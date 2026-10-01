@@ -9,6 +9,14 @@ from orchestrator.application.a2a_tasks import (
     TaskUpdateObserver,
 )
 from orchestrator.application.dispatch import PlannerRunDispatcher
+from orchestrator.application.planner_output import (
+    ImplementationTask,
+    PlanRequirement,
+    PlannerOutputValidationError,
+    PlannerPlan,
+    ValidatedPlannerOutput,
+    parse_planner_output,
+)
 
 __all__ = [
     "A2ATaskProtocolError",
@@ -18,4 +26,10 @@ __all__ = [
     "TaskRunDisposition",
     "TaskUpdateObserver",
     "PlannerRunDispatcher",
+    "ImplementationTask",
+    "PlanRequirement",
+    "PlannerOutputValidationError",
+    "PlannerPlan",
+    "ValidatedPlannerOutput",
+    "parse_planner_output",
 ]

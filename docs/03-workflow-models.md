@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run/Step 도메인 모델, Workflow/A2A/Verdict 상태 정의
-> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
+> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
 
 ## 목적
 
@@ -68,7 +68,7 @@ Pydantic 모델은 미정의 필드를 거부하고, 모델 속성 대입 시에
 - terminal/interrupted 상태까지의 A2A Task 실행 및 Step/AgentContext/Trace 이벤트 snapshot 생성은 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 구현한다. Run/Step/Context/Trace 영속화와 Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)에 구현한다. Artifact Registry/Object Store 영속화는 후속 작업이다. A2A HTTP Client 경계는 [`06-a2a-client.md`](06-a2a-client.md)에, Snapshot 도메인과 Manifest Schema는 [`05-code-handoff.md`](05-code-handoff.md)에 정의한다.
 - camelCase A2A metadata 직렬화는 A2A Client/Schema 단계에서 처리한다. 내부 Python 도메인 필드는 snake_case다.
 - Agent별 Context Mapping은 Task Runner에서 갱신하며 SQLite에 저장한다. 관련 transaction은 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)를 따른다.
-- WorkflowRun은 최신 `code_version`과 Artifact ID를 연결하고, 불변 Source Snapshot metadata는 별도 Artifact 도메인 계약으로 관리한다.
+- WorkflowRun은 최신 `code_version`과 Artifact ID를 연결하고, 불변 Source Snapshot metadata는 별도 Artifact 도메인 계약으로 관리한다. Planner 출력은 Task 10의 프로젝트 JSON Schema를 따른다.
 
 ## 사용 예시
 
@@ -86,7 +86,7 @@ step = WorkflowStep(run_id=run.run_id, agent_role=AgentRole.PLANNER)
 
 ## 다음 작업
 
-8번에서 저장소/API, 9번에서 Planner dispatch를 구현했다. 10번에서 Planner 결과를 Workflow Plan으로 해석하고 후속 Step을 만든다.
+8번에서 저장소/API, 9번에서 Planner dispatch, 10번에서 검증된 Planner Plan 기반 Developer Step 생성을 구현했다. 다음 11번에서 Developer 결과와 Snapshot/Build handoff를 연결한다.
 
 ## 검증
 

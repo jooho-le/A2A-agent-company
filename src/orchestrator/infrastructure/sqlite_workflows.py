@@ -144,6 +144,179 @@ class SQLiteWorkflowRepository:
             )
         return updated_run, updated_step
 
+    def create_developer_step_from_plan(
+        self,
+        run_id: UUID,
+        planner_step_id: UUID,
+        *,
+        a2a_artifact_id: str,
+        requirement_ids: Sequence[UUID],
+        project_artifact_id: UUID,
+        developer_configured: bool,
+    ) -> tuple[WorkflowRun, WorkflowStep]:
+        """Atomically link a validated Planner Artifact and create one Developer Step."""
+        if not requirement_ids or len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("Developer Step requires unique Planner requirement IDs")
+
+        with self._transaction() as connection:
+            run_row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+            if run_row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, run_row[0])
+            steps = [
+                _load_model(WorkflowStep, row[0])
+                for row in connection.execute(
+                    "SELECT payload_json FROM workflow_steps WHERE run_id = ?",
+                    (str(run_id),),
+                ).fetchall()
+            ]
+            planner_steps = [
+                step for step in steps
+                if step.workflow_step_id == planner_step_id
+                and step.agent_role == AgentRole.PLANNER
+            ]
+            all_planner_steps = [
+                step for step in steps if step.agent_role == AgentRole.PLANNER
+            ]
+            if (
+                run.status != WorkflowStatus.PLANNING
+                or len(all_planner_steps) != 1
+                or len(planner_steps) != 1
+                or planner_steps[0].status != WorkflowStepStatus.SUCCEEDED
+                or planner_steps[0].a2a_task_state != A2ATaskState.COMPLETED
+                or planner_steps[0].a2a_task_id is None
+                or a2a_artifact_id not in planner_steps[0].a2a_artifact_ids
+                or any(step.agent_role == AgentRole.DEVELOPER for step in steps)
+            ):
+                raise RunDispatchConflict(
+                    "Run is not eligible for its first Developer Step"
+                )
+
+            implementing_run = transition_run(run, WorkflowStatus.IMPLEMENTING)
+            final_run = (
+                implementing_run
+                if developer_configured
+                else transition_run(implementing_run, WorkflowStatus.HUMAN_REVIEW)
+            )
+            planner_step = planner_steps[0]
+            linked_artifact_ids = list(
+                dict.fromkeys([*planner_step.output_artifact_ids, project_artifact_id])
+            )
+            updated_planner_step = WorkflowStep.model_validate(
+                {
+                    **planner_step.model_dump(mode="python"),
+                    "output_artifact_ids": linked_artifact_ids,
+                    "updated_at": utc_now(),
+                }
+            )
+            developer_step = WorkflowStep(
+                run_id=run_id,
+                agent_role=AgentRole.DEVELOPER,
+                status=(
+                    WorkflowStepStatus.RUNNING
+                    if developer_configured
+                    else WorkflowStepStatus.PENDING
+                ),
+                requirement_ids=list(requirement_ids),
+                input_artifact_ids=[project_artifact_id],
+            )
+
+            connection.execute(
+                "UPDATE workflow_runs SET status = ?, updated_at = ?, payload_json = ? "
+                "WHERE run_id = ?",
+                (
+                    final_run.status.value,
+                    final_run.updated_at.isoformat(),
+                    _json_model(final_run),
+                    str(run_id),
+                ),
+            )
+            _upsert_step(connection, updated_planner_step)
+            _insert_step(connection, developer_step)
+
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    workflow_step_id=planner_step_id,
+                    a2a_task_id=planner_step.a2a_task_id,
+                    agent_context_id=planner_step.agent_context_id,
+                    event_type="PLANNER_OUTPUT_VALIDATED",
+                    actor="Orchestrator",
+                    attempt=planner_step.attempt,
+                    requirement_ids=list(requirement_ids),
+                    output_artifact_ids=[project_artifact_id],
+                    a2a_task_state=planner_step.a2a_task_state,
+                    workflow_state=run.status,
+                ),
+            )
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    event_type="WORKFLOW_STATE_CHANGED",
+                    actor="Orchestrator",
+                    attempt=0,
+                    workflow_state=implementing_run.status,
+                ),
+            )
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    workflow_step_id=developer_step.workflow_step_id,
+                    event_type="WORKFLOW_STEP_CREATED",
+                    actor="Orchestrator",
+                    attempt=developer_step.attempt,
+                    requirement_ids=developer_step.requirement_ids,
+                    input_artifact_ids=developer_step.input_artifact_ids,
+                    workflow_state=implementing_run.status,
+                ),
+            )
+            if developer_configured:
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=developer_step.workflow_step_id,
+                        event_type="WORKFLOW_STEP_DISPATCH_STARTED",
+                        actor="Orchestrator",
+                        attempt=developer_step.attempt,
+                        requirement_ids=developer_step.requirement_ids,
+                        input_artifact_ids=developer_step.input_artifact_ids,
+                        workflow_state=final_run.status,
+                    ),
+                )
+            else:
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        event_type="WORKFLOW_STATE_CHANGED",
+                        actor="Orchestrator",
+                        attempt=0,
+                        workflow_state=final_run.status,
+                    ),
+                )
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=developer_step.workflow_step_id,
+                        event_type="DEVELOPER_DISPATCH_NOT_CONFIGURED",
+                        actor="Orchestrator",
+                        attempt=developer_step.attempt,
+                        requirement_ids=developer_step.requirement_ids,
+                        input_artifact_ids=developer_step.input_artifact_ids,
+                        workflow_state=final_run.status,
+                    ),
+                )
+
+        return final_run, developer_step
+
     def get_run(self, run_id: UUID) -> WorkflowRun | None:
         with self._connection() as connection:
             row = connection.execute(

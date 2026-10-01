@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료  
 > 범위: FastAPI 앱, 환경 설정, 기본 로깅, Liveness API  
-> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
+> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
 
 ## 결정 목적
 

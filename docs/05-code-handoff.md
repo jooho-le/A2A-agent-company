@@ -2,7 +2,7 @@
 
 > 상태: 도메인 계약 구현 완료
 > 범위: Developer Source Artifact, 불변 Snapshot Manifest, QA/Security read-only 인계, 검증 결과의 동일 Snapshot 확인
-> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
+> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
 
 ## 목적
 
@@ -103,4 +103,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-6번의 [`A2A Client`](06-a2a-client.md)와 7번의 [`Task Runner`](07-task-lifecycle.md)가 Handoff/Manifest 전달과 Task 상태 추적을 담당한다. 8번의 [`Workflow 저장소와 Run API`](08-workflow-storage-run-api.md)가 Run/Step/Context 및 Trace를 영속화하고, 9번의 [`Planner dispatch`](09-planner-dispatch.md)가 첫 A2A 호출을 수행한다. 10번에서 Planner 출력에서 Developer 후속 Step을 만든다.
+6번의 [`A2A Client`](06-a2a-client.md)와 7번의 [`Task Runner`](07-task-lifecycle.md)가 Handoff/Manifest 전달과 Task 상태 추적을 담당한다. 8번의 [`Workflow 저장소와 Run API`](08-workflow-storage-run-api.md)가 Run/Step/Context 및 Trace를 영속화하고, 9번의 [`Planner dispatch`](09-planner-dispatch.md)가 첫 A2A 호출을 수행한다. 10번의 [`Planner 출력 검증`](10-planner-output-developer-dispatch.md)이 후속 Developer Step과 A2A 전달을 연결한다. 11번에서 Developer Source Artifact를 Snapshot/Build 흐름에 연결한다.

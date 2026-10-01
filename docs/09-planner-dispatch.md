@@ -2,7 +2,7 @@
 
 > 상태: Planner A2A Dispatch 구현 완료
 > 범위: Agent URL Registry, Run 제출 background dispatch, Planner Task polling과 Workflow 상태 연결
-> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
+> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
 
 ## 목적
 
@@ -41,13 +41,13 @@ Planner `agent_id`는 Context mapping용 고정 key `planner`다. 첫 호출은 
 
 | Planner A2A disposition | Workflow Run | 정책 |
 | --- | --- | --- |
-| `COMPLETED` | `PLANNING` 유지 | Agent Task만 완료. 전체 Run/Verdict를 완료 처리하지 않음 |
+| `COMPLETED` | 10번 후속 처리 전에는 `PLANNING`; 유효한 Plan은 `IMPLEMENTING`, 무효 Plan은 `HUMAN_REVIEW` | Agent Task만 완료. 전체 Run/Verdict를 완료 처리하지 않음 |
 | `WAITING_INPUT` | `WAITING_INPUT` | `resume_state=PLANNING`; 사용자 입력을 기다림 |
 | `HUMAN_REVIEW` | `HUMAN_REVIEW` | 인증/거부 등 자동 진행 중단 |
 | `AGENT_FAILED`, `CANCELED`, `PROTOCOL_ERROR`, `POLLING_TIMEOUT` | `HUMAN_REVIEW` | A2A/Agent 실패를 제품 결함으로 보지 않음. 자동 재전송 없이 기록·검토 |
 | A2A 호출 예외 | `HUMAN_REVIEW` | 오류 종류만 로그에 남기고 예외 본문/request를 로그에 복사하지 않음 |
 
-성공한 Planner 결과의 Artifact ID와 A2A state는 Step/Trace에서 조회할 수 있다. Requirements/Plan payload를 검증해 Developer Step으로 변환하는 것은 아직 하지 않는다. 따라서 Planner Task 완료 후에도 Run은 `PLANNING`이며, 전체 자동 Workflow 완료를 의미하지 않는다.
+Planner 결과의 Artifact ID와 A2A state는 Step/Trace에서 조회할 수 있다. 10번에서 Requirements/Acceptance Criteria/Task Plan payload를 검증한 뒤에만 Developer Step으로 넘긴다. Planner Task 완료 자체는 Workflow나 제품의 성공을 의미하지 않는다.
 
 ## 미설정·장애·내구성 경계
 
@@ -70,11 +70,11 @@ Planner `agent_id`는 Context mapping용 고정 key `planner`다. 첫 호출은 
 | A2A 결과를 제품 Verdict로 오판하지 않음 | 반영; Planner Completed 후에도 Run은 PLANNING, Verdict 없음 |
 | uncertain A2A side effect 재전송 | 자동 재시도하지 않고 HUMAN_REVIEW; 결과 불명 요청 중복 방지 |
 | Agent FAILED/Timeout 후 retry 소진 시 UNVERIFIED | 부분 반영; 별도 A2A retry count가 미정이라 현재는 HUMAN_REVIEW |
-| 전체 Planner→Developer→QA→Security workflow | 다음 단계; Planner 결과 해석 및 후속 Step 생성 미구현 |
+| 전체 Planner→Developer→QA→Security workflow | 부분 구현; 10번에서 Developer dispatch까지 연결, Build/QA/Security와 최종 Verdict는 후속 단계 |
 | Background worker crash recovery / durable queue | 미구현; 프로세스 내부 BackgroundTasks 한계 명시 |
 
 테스트는 Registry role 분리, 중복 dispatch claim, Planner Task COMPLETED/INPUT_REQUIRED/failure 해석, A2A payload 및 Context 저장, API background scheduling을 검증한다.
 
 ## 다음 작업
 
-10번에서 Planner가 돌려준 Artifact의 JSON schema·Requirement ID·Acceptance Criteria를 검증하고, 승인된 Plan에서 Developer WorkflowStep을 생성해 다음 Agent dispatch로 넘긴다.
+10번에서 Planner가 돌려준 Artifact Schema·Requirement ID·Acceptance Criteria를 검증하고 Developer WorkflowStep을 생성했다. 다음 11번에서 Developer Artifact 검증과 Snapshot/Build를 연결한다.

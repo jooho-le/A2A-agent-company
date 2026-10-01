@@ -2,7 +2,7 @@
 
 > 상태: 실행·상태 반영 경계 구현 완료
 > 범위: A2A Task 제출/이어가기/폴링, WorkflowStep·AgentContext 갱신, Trace Event 생성
-> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
+> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
 
 ## 목적
 
@@ -88,4 +88,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-8번에서 저장소/API를, 9번에서 Planner Run Dispatch와 Runner 연결을 구현했다. 10번에서 Planner 결과를 검증하고 후속 Step을 생성한다.
+8번에서 저장소/API, 9번에서 Planner Run Dispatch와 Runner 연결, 10번에서 검증된 Planner 결과로 Developer Step 생성 및 A2A 전달을 구현했다. 11번에서 Developer 결과 Artifact와 Build/Snapshot 흐름을 연결한다.

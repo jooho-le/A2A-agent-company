@@ -2,7 +2,7 @@
 
 > 상태: 로컬 MVP 구현 완료
 > 범위: SQLite 영속 저장, Run/Step/AgentContext/Trace transaction, Run 제출·조회 API
-> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
+> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
 
 ## 목적
 
@@ -73,7 +73,7 @@ Artifact Registry는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/
 | Run·Step·Trace 조회 및 pagination | 반영; API draft 경로와 camelCase 응답 |
 | Workflow/A2A/Verdict 별도 관리 | 반영; 응답 필드와 저장 모델 분리 |
 | 사용자 취소 | 부분 반영; 활성 원격 Task가 없을 때만 취소, 활성 Task는 409 |
-| Run 생성 후 Planner Agent 자동 실행 | 부분 반영; Planner URL 설정 시 BackgroundTasks로 dispatch 예약, 미설정 시 `NOT_CONFIGURED` 반환. Planner 결과 해석과 후속 Agent 실행은 10번 이후 |
+| Run 생성 후 Planner/Developer 자동 실행 | 부분 반영; 두 URL 설정 시 Planner Plan 검증 후 Developer dispatch, Planner 미설정 시 `NOT_CONFIGURED`, Developer 미설정 시 `HUMAN_REVIEW`. Build/QA/Security는 후속 단계 |
 | Artifact 목록 API, DB migration/운영 HA | 미구현; Artifact Registry 및 배포 설계 이후 |
 
 ## 테스트
@@ -88,4 +88,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-9번의 [`Planner dispatch`](09-planner-dispatch.md)는 Agent별 A2A 설정, Run 제출, Task Runner, observer 저장을 연결했다. 10번에서 Planner 결과 Artifact를 구조 검증해 후속 WorkflowStep으로 분해한다.
+9번의 [`Planner dispatch`](09-planner-dispatch.md)는 Agent별 A2A 설정, Run 제출, Task Runner, observer 저장을 연결했다. 10번의 [`Planner 결과 검증`](10-planner-output-developer-dispatch.md)은 validated Requirement/Acceptance Criteria를 Developer Step에 연결한다. 11번에서 Developer 출력과 Artifact/Snapshot persistence를 진행한다.

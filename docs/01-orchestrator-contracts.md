@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
+> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
 
 ## 1. 목적과 범위
 
@@ -218,8 +218,22 @@ Task Artifact 예시에서 공식 `artifactId`는 해당 Task 범위의 opaque I
   "parts": [
     {
       "data": {
+        "schemaVersion": 1,
         "requirements": [
-          {"key": "REQ-001", "description": "Create a user account with a valid email and password"}
+          {
+            "requirementId": "<uuid-v4>",
+            "key": "REQ-001",
+            "description": "유효한 이메일과 비밀번호로 계정을 만든다.",
+            "acceptanceCriteria": ["유효한 입력이면 사용자 1건이 생성된다."]
+          }
+        ],
+        "implementationPlan": [
+          {
+            "taskId": "TASK-001",
+            "title": "회원가입 API 구현",
+            "description": "Requirement와 Acceptance Criteria를 구현한다.",
+            "requirementIds": ["<위 requirementId>"]
+          }
         ]
       },
       "mediaType": "application/json"
@@ -233,6 +247,8 @@ Task Artifact 예시에서 공식 `artifactId`는 해당 Task 범위의 opaque I
   }
 }
 ```
+
+Planner `requirements.json` payload의 전체 필수 조건은 [`10-planner-output-developer-dispatch.md`](10-planner-output-developer-dispatch.md)와 [Planner Output Schema](../schemas/project/planner_output.schema.json)를 따른다.
 
 Build, QA, Security 결과는 반드시 동일한 불변 코드 Snapshot과 동일한 실행환경을 가리켜야 한다. 코드가 수정되면 기존 Artifact를 덮어쓰지 않고 새 `codeVersion` 및 Artifact를 만든다. Agent 간에는 로컬 파일 경로만 전달하지 않고, 수신 Agent가 권한을 확인해 가져올 수 있는 Artifact Registry 참조를 전달한다.
 
