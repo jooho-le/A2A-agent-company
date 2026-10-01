@@ -1,0 +1,83 @@
+# 2. Orchestrator 서비스 뼈대
+
+> 상태: 구현 완료  
+> 범위: FastAPI 앱, 환경 설정, 기본 로깅, Liveness API  
+> 다음 작업: 3번 — Workflow 도메인 모델과 상태 상수 정의
+
+## 결정 목적
+
+Workflow 및 Agent 통신 기능을 추가하기 전에, 실행 가능한 Python API 서비스의 기본 구조를 마련한다. 이번 단계는 서비스 프로세스가 설정을 읽고 요청에 응답하는 기반만 제공한다.
+
+## 구현 내용
+
+| 경로 | 내용 |
+| --- | --- |
+| `pyproject.toml` | Python 3.10+, FastAPI, Pydantic Settings 의존성과 `src` 패키지 구조 |
+| `.env.example` | 로컬 실행에 필요한 설정 이름과 기본값 예시 |
+| `.gitignore` | `.env`, 가상환경, Python 빌드·캐시 파일 제외 |
+| `src/orchestrator/main.py` | FastAPI 앱 팩토리와 실행 가능한 `app` 객체 |
+| `src/orchestrator/core/config.py` | `ORCHESTRATOR_` 접두어 환경 설정 및 기본값 |
+| `src/orchestrator/core/logging.py` | 표준 Python 로깅의 최소 초기화 |
+| `src/orchestrator/api/routes/health.py` | `GET /health` Liveness 응답 |
+| `README.md` | 로컬 실행 및 API 확인 방법 |
+
+## 설정 계약
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `ORCHESTRATOR_APP_NAME` | `A2A Orchestrator` | FastAPI 제목 |
+| `ORCHESTRATOR_ENVIRONMENT` | `local` | `local`, `development`, `test`, `production` 중 하나 |
+| `ORCHESTRATOR_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` 중 하나 |
+| `ORCHESTRATOR_API_PREFIX` | `/api/v1` | 후속 업무 API용 기본 Prefix. 현재 Health 경로에는 적용하지 않음 |
+
+환경변수는 프로세스 환경에서 읽거나 프로젝트 루트에 `.env` 파일을 두어 설정한다. 비밀정보는 예시 파일이나 로그에 넣지 않는다.
+
+## Health API
+
+### 요청
+
+```http
+GET /health
+```
+
+### 응답
+
+```json
+{
+  "status": "ok"
+}
+```
+
+이 API는 프로세스가 응답 가능한지 확인하는 Liveness 검사다. 데이터베이스나 Agent 연결 상태까지 검사하지 않는다. 해당 의존성이 추가될 때 별도의 Readiness 검사로 확장한다.
+
+## 로컬 실행
+
+```bash
+cp .env.example .env
+uv sync
+uv run uvicorn orchestrator.main:app --app-dir src --reload
+```
+
+- Health: `http://127.0.0.1:8000/health`
+- OpenAPI UI: `http://127.0.0.1:8000/docs`
+
+## 완료 기준
+
+- Python 3.10 이상에서 의존성을 설치할 수 있다.
+- FastAPI 앱이 환경 설정을 읽어 실행된다.
+- `GET /health`가 HTTP 200과 `{"status":"ok"}`를 반환한다.
+- 이후 Workflow, API, A2A Client를 추가할 수 있도록 `src/orchestrator` 아래에 패키지 구조가 있다.
+
+## 이번 단계에서 미포함
+
+- DB 연결 및 저장소 모델
+- Run 생성·조회 API
+- A2A Client 및 Agent Card 조회
+- Workflow 상태 머신
+- Agent/MCP 서버
+- 인증·배포 설정
+
+## 참고
+
+- FastAPI 설치와 앱 실행은 [공식 FastAPI 튜토리얼](https://fastapi.tiangolo.com/tutorial/)을 따른다.
+- 설정은 Pydantic Settings의 `BaseSettings`와 `env_prefix`를 사용한다. [공식 설정 문서](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/)
