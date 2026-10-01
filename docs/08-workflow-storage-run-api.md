@@ -1,8 +1,8 @@
 # 8. Workflow 저장소와 Run API
 
-> 상태: 로컬 MVP 구현 완료
-> 범위: SQLite 영속 저장, Run/Step/AgentContext/Trace transaction, Run 제출·조회 API
-> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
+> 상태: 로컬 MVP 구현 완료; Developer Artifact metadata 저장 추가
+> 범위: SQLite 영속 저장, Run/Step/AgentContext/Trace/Artifact metadata transaction, Run 제출·조회 API
+> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
 
 ## 목적
 
@@ -18,6 +18,7 @@
 | `workflow_steps` | `workflow_step_id` PK, `run_id` FK | WorkflowStep JSON snapshot 및 상태/시간 인덱스 |
 | `agent_contexts` | `(run_id, agent_id)` PK, `run_id` FK | Agent별 최신 opaque Context/Task 매핑 |
 | `trace_events` | 내부 증가 순번, `event_id` UNIQUE, `run_id` FK | Append-only camelCase Trace JSON |
+| `project_artifacts` | `artifact_id` PK, `run_id` FK | Source/Change/Build Artifact metadata JSON; UPDATE/DELETE 금지 |
 
 도메인 모델은 검증 후 JSON snapshot으로 저장한다. Trace Event는 개발정의서와 동일한 camelCase schema로 저장한다. Foreign Key와 JSON 유효성 제약을 켜며 Trace는 run 내 append 순서를 보존한다. 로컬 동시 읽기를 위해 SQLite WAL mode를 사용한다.
 
@@ -61,7 +62,7 @@ Planner Agent URL이 설정된 경우 Run 생성은 실제 Planner dispatch를 b
 
 `POST /api/v1/runs/{runId}/cancel`은 `{"reason":"USER_CANCELLED"}`를 받는다. 실행 중인 Step이나 진행 중 A2A Task가 없으면 Run을 `ABORTED`로 전이하고 pending/waiting Step을 `CANCELED`로 바꾸며 Trace를 함께 기록한다. 활성 A2A Task가 있으면 원격 Agent 취소 전송이 연결되지 않은 현 단계에서 로컬 상태만 취소된 것처럼 보이지 않도록 `409 Conflict`를 반환하고 아무 상태도 바꾸지 않는다. `WORKFLOW_STEP_CANCELED`는 프로젝트 보조 Trace Event다.
 
-Artifact Registry는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/artifacts`는 이 단계에서 제공하지 않는다. Agent Registry는 9번에 추가했지만, 원격 Task cancel 요청/확인은 A2A Client 기능으로 아직 구현하지 않았다.
+Artifact Registry API/Object Store는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/artifacts`는 제공하지 않는다. 11번에서 검증된 Source/Change/Build Artifact metadata만 SQLite에 append-only로 기록한다. Artifact 바이트 조회·archive hash 검증은 아직 미구현이다. Agent Registry는 9번에 추가했지만, 원격 Task cancel 요청/확인은 A2A Client 기능으로 아직 구현하지 않았다.
 
 ## 검증 및 개발정의서 대조
 
@@ -73,7 +74,7 @@ Artifact Registry는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/
 | Run·Step·Trace 조회 및 pagination | 반영; API draft 경로와 camelCase 응답 |
 | Workflow/A2A/Verdict 별도 관리 | 반영; 응답 필드와 저장 모델 분리 |
 | 사용자 취소 | 부분 반영; 활성 원격 Task가 없을 때만 취소, 활성 Task는 409 |
-| Run 생성 후 Planner/Developer 자동 실행 | 부분 반영; 두 URL 설정 시 Planner Plan 검증 후 Developer dispatch, Planner 미설정 시 `NOT_CONFIGURED`, Developer 미설정 시 `HUMAN_REVIEW`. Build/QA/Security는 후속 단계 |
+| Run 생성 후 Planner/Developer/QA/Security 자동 실행 | 부분 반영; 설정된 URL에 따라 Developer Snapshot/Build 검증 후 QA/Security handoff. 결과 Artifact 판정과 재시도는 후속 단계 |
 | Artifact 목록 API, DB migration/운영 HA | 미구현; Artifact Registry 및 배포 설계 이후 |
 
 ## 테스트
@@ -88,4 +89,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-9번의 [`Planner dispatch`](09-planner-dispatch.md)는 Agent별 A2A 설정, Run 제출, Task Runner, observer 저장을 연결했다. 10번의 [`Planner 결과 검증`](10-planner-output-developer-dispatch.md)은 validated Requirement/Acceptance Criteria를 Developer Step에 연결한다. 11번에서 Developer 출력과 Artifact/Snapshot persistence를 진행한다.
+9번의 [`Planner dispatch`](09-planner-dispatch.md)는 Agent별 A2A 설정, Run 제출, Task Runner, observer 저장을 연결했다. 10번의 [`Planner 결과 검증`](10-planner-output-developer-dispatch.md)은 validated Requirement/Acceptance Criteria를 Developer Step에 연결한다. 11번의 Developer Artifact metadata는 이 저장소에 기록한다. 12번에서 QA/Security 결과 Artifact를 해석한다.

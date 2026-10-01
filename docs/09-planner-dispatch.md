@@ -2,7 +2,7 @@
 
 > 상태: Planner A2A Dispatch 구현 완료
 > 범위: Agent URL Registry, Run 제출 background dispatch, Planner Task polling과 Workflow 상태 연결
-> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
+> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
 
 ## 목적
 
@@ -77,4 +77,4 @@ Planner 결과의 Artifact ID와 A2A state는 Step/Trace에서 조회할 수 있
 
 ## 다음 작업
 
-10번에서 Planner가 돌려준 Artifact Schema·Requirement ID·Acceptance Criteria를 검증하고 Developer WorkflowStep을 생성했다. 다음 11번에서 Developer Artifact 검증과 Snapshot/Build를 연결한다.
+10번에서 Planner가 돌려준 Artifact Schema·Requirement ID·Acceptance Criteria를 검증하고 Developer WorkflowStep을 생성했다. 11번에서 Developer Artifact 검증과 Snapshot/Build/QA/Security handoff를 연결했다. 12번에서 QA/Security 결과와 최종 Verdict를 구현한다.

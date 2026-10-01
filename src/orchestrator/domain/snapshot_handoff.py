@@ -76,26 +76,30 @@ class ExecutionManifest(ImmutableDomainModel):
 class CodeSnapshotArtifact(ImmutableDomainModel):
     """Project Artifact Registry record for one immutable Developer snapshot."""
 
-    artifact_id: UUID4 = Field(default_factory=uuid4)
-    artifact_type: Literal["SOURCE"] = "SOURCE"
-    artifact_version: int = Field(ge=1)
-    previous_artifact_id: UUID4 | None = None
-    run_id: UUID4
-    workflow_step_id: UUID4
-    a2a_task_id: str | None = Field(default=None, min_length=1)
-    a2a_artifact_id: str | None = Field(default=None, min_length=1)
-    created_by: AgentRole = AgentRole.DEVELOPER
-    requirement_ids: tuple[UUID4, ...]
-    code_version: int = Field(ge=1, le=MAX_CODE_FIX_ATTEMPTS + 1)
-    repository_id: str = Field(min_length=1)
-    commit_hash: str = Field(min_length=40, max_length=64)
-    git_object_format: GitObjectFormat
-    tree_hash: str = Field(min_length=40, max_length=64)
-    snapshot_sha256: str
-    artifact_uri: str = Field(min_length=1)
-    container_image_digest: str
-    dependency_lock_hash: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    artifact_id: UUID4 = Field(default_factory=uuid4, alias="artifactId")
+    artifact_type: Literal["SOURCE"] = Field(default="SOURCE", alias="artifactType")
+    artifact_version: int = Field(ge=1, alias="artifactVersion")
+    previous_artifact_id: UUID4 | None = Field(default=None, alias="previousArtifactId")
+    run_id: UUID4 = Field(alias="runId")
+    workflow_step_id: UUID4 = Field(alias="workflowStepId")
+    a2a_task_id: str | None = Field(default=None, min_length=1, alias="a2aTaskId")
+    a2a_artifact_id: str | None = Field(default=None, min_length=1, alias="a2aArtifactId")
+    created_by: AgentRole = Field(default=AgentRole.DEVELOPER, alias="createdBy")
+    requirement_ids: tuple[UUID4, ...] = Field(min_length=1, alias="requirementIds")
+    code_version: int = Field(
+        ge=1, le=MAX_CODE_FIX_ATTEMPTS + 1, alias="codeVersion"
+    )
+    repository_id: str = Field(min_length=1, alias="repositoryId")
+    commit_hash: str = Field(min_length=40, max_length=64, alias="commitHash")
+    git_object_format: GitObjectFormat = Field(alias="gitObjectFormat")
+    tree_hash: str = Field(min_length=40, max_length=64, alias="treeHash")
+    snapshot_sha256: str = Field(alias="snapshotSha256")
+    artifact_uri: str = Field(min_length=1, alias="artifactUri")
+    container_image_digest: str = Field(alias="containerImageDigest")
+    dependency_lock_hash: str = Field(alias="dependencyLockHash")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc), alias="createdAt"
+    )
 
     @field_validator("repository_id")
     @classmethod

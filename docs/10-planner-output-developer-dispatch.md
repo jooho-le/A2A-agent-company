@@ -2,7 +2,7 @@
 
 > 상태: MVP 구현 완료
 > 범위: Planner Artifact 검증, Requirement/Acceptance Criteria 연결, Developer WorkflowStep 생성 및 A2A 전달
-> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 흐름 연결
+> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
 
 ## 목적
 
@@ -60,7 +60,7 @@ Planner Task COMPLETED
             → Developer Agent Card 조회 및 독립 A2A Task 전송/polling
 ```
 
-Developer 요청 payload는 검증된 `plan`과 Planner Artifact의 `a2aArtifactId`, `projectArtifactId`, `artifactVersion`만 포함한다. 프로젝트 metadata에는 Developer Step UUID, Requirement UUID 목록, `projectArtifactIds`를 넣는다. Planner `contextId`는 Developer 호출에 전달하지 않으며 Agent Context를 각각 별도로 저장한다. 원래 사용자 요청 전문은 재전송하지 않는다.
+Developer 요청 payload에는 검증된 `plan`, Planner Artifact의 `a2aArtifactId`/`projectArtifactId`/`artifactVersion`, 그리고 11번에서 정의한 `outputContract`(필수 Artifact 이름·JSON Schema·Build Tool 근거·변경 금지 경계)를 포함한다. 프로젝트 metadata에는 Developer Step UUID, Requirement UUID 목록, 예상 `codeVersion`, `projectArtifactIds`를 넣는다. Planner `contextId`는 Developer 호출에 전달하지 않으며 Agent Context를 각각 별도로 저장한다. 원래 사용자 요청 전문은 재전송하지 않는다.
 
 유효한 Planner Plan을 DB transaction 하나에서 Planner Step의 output Artifact ID 연결, Developer Step 생성, Run 전이, Trace 추가로 기록한다. Developer URL이 있으면 Step을 `RUNNING`으로 선점해 중복 전송을 막는다. URL이 없으면 Plan/Step 참조를 남기고 Run을 `HUMAN_REVIEW`(`resumeState=IMPLEMENTING`), Developer Step을 `PENDING`으로 둔다.
 
@@ -81,7 +81,7 @@ Developer 요청 payload는 검증된 `plan`과 Planner Artifact의 `a2aArtifact
 
 현재 저장소에는 Artifact Registry/Object Store가 아직 없다. `projectArtifactId`는 Planner가 반환한 UUIDv4를 참조로 보존하고, 검증된 Plan 데이터는 바로 Developer A2A 요청에 inline 전달한다. 따라서 이 단계는 실제 Artifact URI 조회, 전역 Registry 등록 여부 검증, ACL/불변성 보장을 구현했다고 주장하지 않는다. 이 기능은 Agent 간 Registry 연동 단계에서 보완해야 한다. 프로세스 재시작 후 PENDING Developer Step 자동 재개도 아직 제공하지 않는다.
 
-Developer Task가 완료돼도 Run은 `IMPLEMENTING`이며 최종 Verdict는 없다. Source Artifact 검증, Build, Snapshot freeze와 이후 QA/Security handoff를 거쳐야 다음 상태로 진행할 수 있다.
+Developer Task 완료 후 결과 처리는 [`11-developer-snapshot-build.md`](11-developer-snapshot-build.md)에서 이어진다. Task 완료만으로 성공 처리하지 않으며 검증된 Source/Build Artifact와 동일 Snapshot QA/Security handoff를 요구한다.
 
 ## 개발정의서 대조
 
@@ -95,7 +95,7 @@ Developer Task가 완료돼도 Run은 `IMPLEMENTING`이며 최종 Verdict는 없
 | 정확한 Planner JSON shape가 개발정의서에 규정됨 | 미정; 본 문서와 Schema에서 팀 통합용 MVP 계약으로 명시 |
 | Acceptance Criteria가 원래 사용자 의도를 의미상 보존하는지 | 미검증; 구조·참조는 검증하지만 의미 일치는 평가자/사람 확인 필요 |
 | `SCN-001` 기준 필수 REQ-001~REQ-008 전체의 누락·기준 약화 여부 | 미검증; Scenario/Requirement Registry와 고정 Acceptance Criteria 주입 경로가 아직 없음 |
-| 전체 Planner→Developer→Build→QA→Security 완료 | 부분 구현; Developer dispatch까지, 후속 작업 필요 |
+| 전체 Planner→Developer→Build→QA→Security 완료 | 부분 구현; QA/Security 결과 Artifact 해석과 최종 Verdict는 후속 작업 필요 |
 
 ## 검증
 
@@ -109,4 +109,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-11번에서 Developer의 Source/Change Artifact 계약을 검증하고, Build 결과와 불변 Snapshot을 등록/연결해 QA와 Security가 같은 코드 버전을 받는 흐름으로 진행한다.
+11번에서 Developer Source/Change/Build Artifact 검증 및 같은 Snapshot QA/Security dispatch까지 구현했다. 12번에서 QA/Security 결과 내용을 검증해 최종 Verdict와 수정/재검증 흐름을 연결한다.

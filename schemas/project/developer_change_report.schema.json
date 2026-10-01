@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2a-agent-company.local/schemas/project/developer_change_report.schema.json",
+  "title": "Developer Change Report Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId", "artifactType", "artifactVersion", "previousArtifactId",
+    "runId", "workflowStepId", "a2aTaskId", "a2aArtifactId", "createdBy",
+    "requirementIds", "codeVersion", "summary", "fileChanges", "createdAt"
+  ],
+  "properties": {
+    "artifactId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "artifactType": { "const": "CHANGE_REPORT" },
+    "artifactVersion": { "type": "integer", "minimum": 1 },
+    "previousArtifactId": { "anyOf": [{ "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, { "type": "null" }] },
+    "runId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "workflowStepId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "a2aTaskId": { "type": "string", "minLength": 1 },
+    "a2aArtifactId": { "type": "string", "minLength": 1 },
+    "createdBy": { "const": "DEVELOPER" },
+    "requirementIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } },
+    "codeVersion": { "type": "integer", "minimum": 1, "maximum": 4 },
+    "summary": { "type": "string", "minLength": 1 },
+    "fileChanges": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "action"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "action": { "enum": ["ADDED", "MODIFIED", "DELETED"] }
+        }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}

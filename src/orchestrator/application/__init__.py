@@ -9,6 +9,11 @@ from orchestrator.application.a2a_tasks import (
     TaskUpdateObserver,
 )
 from orchestrator.application.dispatch import PlannerRunDispatcher
+from orchestrator.application.developer_output import (
+    DeveloperOutputValidationError,
+    ValidatedDeveloperOutput,
+    parse_developer_output,
+)
 from orchestrator.application.planner_output import (
     ImplementationTask,
     PlanRequirement,
@@ -26,6 +31,9 @@ __all__ = [
     "TaskRunDisposition",
     "TaskUpdateObserver",
     "PlannerRunDispatcher",
+    "DeveloperOutputValidationError",
+    "ValidatedDeveloperOutput",
+    "parse_developer_output",
     "ImplementationTask",
     "PlanRequirement",
     "PlannerOutputValidationError",

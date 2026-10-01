@@ -24,7 +24,9 @@ GET /docs
 
 설정값은 환경변수 또는 프로젝트 루트의 `.env` 파일에서 읽습니다. 시작값은 `.env.example`을 참고하세요.
 
-현재 구현된 기능은 서비스 시작, Workflow 도메인 모델·상태 전이·재시도 정책, Snapshot/Artifact 인계 계약, A2A 1.0 Client와 Task lifecycle, SQLite Workflow 저장소, Run/Step/Trace API, Planner dispatch 및 Planner Plan 검증, Developer Step/A2A dispatch입니다. `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`과 `ORCHESTRATOR_DEVELOPER_AGENT_URL`을 설정하면 Run 제출 후 Planner 결과를 검증해 Developer로 전달합니다. Developer URL이 없으면 Run/Plan은 저장되고 `HUMAN_REVIEW`로 전환됩니다. QA/Security 후속 dispatch, Source Snapshot/Build 실행, Artifact Registry/Object Store는 후속 작업입니다.
+현재 구현된 기능은 Workflow 상태·Trace 저장, A2A 1.0 Task 실행, Planner 결과 검증 후 Developer dispatch, Developer Source/Change/Build Artifact 검증, SQLite Artifact metadata 기록, Build PASS 시 동일 Snapshot을 QA/Security에 A2A로 전달하는 로컬 MVP까지입니다. Build Tool은 Developer Agent가 MCP로 실행하며 Orchestrator가 MCP를 직접 호출하지 않습니다. API/스토리지 기반의 실제 Artifact 바이트 보관, Snapshot hash 재검증, read-only ACL과 QA/Security 결과 해석 및 최종 Verdict는 아직 미구현입니다. 현재 통합 계약은 [10번 Planner/Developer 계약](docs/10-planner-output-developer-dispatch.md)과 [11번 Snapshot/Build handoff](docs/11-developer-snapshot-build.md)을 참고하세요.
+
+자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
 
 기본 DB 경로는 `.data/orchestrator.sqlite3`이며 `ORCHESTRATOR_DATABASE_PATH` 환경변수로 바꿀 수 있습니다. `.data/`는 Git에서 제외됩니다.
 

@@ -14,11 +14,16 @@ from orchestrator.domain import (
     A2ATaskState,
     AgentContext,
     AgentRole,
+    MAX_CODE_FIX_ATTEMPTS,
+    BuildReportArtifact,
+    ChangeReportArtifact,
+    CodeSnapshotArtifact,
     TraceEvent,
     WorkflowRun,
     WorkflowStatus,
     WorkflowStep,
     WorkflowStepStatus,
+    code_version_for_fix_attempt,
     transition_run,
 )
 from orchestrator.domain.models import utc_now
@@ -34,6 +39,9 @@ class ActiveAgentTaskError(RuntimeError):
 
 class RunDispatchConflict(RuntimeError):
     """Raised when a Run is not eligible for its one initial Planner dispatch."""
+
+
+ProjectArtifact = CodeSnapshotArtifact | ChangeReportArtifact | BuildReportArtifact
 
 
 class SQLiteWorkflowRepository:
@@ -221,6 +229,7 @@ class SQLiteWorkflowRepository:
                     else WorkflowStepStatus.PENDING
                 ),
                 requirement_ids=list(requirement_ids),
+                code_version=code_version_for_fix_attempt(run.fix_attempt),
                 input_artifact_ids=[project_artifact_id],
             )
 
@@ -316,6 +325,311 @@ class SQLiteWorkflowRepository:
                 )
 
         return final_run, developer_step
+
+    def record_developer_candidate(
+        self,
+        run_id: UUID,
+        developer_step_id: UUID,
+        *,
+        source: CodeSnapshotArtifact,
+        change_report: ChangeReportArtifact,
+        build_report: BuildReportArtifact,
+        validation_agents_configured: bool,
+    ) -> tuple[WorkflowRun, WorkflowStep, tuple[WorkflowStep, ...]]:
+        """Atomically append Developer Artifacts and prepare the next workflow state."""
+        artifacts: tuple[ProjectArtifact, ...] = (source, change_report, build_report)
+        if len({artifact.artifact_id for artifact in artifacts}) != len(artifacts):
+            raise ValueError("Developer project Artifact IDs must be distinct")
+        if any(artifact.run_id != run_id for artifact in artifacts):
+            raise ValueError("Developer Artifacts must belong to the current Run")
+        if any(artifact.workflow_step_id != developer_step_id for artifact in artifacts):
+            raise ValueError("Developer Artifacts must reference the Developer Step")
+        if (
+            change_report.a2a_task_id != source.a2a_task_id
+            or build_report.a2a_task_id != source.a2a_task_id
+            or build_report.source_artifact_id != source.artifact_id
+            or build_report.execution_manifest != source.execution_manifest()
+        ):
+            raise ValueError("Developer Artifact references or execution Manifests disagree")
+
+        with self._transaction() as connection:
+            run_row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+            if run_row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, run_row[0])
+            steps = [
+                _load_model(WorkflowStep, row[0])
+                for row in connection.execute(
+                    "SELECT payload_json FROM workflow_steps WHERE run_id = ?",
+                    (str(run_id),),
+                ).fetchall()
+            ]
+            developer_steps = [
+                step for step in steps
+                if step.workflow_step_id == developer_step_id
+                and step.agent_role == AgentRole.DEVELOPER
+            ]
+            if (
+                run.status != WorkflowStatus.IMPLEMENTING
+                or len(developer_steps) != 1
+                or developer_steps[0].status != WorkflowStepStatus.SUCCEEDED
+                or developer_steps[0].a2a_task_state != A2ATaskState.COMPLETED
+                or developer_steps[0].a2a_task_id != source.a2a_task_id
+                or any(step.agent_role in (AgentRole.QA, AgentRole.SECURITY) for step in steps)
+            ):
+                raise RunDispatchConflict("Run is not eligible to register a Developer candidate")
+
+            developer_step = developer_steps[0]
+            expected_requirements = set(developer_step.requirement_ids)
+            if any(
+                set(artifact.requirement_ids) != expected_requirements
+                for artifact in artifacts
+            ):
+                raise ValueError("Developer Artifacts must preserve Step Requirement IDs")
+            if source.code_version != code_version_for_fix_attempt(run.fix_attempt):
+                raise ValueError("Source codeVersion does not match the Run fix attempt")
+            if any(artifact.code_version != source.code_version for artifact in artifacts):
+                raise ValueError("Developer Artifacts must refer to one codeVersion")
+            if any(
+                artifact.a2a_artifact_id not in developer_step.a2a_artifact_ids
+                for artifact in artifacts
+            ):
+                raise ValueError("Developer Artifacts must reference IDs from its A2A Task")
+
+            for artifact in artifacts:
+                if artifact.previous_artifact_id is None:
+                    continue
+                previous = connection.execute(
+                    "SELECT artifact_type, artifact_version FROM project_artifacts "
+                    "WHERE artifact_id = ? AND run_id = ?",
+                    (str(artifact.previous_artifact_id), str(run_id)),
+                ).fetchone()
+                if (
+                    previous is None
+                    or previous[0] != artifact.artifact_type
+                    or previous[1] != artifact.artifact_version - 1
+                ):
+                    raise ValueError("Artifact predecessor must exist in the same Run and lineage")
+
+            for artifact in artifacts:
+                connection.execute(
+                    "INSERT INTO project_artifacts("
+                    "artifact_id, run_id, artifact_type, artifact_version, payload_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        str(artifact.artifact_id),
+                        str(run_id),
+                        artifact.artifact_type,
+                        artifact.artifact_version,
+                        artifact.model_dump_json(),
+                    ),
+                )
+
+            updated_developer_step = WorkflowStep.model_validate(
+                {
+                    **developer_step.model_dump(mode="python"),
+                    "code_version": source.code_version,
+                    "output_artifact_ids": [str(artifact.artifact_id) for artifact in artifacts],
+                    "updated_at": utc_now(),
+                }
+            )
+            run_with_code_version = WorkflowRun.model_validate(
+                {
+                    **run.model_dump(mode="python"),
+                    "code_version": source.code_version,
+                }
+            )
+            snapshot_ready_run = transition_run(
+                run_with_code_version, WorkflowStatus.SNAPSHOT_READY
+            )
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    workflow_step_id=developer_step_id,
+                    a2a_task_id=developer_step.a2a_task_id,
+                    event_type="DEVELOPER_ARTIFACTS_VALIDATED",
+                    actor="Orchestrator",
+                    attempt=developer_step.attempt,
+                    requirement_ids=developer_step.requirement_ids,
+                    output_artifact_ids=[artifact.artifact_id for artifact in artifacts],
+                    a2a_task_state=developer_step.a2a_task_state,
+                    code_version=source.code_version,
+                    workflow_state=snapshot_ready_run.status,
+                ),
+            )
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    event_type="WORKFLOW_STATE_CHANGED",
+                    actor="Orchestrator",
+                    attempt=0,
+                    workflow_state=snapshot_ready_run.status,
+                ),
+            )
+
+            validation_steps: tuple[WorkflowStep, ...] = ()
+            if not build_report.passed:
+                if snapshot_ready_run.fix_attempt >= MAX_CODE_FIX_ATTEMPTS:
+                    final_run = transition_run(
+                        snapshot_ready_run, WorkflowStatus.HUMAN_REVIEW
+                    )
+                    event_type = "BUILD_FAILED_FIX_LIMIT_REACHED"
+                else:
+                    final_run = transition_run(
+                        snapshot_ready_run, WorkflowStatus.FIX_REQUIRED
+                    )
+                    event_type = "BUILD_FAILED"
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=developer_step_id,
+                        event_type=event_type,
+                        actor="Orchestrator",
+                        attempt=developer_step.attempt,
+                        requirement_ids=developer_step.requirement_ids,
+                        output_artifact_ids=[build_report.artifact_id],
+                        code_version=source.code_version,
+                        workflow_state=final_run.status,
+                    ),
+                )
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        event_type="WORKFLOW_STATE_CHANGED",
+                        actor="Orchestrator",
+                        attempt=0,
+                        workflow_state=final_run.status,
+                    ),
+                )
+            else:
+                validating_run = transition_run(
+                    snapshot_ready_run, WorkflowStatus.VALIDATING
+                )
+                validation_steps = tuple(
+                    WorkflowStep(
+                        run_id=run_id,
+                        agent_role=role,
+                        status=(
+                            WorkflowStepStatus.RUNNING
+                            if validation_agents_configured
+                            else WorkflowStepStatus.PENDING
+                        ),
+                        requirement_ids=developer_step.requirement_ids,
+                        code_version=source.code_version,
+                        input_artifact_ids=[source.artifact_id],
+                    )
+                    for role in (AgentRole.QA, AgentRole.SECURITY)
+                )
+                final_run = (
+                    validating_run
+                    if validation_agents_configured
+                    else transition_run(validating_run, WorkflowStatus.HUMAN_REVIEW)
+                )
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=developer_step_id,
+                        event_type="BUILD_PASSED",
+                        actor="Orchestrator",
+                        attempt=developer_step.attempt,
+                        requirement_ids=developer_step.requirement_ids,
+                        output_artifact_ids=[build_report.artifact_id],
+                        code_version=source.code_version,
+                        workflow_state=validating_run.status,
+                    ),
+                )
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        event_type="WORKFLOW_STATE_CHANGED",
+                        actor="Orchestrator",
+                        attempt=0,
+                        workflow_state=validating_run.status,
+                    ),
+                )
+                for validation_step in validation_steps:
+                    _insert_step(connection, validation_step)
+                    _insert_event(
+                        connection,
+                        TraceEvent(
+                            run_id=run_id,
+                            workflow_step_id=validation_step.workflow_step_id,
+                            event_type=(
+                                "WORKFLOW_STEP_DISPATCH_STARTED"
+                                if validation_agents_configured
+                                else "WORKFLOW_STEP_CREATED"
+                            ),
+                            actor="Orchestrator",
+                            attempt=validation_step.attempt,
+                            requirement_ids=validation_step.requirement_ids,
+                            input_artifact_ids=validation_step.input_artifact_ids,
+                            code_version=validation_step.code_version,
+                            workflow_state=final_run.status,
+                        ),
+                    )
+                if not validation_agents_configured:
+                    _insert_event(
+                        connection,
+                        TraceEvent(
+                            run_id=run_id,
+                            event_type="QA_SECURITY_DISPATCH_NOT_CONFIGURED",
+                            actor="Orchestrator",
+                            attempt=0,
+                            code_version=source.code_version,
+                            workflow_state=final_run.status,
+                        ),
+                    )
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        event_type="WORKFLOW_STATE_CHANGED",
+                        actor="Orchestrator",
+                        attempt=0,
+                        workflow_state=final_run.status,
+                    ),
+                )
+
+            connection.execute(
+                "UPDATE workflow_runs SET status = ?, updated_at = ?, payload_json = ? "
+                "WHERE run_id = ?",
+                (
+                    final_run.status.value,
+                    final_run.updated_at.isoformat(),
+                    _json_model(final_run),
+                    str(run_id),
+                ),
+            )
+            _upsert_step(connection, updated_developer_step)
+
+        return final_run, updated_developer_step, validation_steps
+
+    def list_project_artifacts(self, run_id: UUID) -> list[ProjectArtifact]:
+        """Return append-only Artifact Registry metadata rows for one Run."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT artifact_type, payload_json FROM project_artifacts "
+                "WHERE run_id = ? ORDER BY rowid",
+                (str(run_id),),
+            ).fetchall()
+        model_by_type = {
+            "SOURCE": CodeSnapshotArtifact,
+            "CHANGE_REPORT": ChangeReportArtifact,
+            "BUILD_REPORT": BuildReportArtifact,
+        }
+        return [
+            _load_model(model_by_type[row[0]], row[1])
+            for row in rows
+        ]
 
     def get_run(self, run_id: UUID) -> WorkflowRun | None:
         with self._connection() as connection:
@@ -621,6 +935,24 @@ class SQLiteWorkflowRepository:
                 );
                 CREATE INDEX IF NOT EXISTS trace_events_by_run
                     ON trace_events(run_id, sequence);
+                CREATE TABLE IF NOT EXISTS project_artifacts (
+                    artifact_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+                    artifact_type TEXT NOT NULL CHECK (
+                        artifact_type IN ('SOURCE', 'CHANGE_REPORT', 'BUILD_REPORT')
+                    ),
+                    artifact_version INTEGER NOT NULL CHECK (artifact_version >= 1),
+                    payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+                    UNIQUE(run_id, artifact_type, artifact_version)
+                );
+                CREATE INDEX IF NOT EXISTS project_artifacts_by_run
+                    ON project_artifacts(run_id, artifact_type, artifact_version);
+                CREATE TRIGGER IF NOT EXISTS project_artifacts_no_update
+                    BEFORE UPDATE ON project_artifacts
+                    BEGIN SELECT RAISE(ABORT, 'project_artifacts are append-only'); END;
+                CREATE TRIGGER IF NOT EXISTS project_artifacts_no_delete
+                    BEFORE DELETE ON project_artifacts
+                    BEGIN SELECT RAISE(ABORT, 'project_artifacts are append-only'); END;
                 """
             )
 

@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
+> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
 
 ## 1. 목적과 범위
 

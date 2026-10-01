@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2a-agent-company.local/schemas/project/developer_build_report.schema.json",
+  "title": "Developer Build Report Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId", "artifactType", "artifactVersion", "previousArtifactId",
+    "runId", "workflowStepId", "a2aTaskId", "a2aArtifactId", "createdBy",
+    "requirementIds", "codeVersion", "sourceArtifactId", "exitCode",
+    "durationMs", "executionManifestId", "executionManifest", "stdoutRef",
+    "stderrRef", "createdAt"
+  ],
+  "properties": {
+    "artifactId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "artifactType": { "const": "BUILD_REPORT" },
+    "artifactVersion": { "type": "integer", "minimum": 1 },
+    "previousArtifactId": { "anyOf": [{ "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, { "type": "null" }] },
+    "runId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "workflowStepId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "a2aTaskId": { "type": "string", "minLength": 1 },
+    "a2aArtifactId": { "type": "string", "minLength": 1 },
+    "createdBy": { "const": "DEVELOPER" },
+    "requirementIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } },
+    "codeVersion": { "type": "integer", "minimum": 1, "maximum": 4 },
+    "sourceArtifactId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "exitCode": { "type": "integer" },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "executionManifestId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "executionManifest": { "$ref": "snapshot_execution_manifest.schema.json" },
+    "stdoutRef": { "type": ["string", "null"], "minLength": 1 },
+    "stderrRef": { "type": ["string", "null"], "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,8 +1,8 @@
 # 5. Developer Snapshot과 QA/Security 인계
 
-> 상태: 도메인 계약 구현 완료
-> 범위: Developer Source Artifact, 불변 Snapshot Manifest, QA/Security read-only 인계, 검증 결과의 동일 Snapshot 확인
-> 다음 작업: 11번 — Developer 결과 Artifact 검증과 Snapshot/Build 연결
+> 상태: Orchestrator MVP 연결 완료; Artifact Registry/Object Store 경계는 미완료
+> 범위: Developer Source/Change/Build Artifact 검증, 불변 Snapshot Manifest, QA/Security read-only handoff
+> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
 
 ## 목적
 
@@ -91,7 +91,7 @@ Developer Working Tree
 
 ## 범위 및 후속 연동
 
-5번 당시에는 검증 가능한 도메인 계약과 순수 검증 함수까지만 구현했다. 이후 A2A Client/Task Runner가 [`06-a2a-client.md`](06-a2a-client.md), [`07-task-lifecycle.md`](07-task-lifecycle.md)에 추가됐다. 실제 Git Commit 생성, deterministic archive 제작, Artifact Registry DB/API, 영속 Object Store, URI 권한 ACL, Build/QA/Security 컨테이너 실행은 아직 연결하지 않았다. 특히 `READ_ONLY` Grant를 실제로 강제할 주체는 후속 Artifact Registry/스토리지 계층이다. 현재 Python 모델만으로 외부 파일 권한을 보장한다고 간주하면 안 된다.
+5번에서 정의했던 도메인 계약을 11번에서 Developer A2A 결과 검증 및 Orchestrator handoff까지 연결했다. 실제 Git Commit 생성, deterministic archive 제작, Artifact Registry API/Object Store, URI 권한 ACL, Build/QA/Security 컨테이너 실행은 아직 Agent/MCP/스토리지 구현 범위다. SQLite에는 불변 Artifact 메타데이터와 Run 참조만 저장한다. 특히 `READ_ONLY` Grant는 A2A 요청 계약이며 실제 외부 파일 권한을 보장하지 않는다.
 
 ## 검증
 
@@ -103,4 +103,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-6번의 [`A2A Client`](06-a2a-client.md)와 7번의 [`Task Runner`](07-task-lifecycle.md)가 Handoff/Manifest 전달과 Task 상태 추적을 담당한다. 8번의 [`Workflow 저장소와 Run API`](08-workflow-storage-run-api.md)가 Run/Step/Context 및 Trace를 영속화하고, 9번의 [`Planner dispatch`](09-planner-dispatch.md)가 첫 A2A 호출을 수행한다. 10번의 [`Planner 출력 검증`](10-planner-output-developer-dispatch.md)이 후속 Developer Step과 A2A 전달을 연결한다. 11번에서 Developer Source Artifact를 Snapshot/Build 흐름에 연결한다.
+6번의 [`A2A Client`](06-a2a-client.md)와 7번의 [`Task Runner`](07-task-lifecycle.md)가 Handoff/Manifest 전달과 Task 상태 추적을 담당한다. 8번의 [`Workflow 저장소와 Run API`](08-workflow-storage-run-api.md)가 Run/Step/Context/Trace/Artifact metadata를 영속화하고, 9번의 [`Planner dispatch`](09-planner-dispatch.md)가 첫 A2A 호출을 수행한다. 10번의 [`Planner 출력 검증`](10-planner-output-developer-dispatch.md)이 후속 Developer Step과 A2A 전달을 연결한다. 11번은 Developer Source/Change/Build 결과 검증과 QA/Security handoff를 연결한다.

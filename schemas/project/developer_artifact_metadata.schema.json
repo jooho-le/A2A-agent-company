@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2a-agent-company.local/schemas/project/developer_artifact_metadata.schema.json",
+  "title": "Developer Artifact A2A Metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runId", "workflowStepId", "projectArtifactId", "artifactVersion"],
+  "properties": {
+    "runId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "workflowStepId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "projectArtifactId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "artifactVersion": { "type": "integer", "minimum": 1 }
+  }
+}

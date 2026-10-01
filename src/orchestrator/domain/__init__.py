@@ -39,6 +39,11 @@ from orchestrator.domain.snapshot_handoff import (
     code_version_for_fix_attempt,
     verify_snapshot_archive,
 )
+from orchestrator.domain.developer_artifacts import (
+    BuildReportArtifact,
+    ChangeReportArtifact,
+    ChangeReportFile,
+)
 
 __all__ = [
     "A2ATaskState",
@@ -50,6 +55,9 @@ __all__ = [
     "MAX_MCP_TOOL_RETRIES",
     "ALLOWED_TRANSITIONS",
     "CodeSnapshotArtifact",
+    "BuildReportArtifact",
+    "ChangeReportArtifact",
+    "ChangeReportFile",
     "ExecutionManifest",
     "GitObjectFormat",
     "RetryDecision",
