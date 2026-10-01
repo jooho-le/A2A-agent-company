@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료  
 > 범위: FastAPI 앱, 환경 설정, 기본 로깅, Liveness API  
-> 다음 작업: 4번 — 상태 전이와 실패·수정·재시도 정책
+> 다음 작업: 5번 — Developer 결과와 QA/Security 검증을 위한 Snapshot·Artifact 인계
 
 ## 결정 목적
 

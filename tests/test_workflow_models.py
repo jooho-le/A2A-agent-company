@@ -11,9 +11,11 @@ from orchestrator.domain import (
     AgentContext,
     AgentRole,
     FinalVerdict,
+    TransitionError,
     WorkflowRun,
     WorkflowStatus,
     WorkflowStep,
+    transition_run,
 )
 
 
@@ -39,8 +41,13 @@ class WorkflowRunTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.make_run(status=WorkflowStatus.FINISHED)
 
-        finished = self.make_run().with_outcome(
-            status=WorkflowStatus.FINISHED,
+        started = transition_run(self.make_run(), WorkflowStatus.PLANNING)
+        started = transition_run(started, WorkflowStatus.IMPLEMENTING)
+        started = transition_run(started, WorkflowStatus.SNAPSHOT_READY)
+        started = transition_run(started, WorkflowStatus.VALIDATING)
+        finished = transition_run(
+            started,
+            WorkflowStatus.FINISHED,
             verdict=FinalVerdict.SUCCESS,
         )
         self.assertEqual(finished.status, WorkflowStatus.FINISHED)
@@ -49,17 +56,25 @@ class WorkflowRunTests(unittest.TestCase):
     def test_aborted_run_has_no_verdict_and_requires_reason(self) -> None:
         with self.assertRaises(ValidationError):
             self.make_run(status=WorkflowStatus.ABORTED)
+        with self.assertRaises(TransitionError):
+            transition_run(
+                self.make_run(),
+                WorkflowStatus.ABORTED,
+                termination_reason="  ",
+            )
 
-        aborted = self.make_run().with_outcome(
-            status=WorkflowStatus.ABORTED,
+        aborted = transition_run(
+            self.make_run(),
+            WorkflowStatus.ABORTED,
             termination_reason="USER_CANCELLED",
         )
         self.assertIsNone(aborted.verdict)
         self.assertEqual(aborted.termination_reason, "USER_CANCELLED")
 
-        with self.assertRaises(ValidationError):
-            self.make_run(
-                status=WorkflowStatus.ABORTED,
+        with self.assertRaises(TransitionError):
+            transition_run(
+                self.make_run(),
+                WorkflowStatus.ABORTED,
                 verdict=FinalVerdict.SUCCESS,
                 termination_reason="USER_CANCELLED",
             )

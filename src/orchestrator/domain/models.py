@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 
+from orchestrator.domain.constants import MAX_CODE_FIX_ATTEMPTS
 from orchestrator.domain.states import (
     A2ATaskState,
     AgentRole,
@@ -35,9 +36,10 @@ class WorkflowRun(DomainModel):
     scenario_id: UUID4
     request_text: str = Field(min_length=1)
     status: WorkflowStatus = WorkflowStatus.RECEIVED
+    resume_state: WorkflowStatus | None = None
     verdict: FinalVerdict | None = None
     code_version: int | None = Field(default=None, ge=1)
-    fix_attempt: int = Field(default=0, ge=0, le=3)
+    fix_attempt: int = Field(default=0, ge=0, le=MAX_CODE_FIX_ATTEMPTS)
     termination_reason: str | None = Field(default=None, min_length=1)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -50,8 +52,32 @@ class WorkflowRun(DomainModel):
             raise ValueError("request_text must not be blank")
         return value
 
+    @field_validator("termination_reason")
+    @classmethod
+    def termination_reason_must_not_be_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("termination_reason must not be blank")
+        return value
+
     @model_validator(mode="after")
     def validate_outcome(self) -> "WorkflowRun":
+        paused_states = (WorkflowStatus.WAITING_INPUT, WorkflowStatus.HUMAN_REVIEW)
+        if self.status in paused_states:
+            if self.resume_state is None:
+                raise ValueError(f"{self.status.value} runs must include a resume_state")
+            if self.resume_state in (
+                WorkflowStatus.WAITING_INPUT,
+                WorkflowStatus.HUMAN_REVIEW,
+                WorkflowStatus.FINISHED,
+                WorkflowStatus.ABORTED,
+            ):
+                raise ValueError("resume_state must be a resumable workflow state")
+        elif self.resume_state is not None:
+            raise ValueError("resume_state is only valid while waiting or in human review")
+
         if self.status == WorkflowStatus.FINISHED and self.verdict is None:
             raise ValueError("FINISHED runs must have a final verdict")
         if self.status == WorkflowStatus.ABORTED:
@@ -69,22 +95,6 @@ class WorkflowRun(DomainModel):
             if self.verdict is not None:
                 raise ValueError("non-terminal runs must not have a final verdict")
         return self
-
-    def with_outcome(
-        self,
-        *,
-        status: WorkflowStatus,
-        verdict: FinalVerdict | None = None,
-        termination_reason: str | None = None,
-    ) -> "WorkflowRun":
-        """Return a validated copy with status-related fields changed atomically."""
-        values = self.model_dump()
-        values.update(
-            status=status,
-            verdict=verdict,
-            termination_reason=termination_reason,
-        )
-        return type(self).model_validate(values)
 
 
 class WorkflowStep(DomainModel):

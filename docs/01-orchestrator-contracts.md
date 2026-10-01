@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 4번 — 상태 전이와 실패·수정·재시도 정책
+> 다음 작업: 5번 — Developer 결과와 QA/Security 검증을 위한 Snapshot·Artifact 인계
 
 ## 1. 목적과 범위
 
@@ -276,7 +276,7 @@ QA 또는 Security에서 확인된 결함
 | 입력 Schema 또는 권한 오류 | 자동 재시도하지 않음 |
 | 검증 환경 오류 | 정해진 Tool 재시도 후에도 해결되지 않으면 `UNVERIFIED` |
 
-수정 횟수와 Tool 재시도 횟수는 별도로 센다. 자세한 backoff와 오류별 분류는 상태 전이 명세에서 관리한다.
+수정 횟수와 Tool 재시도 횟수는 별도로 센다. 오류별 재시도 결정과 전체 Workflow 전이는 [`04-state-machine.md`](04-state-machine.md)에서 관리한다.
 
 ## 8. 상태와 판정 계약
 
@@ -314,6 +314,8 @@ TASK_STATE_AUTH_REQUIRED
 | `HUMAN_REVIEW` | 자동 처리를 멈추고 사람 판단 대기 |
 | `FINISHED` | 최종 Verdict 생성 후 정상 종료 |
 | `ABORTED` | 취소 또는 운영자 중단 |
+
+허용 전이, pause/resume, 3회 수정 한도, 전역 취소 API와 전이표의 예외 해석은 [`04-state-machine.md`](04-state-machine.md)를 따른다.
 
 ### 8.3 최종 Verdict
 
@@ -371,7 +373,7 @@ Mock은 Orchestrator 계약을 개발하기 위한 대체 구현이며 실제 �
 | 서비스 실행·설정 | `02-orchestrator-bootstrap.md` |
 | 도메인 모델·상태 상수 | 이후 Workflow Model 명세 |
 | 실제 A2A 객체 Schema | `03-a2a-contract.md` 및 공식 Proto 정의 |
-| 전체 상태 전이·재시도 | `04-state-machine.md` |
+| 전체 상태 전이·재시도 | [`04-state-machine.md`](04-state-machine.md) |
 | Snapshot/Artifact 접근 | `05-code-handoff.md`, `09-version-policy.md` |
 | 최종 Verdict | `10-verdict-policy.md` |
 | 이벤트 저장 형식 | `11-trace-schema.md` |

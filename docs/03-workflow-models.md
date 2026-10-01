@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run/Step 도메인 모델, Workflow/A2A/Verdict 상태 정의
-> 다음 작업: 4번 — 상태 전이와 실패·수정·재시도 정책
+> 다음 작업: 5번 — Developer 결과와 QA/Security 검증을 위한 Snapshot·Artifact 인계
 
 ## 목적
 
@@ -15,6 +15,8 @@ Orchestrator 내부의 Run과 논리적 Workflow Step을 타입으로 표현한�
 | `src/orchestrator/domain/states.py` | Workflow, Step, A2A Task, Verdict, Agent Role Enum |
 | `src/orchestrator/domain/models.py` | `WorkflowRun`, `WorkflowStep`, `AgentContext` Pydantic 모델 |
 | `src/orchestrator/domain/__init__.py` | 주요 도메인 타입 공개 |
+
+상태 전이와 재시도 정책 구현은 [`04-state-machine.md`](04-state-machine.md)에 정의한다.
 
 ## 상태 정의
 
@@ -51,15 +53,15 @@ Step 상태는 Orchestrator가 관리하는 `PENDING`, `RUNNING`, `SUCCEEDED`, `
 
 | 모델 | 주요 필드 | 규칙 |
 | --- | --- | --- |
-| `WorkflowRun` | `run_id`, `scenario_id`, `request_text`, `status`, `verdict`, `code_version`, `fix_attempt`, `termination_reason`, timestamps | 식별자는 UUIDv4. 빈 요청은 허용하지 않는다. `fix_attempt`는 0~3이며 A2A `attempt`와 별도다. `FINISHED`에는 Verdict가 필요하고 `ABORTED`는 Verdict 없이 종료 사유를 갖는다. |
+| `WorkflowRun` | `run_id`, `scenario_id`, `request_text`, `status`, `resume_state`, `verdict`, `code_version`, `fix_attempt`, `termination_reason`, timestamps | 식별자는 UUIDv4. 빈 요청은 허용하지 않는다. `resume_state`는 `WAITING_INPUT`/`HUMAN_REVIEW` 중일 때만 설정된다. `fix_attempt`는 0~3이며 A2A `attempt`와 별도다. `FINISHED`에는 Verdict가 필요하고 `ABORTED`는 Verdict 없이 종료 사유를 갖는다. |
 | `WorkflowStep` | `workflow_step_id`, `run_id`, `agent_role`, `status`, `attempt`, `requirement_ids`, A2A 참조, Artifact ID 목록, `code_version`, timestamps | Step과 Run 식별자는 UUIDv4. A2A `attempt`의 최초 값은 0. A2A Task/Context/Artifact ID는 opaque 문자열이며 프로젝트 Artifact ID(UUIDv4)와 분리한다. ID 참조 목록의 중복은 거부한다. |
 | `AgentContext` | `run_id`, `agent_id`, `agent_context_id`, `latest_a2a_task_id` | Agent별 Context/최근 Task 매핑. Context와 Task ID는 Agent 서버 범위의 opaque 문자열이다. |
 
-Pydantic 모델은 미정의 필드를 거부하고, 모델 속성 대입 시에도 필드 검증을 적용한다. `FINISHED`와 `ABORTED` 결과 제약도 검증하며, 상태/결과를 바꿀 때는 `WorkflowRun.with_outcome()`으로 원자적으로 갱신한다. `input_artifact_ids`, `output_artifact_ids`, `a2a_artifact_ids` 등 목록은 새 인스턴스마다 독립적으로 생성된다.
+Pydantic 모델은 미정의 필드를 거부하고, 모델 속성 대입 시에도 필드 검증을 적용한다. `FINISHED`와 `ABORTED` 결과 제약도 검증한다. 실제 상태/결과 전이는 [`transition_run()`](../src/orchestrator/domain/state_machine.py)을 통해 허용 간선과 함께 검증한다. `input_artifact_ids`, `output_artifact_ids`, `a2a_artifact_ids` 등 목록은 새 인스턴스마다 독립적으로 생성된다.
 
 ## 설계 경계
 
-- 이 단계는 데이터 모양과 상태 이름만 정의하며 상태 전이 허용 여부를 결정하지 않는다.
+- Run과 Step은 상태 데이터를 표현하고, 허용 상태 전이는 별도 상태 머신이 검증한다.
 - `attempt`는 A2A 호출 시도 번호, `fix_attempt`는 최초 구현 이후 코드 수정 Cycle 수(최대 3회)다. 서로 대체하지 않는다.
 - DB 저장, API 입출력 Schema, A2A HTTP Client, Artifact 본문은 후속 작업이다.
 - camelCase A2A metadata 직렬화는 A2A Client/Schema 단계에서 처리한다. 내부 Python 도메인 필드는 snake_case다.
@@ -82,7 +84,7 @@ step = WorkflowStep(run_id=run.run_id, agent_role=AgentRole.PLANNER)
 
 ## 다음 작업
 
-4번에서 허용 상태 전이, 실패·수정 흐름, 재시도 한도와 검증 규칙을 별도 상태 머신으로 정의한다.
+5번에서 Developer 코드 결과를 불변 Snapshot으로 고정하고 QA/Security로 전달하는 계약을 구현한다.
 
 ## 검증
 
