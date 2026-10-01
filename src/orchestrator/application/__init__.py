@@ -8,6 +8,7 @@ from orchestrator.application.a2a_tasks import (
     TaskRunDisposition,
     TaskUpdateObserver,
 )
+from orchestrator.application.dispatch import PlannerRunDispatcher
 
 __all__ = [
     "A2ATaskProtocolError",
@@ -16,4 +17,5 @@ __all__ = [
     "TaskPollingPolicy",
     "TaskRunDisposition",
     "TaskUpdateObserver",
+    "PlannerRunDispatcher",
 ]

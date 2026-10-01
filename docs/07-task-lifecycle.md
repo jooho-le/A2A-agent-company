@@ -2,7 +2,7 @@
 
 > 상태: 실행·상태 반영 경계 구현 완료
 > 범위: A2A Task 제출/이어가기/폴링, WorkflowStep·AgentContext 갱신, Trace Event 생성
-> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
+> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
 
 ## 목적
 
@@ -88,4 +88,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-8번에서 저장소 및 Run/Step/Trace API를 구현했다. Run 생성 후 실제 Agent에 dispatch하고 이 Runner를 호출하는 연결은 9번 범위다.
+8번에서 저장소/API를, 9번에서 Planner Run Dispatch와 Runner 연결을 구현했다. 10번에서 Planner 결과를 검증하고 후속 Step을 생성한다.

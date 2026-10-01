@@ -370,8 +370,13 @@ class A2ATaskRunner:
     ) -> AgentContext:
         if run.run_id != step.run_id:
             raise A2ATaskProtocolError("WorkflowRun and WorkflowStep IDs do not match")
-        if step.status != WorkflowStepStatus.PENDING:
-            raise A2ATaskProtocolError("A new Agent Task requires a PENDING WorkflowStep")
+        if step.status not in (
+            WorkflowStepStatus.PENDING,
+            WorkflowStepStatus.RUNNING,
+        ):
+            raise A2ATaskProtocolError(
+                "A new Agent Task requires a PENDING or preclaimed RUNNING WorkflowStep"
+            )
         if step.a2a_task_id is not None or step.a2a_task_state is not None:
             raise A2ATaskProtocolError("A WorkflowStep cannot be assigned a second Task")
         context = _make_or_check_context(run, step, agent_id, agent_context)

@@ -15,7 +15,11 @@ from orchestrator.domain import (
     WorkflowStep,
     WorkflowStepStatus,
 )
-from orchestrator.infrastructure import ActiveAgentTaskError, SQLiteWorkflowRepository
+from orchestrator.infrastructure import (
+    ActiveAgentTaskError,
+    RunDispatchConflict,
+    SQLiteWorkflowRepository,
+)
 
 
 class SQLiteWorkflowRepositoryTests(unittest.TestCase):
@@ -92,6 +96,19 @@ class SQLiteWorkflowRepositoryTests(unittest.TestCase):
 
         self.assertIsNone(self.repository.get_run(run.run_id))
         self.assertEqual(self.repository.list_steps(run.run_id), [])
+
+    def test_planner_dispatch_claim_is_atomic_and_one_shot(self) -> None:
+        run, step, _ = self.create_bundle()
+
+        claimed_run, claimed_step = self.repository.claim_planner_dispatch(run.run_id)
+
+        self.assertEqual(claimed_run.status, WorkflowStatus.PLANNING)
+        self.assertEqual(claimed_step.workflow_step_id, step.workflow_step_id)
+        self.assertEqual(claimed_step.status, WorkflowStepStatus.RUNNING)
+        self.assertEqual(self.repository.get_run(run.run_id), claimed_run)
+        self.assertEqual(self.repository.list_steps(run.run_id), [claimed_step])
+        with self.assertRaises(RunDispatchConflict):
+            self.repository.claim_planner_dispatch(run.run_id)
 
     def test_task_step_context_and_trace_write_atomically(self) -> None:
         run, step, _ = self.create_bundle()

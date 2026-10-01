@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
+> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
 
 ## 1. 목적과 범위
 

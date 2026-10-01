@@ -5,6 +5,7 @@ from orchestrator.a2a.client import (
     AgentCardContractError,
     validate_agent_card,
 )
+from orchestrator.a2a.registry import A2AAgentRegistry, AgentNotConfiguredError
 from orchestrator.a2a.requests import (
     A2AProjectContractError,
     A2AWorkflowMetadata,
@@ -15,8 +16,10 @@ from orchestrator.a2a.requests import (
 
 __all__ = [
     "A2AAgentClient",
+    "A2AAgentRegistry",
     "A2AProjectContractError",
     "A2AWorkflowMetadata",
+    "AgentNotConfiguredError",
     "AgentCardContractError",
     "build_send_message_request",
     "build_snapshot_handoff_data",

@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     api_prefix: str = "/api/v1"
     database_path: str = ".data/orchestrator.sqlite3"
+    planner_agent_url: str | None = None
+    developer_agent_url: str | None = None
+    qa_agent_url: str | None = None
+    security_agent_url: str | None = None
 
 
 @lru_cache

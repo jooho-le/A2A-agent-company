@@ -6,9 +6,25 @@ from uuid import UUID, uuid4
 
 import httpx
 
-from orchestrator.domain import A2ATaskState, AgentRole, WorkflowRun, WorkflowStatus, WorkflowStep, WorkflowStepStatus
+from orchestrator.domain import (
+    A2ATaskState,
+    AgentRole,
+    WorkflowRun,
+    WorkflowStatus,
+    WorkflowStep,
+    WorkflowStepStatus,
+)
 from orchestrator.infrastructure import SQLiteWorkflowRepository
+from orchestrator.core.config import Settings
 from orchestrator.main import create_app
+
+
+class RecordingDispatcher:
+    def __init__(self) -> None:
+        self.run_ids = []
+
+    async def dispatch_planner(self, run_id) -> None:
+        self.run_ids.append(run_id)
 
 
 class RunsAPITests(unittest.TestCase):
@@ -16,7 +32,10 @@ class RunsAPITests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.database_path = Path(self.temp_dir.name) / "api.sqlite3"
         self.repository = SQLiteWorkflowRepository(self.database_path)
-        self.app = create_app(self.repository)
+        self.app = create_app(
+            self.repository,
+            settings=Settings(_env_file=None, database_path=str(self.database_path)),
+        )
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -44,6 +63,7 @@ class RunsAPITests(unittest.TestCase):
         run_id = body["run"]["runId"]
         self.assertEqual(body["run"]["status"], "RECEIVED")
         self.assertNotIn("requestText", body["run"])
+        self.assertEqual(body["dispatchStatus"], "NOT_CONFIGURED")
         self.assertEqual(body["firstStep"]["agentRole"], "PLANNER")
         self.assertEqual(body["firstStep"]["status"], "PENDING")
         self.assertEqual(response.headers["location"], f"http://testserver/api/v1/runs/{run_id}")
@@ -56,6 +76,24 @@ class RunsAPITests(unittest.TestCase):
             [event["eventType"] for event in event_response.json()["events"]],
             ["RUN_STARTED", "WORKFLOW_STEP_CREATED"],
         )
+
+    def test_configured_planner_is_scheduled_after_run_creation(self) -> None:
+        dispatcher = RecordingDispatcher()
+        self.app = create_app(
+            self.repository,
+            dispatcher=dispatcher,  # type: ignore[arg-type]
+            settings=Settings(_env_file=None, database_path=str(self.database_path)),
+        )
+
+        response = self.request(
+            "POST",
+            "/api/v1/runs",
+            json={"scenarioId": str(uuid4()), "requestText": "Plan this request"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["dispatchStatus"], "SCHEDULED")
+        self.assertEqual(dispatcher.run_ids, [UUID(response.json()["run"]["runId"])])
 
     def test_status_steps_and_event_pagination(self) -> None:
         created = self.request(

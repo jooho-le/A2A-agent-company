@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료  
 > 범위: FastAPI 앱, 환경 설정, 기본 로깅, Liveness API  
-> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
+> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
 
 ## 결정 목적
 
@@ -30,8 +30,12 @@ Workflow 및 Agent 통신 기능을 추가하기 전에, 실행 가능한 Python
 | `ORCHESTRATOR_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` 중 하나 |
 | `ORCHESTRATOR_API_PREFIX` | `/api/v1` | 후속 업무 API용 기본 Prefix. 현재 Health 경로에는 적용하지 않음 |
 | `ORCHESTRATOR_DATABASE_PATH` | `.data/orchestrator.sqlite3` | SQLite Workflow DB 경로 |
+| `ORCHESTRATOR_PLANNER_AGENT_URL` | 설정 없음 | Planner Agent Card/A2A Base URL. 설정하면 Run 제출 후 자동 dispatch |
+| `ORCHESTRATOR_DEVELOPER_AGENT_URL` | 설정 없음 | Developer Agent Card/A2A Base URL |
+| `ORCHESTRATOR_QA_AGENT_URL` | 설정 없음 | QA Agent Card/A2A Base URL |
+| `ORCHESTRATOR_SECURITY_AGENT_URL` | 설정 없음 | Security Agent Card/A2A Base URL |
 
-환경변수는 프로세스 환경에서 읽거나 프로젝트 루트에 `.env` 파일을 두어 설정한다. 비밀정보는 예시 파일이나 로그에 넣지 않는다.
+환경변수는 프로세스 환경에서 읽거나 프로젝트 루트에 `.env` 파일을 두어 설정한다. Agent URL은 Agent Card를 조회할 Base URL이며 A2A interface path를 직접 넣지 않는다. Planner URL을 설정하지 않아도 Run 저장·조회 API는 쓸 수 있지만 POST 응답은 `dispatchStatus: NOT_CONFIGURED`를 알린다. 비밀정보는 예시 파일이나 로그에 넣지 않는다.
 
 ## Health API
 

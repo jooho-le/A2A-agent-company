@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run 상태 전이, 대기 후 재개, 취소, 코드 수정 한도, MCP 재시도, 반복 Issue 감지
-> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
+> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
 
 ## 목적
 
@@ -100,4 +100,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md), 저장소·Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)에 구현했다. 다음 9번에서 Agent dispatch를 연결한다.
+5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md), 저장소·Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md), Planner dispatch는 [`09-planner-dispatch.md`](09-planner-dispatch.md)에 구현했다. 다음 10번에서 Planner 결과로 후속 Workflow를 구성한다.

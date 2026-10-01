@@ -2,7 +2,7 @@
 
 > 상태: 로컬 MVP 구현 완료
 > 범위: SQLite 영속 저장, Run/Step/AgentContext/Trace transaction, Run 제출·조회 API
-> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
+> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
 
 ## 목적
 
@@ -45,7 +45,7 @@ Content-Type: application/json
 
 성공 시 `201 Created`, `Location: /api/v1/runs/{runId}`를 반환한다. 요청 본문에서 Scenario Registry가 발급한 UUIDv4를 받는다. Run은 `RECEIVED`, 첫 Planner Step은 `PENDING`으로 저장되고, `RUN_STARTED` 및 `WORKFLOW_STEP_CREATED` 이벤트가 같은 transaction에 들어간다.
 
-이 단계에서는 Agent URL/Registry가 아직 연결되지 않았으므로 Run 생성이 Planner를 자동 호출하지 않는다. 상태는 `RECEIVED`에 머물며, 실제 dispatch는 9번 통합 범위다.
+Planner Agent URL이 설정된 경우 Run 생성은 실제 Planner dispatch를 background로 예약한다. URL이 없는 로컬 환경에서도 저장 API를 사용할 수 있지만 응답에 `dispatchStatus: NOT_CONFIGURED`가 표시되고 Run은 `RECEIVED`에 머문다. Dispatch 동작은 [`09-planner-dispatch.md`](09-planner-dispatch.md)를 따른다.
 
 ### 상태 및 실행 기록 조회
 
@@ -61,7 +61,7 @@ Content-Type: application/json
 
 `POST /api/v1/runs/{runId}/cancel`은 `{"reason":"USER_CANCELLED"}`를 받는다. 실행 중인 Step이나 진행 중 A2A Task가 없으면 Run을 `ABORTED`로 전이하고 pending/waiting Step을 `CANCELED`로 바꾸며 Trace를 함께 기록한다. 활성 A2A Task가 있으면 원격 Agent 취소 전송이 연결되지 않은 현 단계에서 로컬 상태만 취소된 것처럼 보이지 않도록 `409 Conflict`를 반환하고 아무 상태도 바꾸지 않는다. `WORKFLOW_STEP_CANCELED`는 프로젝트 보조 Trace Event다.
 
-Artifact Registry는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/artifacts`는 이 단계에서 제공하지 않는다. 활성 Agent를 실제로 취소하는 기능도 Agent Registry/Client 연결 이후 구현한다.
+Artifact Registry는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/artifacts`는 이 단계에서 제공하지 않는다. Agent Registry는 9번에 추가했지만, 원격 Task cancel 요청/확인은 A2A Client 기능으로 아직 구현하지 않았다.
 
 ## 검증 및 개발정의서 대조
 
@@ -73,7 +73,7 @@ Artifact Registry는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/
 | Run·Step·Trace 조회 및 pagination | 반영; API draft 경로와 camelCase 응답 |
 | Workflow/A2A/Verdict 별도 관리 | 반영; 응답 필드와 저장 모델 분리 |
 | 사용자 취소 | 부분 반영; 활성 원격 Task가 없을 때만 취소, 활성 Task는 409 |
-| Run 생성 후 Agent 자동 실행 | 미구현; Agent URL/Registry와 workflow dispatch는 다음 단계 |
+| Run 생성 후 Planner Agent 자동 실행 | 부분 반영; Planner URL 설정 시 BackgroundTasks로 dispatch 예약, 미설정 시 `NOT_CONFIGURED` 반환. Planner 결과 해석과 후속 Agent 실행은 10번 이후 |
 | Artifact 목록 API, DB migration/운영 HA | 미구현; Artifact Registry 및 배포 설계 이후 |
 
 ## 테스트
@@ -88,4 +88,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-9번에서 Agent별 A2A Base URL/Agent Card 설정을 주입하고, Run 제출을 Planner dispatch 및 기존 `A2ATaskRunner`에 연결한다. Task observer에 `repository.task_update_observer(run)`를 전달해 실행 중 상태와 Trace를 영속화한다.
+9번의 [`Planner dispatch`](09-planner-dispatch.md)는 Agent별 A2A 설정, Run 제출, Task Runner, observer 저장을 연결했다. 10번에서 Planner 결과 Artifact를 구조 검증해 후속 WorkflowStep으로 분해한다.

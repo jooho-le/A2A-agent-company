@@ -1,6 +1,7 @@
 """Run API schemas kept separate from the internal domain models."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 
@@ -78,6 +79,9 @@ class WorkflowStepResponse(APIModel):
 class RunSubmissionResponse(APIModel):
     run: RunStatusResponse
     first_step: WorkflowStepResponse = Field(alias="firstStep")
+    dispatch_status: Literal["SCHEDULED", "NOT_CONFIGURED"] = Field(
+        alias="dispatchStatus"
+    )
 
 
 class RunStepsResponse(APIModel):

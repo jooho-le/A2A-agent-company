@@ -3,9 +3,21 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 
-from orchestrator.api.dependencies import get_workflow_repository
+from orchestrator.api.dependencies import (
+    get_run_dispatcher,
+    get_workflow_repository,
+)
 from orchestrator.api.schemas.runs import (
     CancelRunRequest,
     CreateRunRequest,
@@ -22,6 +34,7 @@ from orchestrator.domain import (
     WorkflowStep,
     WorkflowStatus,
 )
+from orchestrator.application import PlannerRunDispatcher
 from orchestrator.infrastructure import (
     ActiveAgentTaskError,
     RunNotFoundError,
@@ -31,6 +44,10 @@ from orchestrator.infrastructure import (
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 Repository = Annotated[SQLiteWorkflowRepository, Depends(get_workflow_repository)]
+Dispatcher = Annotated[
+    PlannerRunDispatcher | None,
+    Depends(get_run_dispatcher),
+]
 
 
 @router.post(
@@ -42,7 +59,9 @@ def create_run(
     body: CreateRunRequest,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     repository: Repository,
+    dispatcher: Dispatcher,
 ) -> RunSubmissionResponse:
     """Create a durable Run and its initial pending Planner Step."""
     run = WorkflowRun(
@@ -69,12 +88,17 @@ def create_run(
         ),
     )
     repository.create_run(run, (step,), events)
+    dispatch_status = "NOT_CONFIGURED"
+    if dispatcher is not None:
+        background_tasks.add_task(dispatcher.dispatch_planner, run.run_id)
+        dispatch_status = "SCHEDULED"
     response.headers["Location"] = str(
         request.url_for("get_run", run_id=str(run.run_id))
     )
     return RunSubmissionResponse(
         run=RunStatusResponse.from_run(run),
         first_step=WorkflowStepResponse.from_step(step),
+        dispatch_status=dispatch_status,
     )
 
 

@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run/Step 도메인 모델, Workflow/A2A/Verdict 상태 정의
-> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
+> 다음 작업: 10번 — Planner 결과 해석과 후속 Workflow 구성
 
 ## 목적
 
@@ -86,7 +86,7 @@ step = WorkflowStep(run_id=run.run_id, agent_role=AgentRole.PLANNER)
 
 ## 다음 작업
 
-8번에서 Run/Step/AgentContext와 Trace 이벤트 저장소 및 Run 조회 API를 구현했다. 9번에서 Agent dispatch와 통합한다.
+8번에서 저장소/API, 9번에서 Planner dispatch를 구현했다. 10번에서 Planner 결과를 Workflow Plan으로 해석하고 후속 Step을 만든다.
 
 ## 검증
 

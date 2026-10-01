@@ -13,6 +13,7 @@ from uuid import UUID
 from orchestrator.domain import (
     A2ATaskState,
     AgentContext,
+    AgentRole,
     TraceEvent,
     WorkflowRun,
     WorkflowStatus,
@@ -29,6 +30,10 @@ class RunNotFoundError(LookupError):
 
 class ActiveAgentTaskError(RuntimeError):
     """Raised when local cancellation cannot safely cancel an active remote Task."""
+
+
+class RunDispatchConflict(RuntimeError):
+    """Raised when a Run is not eligible for its one initial Planner dispatch."""
 
 
 class SQLiteWorkflowRepository:
@@ -64,6 +69,80 @@ class SQLiteWorkflowRepository:
                 _insert_step(connection, step)
             for event in events:
                 _insert_event(connection, event)
+
+    def claim_planner_dispatch(
+        self, run_id: UUID
+    ) -> tuple[WorkflowRun, WorkflowStep]:
+        """Atomically claim the initial Planner Step before making an A2A call."""
+        with self._transaction() as connection:
+            run_row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+            if run_row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, run_row[0])
+            run_steps = [
+                _load_model(WorkflowStep, step_row[0])
+                for step_row in connection.execute(
+                    "SELECT payload_json FROM workflow_steps WHERE run_id = ?",
+                    (str(run_id),),
+                ).fetchall()
+            ]
+            planner_steps = [
+                step for step in run_steps if step.agent_role == AgentRole.PLANNER
+            ]
+            if len(planner_steps) != 1:
+                raise RunDispatchConflict("Run must contain exactly one Planner Step")
+            step = planner_steps[0]
+            if (
+                run.status != WorkflowStatus.RECEIVED
+                or step.status != WorkflowStepStatus.PENDING
+                or step.a2a_task_id is not None
+                or step.a2a_task_state is not None
+            ):
+                raise RunDispatchConflict("Run is not eligible for initial Planner dispatch")
+
+            updated_run = transition_run(run, WorkflowStatus.PLANNING)
+            updated_step = step.model_copy(
+                update={
+                    "status": WorkflowStepStatus.RUNNING,
+                    "updated_at": utc_now(),
+                }
+            )
+            connection.execute(
+                "UPDATE workflow_runs SET status = ?, updated_at = ?, payload_json = ? "
+                "WHERE run_id = ?",
+                (
+                    updated_run.status.value,
+                    updated_run.updated_at.isoformat(),
+                    _json_model(updated_run),
+                    str(run_id),
+                ),
+            )
+            _upsert_step(connection, updated_step)
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    event_type="WORKFLOW_STATE_CHANGED",
+                    actor="Orchestrator",
+                    attempt=0,
+                    workflow_state=updated_run.status,
+                ),
+            )
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    workflow_step_id=updated_step.workflow_step_id,
+                    event_type="WORKFLOW_STEP_DISPATCH_STARTED",
+                    actor="Orchestrator",
+                    attempt=updated_step.attempt,
+                    workflow_state=updated_run.status,
+                ),
+            )
+        return updated_run, updated_step
 
     def get_run(self, run_id: UUID) -> WorkflowRun | None:
         with self._connection() as connection:
@@ -170,6 +249,53 @@ class SQLiteWorkflowRepository:
                 raise RunNotFoundError(str(run.run_id))
             for event in events:
                 _insert_event(connection, event)
+
+    def transition_run_and_record(
+        self,
+        run_id: UUID,
+        target: WorkflowStatus,
+        *,
+        additional_event_types: Sequence[str] = (),
+        workflow_step_id: UUID | None = None,
+        attempt: int = 0,
+    ) -> WorkflowRun:
+        """Apply a validated Run transition and append its Trace atomically."""
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+            if row is None:
+                raise RunNotFoundError(str(run_id))
+            current_run = _load_model(WorkflowRun, row[0])
+            updated_run = transition_run(current_run, target)
+            trace_events = [
+                "WORKFLOW_STATE_CHANGED",
+                *additional_event_types,
+            ]
+            for index, event_type in enumerate(trace_events):
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=workflow_step_id if index else None,
+                        event_type=event_type,
+                        actor="Orchestrator",
+                        attempt=attempt if index else 0,
+                        workflow_state=updated_run.status,
+                    ),
+                )
+            connection.execute(
+                "UPDATE workflow_runs SET status = ?, updated_at = ?, payload_json = ? "
+                "WHERE run_id = ?",
+                (
+                    updated_run.status.value,
+                    updated_run.updated_at.isoformat(),
+                    _json_model(updated_run),
+                    str(run_id),
+                ),
+            )
+        return updated_run
 
     def cancel_run(self, run_id: UUID, reason: str) -> WorkflowRun:
         """Abort a run only when no remote A2A Task needs cancellation first."""
