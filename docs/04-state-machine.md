@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run 상태 전이, 대기 후 재개, 취소, 코드 수정 한도, MCP 재시도, 반복 Issue 감지
-> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
+> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
 
 ## 목적
 
@@ -45,7 +45,7 @@
 
 ## 취소와 명세 예외
 
-개발정의서의 일반 전이표에는 일부 상태에만 `ABORTED` 간선이 있지만, API 계약에는 전역 `POST /runs/{runId}/cancel`이 정의되어 있다. 이 충돌은 **명시적 사용자/운영자 취소에 한해 모든 비종료 상태에서 `ABORTED`를 허용**하는 예외로 해석했다. 그 외 자동 흐름은 표의 간선만 허용한다.
+개발정의서의 일반 전이표에는 일부 상태에만 `ABORTED` 간선이 있지만, API 계약에는 전역 `POST /runs/{runId}/cancel`이 정의되어 있다. 이 충돌은 **명시적 사용자/운영자 취소에 한해 모든 비종료 상태에서 `ABORTED`를 허용**하는 예외로 해석했다. 그 외 자동 흐름은 표의 간선만 허용한다. Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)에 구현했고, 활성 원격 A2A Task가 존재하면 실제 원격 취소가 연결되기 전까지 409로 보류한다.
 
 취소 전이는 비어 있지 않은 `termination_reason`을 필수로 받고 Verdict는 저장하지 않는다. 상태 머신은 Run만 갱신한다. 실제 활성 A2A Task 취소 요청과 취소 결과 기록은 API/A2A 실행 계층의 책임이며 이번 작업 범위가 아니다.
 
@@ -84,7 +84,7 @@ Issue fingerprint는 개발정의서 순서대로 `requirement_id + test_id + is
 ## 설계 경계
 
 - Workflow 상태 머신은 로컬 도메인 규칙이며 A2A Task 상태를 대신하지 않는다.
-- A2A Task 취소, DB 트랜잭션, 이벤트/Trace 영속화는 후속 API·저장소 작업이다. Agent Card/Task 송수신 Client 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 실행·상태 반영 경계는 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 정의한다.
+- DB transaction과 Event/Trace 영속화, 활성 원격 Task가 없는 Run의 취소 API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)에 구현했다. 활성 A2A Task의 원격 취소는 Agent Client/Registry 연결 이후 작업이다. Agent Card/Task 송수신 Client 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 실행·상태 반영 경계는 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 정의한다.
 - 코드 Snapshot 동일성·무결성 확인은 [`05-code-handoff.md`](05-code-handoff.md)에서 정의하며 실제 Artifact 권한 강제는 Storage 계층에 남아 있다.
 - 상태 변경 결과를 DB에 기록할 때에는 실패한 전이가 일부만 저장되지 않도록 Run/Event 저장을 같은 트랜잭션 경계로 다룬다.
 
@@ -96,8 +96,8 @@ Issue fingerprint는 개발정의서 순서대로 `requirement_id + test_id + is
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
-전체 22개 단위 테스트 통과. 상태 전이 정상/오류 경로, 종료 상태 불변성, 대기 후 재개, 3회 수정 한도, 사용자 취소 예외, MCP 재시도 분기, 반복 Issue fingerprint를 확인했다.
+해당 단계 완료 당시 전체 22개 단위 테스트 통과. 상태 전이 정상/오류 경로, 종료 상태 불변성, 대기 후 재개, 3회 수정 한도, 사용자 취소 예외, MCP 재시도 분기, 반복 Issue fingerprint를 확인했다.
 
 ## 다음 작업
 
-5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 구현했다. 다음 8번에서는 이를 저장소 및 API에 연결한다.
+5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md), 저장소·Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)에 구현했다. 다음 9번에서 Agent dispatch를 연결한다.

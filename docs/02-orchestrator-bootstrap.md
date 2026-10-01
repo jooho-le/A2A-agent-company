@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료  
 > 범위: FastAPI 앱, 환경 설정, 기본 로깅, Liveness API  
-> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
+> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
 
 ## 결정 목적
 
@@ -29,6 +29,7 @@ Workflow 및 Agent 통신 기능을 추가하기 전에, 실행 가능한 Python
 | `ORCHESTRATOR_ENVIRONMENT` | `local` | `local`, `development`, `test`, `production` 중 하나 |
 | `ORCHESTRATOR_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` 중 하나 |
 | `ORCHESTRATOR_API_PREFIX` | `/api/v1` | 후속 업무 API용 기본 Prefix. 현재 Health 경로에는 적용하지 않음 |
+| `ORCHESTRATOR_DATABASE_PATH` | `.data/orchestrator.sqlite3` | SQLite Workflow DB 경로 |
 
 환경변수는 프로세스 환경에서 읽거나 프로젝트 루트에 `.env` 파일을 두어 설정한다. 비밀정보는 예시 파일이나 로그에 넣지 않는다.
 

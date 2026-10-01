@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run/Step 도메인 모델, Workflow/A2A/Verdict 상태 정의
-> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
+> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
 
 ## 목적
 
@@ -65,9 +65,9 @@ Pydantic 모델은 미정의 필드를 거부하고, 모델 속성 대입 시에
 
 - Run과 Step은 상태 데이터를 표현하고, 허용 상태 전이는 별도 상태 머신이 검증한다.
 - `attempt`는 A2A 호출 시도 번호, `fix_attempt`는 최초 구현 이후 코드 수정 Cycle 수(최대 3회)다. 서로 대체하지 않는다.
-- terminal/interrupted 상태까지의 A2A Task 실행 및 Step/AgentContext/Trace 이벤트 snapshot 생성은 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 구현한다. DB 저장, Run API, Artifact Registry/Object Store 영속화는 후속 작업이다. A2A HTTP Client 경계는 [`06-a2a-client.md`](06-a2a-client.md)에, Snapshot 도메인과 Manifest Schema는 [`05-code-handoff.md`](05-code-handoff.md)에 정의한다.
+- terminal/interrupted 상태까지의 A2A Task 실행 및 Step/AgentContext/Trace 이벤트 snapshot 생성은 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 구현한다. Run/Step/Context/Trace 영속화와 Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)에 구현한다. Artifact Registry/Object Store 영속화는 후속 작업이다. A2A HTTP Client 경계는 [`06-a2a-client.md`](06-a2a-client.md)에, Snapshot 도메인과 Manifest Schema는 [`05-code-handoff.md`](05-code-handoff.md)에 정의한다.
 - camelCase A2A metadata 직렬화는 A2A Client/Schema 단계에서 처리한다. 내부 Python 도메인 필드는 snake_case다.
-- Agent별 Context Mapping은 Task Runner에서 갱신할 snapshot 타입이며 DB 저장은 후속 작업이다.
+- Agent별 Context Mapping은 Task Runner에서 갱신하며 SQLite에 저장한다. 관련 transaction은 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)를 따른다.
 - WorkflowRun은 최신 `code_version`과 Artifact ID를 연결하고, 불변 Source Snapshot metadata는 별도 Artifact 도메인 계약으로 관리한다.
 
 ## 사용 예시
@@ -86,7 +86,7 @@ step = WorkflowStep(run_id=run.run_id, agent_role=AgentRole.PLANNER)
 
 ## 다음 작업
 
-8번에서는 Run/Step/AgentContext와 Trace 이벤트를 영속화할 저장소 경계 및 Run 조회 API를 구현한다.
+8번에서 Run/Step/AgentContext와 Trace 이벤트 저장소 및 Run 조회 API를 구현했다. 9번에서 Agent dispatch와 통합한다.
 
 ## 검증
 

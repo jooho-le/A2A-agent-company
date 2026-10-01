@@ -2,7 +2,7 @@
 
 > 상태: 실행·상태 반영 경계 구현 완료
 > 범위: A2A Task 제출/이어가기/폴링, WorkflowStep·AgentContext 갱신, Trace Event 생성
-> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
+> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
 
 ## 목적
 
@@ -62,7 +62,7 @@ Runner는 `WorkflowRun.status`나 `verdict`를 바꾸지 않는다. 호출자는
 
 ## Step/Context/Trace 기록 경계
 
-Runner는 입력 모델을 직접 바꾸지 않고 새 `WorkflowStep`, `AgentContext`, `TraceEvent` snapshot을 반환한다. 선택적 async `observer(step, agent_context, event)`는 다음 업데이트마다 호출된다. 다음 저장소 작업은 이 callback에서 세 snapshot을 한 DB transaction으로 저장해야 한다. 현재 구현은 DB, 이벤트 저장소, crash-safe durability를 제공하지 않는다.
+Runner는 입력 모델을 직접 바꾸지 않고 새 `WorkflowStep`, `AgentContext`, `TraceEvent` snapshot을 반환한다. 선택적 async `observer(step, agent_context, event)`는 다음 업데이트마다 호출된다. [`SQLiteWorkflowRepository.task_update_observer(run)`](../src/orchestrator/infrastructure/sqlite_workflows.py)는 이 callback을 Step/Context/Event 한 transaction 저장에 연결한다.
 
 기록 이벤트는 `A2A_MESSAGE_SENT`, `A2A_TASK_RECEIVED`, 상태 변경 시 `A2A_TASK_STATE_CHANGED`다. 상태가 그대로여도 Artifact/Context snapshot이 변하면 프로젝트 보조 이벤트 `A2A_TASK_UPDATED`를 만든다. Timeout에는 `A2A_POLL_TIMED_OUT`을 기록하고 실제 `a2aTaskState`는 그대로 둔다. Trace Event는 개발정의서의 camelCase field/schema를 따르며 payload 본문이나 비밀정보는 기록하지 않는다.
 
@@ -83,9 +83,9 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 | `INPUT_REQUIRED` 후 같은 Task에 후속 Message | 반영, 같은 Agent Task/Context ID 유지 및 attempt 증가 |
 | Agent 실패/timeout을 제품 결함으로 오판하지 않음 | 반영, 별도 disposition, timeout은 Task state를 덮지 않음 |
 | Trace `A2A_MESSAGE_SENT`, `A2A_TASK_RECEIVED`, `A2A_TASK_STATE_CHANGED` 기록 | 반영, observer로 저장할 수 있는 event 모델 제공 |
-| DB에 Task/Context/Event transaction 영속화 | 다음 작업 범위, 미구현 |
+| DB에 Task/Context/Event transaction 영속화 | 8번에서 SQLite transaction으로 구현 |
 | 자동 Agent 재시도 및 전체 Run 전이/최종 Verdict | 상위 Workflow 통합 범위, 미구현 |
 
 ## 다음 작업
 
-8번에서 Run/Step/AgentContext와 TraceEvent 저장소 transaction을 구현하고, Run 제출/상태 조회 API를 통해 이 Runner를 호출한다.
+8번에서 저장소 및 Run/Step/Trace API를 구현했다. Run 생성 후 실제 Agent에 dispatch하고 이 Runner를 호출하는 연결은 9번 범위다.

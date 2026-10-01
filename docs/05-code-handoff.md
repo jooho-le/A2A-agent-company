@@ -2,7 +2,7 @@
 
 > 상태: 도메인 계약 구현 완료
 > 범위: Developer Source Artifact, 불변 Snapshot Manifest, QA/Security read-only 인계, 검증 결과의 동일 Snapshot 확인
-> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
+> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
 
 ## 목적
 
@@ -103,4 +103,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-6번의 [`A2A Client`](06-a2a-client.md)와 7번의 [`Task Runner`](07-task-lifecycle.md)가 Handoff/Manifest 전달과 Task 상태 추적을 담당한다. 다음 8번에서는 Run/Step/Context 및 Trace 결과를 영속화한다.
+6번의 [`A2A Client`](06-a2a-client.md)와 7번의 [`Task Runner`](07-task-lifecycle.md)가 Handoff/Manifest 전달과 Task 상태 추적을 담당한다. 8번의 [`Workflow 저장소와 Run API`](08-workflow-storage-run-api.md)가 Run/Step/Context 및 Trace를 영속화한다. 9번에서 Agent dispatch를 통합한다.

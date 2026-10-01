@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
+> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
 
 ## 1. 목적과 범위
 
@@ -342,6 +342,7 @@ Web 담당자와 연결하기 전까지 계약 초안으로 사용한다.
 | `POST /runs/{runId}/cancel` | 실행 취소 요청. 활성 A2A Task가 있으면 취소를 요청하고 결과를 저장 |
 
 응답은 프로젝트 내부 UUID, Workflow 상태, A2A Task 상태, 관련 Artifact ID를 혼동 없이 별도 필드로 제공한다.
+로컬 API prefix, request/response JSON, pagination, 저장 및 미연결 Agent dispatch 범위는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)를 따른다.
 
 ## 10. Mock Agent 수용 기준
 

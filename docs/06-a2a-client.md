@@ -2,7 +2,7 @@
 
 > 상태: Client 경계 구현 완료
 > 범위: Agent Card 검증, A2A 1.0 HTTP+JSON 요청, 프로젝트 metadata 및 Snapshot payload 전달, Task 조회
-> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
+> 다음 작업: 9번 — Agent 연결 설정과 Run dispatch 통합
 
 ## 목적
 
@@ -98,4 +98,4 @@ Mock HTTP Transport로 Agent Card 조회, 다중 버전 중 1.0 선택, A2A Head
 
 ## 다음 작업
 
-8번에서는 7번의 update observer를 저장소 transaction에 연결하고, Run/Step 상태 조회 API를 구현한다.
+8번에서 update observer를 SQLite transaction 및 Run/Step/Trace API에 연결했다. 9번에서 설정된 Agent를 대상으로 Run 생성 이후 Planner dispatch를 수행한다.
