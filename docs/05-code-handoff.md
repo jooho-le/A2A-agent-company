@@ -2,7 +2,7 @@
 
 > 상태: 도메인 계약 구현 완료
 > 범위: Developer Source Artifact, 불변 Snapshot Manifest, QA/Security read-only 인계, 검증 결과의 동일 Snapshot 확인
-> 다음 작업: 6번 — A2A Agent Card 조회와 Snapshot 인계 payload 전송 경계
+> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
 
 ## 목적
 
@@ -91,7 +91,7 @@ Developer Working Tree
 
 ## 범위 및 후속 연동
 
-이번 단계는 검증 가능한 도메인 계약과 순수 검증 함수를 구현했다. 실제 Git Commit 생성, deterministic archive 제작, Artifact Registry DB/API, 영속 Object Store, URI 권한 ACL, Build/QA/Security 컨테이너 실행, A2A 전송은 아직 연결하지 않았다. 특히 `READ_ONLY` Grant를 실제로 강제할 주체는 후속 Artifact Registry/스토리지 계층이다. 현재 Python 모델만으로 외부 파일 권한을 보장한다고 간주하면 안 된다.
+5번 당시에는 검증 가능한 도메인 계약과 순수 검증 함수까지만 구현했다. 이후 A2A Client/Task Runner가 [`06-a2a-client.md`](06-a2a-client.md), [`07-task-lifecycle.md`](07-task-lifecycle.md)에 추가됐다. 실제 Git Commit 생성, deterministic archive 제작, Artifact Registry DB/API, 영속 Object Store, URI 권한 ACL, Build/QA/Security 컨테이너 실행은 아직 연결하지 않았다. 특히 `READ_ONLY` Grant를 실제로 강제할 주체는 후속 Artifact Registry/스토리지 계층이다. 현재 Python 모델만으로 외부 파일 권한을 보장한다고 간주하면 안 된다.
 
 ## 검증
 
@@ -103,4 +103,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-6번에서 이 Handoff/Manifest를 A2A Agent Card 및 SendMessage 업무 payload에 싣는 Orchestrator Client 경계를 구현한다.
+6번의 [`A2A Client`](06-a2a-client.md)와 7번의 [`Task Runner`](07-task-lifecycle.md)가 Handoff/Manifest 전달과 Task 상태 추적을 담당한다. 다음 8번에서는 Run/Step/Context 및 Trace 결과를 영속화한다.

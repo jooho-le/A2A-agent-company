@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 6번 — A2A Agent Card 조회와 Snapshot 인계 payload 전송 경계
+> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
 
 ## 1. 목적과 범위
 
@@ -96,7 +96,7 @@ Orchestrator는 Agent를 호출하기 전에 설정된 주소에서 Agent Card�
 
 ### 5.2 새 Task 요청
 
-Orchestrator는 새 업무에 대해 Message를 만들고 Agent에 보낸다. 새 Task 요청에서 `taskId`와 `contextId`는 생략한다. Agent Server가 새 Task ID와 필요 시 Context ID를 생성해 응답한다.
+Orchestrator는 새 업무에 대해 Message를 만들고 Agent에 보낸다. 새 Task 요청에서 `taskId`는 생략하며, 해당 Agent의 첫 호출에는 `contextId`도 생략한다. Agent Server가 Task ID와 필요 시 Context ID를 생성해 응답한다. 같은 Agent의 후속 요청은 그 Agent가 발급한 `agent_context_id`를 재사용할 수 있고, `INPUT_REQUIRED` Task를 이어갈 때는 같은 Agent가 발급한 Task/Context ID를 사용한다. 다른 Agent의 Context ID는 재사용하지 않는다.
 
 ```http
 POST /message:send
@@ -164,7 +164,7 @@ GET /tasks/{a2a_task_id}
 A2A-Version: 1.0
 ```
 
-Orchestrator는 조회한 A2A Task의 상태가 terminal 상태가 될 때까지 폴링한다. 필수 Step에서 Task 대신 즉시 Message만 반환하면 A2A 자체 오류는 아닐 수 있지만, 프로젝트 계약 위반으로 처리한다.
+Orchestrator는 조회한 A2A Task가 terminal 또는 interrupted 상태가 될 때까지 폴링한다. `INPUT_REQUIRED`와 `AUTH_REQUIRED`에서는 폴링을 멈추고 각각 사용자 입력 대기 또는 Human Review로 넘긴다. 필수 Step에서 Task 대신 즉시 Message만 반환하면 A2A 자체 오류는 아닐 수 있지만, 프로젝트 계약 위반으로 처리한다.
 
 ### 5.4 프로젝트 metadata
 

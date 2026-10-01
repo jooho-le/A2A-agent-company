@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2a-agent-company.local/schema/trace-event.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "runId",
+    "eventType",
+    "occurredAt",
+    "actor",
+    "attempt"
+  ],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "runId": { "type": "string", "format": "uuid" },
+    "workflowStepId": { "type": ["string", "null"], "format": "uuid" },
+    "a2aTaskId": { "type": ["string", "null"] },
+    "agentContextId": { "type": ["string", "null"] },
+    "eventType": { "type": "string" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "actor": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "requirementIds": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" }
+    },
+    "inputArtifactIds": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" }
+    },
+    "outputArtifactIds": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" }
+    },
+    "issueId": { "type": ["string", "null"], "format": "uuid" },
+    "codeVersion": { "type": ["integer", "null"], "minimum": 1 },
+    "snapshotSha256": { "type": ["string", "null"] },
+    "a2aTaskState": { "type": ["string", "null"] },
+    "workflowState": { "type": ["string", "null"] },
+    "durationMs": { "type": ["integer", "null"], "minimum": 0 }
+  }
+}

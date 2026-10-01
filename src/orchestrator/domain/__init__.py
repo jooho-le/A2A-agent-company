@@ -1,6 +1,7 @@
 """Workflow domain models and state definitions."""
 
 from orchestrator.domain.models import AgentContext, WorkflowRun, WorkflowStep
+from orchestrator.domain.trace import TraceEvent
 from orchestrator.domain.constants import (
     MAX_CODE_FIX_ATTEMPTS,
     MAX_CONSECUTIVE_SAME_ISSUE_REPEATS,
@@ -57,6 +58,7 @@ __all__ = [
     "SnapshotMismatchError",
     "SnapshotReadGrant",
     "ToolErrorKind",
+    "TraceEvent",
     "TransitionError",
     "WorkflowRun",
     "WorkflowStatus",

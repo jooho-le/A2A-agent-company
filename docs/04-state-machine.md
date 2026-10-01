@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run 상태 전이, 대기 후 재개, 취소, 코드 수정 한도, MCP 재시도, 반복 Issue 감지
-> 다음 작업: 6번 — A2A Agent Card 조회와 Snapshot 인계 payload 전송 경계
+> 다음 작업: 8번 — Workflow 저장소와 Run API 연결
 
 ## 목적
 
@@ -84,7 +84,7 @@ Issue fingerprint는 개발정의서 순서대로 `requirement_id + test_id + is
 ## 설계 경계
 
 - Workflow 상태 머신은 로컬 도메인 규칙이며 A2A Task 상태를 대신하지 않는다.
-- A2A Task 호출·취소, DB 트랜잭션, 이벤트/Trace 영속화는 후속 API·저장소 작업이다.
+- A2A Task 취소, DB 트랜잭션, 이벤트/Trace 영속화는 후속 API·저장소 작업이다. Agent Card/Task 송수신 Client 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 실행·상태 반영 경계는 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 정의한다.
 - 코드 Snapshot 동일성·무결성 확인은 [`05-code-handoff.md`](05-code-handoff.md)에서 정의하며 실제 Artifact 권한 강제는 Storage 계층에 남아 있다.
 - 상태 변경 결과를 DB에 기록할 때에는 실패한 전이가 일부만 저장되지 않도록 Run/Event 저장을 같은 트랜잭션 경계로 다룬다.
 
@@ -100,4 +100,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. 다음 6번은 이 계약의 A2A 전송 연결이다.
+5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md)에 구현했다. 다음 8번에서는 이를 저장소 및 API에 연결한다.
