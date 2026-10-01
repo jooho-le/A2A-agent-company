@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2a-agent-company.local/schema/workflow-metadata.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runId",
+    "workflowStepId",
+    "scenarioId",
+    "attempt"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workflowStepId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scenarioId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "requirementIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "uniqueItems": true
+    },
+    "codeVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "projectArtifactIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "uniqueItems": true
+    }
+  }
+}

@@ -20,4 +20,10 @@ GET /docs
 
 설정값은 환경변수 또는 프로젝트 루트의 `.env` 파일에서 읽습니다. 시작값은 `.env.example`을 참고하세요.
 
-현재는 서비스 시작과 Liveness 확인만 제공합니다. 데이터베이스, Workflow, A2A Client는 후속 작업에서 추가합니다.
+현재 구현된 기능은 서비스 시작, Liveness 확인, Workflow 도메인 모델입니다. DB 저장, Workflow 실행·상태 전이, A2A Client는 후속 작업에서 추가합니다.
+
+## 테스트
+
+```bash
+PYTHONPATH=src uv run python -m unittest discover -s tests -v
+```

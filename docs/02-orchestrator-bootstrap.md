@@ -12,9 +12,9 @@ Workflow 및 Agent 통신 기능을 추가하기 전에, 실행 가능한 Python
 
 | 경로 | 내용 |
 | --- | --- |
-| `pyproject.toml` | Python 3.10+, FastAPI, Pydantic Settings 의존성과 `src` 패키지 구조 |
+| `pyproject.toml`, `uv.lock` | Python 3.10+, FastAPI, `a2a-sdk>=1.0.0`, Pydantic Settings 의존성 고정과 `src` 패키지 구조 |
 | `.env.example` | 로컬 실행에 필요한 설정 이름과 기본값 예시 |
-| `.gitignore` | `.env`, 가상환경, Python 빌드·캐시 파일 제외 |
+| `.gitignore` | `.env`, `.DS_Store`, 가상환경, Python 빌드·캐시 파일 제외 |
 | `src/orchestrator/main.py` | FastAPI 앱 팩토리와 실행 가능한 `app` 객체 |
 | `src/orchestrator/core/config.py` | `ORCHESTRATOR_` 접두어 환경 설정 및 기본값 |
 | `src/orchestrator/core/logging.py` | 표준 Python 로깅의 최소 초기화 |
@@ -63,7 +63,8 @@ uv run uvicorn orchestrator.main:app --app-dir src --reload
 
 ## 완료 기준
 
-- Python 3.10 이상에서 의존성을 설치할 수 있다.
+- Python 3.10 이상에서 `uv.lock`에 고정된 의존성을 설치할 수 있다.
+- A2A Protocol 버전(`1.0`)과 Python SDK 패키지 버전을 별도로 관리하며, SDK 해석 버전은 `uv.lock`에 고정한다.
 - FastAPI 앱이 환경 설정을 읽어 실행된다.
 - `GET /health`가 HTTP 200과 `{"status":"ok"}`를 반환한다.
 - 이후 Workflow, API, A2A Client를 추가할 수 있도록 `src/orchestrator` 아래에 패키지 구조가 있다.
@@ -76,6 +77,12 @@ uv run uvicorn orchestrator.main:app --app-dir src --reload
 - Workflow 상태 머신
 - Agent/MCP 서버
 - 인증·배포 설정
+
+## 검증
+
+- 실행 명령: `PYTHONPATH=src uv run python -m unittest discover -s tests -p test_health.py -v`
+- `GET /health`가 HTTP 200과 `{"status":"ok"}`를 반환하는지 확인.
+- 실행 결과: 통과.
 
 ## 참고
 

@@ -1,6 +1,6 @@
 """Workflow domain models and state definitions."""
 
-from orchestrator.domain.models import WorkflowRun, WorkflowStep
+from orchestrator.domain.models import AgentContext, WorkflowRun, WorkflowStep
 from orchestrator.domain.states import (
     A2ATaskState,
     AgentRole,
@@ -11,6 +11,7 @@ from orchestrator.domain.states import (
 
 __all__ = [
     "A2ATaskState",
+    "AgentContext",
     "AgentRole",
     "FinalVerdict",
     "WorkflowRun",

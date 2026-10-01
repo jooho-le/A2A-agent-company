@@ -1,8 +1,8 @@
 # 1. Orchestrator 연동 계약
 
-> 상태: 초안 v0.1  
+> 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 2번 — Orchestrator 서비스 뼈대 구성
+> 다음 작업: 4번 — 상태 전이와 실패·수정·재시도 정책
 
 ## 1. 목적과 범위
 
@@ -17,11 +17,29 @@
 - 모든 Agent 업무 결과는 A2A Task와 Artifact로 추적한다.
 - 현재 단계에서는 실제 팀원 Agent나 Web UI와 연결하지 않고, 이 계약을 만족하는 로컬 Mock Agent를 사용한다.
 
+## 1.1 첫 MVP 시나리오
+
+첫 시나리오는 `SCN-001` 회원가입 기능 자동 개발·검증이다. 내부 `scenario_id`는 UUIDv4이며 `SCN-001`은 표시용 Key다. 로그인, OAuth, 이메일 인증, 비밀번호 찾기, 프로필 관리는 첫 MVP에서 제외한다.
+
+| Requirement Key | 검증 기준 요약 | 주 검증 담당 |
+| --- | --- | --- |
+| `REQ-001` | 유효한 이메일/비밀번호로 사용자 1명이 생성되고 성공 응답 | QA |
+| `REQ-002` | 잘못된 이메일은 저장되지 않고 오류 응답 | QA |
+| `REQ-003` | 애플리케이션 사전검사와 별도로 DB canonical email UNIQUE 제약을 적용해 동시 중복 가입도 방지 | QA + Security |
+| `REQ-004` | 7자 이하 비밀번호 거부, 8자 이상 허용 | QA |
+| `REQ-005` | 승인된 비밀번호 해시 정책으로 저장 | Security |
+| `REQ-006` | 평문 비밀번호와 저장 Hash가 응답·A2A·로그·Trace에 노출되지 않음 | Security |
+| `REQ-007` | 실제 가입 결과와 사용자 응답이 일치 | QA |
+| `REQ-008` | 요구사항부터 재검증까지 Trace로 연결 가능 | Orchestrator |
+
+MVP의 비밀번호 정책은 Argon2id, `m=19456 KiB`, `t=2`, `p=1`이며 각 비밀번호마다 고유 Salt를 사용한다. 비교용 이메일은 앞뒤 공백 제거 후 전체 소문자화하며, Gmail dot/plus 등 Provider별 변환은 하지 않는다. 상세 수용 기준은 개발정의서를 기준으로 한다.
+
 ## 2. 프로토콜 및 실행 방식
 
 | 항목 | 계약 |
 | --- | --- |
 | A2A 프로토콜 | 1.0 |
+| A2A Python SDK | `a2a-sdk>=1.0.0`, 정확한 해석 버전은 `uv.lock`으로 고정 |
 | A2A Binding | HTTP+JSON/REST |
 | A2A 요청 버전 | `A2A-Version: 1.0` |
 | A2A Content-Type | `application/a2a+json` |
@@ -29,9 +47,11 @@
 | Task 시작 | `POST /message:send`, `returnImmediately: true` |
 | Task 상태 조회 | `GET /tasks/{id}` 폴링 |
 | Streaming / Push | MVP에서 사용하지 않음 |
+| MCP Specification | `2026-07-28` |
 | MCP 연결 | Agent 프로세스가 로컬 stdio MCP Server에 연결 |
+| MCP SDK | MCP 담당 Agent/MCP 서버에서 공식 Python SDK v2 사용. Orchestrator는 MCP Tool을 직접 호출하지 않음 |
 
-비스트리밍은 SSE를 사용하지 않는다는 뜻이다. Agent 작업은 비동기로 실행하며, Orchestrator는 응답으로 받은 Task를 폴링한다.
+Protocol Version `1.0`과 SDK 배포 버전은 서로 다른 값이다. 비스트리밍은 SSE를 사용하지 않는다는 뜻이다. Agent 작업은 비동기로 실행하며, Orchestrator는 응답으로 받은 Task를 폴링한다.
 
 ## 3. 역할과 책임 경계
 
@@ -92,31 +112,52 @@ A2A-Version: 1.0
     "parts": [
       {
         "data": {
-          "instruction": "요구사항에 따라 회원가입 기능을 구현한다.",
-          "inputArtifactIds": ["<artifact-uuid>"]
+          "request": "이메일과 비밀번호로 회원가입 기능을 만들어줘."
         },
         "mediaType": "application/json"
       }
-    ],
-    "metadata": {
-      "runId": "<uuid>",
-      "workflowStepId": "<uuid>",
-      "scenarioId": "<uuid>",
-      "requirementIds": ["<requirement-uuid>"]
-    }
+    ]
   },
   "configuration": {
     "acceptedOutputModes": ["application/json"],
     "returnImmediately": true
+  },
+  "metadata": {
+    "runId": "<uuid>",
+    "workflowStepId": "<uuid>",
+    "scenarioId": "<uuid>",
+    "attempt": 0,
+    "requirementIds": []
   }
 }
 ```
 
-JSON의 A2A Role 값은 `ROLE_USER` 또는 `ROLE_AGENT`를 사용한다. 프로젝트 metadata의 JSON 필드는 camelCase를 사용한다. UUID 내부 ID와 `REQ-001` 같은 표시용 Key는 혼용하지 않는다.
+`metadata`는 `message` 내부가 아니라 SendMessage 요청 최상위에 둔다. JSON의 A2A Role 값은 `ROLE_USER` 또는 `ROLE_AGENT`를 사용한다. 프로젝트 metadata의 JSON 필드는 camelCase를 사용한다. UUID 내부 ID와 `REQ-001` 같은 표시용 Key는 혼용하지 않는다.
+
+프로젝트 metadata 검증 Schema는 [`schemas/project/workflow_metadata.schema.json`](../schemas/project/workflow_metadata.schema.json)이다. 이 Schema는 프로젝트 확장만 검증한다. A2A 공식 객체의 규범적 기준은 A2A 1.0 Proto와 SDK이며, 공식 객체를 자체 Schema로 복제하지 않는다.
 
 ### 5.3 응답과 Task 조회
 
 실제 Workflow Step은 추적 가능한 Task 응답을 요구한다. 응답의 `task.id`를 `a2a_task_id`로 저장하고, 응답에 포함된 `contextId`는 해당 Agent 전용으로 저장한다. Task ID는 opaque 문자열로 취급한다.
+
+```json
+{
+  "task": {
+    "id": "agent-server-generated-task-id",
+    "contextId": "planner-server-context-id",
+    "status": {
+      "state": "TASK_STATE_SUBMITTED",
+      "timestamp": "2026-09-28T10:00:00Z"
+    },
+    "metadata": {
+      "runId": "<uuid>",
+      "workflowStepId": "<uuid>",
+      "scenarioId": "<uuid>",
+      "attempt": 0
+    }
+  }
+}
+```
 
 ```http
 GET /tasks/{a2a_task_id}
@@ -136,7 +177,6 @@ Orchestrator는 조회한 A2A Task의 상태가 terminal 상태가 될 때까지
 | `scenarioId` | UUID 문자열 | 예 | 시나리오 내부 ID |
 | `attempt` | 정수 | 예 | Agent 호출 시도 번호. 최초 호출은 0 |
 | `requirementIds` | UUID 문자열 배열 | 아니오 | 관련 내부 요구사항 ID |
-| `requirementKeys` | 문자열 배열 | 아니오 | 사람이 보는 Key가 필요할 때 사용 |
 | `codeVersion` | 양의 정수 | 조건부 | 코드 Snapshot을 대상으로 하는 Step에서 필수 |
 | `projectArtifactIds` | UUID 문자열 배열 | 아니오 | Artifact Registry에서 조회할 프로젝트 Artifact ID |
 
@@ -168,6 +208,32 @@ Agent는 결과물을 A2A Task의 Artifact로 반환한다. Orchestrator는 A2A�
 | QA | Test Case, QA Report, Issue | 검사한 `codeVersion`, `snapshotSha256` |
 | Security | Security Report, Finding, Issue | 검사한 `codeVersion`, `snapshotSha256` |
 
+Task Artifact 예시에서 공식 `artifactId`는 해당 Task 범위의 opaque ID다. 전역 UUID `projectArtifactId`는 Artifact Registry의 별도 ID이며 둘을 같은 필드로 취급하지 않는다.
+
+```json
+{
+  "artifactId": "planner-artifact-1",
+  "name": "requirements.json",
+  "description": "Structured requirements for the requested feature",
+  "parts": [
+    {
+      "data": {
+        "requirements": [
+          {"key": "REQ-001", "description": "Create a user account with a valid email and password"}
+        ]
+      },
+      "mediaType": "application/json"
+    }
+  ],
+  "metadata": {
+    "runId": "<uuid>",
+    "workflowStepId": "<uuid>",
+    "projectArtifactId": "<uuid>",
+    "artifactVersion": 1
+  }
+}
+```
+
 Build, QA, Security 결과는 반드시 동일한 불변 코드 Snapshot과 동일한 실행환경을 가리켜야 한다. 코드가 수정되면 기존 Artifact를 덮어쓰지 않고 새 `codeVersion` 및 Artifact를 만든다. Agent 간에는 로컬 파일 경로만 전달하지 않고, 수신 Agent가 권한을 확인해 가져올 수 있는 Artifact Registry 참조를 전달한다.
 
 ## 7. Workflow 실행 계약
@@ -191,7 +257,8 @@ QA와 Security는 동일 Snapshot이 고정되고 Build가 통과한 뒤 병렬 
 ```text
 QA 또는 Security에서 확인된 결함
 → Issue Artifact 등록
-→ 새 Developer 수정 Task
+→ `FIX_REQUIRED`
+→ `FIXING`에서 새 Developer 수정 Step/Task
 → 새 Snapshot 생성
 → Build 재실행
 → QA와 Security 모두 재검증
@@ -238,10 +305,11 @@ TASK_STATE_AUTH_REQUIRED
 | `RECEIVED` | 요청 접수 |
 | `PLANNING` | Planner 실행 중 |
 | `WAITING_INPUT` | 사용자 또는 사람의 추가 입력 대기 |
-| `IMPLEMENTING` | Developer 구현 또는 수정 중 |
+| `IMPLEMENTING` | Developer 최초 구현 중 |
 | `SNAPSHOT_READY` | 불변 Snapshot 준비 완료 |
 | `VALIDATING` | 최초 Build/QA/Security 검증 중 |
 | `FIX_REQUIRED` | 확인된 제품 결함으로 수정 필요 |
+| `FIXING` | Developer가 결함을 수정 중 |
 | `REVALIDATING` | 수정 Snapshot 재검증 중 |
 | `HUMAN_REVIEW` | 자동 처리를 멈추고 사람 판단 대기 |
 | `FINISHED` | 최종 Verdict 생성 후 정상 종료 |
