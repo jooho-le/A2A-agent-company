@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료  
 > 범위: FastAPI 앱, 환경 설정, 기본 로깅, Liveness API  
-> 다음 작업: 5번 — Developer 결과와 QA/Security 검증을 위한 Snapshot·Artifact 인계
+> 다음 작업: 6번 — A2A Agent Card 조회와 Snapshot 인계 payload 전송 경계
 
 ## 결정 목적
 

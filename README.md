@@ -20,7 +20,7 @@ GET /docs
 
 설정값은 환경변수 또는 프로젝트 루트의 `.env` 파일에서 읽습니다. 시작값은 `.env.example`을 참고하세요.
 
-현재 구현된 기능은 서비스 시작, Liveness 확인, Workflow 도메인 모델과 상태 전이·재시도 정책입니다. DB 저장, 실제 Workflow 실행, A2A Client 연동은 후속 작업에서 추가합니다.
+현재 구현된 기능은 서비스 시작, Liveness 확인, Workflow 도메인 모델·상태 전이·재시도 정책, Snapshot/Artifact 인계 계약입니다. DB·Artifact Registry 저장, 실제 Workflow 실행, A2A Client 연동은 후속 작업에서 추가합니다.
 
 ## 테스트
 

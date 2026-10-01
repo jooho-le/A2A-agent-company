@@ -26,6 +26,18 @@ from orchestrator.domain.state_machine import (
     TransitionError,
     transition_run,
 )
+from orchestrator.domain.snapshot_handoff import (
+    CodeSnapshotArtifact,
+    ExecutionManifest,
+    GitObjectFormat,
+    SnapshotHandoff,
+    SnapshotIntegrityError,
+    SnapshotMismatchError,
+    SnapshotReadGrant,
+    assert_same_execution_snapshot,
+    code_version_for_fix_attempt,
+    verify_snapshot_archive,
+)
 
 __all__ = [
     "A2ATaskState",
@@ -36,7 +48,14 @@ __all__ = [
     "MAX_CONSECUTIVE_SAME_ISSUE_REPEATS",
     "MAX_MCP_TOOL_RETRIES",
     "ALLOWED_TRANSITIONS",
+    "CodeSnapshotArtifact",
+    "ExecutionManifest",
+    "GitObjectFormat",
     "RetryDecision",
+    "SnapshotHandoff",
+    "SnapshotIntegrityError",
+    "SnapshotMismatchError",
+    "SnapshotReadGrant",
     "ToolErrorKind",
     "TransitionError",
     "WorkflowRun",
@@ -44,8 +63,11 @@ __all__ = [
     "WorkflowStep",
     "WorkflowStepStatus",
     "decide_tool_retry",
+    "assert_same_execution_snapshot",
+    "code_version_for_fix_attempt",
     "make_issue_fingerprint",
     "next_consecutive_repeat_count",
     "requires_human_review",
     "transition_run",
+    "verify_snapshot_archive",
 ]

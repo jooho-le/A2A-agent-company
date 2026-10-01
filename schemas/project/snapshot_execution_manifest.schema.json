@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:a2a-agent-company:schema:project:snapshot-execution-manifest:v1",
+  "title": "SnapshotExecutionManifest",
+  "description": "Immutable source and execution-environment identity attached to Build, QA, and Security results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "repositoryId",
+    "codeVersion",
+    "projectArtifactId",
+    "commitHash",
+    "gitObjectFormat",
+    "treeHash",
+    "snapshotSha256",
+    "containerImageDigest",
+    "dependencyLockHash"
+  ],
+  "properties": {
+    "repositoryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "codeVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "projectArtifactId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "commitHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]+$"
+    },
+    "gitObjectFormat": {
+      "type": "string",
+      "enum": ["sha1", "sha256"]
+    },
+    "treeHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]+$"
+    },
+    "snapshotSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "containerImageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "dependencyLockHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "gitObjectFormat": {"const": "sha1"}
+        },
+        "required": ["gitObjectFormat"]
+      },
+      "then": {
+        "properties": {
+          "commitHash": {"pattern": "^[0-9a-f]{40}$"},
+          "treeHash": {"pattern": "^[0-9a-f]{40}$"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gitObjectFormat": {"const": "sha256"}
+        },
+        "required": ["gitObjectFormat"]
+      },
+      "then": {
+        "properties": {
+          "commitHash": {"pattern": "^[0-9a-f]{64}$"},
+          "treeHash": {"pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  ]
+}

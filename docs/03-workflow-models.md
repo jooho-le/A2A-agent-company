@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run/Step 도메인 모델, Workflow/A2A/Verdict 상태 정의
-> 다음 작업: 5번 — Developer 결과와 QA/Security 검증을 위한 Snapshot·Artifact 인계
+> 다음 작업: 6번 — A2A Agent Card 조회와 Snapshot 인계 payload 전송 경계
 
 ## 목적
 
@@ -15,6 +15,7 @@ Orchestrator 내부의 Run과 논리적 Workflow Step을 타입으로 표현한�
 | `src/orchestrator/domain/states.py` | Workflow, Step, A2A Task, Verdict, Agent Role Enum |
 | `src/orchestrator/domain/models.py` | `WorkflowRun`, `WorkflowStep`, `AgentContext` Pydantic 모델 |
 | `src/orchestrator/domain/__init__.py` | 주요 도메인 타입 공개 |
+| `src/orchestrator/domain/snapshot_handoff.py` | Code Snapshot/Artifact 및 검증 Handoff 도메인 계약 |
 
 상태 전이와 재시도 정책 구현은 [`04-state-machine.md`](04-state-machine.md)에 정의한다.
 
@@ -63,10 +64,10 @@ Pydantic 모델은 미정의 필드를 거부하고, 모델 속성 대입 시에
 
 - Run과 Step은 상태 데이터를 표현하고, 허용 상태 전이는 별도 상태 머신이 검증한다.
 - `attempt`는 A2A 호출 시도 번호, `fix_attempt`는 최초 구현 이후 코드 수정 Cycle 수(최대 3회)다. 서로 대체하지 않는다.
-- DB 저장, API 입출력 Schema, A2A HTTP Client, Artifact 본문은 후속 작업이다.
+- DB 저장, API 입출력, A2A HTTP Client, Artifact Registry/Object Store 영속화는 후속 작업이다. Snapshot 도메인과 Manifest Schema는 [`05-code-handoff.md`](05-code-handoff.md)에 정의한다.
 - camelCase A2A metadata 직렬화는 A2A Client/Schema 단계에서 처리한다. 내부 Python 도메인 필드는 snake_case다.
 - Agent별 Context Mapping은 현재 메모리 도메인 타입만 정의하며 DB 저장은 후속 작업이다.
-- 실제 코드 Snapshot 내용 대신 `code_version`과 Artifact ID 참조만 보관한다.
+- WorkflowRun은 최신 `code_version`과 Artifact ID를 연결하고, 불변 Source Snapshot metadata는 별도 Artifact 도메인 계약으로 관리한다.
 
 ## 사용 예시
 
@@ -84,7 +85,7 @@ step = WorkflowStep(run_id=run.run_id, agent_role=AgentRole.PLANNER)
 
 ## 다음 작업
 
-5번에서 Developer 코드 결과를 불변 Snapshot으로 고정하고 QA/Security로 전달하는 계약을 구현한다.
+Snapshot/Artifact 인계는 [`05-code-handoff.md`](05-code-handoff.md)에 정의한다. 6번에서는 이 계약을 A2A 요청에 연결한다.
 
 ## 검증
 

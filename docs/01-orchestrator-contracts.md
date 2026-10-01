@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 5번 — Developer 결과와 QA/Security 검증을 위한 Snapshot·Artifact 인계
+> 다음 작업: 6번 — A2A Agent Card 조회와 Snapshot 인계 payload 전송 경계
 
 ## 1. 목적과 범위
 
@@ -374,6 +374,6 @@ Mock은 Orchestrator 계약을 개발하기 위한 대체 구현이며 실제 �
 | 도메인 모델·상태 상수 | 이후 Workflow Model 명세 |
 | 실제 A2A 객체 Schema | `03-a2a-contract.md` 및 공식 Proto 정의 |
 | 전체 상태 전이·재시도 | [`04-state-machine.md`](04-state-machine.md) |
-| Snapshot/Artifact 접근 | `05-code-handoff.md`, `09-version-policy.md` |
+| Snapshot/Artifact 접근 | [`05-code-handoff.md`](05-code-handoff.md), `09-version-policy.md` |
 | 최종 Verdict | `10-verdict-policy.md` |
 | 이벤트 저장 형식 | `11-trace-schema.md` |
