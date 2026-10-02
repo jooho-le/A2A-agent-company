@@ -2,7 +2,7 @@
 
 > 상태: 실행·상태 반영 경계 구현 완료
 > 범위: A2A Task 제출/이어가기/폴링, WorkflowStep·AgentContext 갱신, Trace Event 생성
-> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
+> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
 
 ## 목적
 
@@ -88,4 +88,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-8번에서 저장소/API, 9번에서 Planner Run Dispatch와 Runner 연결, 10번에서 검증된 Planner 결과로 Developer Step 생성 및 A2A 전달을 구현했다. 11번에서 Developer 결과 Artifact 검증과 QA/Security handoff를 연결했다. 다음 12번은 각 Agent 결과 Artifact를 해석한다.
+8번에서 저장소/API, 9번에서 Planner Run Dispatch와 Runner 연결, 10번에서 검증된 Planner 결과로 Developer Step 생성 및 A2A 전달을 구현했다. 11번에서 Developer 결과 Artifact 검증과 QA/Security handoff를, 12번에서 QA/Security 결과 Artifact 해석과 상태/Verdict 기록을 연결했다. 고정 기준과 재개 가능한 수정 루프는 13번 작업이다.

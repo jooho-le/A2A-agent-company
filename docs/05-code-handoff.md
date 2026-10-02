@@ -2,7 +2,7 @@
 
 > 상태: Orchestrator MVP 연결 완료; Artifact Registry/Object Store 경계는 미완료
 > 범위: Developer Source/Change/Build Artifact 검증, 불변 Snapshot Manifest, QA/Security read-only handoff
-> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
+> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
 
 ## 목적
 

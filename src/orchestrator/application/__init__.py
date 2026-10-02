@@ -22,6 +22,12 @@ from orchestrator.application.planner_output import (
     ValidatedPlannerOutput,
     parse_planner_output,
 )
+from orchestrator.application.validation_output import (
+    ValidationOutputError,
+    VerdictDecision,
+    decide_verdict,
+    parse_validation_output,
+)
 
 __all__ = [
     "A2ATaskProtocolError",
@@ -40,4 +46,8 @@ __all__ = [
     "PlannerPlan",
     "ValidatedPlannerOutput",
     "parse_planner_output",
+    "ValidationOutputError",
+    "VerdictDecision",
+    "decide_verdict",
+    "parse_validation_output",
 ]

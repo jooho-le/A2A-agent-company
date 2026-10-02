@@ -32,12 +32,20 @@ class FakePlannerClient:
         include_developer_artifacts: bool = True,
         build_exit_code: int = 0,
         mismatch_build_manifest: bool = False,
+        qa_outcome: str = "PASS",
+        security_outcome: str = "PASS",
+        security_findings: list[dict[str, object]] | None = None,
+        include_validation_artifacts: bool = True,
     ) -> None:
         self.state = state
         self.include_artifact = include_artifact
         self.include_developer_artifacts = include_developer_artifacts
         self.build_exit_code = build_exit_code
         self.mismatch_build_manifest = mismatch_build_manifest
+        self.qa_outcome = qa_outcome
+        self.security_outcome = security_outcome
+        self.security_findings = security_findings or []
+        self.include_validation_artifacts = include_validation_artifacts
         self.sent: list[tuple[dict[str, object], object, str | None]] = []
         self.handoffs: list[tuple[object, object, str]] = []
         self.closed = False
@@ -210,11 +218,66 @@ class FakePlannerClient:
 
     async def send_snapshot_handoff(self, handoff, recipient, request_text, **kwargs):
         self.handoffs.append((handoff, recipient, request_text))
+        task_id = f"{recipient.value.lower()}-task-opaque"
+        a2a_artifact_id = f"{recipient.value.lower()}-report-a2a"
+        project_artifact_id = uuid4()
+        requirement_ids = [str(value) for value in kwargs["requirement_ids"]]
+        outcome = self.qa_outcome if recipient == AgentRole.QA else self.security_outcome
+        common = {
+            "artifactId": str(project_artifact_id),
+            "artifactType": "QA_REPORT" if recipient == AgentRole.QA else "SECURITY_REPORT",
+            "artifactVersion": 1,
+            "previousArtifactId": None,
+            "runId": str(handoff.run_id),
+            "workflowStepId": str(kwargs["workflow_step_id"]),
+            "a2aTaskId": task_id,
+            "a2aArtifactId": a2a_artifact_id,
+            "createdBy": recipient.value,
+            "requirementIds": requirement_ids,
+            "codeVersion": handoff.execution_manifest.code_version,
+            "executionManifest": handoff.execution_manifest.model_dump(
+                mode="json", by_alias=True
+            ),
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        }
+        if recipient == AgentRole.QA:
+            common["tests"] = [
+                {
+                    "testId": "QA-001",
+                    "requirementId": requirement_ids[0],
+                    "outcome": outcome,
+                    "title": "요구사항 수락 테스트",
+                }
+            ]
+            name = "qa-report.json"
+        else:
+            common["requirementResults"] = [
+                {"requirementId": requirement_id, "outcome": outcome}
+                for requirement_id in requirement_ids
+            ]
+            common["findings"] = self.security_findings
+            name = "security-report.json"
+        artifacts = []
+        if self.include_validation_artifacts:
+            artifacts = [
+                {
+                    "artifactId": a2a_artifact_id,
+                    "name": name,
+                    "parts": [{"data": common, "mediaType": "application/json"}],
+                    "metadata": {
+                        "runId": str(handoff.run_id),
+                        "workflowStepId": str(kwargs["workflow_step_id"]),
+                        "projectArtifactId": str(project_artifact_id),
+                        "artifactVersion": 1,
+                    },
+                }
+            ]
         return ParseDict(
             {
-                "id": f"{recipient.value.lower()}-task-opaque",
+                "id": task_id,
                 "contextId": f"{recipient.value.lower()}-context-opaque",
                 "status": {"state": "TASK_STATE_COMPLETED"},
+                "artifacts": artifacts,
             },
             Task(),
         )
@@ -300,9 +363,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
             for context in self.repository.list_agent_contexts(self.run.run_id)
         }
         events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
-        self.assertEqual(run.status, WorkflowStatus.VALIDATING)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
         self.assertEqual(run.code_version, 1)
-        self.assertIsNone(run.verdict)
+        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
+        self.assertEqual(run.resume_state, WorkflowStatus.VALIDATING)
         self.assertEqual(planner_step.status, WorkflowStepStatus.SUCCEEDED)
         self.assertEqual(planner_step.a2a_task_id, "planner-task-opaque")
         self.assertEqual(planner_step.output_artifact_ids, [client.project_artifact_id])
@@ -379,7 +443,15 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("PLANNER_OUTPUT_VALIDATED", [event.event_type for event in events])
         self.assertIn("WORKFLOW_STEP_DISPATCH_STARTED", [event.event_type for event in events])
         self.assertIn("DEVELOPER_ARTIFACTS_VALIDATED", [event.event_type for event in events])
-        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 3)
+        project_artifacts = self.repository.list_project_artifacts(self.run.run_id)
+        self.assertEqual(len(project_artifacts), 5)
+        self.assertEqual(
+            {artifact.artifact_type for artifact in project_artifacts},
+            {"SOURCE", "CHANGE_REPORT", "BUILD_REPORT", "QA_REPORT", "SECURITY_REPORT"},
+        )
+        self.assertIn("QA_REPORT_VALIDATED", [event.event_type for event in events])
+        self.assertIn("SECURITY_REPORT_VALIDATED", [event.event_type for event in events])
+        self.assertIn("VALIDATION_DECISION_HUMAN_REVIEW", [event.event_type for event in events])
         with sqlite3.connect(self.repository.database_path) as connection:
             with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute(
@@ -453,6 +525,82 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
             all(step.status == WorkflowStepStatus.PENDING for step in validation_steps)
         )
         self.assertFalse(client.handoffs)
+
+    async def test_validation_failure_is_recorded_as_fix_required_not_final_fail(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", qa_outcome="FAIL")
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
+        self.assertEqual(run.status, WorkflowStatus.FIX_REQUIRED)
+        self.assertIsNone(run.verdict)
+        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 5)
+        self.assertIn("VALIDATION_DECISION_FIX_REQUIRED", [e.event_type for e in events])
+
+    async def test_unverified_validation_requires_review_not_product_failure(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", security_outcome="UNVERIFIED")
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
+        self.assertEqual(run.resume_state, WorkflowStatus.VALIDATING)
+
+    async def test_confirmed_high_security_finding_requires_fix(self) -> None:
+        client = FakePlannerClient(
+            "TASK_STATE_COMPLETED",
+            security_findings=[
+                {
+                    "findingId": "SEC-001",
+                    "severity": "HIGH",
+                    "disposition": "CONFIRMED",
+                    "title": "권한 우회",
+                    "description": "인증되지 않은 사용자가 보호된 기능에 접근한다.",
+                }
+            ],
+        )
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.status, WorkflowStatus.FIX_REQUIRED)
+        self.assertIsNone(run.verdict)
+
+    async def test_confirmed_medium_security_finding_requires_policy_review(self) -> None:
+        client = FakePlannerClient(
+            "TASK_STATE_COMPLETED",
+            security_findings=[
+                {
+                    "findingId": "SEC-002",
+                    "severity": "MEDIUM",
+                    "disposition": "CONFIRMED",
+                    "title": "보안 정책 결정 필요",
+                    "description": "팀의 중간 심각도 차단 정책이 확정되지 않았다.",
+                }
+            ],
+        )
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
+
+    async def test_missing_validation_report_is_rejected_and_not_registered(self) -> None:
+        client = FakePlannerClient(
+            "TASK_STATE_COMPLETED", include_validation_artifacts=False
+        )
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(run.resume_state, WorkflowStatus.VALIDATING)
+        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 3)
+        self.assertIn("QA_SECURITY_OUTPUT_REJECTED", [e.event_type for e in events])
 
     async def test_planner_input_required_pauses_workflow(self) -> None:
         client = FakePlannerClient("TASK_STATE_INPUT_REQUIRED")

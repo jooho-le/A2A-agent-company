@@ -18,6 +18,9 @@ from orchestrator.domain import (
     BuildReportArtifact,
     ChangeReportArtifact,
     CodeSnapshotArtifact,
+    FinalVerdict,
+    QAReportArtifact,
+    SecurityReportArtifact,
     TraceEvent,
     WorkflowRun,
     WorkflowStatus,
@@ -41,7 +44,13 @@ class RunDispatchConflict(RuntimeError):
     """Raised when a Run is not eligible for its one initial Planner dispatch."""
 
 
-ProjectArtifact = CodeSnapshotArtifact | ChangeReportArtifact | BuildReportArtifact
+ProjectArtifact = (
+    CodeSnapshotArtifact
+    | ChangeReportArtifact
+    | BuildReportArtifact
+    | QAReportArtifact
+    | SecurityReportArtifact
+)
 
 
 class SQLiteWorkflowRepository:
@@ -476,7 +485,9 @@ class SQLiteWorkflowRepository:
             if not build_report.passed:
                 if snapshot_ready_run.fix_attempt >= MAX_CODE_FIX_ATTEMPTS:
                     final_run = transition_run(
-                        snapshot_ready_run, WorkflowStatus.HUMAN_REVIEW
+                        snapshot_ready_run,
+                        WorkflowStatus.FINISHED,
+                        verdict=FinalVerdict.FAIL,
                     )
                     event_type = "BUILD_FAILED_FIX_LIMIT_REACHED"
                 else:
@@ -625,11 +636,194 @@ class SQLiteWorkflowRepository:
             "SOURCE": CodeSnapshotArtifact,
             "CHANGE_REPORT": ChangeReportArtifact,
             "BUILD_REPORT": BuildReportArtifact,
+            "QA_REPORT": QAReportArtifact,
+            "SECURITY_REPORT": SecurityReportArtifact,
         }
         return [
             _load_model(model_by_type[row[0]], row[1])
             for row in rows
         ]
+
+    def record_validation_results(
+        self,
+        run_id: UUID,
+        *,
+        qa_report: QAReportArtifact,
+        security_report: SecurityReportArtifact,
+        decision_status: WorkflowStatus,
+        verdict: FinalVerdict | None,
+    ) -> WorkflowRun:
+        """Atomically append both validated reports and the derived Run Verdict."""
+        artifacts: tuple[ProjectArtifact, ...] = (qa_report, security_report)
+        if qa_report.run_id != run_id or security_report.run_id != run_id:
+            raise ValueError("Validation Artifacts must belong to the current Run")
+        if qa_report.artifact_id == security_report.artifact_id:
+            raise ValueError("QA and Security Artifact IDs must be distinct")
+        if qa_report.execution_manifest != security_report.execution_manifest:
+            raise ValueError("QA and Security Execution Manifests must match")
+        if set(qa_report.requirement_ids) != set(security_report.requirement_ids):
+            raise ValueError("QA and Security reports must cover the same Requirements")
+        if decision_status == WorkflowStatus.FINISHED and verdict is None:
+            raise ValueError("finished validation requires a final Verdict")
+        if decision_status != WorkflowStatus.FINISHED and verdict not in (
+            None,
+            FinalVerdict.HUMAN_REVIEW,
+        ):
+            raise ValueError("non-terminal validation cannot store this final Verdict")
+
+        with self._transaction() as connection:
+            run_row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+            if run_row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, run_row[0])
+            if run.status != WorkflowStatus.VALIDATING:
+                raise RunDispatchConflict("Run is not awaiting validation results")
+
+            steps = [
+                _load_model(WorkflowStep, row[0])
+                for row in connection.execute(
+                    "SELECT payload_json FROM workflow_steps WHERE run_id = ?",
+                    (str(run_id),),
+                ).fetchall()
+            ]
+            step_by_role: dict[AgentRole, WorkflowStep] = {}
+            for step in steps:
+                if step.agent_role in (AgentRole.QA, AgentRole.SECURITY):
+                    if step.agent_role in step_by_role:
+                        raise RunDispatchConflict(
+                            "multiple validation Steps are not supported in this MVP"
+                        )
+                    step_by_role[step.agent_role] = step
+            reports = (
+                (AgentRole.QA, qa_report),
+                (AgentRole.SECURITY, security_report),
+            )
+            updated_steps: list[WorkflowStep] = []
+            for role, report in reports:
+                step = step_by_role.get(role)
+                if (
+                    step is None
+                    or step.status != WorkflowStepStatus.SUCCEEDED
+                    or step.a2a_task_state != A2ATaskState.COMPLETED
+                    or step.a2a_task_id != report.a2a_task_id
+                    or step.workflow_step_id != report.workflow_step_id
+                    or set(step.requirement_ids) != set(report.requirement_ids)
+                    or step.code_version != report.code_version
+                    or report.a2a_artifact_id not in step.a2a_artifact_ids
+                ):
+                    raise RunDispatchConflict(
+                        f"{role.value} report does not match its completed WorkflowStep"
+                    )
+                source_row = connection.execute(
+                    "SELECT payload_json FROM project_artifacts "
+                    "WHERE run_id = ? AND artifact_type = 'SOURCE' AND artifact_version = ?",
+                    (str(run_id), report.code_version),
+                ).fetchone()
+                build_row = connection.execute(
+                    "SELECT payload_json FROM project_artifacts "
+                    "WHERE run_id = ? AND artifact_type = 'BUILD_REPORT' AND artifact_version = ?",
+                    (str(run_id), report.code_version),
+                ).fetchone()
+                if source_row is None or build_row is None:
+                    raise RunDispatchConflict("validation has no matching Source/Build Artifact")
+                source = _load_model(CodeSnapshotArtifact, source_row[0])
+                build = _load_model(BuildReportArtifact, build_row[0])
+                if (
+                    not build.passed
+                    or report.execution_manifest != source.execution_manifest()
+                    or build.execution_manifest != report.execution_manifest
+                    or report.execution_manifest.project_artifact_id != source.artifact_id
+                ):
+                    raise ValueError("validation report does not match the passed Build Snapshot")
+
+                previous = connection.execute(
+                    "SELECT artifact_id, artifact_version FROM project_artifacts "
+                    "WHERE run_id = ? AND artifact_type = ? "
+                    "ORDER BY artifact_version DESC LIMIT 1",
+                    (str(run_id), report.artifact_type),
+                ).fetchone()
+                if previous is None:
+                    if report.artifact_version != 1 or report.previous_artifact_id is not None:
+                        raise ValueError("first validation report must start at version 1")
+                elif (
+                    report.artifact_version != previous[1] + 1
+                    or str(report.previous_artifact_id) != previous[0]
+                ):
+                    raise ValueError("validation Artifact lineage is not consecutive")
+                if report.workflow_step_id != step.workflow_step_id:
+                    raise ValueError("validation Artifact Step reference mismatch")
+                updated_steps.append(
+                    WorkflowStep.model_validate(
+                        {
+                            **step.model_dump(mode="python"),
+                            "output_artifact_ids": [str(report.artifact_id)],
+                            "updated_at": utc_now(),
+                        }
+                    )
+                )
+
+            final_run = transition_run(run, decision_status, verdict=verdict)
+            for artifact in artifacts:
+                connection.execute(
+                    "INSERT INTO project_artifacts("
+                    "artifact_id, run_id, artifact_type, artifact_version, payload_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        str(artifact.artifact_id), str(run_id), artifact.artifact_type,
+                        artifact.artifact_version, artifact.model_dump_json(),
+                    ),
+                )
+            for step, report, event_type in (
+                (updated_steps[0], qa_report, "QA_REPORT_VALIDATED"),
+                (updated_steps[1], security_report, "SECURITY_REPORT_VALIDATED"),
+            ):
+                _upsert_step(connection, step)
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=step.workflow_step_id,
+                        a2a_task_id=step.a2a_task_id,
+                        event_type=event_type,
+                        actor="Orchestrator",
+                        attempt=step.attempt,
+                        requirement_ids=step.requirement_ids,
+                        input_artifact_ids=step.input_artifact_ids,
+                        output_artifact_ids=[report.artifact_id],
+                        a2a_task_state=step.a2a_task_state,
+                        code_version=report.code_version,
+                        snapshot_sha256=report.execution_manifest.snapshot_sha256,
+                        workflow_state=final_run.status,
+                    ),
+                )
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    event_type=f"VALIDATION_DECISION_{final_run.status.value}",
+                    actor="Orchestrator",
+                    attempt=run.fix_attempt,
+                    requirement_ids=list(qa_report.requirement_ids),
+                    output_artifact_ids=[qa_report.artifact_id, security_report.artifact_id],
+                    code_version=qa_report.code_version,
+                    snapshot_sha256=qa_report.execution_manifest.snapshot_sha256,
+                    workflow_state=final_run.status,
+                ),
+            )
+            connection.execute(
+                "UPDATE workflow_runs SET status = ?, updated_at = ?, payload_json = ? "
+                "WHERE run_id = ?",
+                (
+                    final_run.status.value,
+                    final_run.updated_at.isoformat(),
+                    _json_model(final_run),
+                    str(run_id),
+                ),
+            )
+        return final_run
 
     def get_run(self, run_id: UUID) -> WorkflowRun | None:
         with self._connection() as connection:
@@ -955,6 +1149,56 @@ class SQLiteWorkflowRepository:
                     BEGIN SELECT RAISE(ABORT, 'project_artifacts are append-only'); END;
                 """
             )
+            self._migrate_validation_artifact_types(connection)
+
+    @staticmethod
+    def _migrate_validation_artifact_types(connection: sqlite3.Connection) -> None:
+        """Widen the append-only Artifact type check without losing existing rows."""
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_artifacts'"
+        ).fetchone()
+        if row is None or "QA_REPORT" in row[0] and "SECURITY_REPORT" in row[0]:
+            return
+
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute("DROP TRIGGER IF EXISTS project_artifacts_no_update")
+            connection.execute("DROP TRIGGER IF EXISTS project_artifacts_no_delete")
+            connection.execute(
+                "CREATE TABLE project_artifacts_v12 ("
+                "artifact_id TEXT PRIMARY KEY, "
+                "run_id TEXT NOT NULL REFERENCES workflow_runs(run_id), "
+                "artifact_type TEXT NOT NULL CHECK (artifact_type IN ("
+                "'SOURCE', 'CHANGE_REPORT', 'BUILD_REPORT', 'QA_REPORT', 'SECURITY_REPORT')), "
+                "artifact_version INTEGER NOT NULL CHECK (artifact_version >= 1), "
+                "payload_json TEXT NOT NULL CHECK (json_valid(payload_json)), "
+                "UNIQUE(run_id, artifact_type, artifact_version))"
+            )
+            connection.execute(
+                "INSERT INTO project_artifacts_v12 "
+                "SELECT artifact_id, run_id, artifact_type, artifact_version, payload_json "
+                "FROM project_artifacts"
+            )
+            connection.execute("DROP TABLE project_artifacts")
+            connection.execute(
+                "ALTER TABLE project_artifacts_v12 RENAME TO project_artifacts"
+            )
+            connection.execute(
+                "CREATE INDEX project_artifacts_by_run "
+                "ON project_artifacts(run_id, artifact_type, artifact_version)"
+            )
+            connection.execute(
+                "CREATE TRIGGER project_artifacts_no_update BEFORE UPDATE ON project_artifacts "
+                "BEGIN SELECT RAISE(ABORT, 'project_artifacts are append-only'); END"
+            )
+            connection.execute(
+                "CREATE TRIGGER project_artifacts_no_delete BEFORE DELETE ON project_artifacts "
+                "BEGIN SELECT RAISE(ABORT, 'project_artifacts are append-only'); END"
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
 
 
 def _validate_bundle(

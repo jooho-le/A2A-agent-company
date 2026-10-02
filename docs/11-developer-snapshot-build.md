@@ -2,7 +2,7 @@
 
 > 상태: 로컬 Orchestrator MVP 구현 완료; 실제 Artifact Registry/Object Store 연동은 미완료
 > 범위: Developer 결과 검증, Artifact metadata 영속화, Build PASS 후 동일 Snapshot QA/Security dispatch
-> 다음 작업: 12번 — QA/Security 결과 검증, Verdict, 수정·재검증 흐름
+> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
 
 ## 목적
 
@@ -87,9 +87,9 @@ Developer Task COMPLETED
        → QA/Security Step은 PENDING, 부분 호출하지 않음
 ```
 
-Build 실패는 제품 전체 Verdict `FAIL`을 뜻하지 않는다. 유효한 Build Report와 Source는 보존하고 Run을 `FIX_REQUIRED`로 둔다. 수정 횟수를 소진한 상태에서 Build가 실패하면 현재 자동 수정 가능한 상태가 아니므로 `HUMAN_REVIEW`로 멈춘다.
+Build 실패는 첫 발생만으로 제품 전체 Verdict `FAIL`을 뜻하지 않는다. 유효한 Build Report와 Source는 보존하고 수정 한도 전 Run을 `FIX_REQUIRED`로 둔다. 정의서에 따라 수정 한도를 소진한 Build 실패는 `FINISHED/FAIL`로 기록한다. 자동 Developer 수정 재호출은 아직 연결되지 않았다.
 
-QA/Security Task는 둘 다 완료돼도 Run을 `VALIDATING`에 둔다. A2A Task `COMPLETED`는 해당 Agent 업무의 완료이지 Report 내용의 PASS가 아니며, 이 단계에서는 최종 Verdict를 만들지 않는다. 두 호출 중 실패·거절·입력 대기·timeout·전송 불확실성이 있으면 두 호출의 결과를 기다린 다음 `HUMAN_REVIEW`로 전환한다.
+QA/Security Task가 모두 완료되면 12번 처리기가 각 Report Artifact를 검증한다. A2A Task `COMPLETED`는 해당 Agent 업무의 완료이지 Report 내용의 PASS가 아니다. 결과에 따라 Report와 Step output 참조를 append-only Registry에 기록하고 Run Verdict/상태/Trace를 transaction 하나로 저장한다. Task 실패·거절·입력 대기·timeout·전송 불확실성 또는 Report 계약 오류는 `HUMAN_REVIEW`로 전환한다. 상세 규칙은 [12번 문서](12-validation-results-verdict.md)를 따른다.
 
 ## Artifact/권한 경계와 미완료 항목
 
@@ -110,7 +110,7 @@ Build MCP 실행 자체도 이 단계에서 수행하지 않는다. Developer가
 | Build 실패에서 QA/Security PASS를 섞지 않음 | 반영; Build nonzero면 `FIX_REQUIRED`, Validator 호출 없음 |
 | QA/Security가 Source를 변경할 수 없음 | 부분 반영; A2A 요청은 `READ_ONLY`, 외부 Artifact/MCP 권한 강제는 미구현 |
 | Scenario Registry의 고정 필수 Requirement/Acceptance Criteria 보호 | 미구현; 10번과 동일하게 Orchestrator가 기준 원본을 조회하는 Scenario Registry가 없어 Planner가 반환한 기준을 전달하는 데 그침 |
-| 모든 QA/Security 결과 확인 후 제품 Verdict 계산 | 다음 12번; 현재 Agent Task 완료를 PASS로 취급하지 않음 |
+| 모든 QA/Security 결과 확인 후 제품 Verdict 계산 | 12번 반영; Task 상태와 Report 판정을 분리하고 동일 Snapshot/Build와 대조 |
 | Tool/Infrastructure 실패를 제품 FAIL과 구분 | 부분 반영; 불확실한/잘못된 완료 결과는 `HUMAN_REVIEW`, 최종 `UNVERIFIED` 확정 연결 미구현 |
 
 ## 검증
@@ -125,4 +125,4 @@ Artifact 필드/Lineage/경로와 Manifest, 누락 또는 불일치 Developer �
 
 ## 다음 작업
 
-12번에서 QA Report와 Security Report의 출처/Schema/Requirement별 결과/Manifest를 검증하고, `SUCCESS`/`FAIL`/`UNVERIFIED`/`HUMAN_REVIEW`를 개발정의서 조건대로 결정한다. 필요하면 Issue/수정 요청으로 Developer 새 Code Version을 만들고 Build·QA·Security를 새 Snapshot에서 재검증한다.
+12번은 QA/Security Report와 Manifest를 검증하고 결과에 따라 Verdict 또는 `FIX_REQUIRED`를 기록한다. 고정 Requirement Registry, Issue 레코드, 자동 Developer 수정·재검증은 아직 미구현이며 [12번 문서](12-validation-results-verdict.md)의 미완료 항목으로 관리한다.

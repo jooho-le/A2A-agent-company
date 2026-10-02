@@ -2,7 +2,7 @@
 
 > 상태: Client 경계 구현 완료
 > 범위: Agent Card 검증, A2A 1.0 HTTP+JSON 요청, 프로젝트 metadata 및 Snapshot payload 전달, Task 조회
-> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
+> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
 
 ## 목적
 
@@ -98,4 +98,4 @@ Mock HTTP Transport로 Agent Card 조회, 다중 버전 중 1.0 선택, A2A Head
 
 ## 다음 작업
 
-8번에서 update observer를 SQLite transaction 및 Run/Step/Trace API에 연결했고, 9번에서 설정된 Planner Agent로 Run 생성 후 dispatch한다. 10번에서 Planner 결과를 검증해 Developer Agent로 넘긴다. 11번에서 Developer 결과로부터 같은 Manifest의 QA/Security Snapshot handoff를 한다. 12번에서 검증 Report를 해석한다.
+8번에서 update observer를 SQLite transaction 및 Run/Step/Trace API에 연결했고, 9번에서 설정된 Planner Agent로 Run 생성 후 dispatch한다. 10번에서 Planner 결과를 검증해 Developer Agent로 넘긴다. 11번에서 Developer 결과로부터 같은 Manifest의 QA/Security Snapshot handoff를 하고, 12번에서 Report를 검증해 Verdict/상태로 기록한다. 재시도·수정 재호출은 후속 작업이다.

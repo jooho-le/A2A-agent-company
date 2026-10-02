@@ -24,7 +24,7 @@ GET /docs
 
 설정값은 환경변수 또는 프로젝트 루트의 `.env` 파일에서 읽습니다. 시작값은 `.env.example`을 참고하세요.
 
-현재 구현된 기능은 Workflow 상태·Trace 저장, A2A 1.0 Task 실행, Planner 결과 검증 후 Developer dispatch, Developer Source/Change/Build Artifact 검증, SQLite Artifact metadata 기록, Build PASS 시 동일 Snapshot을 QA/Security에 A2A로 전달하는 로컬 MVP까지입니다. Build Tool은 Developer Agent가 MCP로 실행하며 Orchestrator가 MCP를 직접 호출하지 않습니다. API/스토리지 기반의 실제 Artifact 바이트 보관, Snapshot hash 재검증, read-only ACL과 QA/Security 결과 해석 및 최종 Verdict는 아직 미구현입니다. 현재 통합 계약은 [10번 Planner/Developer 계약](docs/10-planner-output-developer-dispatch.md)과 [11번 Snapshot/Build handoff](docs/11-developer-snapshot-build.md)을 참고하세요.
+현재 구현된 기능은 Workflow 상태·Trace 저장, A2A 1.0 Task 실행, Planner/Developer 출력 검증, Build PASS 시 같은 Snapshot을 QA/Security에 전달하고 두 Report를 검증·저장하는 로컬 Orchestrator 흐름입니다. 고정 Scenario/Requirement Registry가 없어 자동 `SUCCESS`는 보류되며, 자동 Developer 수정·재검증과 실제 Artifact bytes/ACL은 아직 연결되지 않았습니다. Build Tool은 Developer Agent가 MCP로 실행하며 Orchestrator가 MCP를 직접 호출하지 않습니다. 통합 계약은 [10번 Planner/Developer 계약](docs/10-planner-output-developer-dispatch.md), [11번 Snapshot/Build handoff](docs/11-developer-snapshot-build.md), [12번 QA/Security 판정](docs/12-validation-results-verdict.md)을 참고하세요.
 
 자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
 

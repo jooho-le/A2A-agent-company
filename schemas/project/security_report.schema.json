@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2a-agent-company.local/schemas/project/security_report.schema.json",
+  "title": "Security Report Artifact Data Part",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifactId", "artifactType", "artifactVersion", "previousArtifactId", "runId", "workflowStepId", "a2aTaskId", "a2aArtifactId", "createdBy", "requirementIds", "codeVersion", "executionManifest", "createdAt", "requirementResults", "findings"],
+  "properties": {
+    "artifactId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "artifactType": { "const": "SECURITY_REPORT" },
+    "artifactVersion": { "type": "integer", "minimum": 1 },
+    "previousArtifactId": { "oneOf": [{ "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, { "type": "null" }] },
+    "runId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "workflowStepId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "a2aTaskId": { "type": "string", "minLength": 1 },
+    "a2aArtifactId": { "type": "string", "minLength": 1 },
+    "createdBy": { "const": "SECURITY" },
+    "requirementIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } },
+    "codeVersion": { "type": "integer", "minimum": 1, "maximum": 4 },
+    "executionManifest": { "$ref": "execution_manifest.schema.json" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "requirementResults": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["requirementId", "outcome"],
+        "properties": {
+          "requirementId": { "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+          "outcome": { "enum": ["PASS", "FAIL", "UNVERIFIED"] },
+          "details": { "type": ["string", "null"], "minLength": 1 }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["findingId", "severity", "disposition", "title", "description"],
+        "properties": {
+          "findingId": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
+          "disposition": { "enum": ["CONFIRMED", "SUSPECTED", "FALSE_POSITIVE"] },
+          "title": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "requirementId": { "oneOf": [{ "type": "string", "format": "uuid", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, { "type": "null" }] },
+          "evidenceRef": { "type": ["string", "null"], "minLength": 1 }
+        }
+      }
+    }
+  }
+}

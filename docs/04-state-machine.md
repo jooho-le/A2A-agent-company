@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run 상태 전이, 대기 후 재개, 취소, 코드 수정 한도, MCP 재시도, 반복 Issue 감지
-> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
+> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
 
 ## 목적
 
@@ -100,4 +100,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md), 저장소·Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md), Planner dispatch는 [`09-planner-dispatch.md`](09-planner-dispatch.md), Planner 출력 검증과 Developer dispatch는 [`10-planner-output-developer-dispatch.md`](10-planner-output-developer-dispatch.md)에 구현했다. 11번에서 Developer 결과 검증과 QA/Security handoff까지 연결했으며, 12번에서 결과 해석 및 Verdict를 진행한다.
+5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md), 저장소·Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md), Planner dispatch는 [`09-planner-dispatch.md`](09-planner-dispatch.md), Planner 출력 검증과 Developer dispatch는 [`10-planner-output-developer-dispatch.md`](10-planner-output-developer-dispatch.md)에 구현했다. 11번에서 Developer 결과 검증과 QA/Security handoff, 12번에서 Report 해석과 Verdict 전이를 연결했다. 자동 수정·재검증은 후속 작업이다.

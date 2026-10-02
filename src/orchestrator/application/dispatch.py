@@ -9,7 +9,11 @@ from uuid import UUID
 from a2a.types import Task
 
 from orchestrator.a2a import A2AAgentClient, A2AAgentRegistry
-from orchestrator.application.a2a_tasks import A2ATaskRunner, TaskRunDisposition
+from orchestrator.application.a2a_tasks import (
+    A2ATaskRunResult,
+    A2ATaskRunner,
+    TaskRunDisposition,
+)
 from orchestrator.application.planner_output import (
     PlannerOutputValidationError,
     PlannerPlan,
@@ -19,8 +23,16 @@ from orchestrator.application.developer_output import (
     DeveloperOutputValidationError,
     parse_developer_output,
 )
+from orchestrator.application.validation_output import (
+    decide_verdict,
+    parse_validation_output,
+)
 from orchestrator.domain import (
     AgentRole,
+    BuildReportArtifact,
+    CodeSnapshotArtifact,
+    QAReportArtifact,
+    SecurityReportArtifact,
     SnapshotHandoff,
     WorkflowRun,
     WorkflowStatus,
@@ -351,7 +363,7 @@ class PlannerRunDispatcher:
         request_context: str,
         agent_urls: dict[AgentRole, str | None],
     ) -> None:
-        async def dispatch_one(step: WorkflowStep) -> TaskRunDisposition | Exception:
+        async def dispatch_one(step: WorkflowStep) -> A2ATaskRunResult | Exception:
             role = step.agent_role
             agent_url = agent_urls[role]
             if agent_url is None:
@@ -364,7 +376,14 @@ class PlannerRunDispatcher:
             request_text = (
                 "검증 대상은 전달된 불변 Source Snapshot이다. 파일을 수정하지 말고 "
                 "READ_ONLY로 접근한다. 요구사항과 Acceptance Criteria를 확인해 "
-                f"{duty} 요구사항: {request_context}"
+                f"{duty} 요구사항: {request_context}\n\n"
+                "완료 시 A2A Task Artifact를 정확히 하나 반환한다. "
+                "QA는 qa-report.json, Security는 security-report.json을 사용하고, "
+                "각 Artifact는 application/json Data Part 하나와 project metadata를 "
+                "가져야 한다. Report Schema는 "
+                "schemas/project/qa_report.schema.json 또는 "
+                "schemas/project/security_report.schema.json을 따른다. "
+                "Task COMPLETED는 업무 완료일 뿐 결과 PASS를 뜻하지 않는다."
             )
             try:
                 async with self._client_factory(agent_url) as client:
@@ -378,7 +397,7 @@ class PlannerRunDispatcher:
                         request_text=request_text,
                         observer=self._repository.task_update_observer(run),
                     )
-                return result.disposition
+                return result
             except Exception as exc:
                 logger.error(
                     "%s dispatch requires review for Run %s (error type: %s)",
@@ -388,18 +407,18 @@ class PlannerRunDispatcher:
                 )
                 return exc
 
-        dispositions = await asyncio.gather(*(dispatch_one(step) for step in steps))
+        outcomes = await asyncio.gather(*(dispatch_one(step) for step in steps))
         if any(
             isinstance(outcome, Exception)
-            or outcome != TaskRunDisposition.COMPLETED
-            for outcome in dispositions
+            or outcome.disposition != TaskRunDisposition.COMPLETED
+            for outcome in outcomes
         ):
             step_id = next(
                 (
                     step.workflow_step_id
-                    for step, outcome in zip(steps, dispositions, strict=True)
+                    for step, outcome in zip(steps, outcomes, strict=True)
                     if isinstance(outcome, Exception)
-                    or outcome != TaskRunDisposition.COMPLETED
+                    or outcome.disposition != TaskRunDisposition.COMPLETED
                 ),
                 steps[0].workflow_step_id,
             )
@@ -408,6 +427,74 @@ class PlannerRunDispatcher:
                 step_id,
                 0,
                 additional_event_types=("QA_SECURITY_DISPATCH_REQUIRES_REVIEW",),
+            )
+            return
+
+        artifacts = self._repository.list_project_artifacts(run.run_id)
+        source = next(
+            (
+                artifact
+                for artifact in artifacts
+                if isinstance(artifact, CodeSnapshotArtifact)
+                and artifact.code_version == handoff.execution_manifest.code_version
+            ),
+            None,
+        )
+        build = next(
+            (
+                artifact
+                for artifact in artifacts
+                if isinstance(artifact, BuildReportArtifact)
+                and artifact.code_version == handoff.execution_manifest.code_version
+            ),
+            None,
+        )
+        if source is None or build is None:
+            self._move_to_human_review(
+                run.run_id,
+                steps[0].workflow_step_id,
+                0,
+                additional_event_types=("VALIDATION_SOURCE_ARTIFACT_MISSING",),
+            )
+            return
+
+        reports: dict[AgentRole, QAReportArtifact | SecurityReportArtifact] = {}
+        try:
+            for step, outcome in zip(steps, outcomes, strict=True):
+                assert isinstance(outcome, A2ATaskRunResult)
+                reports[step.agent_role] = parse_validation_output(
+                    outcome.task,
+                    run=run,
+                    step=outcome.step,
+                    source=source,
+                )
+            qa_report = reports[AgentRole.QA]
+            security_report = reports[AgentRole.SECURITY]
+            assert isinstance(qa_report, QAReportArtifact)
+            assert isinstance(security_report, SecurityReportArtifact)
+            decision = decide_verdict(
+                qa_report,
+                security_report,
+                fix_attempt=run.fix_attempt,
+            )
+            self._repository.record_validation_results(
+                run.run_id,
+                qa_report=qa_report,
+                security_report=security_report,
+                decision_status=decision.target_status,
+                verdict=decision.verdict,
+            )
+        except Exception as exc:
+            logger.error(
+                "QA/Security result requires review for Run %s (error type: %s)",
+                run.run_id,
+                type(exc).__name__,
+            )
+            self._move_to_human_review(
+                run.run_id,
+                steps[0].workflow_step_id,
+                0,
+                additional_event_types=("QA_SECURITY_OUTPUT_REJECTED",),
             )
 
     def _move_to_human_review(

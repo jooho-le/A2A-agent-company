@@ -57,6 +57,7 @@ class WorkflowStateMachineTests(unittest.TestCase):
                 WorkflowStatus.VALIDATING,
                 WorkflowStatus.FIX_REQUIRED,
                 WorkflowStatus.HUMAN_REVIEW,
+                WorkflowStatus.FINISHED,
             },
             WorkflowStatus.VALIDATING: {
                 WorkflowStatus.FINISHED,

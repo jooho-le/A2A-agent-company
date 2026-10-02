@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run/Step 도메인 모델, Workflow/A2A/Verdict 상태 정의
-> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
+> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
 
 ## 목적
 
@@ -86,7 +86,7 @@ step = WorkflowStep(run_id=run.run_id, agent_role=AgentRole.PLANNER)
 
 ## 다음 작업
 
-8번에서 저장소/API, 9번에서 Planner dispatch, 10번에서 검증된 Planner Plan 기반 Developer Step 생성을 구현했다. 11번에서 Developer Artifact metadata 및 QA/Security handoff를 추가했으며, 12번에서 결과 해석과 Verdict를 연결한다.
+8번에서 저장소/API, 9번에서 Planner dispatch, 10번에서 검증된 Planner Plan 기반 Developer Step 생성을 구현했다. 11번에서 Developer Artifact metadata 및 QA/Security handoff, 12번에서 QA/Security Report 검증과 제한된 Verdict 판정을 연결했다. 자동 수정·재검증은 13번 작업으로 남아 있다.
 
 ## 검증
 

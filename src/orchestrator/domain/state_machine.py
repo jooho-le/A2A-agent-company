@@ -39,6 +39,7 @@ ALLOWED_TRANSITIONS: Mapping[WorkflowStatus, frozenset[WorkflowStatus]] = (
                     WorkflowStatus.VALIDATING,
                     WorkflowStatus.FIX_REQUIRED,
                     WorkflowStatus.HUMAN_REVIEW,
+                    WorkflowStatus.FINISHED,
                 }
             ),
             WorkflowStatus.VALIDATING: frozenset(

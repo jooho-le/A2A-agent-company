@@ -2,7 +2,7 @@
 
 > 상태: 로컬 MVP 구현 완료; Developer Artifact metadata 저장 추가
 > 범위: SQLite 영속 저장, Run/Step/AgentContext/Trace/Artifact metadata transaction, Run 제출·조회 API
-> 다음 작업: 12번 — QA/Security 결과 검증과 Verdict/수정 루프
+> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
 
 ## 목적
 
@@ -89,4 +89,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-9번의 [`Planner dispatch`](09-planner-dispatch.md)는 Agent별 A2A 설정, Run 제출, Task Runner, observer 저장을 연결했다. 10번의 [`Planner 결과 검증`](10-planner-output-developer-dispatch.md)은 validated Requirement/Acceptance Criteria를 Developer Step에 연결한다. 11번의 Developer Artifact metadata는 이 저장소에 기록한다. 12번에서 QA/Security 결과 Artifact를 해석한다.
+9번의 [`Planner dispatch`](09-planner-dispatch.md)는 Agent별 A2A 설정, Run 제출, Task Runner, observer 저장을 연결했다. 10번의 [`Planner 결과 검증`](10-planner-output-developer-dispatch.md)은 validated Requirement/Acceptance Criteria를 Developer Step에 연결한다. 11번의 Developer Artifact metadata와 12번의 QA/Security Report를 같은 append-only Registry에 기록한다. 실제 Artifact bytes/Object Store는 아직 연결되지 않았다.
