@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run/Step 도메인 모델, Workflow/A2A/Verdict 상태 정의
-> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
+> 13번에서 Scenario 기준 및 수정·재검증 루프 구현 완료. 다음 Orchestrator 작업은 14번 재개/복구 정책이다. 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목적
 

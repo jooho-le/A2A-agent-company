@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run 상태 전이, 대기 후 재개, 취소, 코드 수정 한도, MCP 재시도, 반복 Issue 감지
-> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
+> 13번에서 Issue 영속화 및 bounded 수정·재검증 루프 구현 완료. 다음 Orchestrator 작업은 14번 재개/복구 정책이다. 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목적
 
@@ -79,7 +79,7 @@
 
 Issue fingerprint는 개발정의서 순서대로 `requirement_id + test_id + issue_category + normalized_location`을 UTF-8 문자열로 이어 SHA-256 계산한다. Location 정규화와 이전 Issue 이력 저장은 호출자/Issue Registry 책임이다.
 
-수정 후 동일 fingerprint가 재검증에서 연속 재발하면 반복 횟수를 증가시키고, 다른 fingerprint가 관측되면 연속 반복 횟수를 0으로 초기화한다. 동일 Issue가 **두 번 연속 수정 Cycle 후에도 재발**하면 `HUMAN_REVIEW` 후보로 올린다. 본 단계의 helper는 계산만 수행하고 Issue Registry 및 영속 저장은 후속 작업이다.
+수정 후 동일 fingerprint가 재검증에서 연속 재발하면 반복 횟수를 증가시키고, 다른 fingerprint가 관측되면 연속 반복 횟수를 0으로 초기화한다. 동일 Issue가 **두 번 연속 수정 Cycle 후에도 재발**하면 `HUMAN_REVIEW`로 올린다. Issue Registry 영속화는 [13번](13-scenario-registry-fix-revalidation.md)에서 구현했다.
 
 ## 설계 경계
 
@@ -100,4 +100,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md), 저장소·Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md), Planner dispatch는 [`09-planner-dispatch.md`](09-planner-dispatch.md), Planner 출력 검증과 Developer dispatch는 [`10-planner-output-developer-dispatch.md`](10-planner-output-developer-dispatch.md)에 구현했다. 11번에서 Developer 결과 검증과 QA/Security handoff, 12번에서 Report 해석과 Verdict 전이를 연결했다. 자동 수정·재검증은 후속 작업이다.
+5번에서 만든 Snapshot/Artifact Handoff는 [`05-code-handoff.md`](05-code-handoff.md)를 따른다. A2A 전송 경계는 [`06-a2a-client.md`](06-a2a-client.md), Task 폴링과 Step/Context 갱신은 [`07-task-lifecycle.md`](07-task-lifecycle.md), 저장소·Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md), Planner dispatch는 [`09-planner-dispatch.md`](09-planner-dispatch.md), Planner 출력 검증과 Developer dispatch는 [`10-planner-output-developer-dispatch.md`](10-planner-output-developer-dispatch.md)에 구현했다. 11번에서 Developer 결과 검증과 QA/Security handoff, 12번에서 Report 해석과 Verdict 전이를, 13번에서 권위 Scenario·Issue Registry·자동 수정 재검증을 연결했다. 실제 Agent/MCP 호출과 Artifact Store 검증은 팀 통합 후 남은 작업이다.

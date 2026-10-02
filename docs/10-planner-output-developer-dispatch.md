@@ -2,7 +2,7 @@
 
 > 상태: MVP 구현 완료
 > 범위: Planner Artifact 검증, Requirement/Acceptance Criteria 연결, Developer WorkflowStep 생성 및 A2A 전달
-> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
+> 13번에서 권위 Scenario 기준 및 수정·재검증 루프 구현 완료. 다음 Orchestrator 작업은 14번 재개/복구 정책이다. 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목적
 
@@ -109,4 +109,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 ## 다음 작업
 
-11번에서 Developer Source/Change/Build Artifact 검증 및 같은 Snapshot QA/Security dispatch, 12번에서 QA/Security Report 검증과 Verdict/상태 기록을 구현했다. 고정 Scenario/Requirement Registry가 없어 자동 SUCCESS는 차단되며, 수정·재검증 dispatch는 후속 작업이다.
+11번에서 Developer Source/Change/Build Artifact 검증 및 같은 Snapshot QA/Security dispatch, 12번에서 QA/Security Report 검증과 Verdict/상태 기록, 13번에서 고정 Scenario/Requirement Registry와 수정·재검증 dispatch를 구현했다. 실제 Agent/MCP 실행은 팀 통합 후 검증해야 한다.

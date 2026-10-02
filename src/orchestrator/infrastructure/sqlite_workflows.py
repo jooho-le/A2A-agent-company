@@ -19,6 +19,7 @@ from orchestrator.domain import (
     ChangeReportArtifact,
     CodeSnapshotArtifact,
     FinalVerdict,
+    IssueRecord,
     QAReportArtifact,
     SecurityReportArtifact,
     TraceEvent,
@@ -27,6 +28,7 @@ from orchestrator.domain import (
     WorkflowStep,
     WorkflowStepStatus,
     code_version_for_fix_attempt,
+    requires_human_review,
     transition_run,
 )
 from orchestrator.domain.models import utc_now
@@ -344,6 +346,7 @@ class SQLiteWorkflowRepository:
         change_report: ChangeReportArtifact,
         build_report: BuildReportArtifact,
         validation_agents_configured: bool,
+        validation_requirement_ids: dict[AgentRole, Sequence[UUID]] | None = None,
     ) -> tuple[WorkflowRun, WorkflowStep, tuple[WorkflowStep, ...]]:
         """Atomically append Developer Artifacts and prepare the next workflow state."""
         artifacts: tuple[ProjectArtifact, ...] = (source, change_report, build_report)
@@ -382,12 +385,11 @@ class SQLiteWorkflowRepository:
                 and step.agent_role == AgentRole.DEVELOPER
             ]
             if (
-                run.status != WorkflowStatus.IMPLEMENTING
+                run.status not in (WorkflowStatus.IMPLEMENTING, WorkflowStatus.FIXING)
                 or len(developer_steps) != 1
                 or developer_steps[0].status != WorkflowStepStatus.SUCCEEDED
                 or developer_steps[0].a2a_task_state != A2ATaskState.COMPLETED
                 or developer_steps[0].a2a_task_id != source.a2a_task_id
-                or any(step.agent_role in (AgentRole.QA, AgentRole.SECURITY) for step in steps)
             ):
                 raise RunDispatchConflict("Run is not eligible to register a Developer candidate")
 
@@ -451,9 +453,11 @@ class SQLiteWorkflowRepository:
                     "code_version": source.code_version,
                 }
             )
-            snapshot_ready_run = transition_run(
-                run_with_code_version, WorkflowStatus.SNAPSHOT_READY
+            is_fix = run.status == WorkflowStatus.FIXING
+            intermediate_state = (
+                WorkflowStatus.REVALIDATING if is_fix else WorkflowStatus.SNAPSHOT_READY
             )
+            intermediate_run = transition_run(run_with_code_version, intermediate_state)
             _insert_event(
                 connection,
                 TraceEvent(
@@ -467,7 +471,7 @@ class SQLiteWorkflowRepository:
                     output_artifact_ids=[artifact.artifact_id for artifact in artifacts],
                     a2a_task_state=developer_step.a2a_task_state,
                     code_version=source.code_version,
-                    workflow_state=snapshot_ready_run.status,
+                    workflow_state=intermediate_run.status,
                 ),
             )
             _insert_event(
@@ -477,22 +481,22 @@ class SQLiteWorkflowRepository:
                     event_type="WORKFLOW_STATE_CHANGED",
                     actor="Orchestrator",
                     attempt=0,
-                    workflow_state=snapshot_ready_run.status,
+                    workflow_state=intermediate_run.status,
                 ),
             )
 
             validation_steps: tuple[WorkflowStep, ...] = ()
             if not build_report.passed:
-                if snapshot_ready_run.fix_attempt >= MAX_CODE_FIX_ATTEMPTS:
+                if intermediate_run.fix_attempt >= MAX_CODE_FIX_ATTEMPTS:
                     final_run = transition_run(
-                        snapshot_ready_run,
+                        intermediate_run,
                         WorkflowStatus.FINISHED,
                         verdict=FinalVerdict.FAIL,
                     )
                     event_type = "BUILD_FAILED_FIX_LIMIT_REACHED"
                 else:
                     final_run = transition_run(
-                        snapshot_ready_run, WorkflowStatus.FIX_REQUIRED
+                        intermediate_run, WorkflowStatus.FIX_REQUIRED
                     )
                     event_type = "BUILD_FAILED"
                 _insert_event(
@@ -520,9 +524,18 @@ class SQLiteWorkflowRepository:
                     ),
                 )
             else:
-                validating_run = transition_run(
-                    snapshot_ready_run, WorkflowStatus.VALIDATING
+                validation_state = (
+                    WorkflowStatus.REVALIDATING if is_fix else WorkflowStatus.VALIDATING
                 )
+                validating_run = (
+                    intermediate_run
+                    if is_fix
+                    else transition_run(intermediate_run, validation_state)
+                )
+                required_by_role = validation_requirement_ids or {
+                    AgentRole.QA: developer_step.requirement_ids,
+                    AgentRole.SECURITY: developer_step.requirement_ids,
+                }
                 validation_steps = tuple(
                     WorkflowStep(
                         run_id=run_id,
@@ -532,7 +545,7 @@ class SQLiteWorkflowRepository:
                             if validation_agents_configured
                             else WorkflowStepStatus.PENDING
                         ),
-                        requirement_ids=developer_step.requirement_ids,
+                        requirement_ids=list(required_by_role[role]),
                         code_version=source.code_version,
                         input_artifact_ids=[source.artifact_id],
                     )
@@ -624,6 +637,231 @@ class SQLiteWorkflowRepository:
 
         return final_run, updated_developer_step, validation_steps
 
+    def start_fix_cycle(
+        self,
+        run_id: UUID,
+        issues: Sequence[IssueRecord],
+        *,
+        developer_configured: bool,
+    ) -> tuple[WorkflowRun, WorkflowStep | None, tuple[IssueRecord, ...], list[UUID]]:
+        """Persist issues and atomically start a bounded Developer fix attempt."""
+        if not issues:
+            raise ValueError("a fix cycle requires at least one Issue")
+        if any(issue.run_id != run_id for issue in issues):
+            raise ValueError("all Issues must belong to the current Run")
+
+        with self._transaction() as connection:
+            run_row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+            if run_row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, run_row[0])
+            if run.status != WorkflowStatus.FIX_REQUIRED or run.code_version is None:
+                raise RunDispatchConflict("Run is not ready for a Developer fix attempt")
+
+            steps = [
+                _load_model(WorkflowStep, row[0])
+                for row in connection.execute(
+                    "SELECT payload_json FROM workflow_steps WHERE run_id = ?",
+                    (str(run_id),),
+                ).fetchall()
+            ]
+            previous_developer = next(
+                (step for step in reversed(steps) if step.agent_role == AgentRole.DEVELOPER),
+                None,
+            )
+            if previous_developer is None:
+                raise RunDispatchConflict("fix attempt has no prior Developer Step")
+
+            stored_issues: list[IssueRecord] = []
+            for issue in issues:
+                previous_issue = connection.execute(
+                    "SELECT fingerprint, consecutive_repeat_count, code_version "
+                    "FROM issue_records WHERE run_id = ? AND fingerprint = ? "
+                    "ORDER BY code_version DESC, created_at DESC, issue_id DESC LIMIT 1",
+                    (str(run_id), issue.fingerprint),
+                ).fetchone()
+                if issue.code_version != run.code_version:
+                    raise ValueError("Issue codeVersion must match the current failed candidate")
+                if not set(issue.requirement_ids).issubset(set(previous_developer.requirement_ids)):
+                    raise ValueError("Issue references a Requirement outside the Plan")
+                source_row = connection.execute(
+                    "SELECT artifact_type, artifact_version FROM project_artifacts "
+                    "WHERE run_id = ? AND artifact_id = ?",
+                    (str(run_id), str(issue.source_artifact_id)),
+                ).fetchone()
+                if source_row is None or tuple(source_row) != ("SOURCE", run.code_version):
+                    raise ValueError("Issue Source reference must be the current Run candidate")
+                if issue.report_artifact_id is not None:
+                    report_row = connection.execute(
+                        "SELECT artifact_type, artifact_version FROM project_artifacts "
+                        "WHERE run_id = ? AND artifact_id = ?",
+                        (str(run_id), str(issue.report_artifact_id)),
+                    ).fetchone()
+                    expected_report_types = {
+                        AgentRole.DEVELOPER: {"BUILD_REPORT"},
+                        AgentRole.QA: {"QA_REPORT"},
+                        AgentRole.SECURITY: {"SECURITY_REPORT"},
+                    }[issue.reporter]
+                    if (
+                        report_row is None
+                        or report_row[0] not in expected_report_types
+                        or report_row[1] != run.code_version
+                    ):
+                        raise ValueError("Issue Report reference must match its reporter and candidate")
+                repeat_count = (
+                    int(previous_issue[1]) + 1
+                    if previous_issue is not None
+                    and previous_issue[0] == issue.fingerprint
+                    and int(previous_issue[2]) == run.code_version - 1
+                    else 0
+                )
+                stored = IssueRecord.model_validate(
+                    {
+                        **issue.model_dump(mode="python", by_alias=False),
+                        "consecutive_repeat_count": repeat_count,
+                    }
+                )
+                connection.execute(
+                    "INSERT INTO issue_records(issue_id, run_id, fingerprint, code_version, "
+                    "consecutive_repeat_count, created_at, payload_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(stored.issue_id), str(run_id), stored.fingerprint,
+                        stored.code_version, stored.consecutive_repeat_count,
+                        stored.created_at.isoformat(),
+                        stored.model_dump_json(by_alias=True),
+                    ),
+                )
+                stored_issues.append(stored)
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=previous_developer.workflow_step_id,
+                        event_type="ISSUE_CREATED",
+                        actor=stored.reporter.value,
+                        attempt=run.fix_attempt,
+                        requirement_ids=stored.requirement_ids,
+                        input_artifact_ids=[stored.source_artifact_id],
+                        output_artifact_ids=(
+                            [stored.report_artifact_id]
+                            if stored.report_artifact_id is not None else []
+                        ),
+                        issue_id=stored.issue_id,
+                        code_version=stored.code_version,
+                        workflow_state=run.status,
+                    ),
+                )
+
+            if any(requires_human_review(item.consecutive_repeat_count) for item in stored_issues):
+                final_run = transition_run(
+                    run, WorkflowStatus.HUMAN_REVIEW, verdict=FinalVerdict.HUMAN_REVIEW
+                )
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        event_type="SAME_ISSUE_REQUIRES_REVIEW",
+                        actor="Orchestrator",
+                        attempt=run.fix_attempt,
+                        issue_id=next(
+                            item.issue_id for item in stored_issues
+                            if requires_human_review(item.consecutive_repeat_count)
+                        ),
+                        code_version=run.code_version,
+                        workflow_state=final_run.status,
+                    ),
+                )
+                step = None
+                input_artifact_ids: list[UUID] = []
+            elif not developer_configured:
+                final_run = transition_run(
+                    run, WorkflowStatus.HUMAN_REVIEW, verdict=FinalVerdict.HUMAN_REVIEW
+                )
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        event_type="FIX_DISPATCH_NOT_CONFIGURED",
+                        actor="Orchestrator",
+                        attempt=run.fix_attempt,
+                        code_version=run.code_version,
+                        workflow_state=final_run.status,
+                    ),
+                )
+                step = None
+                input_artifact_ids = []
+            else:
+                artifact_rows = connection.execute(
+                    "SELECT artifact_id, artifact_type FROM project_artifacts "
+                    "WHERE run_id = ? AND artifact_version = ? "
+                    "AND artifact_type IN ('SOURCE', 'CHANGE_REPORT', 'BUILD_REPORT') "
+                    "ORDER BY rowid",
+                    (str(run_id), run.code_version),
+                ).fetchall()
+                by_type = {row[1]: UUID(row[0]) for row in artifact_rows}
+                required_types = {"SOURCE", "CHANGE_REPORT", "BUILD_REPORT"}
+                if not required_types.issubset(by_type):
+                    raise RunDispatchConflict("fix cycle is missing prior candidate Artifacts")
+                input_artifact_ids = list(by_type.values())
+                fixing_run = transition_run(run, WorkflowStatus.FIXING)
+                step = WorkflowStep(
+                    run_id=run_id,
+                    agent_role=AgentRole.DEVELOPER,
+                    status=WorkflowStepStatus.RUNNING,
+                    requirement_ids=previous_developer.requirement_ids,
+                    code_version=code_version_for_fix_attempt(fixing_run.fix_attempt),
+                    input_artifact_ids=input_artifact_ids,
+                )
+                final_run = fixing_run
+                _insert_step(connection, step)
+                _insert_event(
+                    connection,
+                    TraceEvent(
+                        run_id=run_id,
+                        workflow_step_id=step.workflow_step_id,
+                        event_type="FIX_ATTEMPT_STARTED",
+                        actor="Orchestrator",
+                        attempt=fixing_run.fix_attempt,
+                        requirement_ids=step.requirement_ids,
+                        input_artifact_ids=input_artifact_ids,
+                        issue_id=stored_issues[0].issue_id,
+                        code_version=step.code_version,
+                        workflow_state=fixing_run.status,
+                    ),
+                )
+            _insert_event(
+                connection,
+                TraceEvent(
+                    run_id=run_id,
+                    event_type="WORKFLOW_STATE_CHANGED",
+                    actor="Orchestrator",
+                    attempt=final_run.fix_attempt,
+                    workflow_state=final_run.status,
+                ),
+            )
+            connection.execute(
+                "UPDATE workflow_runs SET status = ?, updated_at = ?, payload_json = ? "
+                "WHERE run_id = ?",
+                (
+                    final_run.status.value, final_run.updated_at.isoformat(),
+                    _json_model(final_run), str(run_id),
+                ),
+            )
+        return final_run, step, tuple(stored_issues), input_artifact_ids
+
+    def list_issue_records(self, run_id: UUID) -> list[IssueRecord]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM issue_records WHERE run_id = ? "
+                "ORDER BY created_at, issue_id",
+                (str(run_id),),
+            ).fetchall()
+        return [IssueRecord.model_validate_json(row[0]) for row in rows]
+
     def list_project_artifacts(self, run_id: UUID) -> list[ProjectArtifact]:
         """Return append-only Artifact Registry metadata rows for one Run."""
         with self._connection() as connection:
@@ -661,8 +899,6 @@ class SQLiteWorkflowRepository:
             raise ValueError("QA and Security Artifact IDs must be distinct")
         if qa_report.execution_manifest != security_report.execution_manifest:
             raise ValueError("QA and Security Execution Manifests must match")
-        if set(qa_report.requirement_ids) != set(security_report.requirement_ids):
-            raise ValueError("QA and Security reports must cover the same Requirements")
         if decision_status == WorkflowStatus.FINISHED and verdict is None:
             raise ValueError("finished validation requires a final Verdict")
         if decision_status != WorkflowStatus.FINISHED and verdict not in (
@@ -679,7 +915,7 @@ class SQLiteWorkflowRepository:
             if run_row is None:
                 raise RunNotFoundError(str(run_id))
             run = _load_model(WorkflowRun, run_row[0])
-            if run.status != WorkflowStatus.VALIDATING:
+            if run.status not in (WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING):
                 raise RunDispatchConflict("Run is not awaiting validation results")
 
             steps = [
@@ -689,21 +925,21 @@ class SQLiteWorkflowRepository:
                     (str(run_id),),
                 ).fetchall()
             ]
-            step_by_role: dict[AgentRole, WorkflowStep] = {}
-            for step in steps:
-                if step.agent_role in (AgentRole.QA, AgentRole.SECURITY):
-                    if step.agent_role in step_by_role:
-                        raise RunDispatchConflict(
-                            "multiple validation Steps are not supported in this MVP"
-                        )
-                    step_by_role[step.agent_role] = step
             reports = (
                 (AgentRole.QA, qa_report),
                 (AgentRole.SECURITY, security_report),
             )
             updated_steps: list[WorkflowStep] = []
             for role, report in reports:
-                step = step_by_role.get(role)
+                step = next(
+                    (
+                        candidate
+                        for candidate in steps
+                        if candidate.workflow_step_id == report.workflow_step_id
+                        and candidate.agent_role == role
+                    ),
+                    None,
+                )
                 if (
                     step is None
                     or step.status != WorkflowStepStatus.SUCCEEDED
@@ -766,6 +1002,19 @@ class SQLiteWorkflowRepository:
                 )
 
             final_run = transition_run(run, decision_status, verdict=verdict)
+            developer_step = next(
+                (
+                    step for step in steps
+                    if step.agent_role == AgentRole.DEVELOPER
+                    and step.code_version == qa_report.code_version
+                ),
+                None,
+            )
+            decision_requirement_ids = (
+                developer_step.requirement_ids
+                if developer_step is not None
+                else list(dict.fromkeys([*qa_report.requirement_ids, *security_report.requirement_ids]))
+            )
             for artifact in artifacts:
                 connection.execute(
                     "INSERT INTO project_artifacts("
@@ -806,7 +1055,7 @@ class SQLiteWorkflowRepository:
                     event_type=f"VALIDATION_DECISION_{final_run.status.value}",
                     actor="Orchestrator",
                     attempt=run.fix_attempt,
-                    requirement_ids=list(qa_report.requirement_ids),
+                    requirement_ids=decision_requirement_ids,
                     output_artifact_ids=[qa_report.artifact_id, security_report.artifact_id],
                     code_version=qa_report.code_version,
                     snapshot_sha256=qa_report.execution_manifest.snapshot_sha256,
@@ -1129,6 +1378,27 @@ class SQLiteWorkflowRepository:
                 );
                 CREATE INDEX IF NOT EXISTS trace_events_by_run
                     ON trace_events(run_id, sequence);
+                CREATE TABLE IF NOT EXISTS issue_records (
+                    issue_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+                    fingerprint TEXT NOT NULL,
+                    code_version INTEGER NOT NULL CHECK (code_version >= 1),
+                    consecutive_repeat_count INTEGER NOT NULL CHECK (
+                        consecutive_repeat_count >= 0
+                    ),
+                    created_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
+                );
+                CREATE INDEX IF NOT EXISTS issue_records_by_run
+                    ON issue_records(run_id, created_at, issue_id);
+                CREATE INDEX IF NOT EXISTS issue_records_by_fingerprint
+                    ON issue_records(run_id, fingerprint, code_version);
+                CREATE TRIGGER IF NOT EXISTS issue_records_no_update
+                    BEFORE UPDATE ON issue_records
+                    BEGIN SELECT RAISE(ABORT, 'issue_records are append-only'); END;
+                CREATE TRIGGER IF NOT EXISTS issue_records_no_delete
+                    BEFORE DELETE ON issue_records
+                    BEGIN SELECT RAISE(ABORT, 'issue_records are append-only'); END;
                 CREATE TABLE IF NOT EXISTS project_artifacts (
                     artifact_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),

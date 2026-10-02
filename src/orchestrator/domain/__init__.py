@@ -2,6 +2,15 @@
 
 from orchestrator.domain.models import AgentContext, WorkflowRun, WorkflowStep
 from orchestrator.domain.trace import TraceEvent
+from orchestrator.domain.issues import IssueRecord
+from orchestrator.domain.scenario_registry import (
+    SCN_001_ID,
+    SCENARIO_REGISTRY,
+    RequirementValidator,
+    ScenarioDefinition,
+    ScenarioRequirement,
+    get_scenario,
+)
 from orchestrator.domain.constants import (
     MAX_CODE_FIX_ATTEMPTS,
     MAX_CONSECUTIVE_SAME_ISSUE_REPEATS,
@@ -71,9 +80,15 @@ __all__ = [
     "ChangeReportFile",
     "ExecutionManifest",
     "GitObjectFormat",
+    "IssueRecord",
     "QAReportArtifact",
     "QATestResult",
     "RetryDecision",
+    "RequirementValidator",
+    "SCN_001_ID",
+    "SCENARIO_REGISTRY",
+    "ScenarioDefinition",
+    "ScenarioRequirement",
     "SnapshotHandoff",
     "SnapshotIntegrityError",
     "SnapshotMismatchError",
@@ -91,6 +106,7 @@ __all__ = [
     "WorkflowStepStatus",
     "ValidationOutcome",
     "decide_tool_retry",
+    "get_scenario",
     "assert_same_execution_snapshot",
     "code_version_for_fix_attempt",
     "make_issue_fingerprint",

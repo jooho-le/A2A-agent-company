@@ -1,14 +1,15 @@
 # 12. QA/Security 결과 검증 및 Verdict
 
-> 상태: QA/Security Report 검증·저장 및 제한된 Verdict 판정 구현 완료
-> 범위: A2A 완료 상태와 제품 검증 결과 분리, Report Artifact 계약, 동일 Snapshot 대조, Trace/DB 반영
-> 다음 작업: 고정 Scenario/Requirement Registry 연결 및 Developer 수정·재검증 루프
+> 상태: 12번 작업 당시의 QA/Security Report 검증·저장 및 제한된 Verdict 판정 구현 기록
+> 후속: Scenario Registry와 Developer 수정·재검증 루프는 [13번 작업](13-scenario-registry-fix-revalidation.md)에서 구현됨
 
 ## 목적
 
 QA/Security Agent의 A2A Task가 `TASK_STATE_COMPLETED`인 사실만으로 제품이 성공했다고 판단하지 않는다. Task의 Report Artifact를 계약대로 검증하고, Build·QA·Security 결과가 같은 Source Snapshot과 실행환경을 가리키는지 확인한 뒤에만 상태를 전이한다.
 
 현재 Orchestrator는 고정된 Scenario/Requirement Registry를 아직 조회하지 않는다. 따라서 Agent가 반환한 Planner Requirement만 통과한 결과를 최종 `SUCCESS`로 단정할 수 없다. 검증 자체가 전부 PASS여도 현재 연결 경로는 `HUMAN_REVIEW`로 보류한다.
+
+> 이 문서의 “현재” 및 미완료 표는 12번 구현을 마쳤을 때의 상태를 보존한다. 13번 이후 기준은 링크한 후속 문서를 참조한다.
 
 ## 구현 위치
 

@@ -2,7 +2,7 @@
 
 > 상태: 개발정의서 대조 반영 v0.2  
 > 범위: Orchestrator가 로컬 Mock Agent와 협업하기 위한 개발 전 계약  
-> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
+> 13번에서 Scenario 기준 및 수정·재검증 루프 구현 완료. 다음 Orchestrator 작업은 14번 재개/복구 정책이다. 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 1. 목적과 범위
 

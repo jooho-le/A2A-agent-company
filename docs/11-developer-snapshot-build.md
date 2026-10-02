@@ -2,7 +2,7 @@
 
 > 상태: 로컬 Orchestrator MVP 구현 완료; 실제 Artifact Registry/Object Store 연동은 미완료
 > 범위: Developer 결과 검증, Artifact metadata 영속화, Build PASS 후 동일 Snapshot QA/Security dispatch
-> 다음 작업: 13번 — 권위 있는 Requirement 기준 및 수정·재검증 루프
+> 13번에서 권위 Scenario 기준 및 수정·재검증 루프 구현 완료. 다음 Orchestrator 작업은 14번 재개/복구 정책이다. 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목적
 
@@ -125,4 +125,4 @@ Artifact 필드/Lineage/경로와 Manifest, 누락 또는 불일치 Developer �
 
 ## 다음 작업
 
-12번은 QA/Security Report와 Manifest를 검증하고 결과에 따라 Verdict 또는 `FIX_REQUIRED`를 기록한다. 고정 Requirement Registry, Issue 레코드, 자동 Developer 수정·재검증은 아직 미구현이며 [12번 문서](12-validation-results-verdict.md)의 미완료 항목으로 관리한다.
+12번은 QA/Security Report와 Manifest를 검증하고 결과에 따라 Verdict 또는 `FIX_REQUIRED`를 기록했다. 고정 Requirement Registry, Issue 레코드, 자동 Developer 수정·재검증은 [13번](13-scenario-registry-fix-revalidation.md)에서 구현했다. 실제 서비스 코드와 Agent/MCP 연결은 별도 통합 검증이 필요하다.

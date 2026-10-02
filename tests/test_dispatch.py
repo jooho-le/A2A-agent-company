@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from a2a.types import Task
@@ -14,6 +14,8 @@ from orchestrator.application import PlannerRunDispatcher, TaskRunDisposition
 from orchestrator.core.config import Settings
 from orchestrator.domain import (
     AgentRole,
+    SCN_001_ID,
+    SCENARIO_REGISTRY,
     TraceEvent,
     WorkflowRun,
     WorkflowStatus,
@@ -29,28 +31,49 @@ class FakePlannerClient:
         state: str,
         *,
         include_artifact: bool = True,
+        weaken_planner_criteria: bool = False,
         include_developer_artifacts: bool = True,
         build_exit_code: int = 0,
         mismatch_build_manifest: bool = False,
         qa_outcome: str = "PASS",
+        qa_outcome_after_fix: str | None = None,
+        change_qa_issue_identity_by_version: bool = False,
         security_outcome: str = "PASS",
+        build_exit_code_after_fix: int | None = None,
         security_findings: list[dict[str, object]] | None = None,
         include_validation_artifacts: bool = True,
     ) -> None:
         self.state = state
         self.include_artifact = include_artifact
+        self.weaken_planner_criteria = weaken_planner_criteria
         self.include_developer_artifacts = include_developer_artifacts
         self.build_exit_code = build_exit_code
         self.mismatch_build_manifest = mismatch_build_manifest
         self.qa_outcome = qa_outcome
+        self.qa_outcome_after_fix = qa_outcome_after_fix
+        self.change_qa_issue_identity_by_version = change_qa_issue_identity_by_version
         self.security_outcome = security_outcome
+        self.build_exit_code_after_fix = build_exit_code_after_fix
         self.security_findings = security_findings or []
         self.include_validation_artifacts = include_validation_artifacts
         self.sent: list[tuple[dict[str, object], object, str | None]] = []
         self.handoffs: list[tuple[object, object, str]] = []
         self.closed = False
         self.card_resolved = False
-        self.requirement_id = uuid4()
+        self.requirements = [
+            {
+                "requirementId": item["requirementId"],
+                "key": item["key"],
+                "description": item["description"],
+                "acceptanceCriteria": item["acceptanceCriteria"],
+            }
+            for item in SCENARIO_REGISTRY[SCN_001_ID].planner_contract()["requirements"]
+        ]
+        if self.weaken_planner_criteria:
+            self.requirements[0]["acceptanceCriteria"] = ["요구사항을 일부만 확인"]
+        self.requirement_id = UUID(self.requirements[0]["requirementId"])
+        self.previous_developer_artifacts: dict[str, object] = {}
+        self.previous_validation_artifacts: dict[AgentRole, object] = {}
         self.project_artifact_id = uuid4()
         self.source_artifact_id = uuid4()
         self.change_artifact_id = uuid4()
@@ -84,16 +107,7 @@ class FakePlannerClient:
                             {
                                 "data": {
                                     "schemaVersion": 1,
-                                    "requirements": [
-                                        {
-                                            "requirementId": str(self.requirement_id),
-                                            "key": "REQ-001",
-                                            "description": "가입 요청을 처리한다.",
-                                            "acceptanceCriteria": [
-                                                "유효한 요청은 계정을 생성한다."
-                                            ],
-                                        }
-                                    ],
+                                    "requirements": self.requirements,
                                     "implementationPlan": [
                                         {
                                             "taskId": "TASK-001",
@@ -101,7 +115,9 @@ class FakePlannerClient:
                                             "description": (
                                                 "검증 기준에 맞춰 가입 API를 만든다."
                                             ),
-                                            "requirementIds": [str(self.requirement_id)],
+                                            "requirementIds": [
+                                                item["requirementId"] for item in self.requirements
+                                            ],
                                             "dependsOn": [],
                                         }
                                     ],
@@ -119,7 +135,11 @@ class FakePlannerClient:
                 ]
         elif "plan" in payload:
             response = {
-                "id": "developer-task-opaque",
+                "id": (
+                    "developer-task-opaque"
+                    if (metadata.code_version or 1) == 1
+                    else f"developer-task-v{metadata.code_version}-opaque"
+                ),
                 "contextId": "developer-context-opaque",
                 "status": {"state": "TASK_STATE_COMPLETED"},
             }
@@ -138,14 +158,29 @@ class FakePlannerClient:
     def _developer_artifacts(self, metadata):
         now = datetime.now(timezone.utc).isoformat()
         code_version = metadata.code_version or 1
+        task_id = (
+            "developer-task-opaque"
+            if code_version == 1
+            else f"developer-task-v{code_version}-opaque"
+        )
+        source_id, change_id, build_id = uuid4(), uuid4(), uuid4()
+        previous = self.previous_developer_artifacts
+        exit_code = (
+            self.build_exit_code_after_fix
+            if code_version > 1 and self.build_exit_code_after_fix is not None
+            else self.build_exit_code
+        )
+        commit_hash = chr(96 + code_version) * 40
+        tree_hash = chr(97 + code_version) * 40
+        snapshot_hash = chr(98 + code_version) * 64
         manifest = {
             "repositoryId": "a2a-agent-company",
             "codeVersion": code_version,
-            "projectArtifactId": str(self.source_artifact_id),
-            "commitHash": "a" * 40,
+            "projectArtifactId": str(source_id),
+            "commitHash": commit_hash,
             "gitObjectFormat": "sha1",
-            "treeHash": "b" * 40,
-            "snapshotSha256": "c" * 64,
+            "treeHash": tree_hash,
+            "snapshotSha256": snapshot_hash,
             "containerImageDigest": "sha256:" + "d" * 64,
             "dependencyLockHash": "sha256:" + "e" * 64,
         }
@@ -155,30 +190,34 @@ class FakePlannerClient:
         requirement_ids = [str(item) for item in metadata.requirement_ids]
         values = [
             (
-                "source-snapshot.json", "developer-source-a2a", self.source_artifact_id,
+                "source-snapshot.json", f"developer-source-v{code_version}-a2a", source_id,
                 {
-                    "artifactId": str(self.source_artifact_id), "artifactType": "SOURCE",
-                    "artifactVersion": 1, "previousArtifactId": None,
+                    "artifactId": str(source_id), "artifactType": "SOURCE",
+                    "artifactVersion": code_version,
+                    "previousArtifactId": str(previous["SOURCE"]) if code_version > 1 else None,
                     "runId": str(metadata.run_id),
                     "workflowStepId": str(metadata.workflow_step_id),
-                    "a2aTaskId": "developer-task-opaque", "a2aArtifactId": "developer-source-a2a",
+                    "a2aTaskId": task_id,
+                    "a2aArtifactId": f"developer-source-v{code_version}-a2a",
                     "createdBy": "DEVELOPER", "requirementIds": requirement_ids,
                     "codeVersion": code_version, "repositoryId": "a2a-agent-company",
-                    "commitHash": "a" * 40, "gitObjectFormat": "sha1", "treeHash": "b" * 40,
-                    "snapshotSha256": "c" * 64,
-                    "artifactUri": f"registry://source/{self.source_artifact_id}/v1",
+                    "commitHash": commit_hash, "gitObjectFormat": "sha1", "treeHash": tree_hash,
+                    "snapshotSha256": snapshot_hash,
+                    "artifactUri": f"registry://source/{source_id}/v{code_version}",
                     "containerImageDigest": "sha256:" + "d" * 64,
                     "dependencyLockHash": "sha256:" + "e" * 64, "createdAt": now,
                 },
             ),
             (
-                "change-report.json", "developer-change-a2a", self.change_artifact_id,
+                "change-report.json", f"developer-change-v{code_version}-a2a", change_id,
                 {
-                    "artifactId": str(self.change_artifact_id), "artifactType": "CHANGE_REPORT",
-                    "artifactVersion": 1, "previousArtifactId": None,
+                    "artifactId": str(change_id), "artifactType": "CHANGE_REPORT",
+                    "artifactVersion": code_version,
+                    "previousArtifactId": str(previous["CHANGE_REPORT"]) if code_version > 1 else None,
                     "runId": str(metadata.run_id),
                     "workflowStepId": str(metadata.workflow_step_id),
-                    "a2aTaskId": "developer-task-opaque", "a2aArtifactId": "developer-change-a2a",
+                    "a2aTaskId": task_id,
+                    "a2aArtifactId": f"developer-change-v{code_version}-a2a",
                     "createdBy": "DEVELOPER", "requirementIds": requirement_ids,
                     "codeVersion": code_version,
                     "summary": "가입 API와 입력 검증을 구현했다.",
@@ -187,22 +226,32 @@ class FakePlannerClient:
                 },
             ),
             (
-                "build-report.json", "developer-build-a2a", self.build_artifact_id,
+                "build-report.json", f"developer-build-v{code_version}-a2a", build_id,
                 {
-                    "artifactId": str(self.build_artifact_id), "artifactType": "BUILD_REPORT",
-                    "artifactVersion": 1, "previousArtifactId": None,
+                    "artifactId": str(build_id), "artifactType": "BUILD_REPORT",
+                    "artifactVersion": code_version,
+                    "previousArtifactId": str(previous["BUILD_REPORT"]) if code_version > 1 else None,
                     "runId": str(metadata.run_id),
                     "workflowStepId": str(metadata.workflow_step_id),
-                    "a2aTaskId": "developer-task-opaque", "a2aArtifactId": "developer-build-a2a",
+                    "a2aTaskId": task_id,
+                    "a2aArtifactId": f"developer-build-v{code_version}-a2a",
                     "createdBy": "DEVELOPER", "requirementIds": requirement_ids,
                     "codeVersion": code_version,
-                    "sourceArtifactId": str(self.source_artifact_id),
-                    "exitCode": self.build_exit_code, "durationMs": 1200,
+                    "sourceArtifactId": str(source_id),
+                    "exitCode": exit_code, "durationMs": 1200,
                     "executionManifestId": str(uuid4()), "executionManifest": build_manifest,
                     "stdoutRef": None, "stderrRef": None, "createdAt": now,
                 },
             ),
         ]
+        self.previous_developer_artifacts = {
+            "SOURCE": source_id,
+            "CHANGE_REPORT": change_id,
+            "BUILD_REPORT": build_id,
+        }
+        self.source_artifact_id = source_id
+        self.change_artifact_id = change_id
+        self.build_artifact_id = build_id
         return [
             {
                 "artifactId": a2a_artifact_id, "name": name,
@@ -210,31 +259,38 @@ class FakePlannerClient:
                 "metadata": {
                     "runId": str(metadata.run_id),
                     "workflowStepId": str(metadata.workflow_step_id),
-                    "projectArtifactId": str(project_artifact_id), "artifactVersion": 1,
+                    "projectArtifactId": str(project_artifact_id), "artifactVersion": code_version,
                 },
             }
             for name, a2a_artifact_id, project_artifact_id, data in values
         ]
-
     async def send_snapshot_handoff(self, handoff, recipient, request_text, **kwargs):
         self.handoffs.append((handoff, recipient, request_text))
-        task_id = f"{recipient.value.lower()}-task-opaque"
-        a2a_artifact_id = f"{recipient.value.lower()}-report-a2a"
+        code_version = handoff.execution_manifest.code_version
+        task_id = f"{recipient.value.lower()}-task-v{code_version}-opaque"
+        a2a_artifact_id = f"{recipient.value.lower()}-report-v{code_version}-a2a"
         project_artifact_id = uuid4()
+        previous_report = self.previous_validation_artifacts.get(recipient)
         requirement_ids = [str(value) for value in kwargs["requirement_ids"]]
-        outcome = self.qa_outcome if recipient == AgentRole.QA else self.security_outcome
+        outcome = (
+            self.qa_outcome_after_fix
+            if recipient == AgentRole.QA
+            and code_version > 1
+            and self.qa_outcome_after_fix is not None
+            else self.qa_outcome if recipient == AgentRole.QA else self.security_outcome
+        )
         common = {
             "artifactId": str(project_artifact_id),
             "artifactType": "QA_REPORT" if recipient == AgentRole.QA else "SECURITY_REPORT",
-            "artifactVersion": 1,
-            "previousArtifactId": None,
+            "artifactVersion": code_version,
+            "previousArtifactId": str(previous_report) if previous_report is not None else None,
             "runId": str(handoff.run_id),
             "workflowStepId": str(kwargs["workflow_step_id"]),
             "a2aTaskId": task_id,
             "a2aArtifactId": a2a_artifact_id,
             "createdBy": recipient.value,
             "requirementIds": requirement_ids,
-            "codeVersion": handoff.execution_manifest.code_version,
+            "codeVersion": code_version,
             "executionManifest": handoff.execution_manifest.model_dump(
                 mode="json", by_alias=True
             ),
@@ -243,11 +299,16 @@ class FakePlannerClient:
         if recipient == AgentRole.QA:
             common["tests"] = [
                 {
-                    "testId": "QA-001",
-                    "requirementId": requirement_ids[0],
+                    "testId": (
+                        f"QA-v{code_version}-{index + 1:03}"
+                        if self.change_qa_issue_identity_by_version
+                        else f"QA-{index + 1:03}"
+                    ),
+                    "requirementId": requirement_id,
                     "outcome": outcome,
                     "title": "요구사항 수락 테스트",
                 }
+                for index, requirement_id in enumerate(requirement_ids)
             ]
             name = "qa-report.json"
         else:
@@ -268,10 +329,11 @@ class FakePlannerClient:
                         "runId": str(handoff.run_id),
                         "workflowStepId": str(kwargs["workflow_step_id"]),
                         "projectArtifactId": str(project_artifact_id),
-                        "artifactVersion": 1,
+                        "artifactVersion": code_version,
                     },
                 }
             ]
+            self.previous_validation_artifacts[recipient] = project_artifact_id
         return ParseDict(
             {
                 "id": task_id,
@@ -290,7 +352,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
             Path(self.temp_dir.name) / "dispatch.sqlite3"
         )
         self.run = WorkflowRun(
-            scenario_id=uuid4(),
+            scenario_id=SCN_001_ID,
             request_text="회원가입 기능을 계획해줘.",
         )
         self.step = WorkflowStep(
@@ -363,10 +425,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
             for context in self.repository.list_agent_contexts(self.run.run_id)
         }
         events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
-        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(run.status, WorkflowStatus.FINISHED)
         self.assertEqual(run.code_version, 1)
-        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
-        self.assertEqual(run.resume_state, WorkflowStatus.VALIDATING)
+        self.assertEqual(run.verdict.value, "SUCCESS")
+        self.assertIsNone(run.resume_state)
         self.assertEqual(planner_step.status, WorkflowStepStatus.SUCCEEDED)
         self.assertEqual(planner_step.a2a_task_id, "planner-task-opaque")
         self.assertEqual(planner_step.output_artifact_ids, [client.project_artifact_id])
@@ -374,7 +436,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(developer_step.a2a_task_id, "developer-task-opaque")
         self.assertEqual(developer_step.code_version, 1)
         self.assertEqual(len(developer_step.output_artifact_ids), 3)
-        self.assertEqual(developer_step.requirement_ids, [client.requirement_id])
+        self.assertEqual(
+            set(developer_step.requirement_ids),
+            {UUID(item["requirementId"]) for item in client.requirements},
+        )
         self.assertEqual(developer_step.input_artifact_ids, [client.project_artifact_id])
         self.assertEqual(contexts["planner"].latest_a2a_task_id, planner_step.a2a_task_id)
         self.assertEqual(contexts["developer"].latest_a2a_task_id, developer_step.a2a_task_id)
@@ -399,7 +464,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len({context.agent_context_id for context in contexts.values()}), 4
         )
-        self.assertEqual(client.sent[0][0], {"request": self.run.request_text})
+        self.assertEqual(client.sent[0][0]["request"], self.run.request_text)
+        self.assertEqual(
+            client.sent[0][0]["scenarioContract"]["scenarioKey"], "SCN-001"
+        )
         self.assertIsNone(client.sent[0][2])
         developer_payload, developer_metadata, developer_context_id = client.sent[1]
         self.assertEqual(developer_payload["plan"]["requirements"][0]["key"], "REQ-001")
@@ -415,7 +483,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
             developer_payload["sourceArtifact"]["projectArtifactId"],
             str(client.project_artifact_id),
         )
-        self.assertEqual(developer_metadata.requirement_ids, (client.requirement_id,))
+        self.assertEqual(
+            set(developer_metadata.requirement_ids),
+            {UUID(item["requirementId"]) for item in client.requirements},
+        )
         self.assertEqual(developer_metadata.code_version, 1)
         self.assertEqual(
             developer_metadata.project_artifact_ids, (client.project_artifact_id,)
@@ -436,7 +507,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
                 for handoff in client.handoffs
             )
         )
-        self.assertTrue(all("REQ-001" in handoff[2] for handoff in client.handoffs))
+        handoff_text = {role: text for _, role, text in client.handoffs}
+        self.assertIn("REQ-001", handoff_text[AgentRole.QA])
+        self.assertNotIn("REQ-001", handoff_text[AgentRole.SECURITY])
+        self.assertIn("REQ-005", handoff_text[AgentRole.SECURITY])
         self.assertTrue(client.card_resolved)
         self.assertTrue(client.closed)
         self.assertIn("A2A_TASK_RECEIVED", [event.event_type for event in events])
@@ -451,7 +525,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("QA_REPORT_VALIDATED", [event.event_type for event in events])
         self.assertIn("SECURITY_REPORT_VALIDATED", [event.event_type for event in events])
-        self.assertIn("VALIDATION_DECISION_HUMAN_REVIEW", [event.event_type for event in events])
+        self.assertIn("VALIDATION_DECISION_FINISHED", [event.event_type for event in events])
         with sqlite3.connect(self.repository.database_path) as connection:
             with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute(
@@ -486,22 +560,25 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.repository.list_project_artifacts(self.run.run_id), [])
         self.assertFalse(client.handoffs)
 
-    async def test_build_failure_is_recorded_without_qa_or_security_dispatch(self) -> None:
+    async def test_repeated_build_issue_stops_the_fix_loop(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED", build_exit_code=1)
 
         await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
 
         run = self.repository.get_run(self.run.run_id)
         steps = self.repository.list_steps(self.run.run_id)
-        events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
-        self.assertEqual(run.status, WorkflowStatus.FIX_REQUIRED)
-        self.assertEqual(run.code_version, 1)
-        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 3)
+        events, _ = self.repository.list_events(self.run.run_id, limit=200, offset=0)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
+        self.assertEqual(run.fix_attempt, 2)
+        self.assertEqual(run.code_version, 3)
+        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 9)
+        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 3)
         self.assertFalse(
             any(step.agent_role in (AgentRole.QA, AgentRole.SECURITY) for step in steps)
         )
         self.assertFalse(client.handoffs)
-        self.assertIn("BUILD_FAILED", [event.event_type for event in events])
+        self.assertIn("SAME_ISSUE_REQUIRES_REVIEW", [event.event_type for event in events])
 
     async def test_missing_validator_endpoint_preserves_candidate_for_review(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED")
@@ -526,17 +603,33 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(client.handoffs)
 
-    async def test_validation_failure_is_recorded_as_fix_required_not_final_fail(self) -> None:
+    async def test_repeated_validation_failure_stops_for_human_review(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED", qa_outcome="FAIL")
 
         await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
 
         run = self.repository.get_run(self.run.run_id)
-        events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
-        self.assertEqual(run.status, WorkflowStatus.FIX_REQUIRED)
-        self.assertIsNone(run.verdict)
-        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 5)
-        self.assertIn("VALIDATION_DECISION_FIX_REQUIRED", [e.event_type for e in events])
+        events, _ = self.repository.list_events(self.run.run_id, limit=200, offset=0)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(run.fix_attempt, 2)
+        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 15)
+        self.assertIn("SAME_ISSUE_REQUIRES_REVIEW", [e.event_type for e in events])
+
+    async def test_new_issues_can_exhaust_the_three_fix_attempt_limit(self) -> None:
+        client = FakePlannerClient(
+            "TASK_STATE_COMPLETED",
+            qa_outcome="FAIL",
+            change_qa_issue_identity_by_version=True,
+        )
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.status, WorkflowStatus.FINISHED)
+        self.assertEqual(run.verdict.value, "FAIL")
+        self.assertEqual(run.fix_attempt, 3)
+        self.assertEqual(run.code_version, 4)
+        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 15)
 
     async def test_unverified_validation_requires_review_not_product_failure(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED", security_outcome="UNVERIFIED")
@@ -547,6 +640,50 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
         self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
         self.assertEqual(run.resume_state, WorkflowStatus.VALIDATING)
+
+    async def test_failed_qa_issue_is_fixed_and_revalidated_on_new_snapshot(self) -> None:
+        client = FakePlannerClient(
+            "TASK_STATE_COMPLETED",
+            qa_outcome="FAIL",
+            qa_outcome_after_fix="PASS",
+        )
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        artifacts = self.repository.list_project_artifacts(self.run.run_id)
+        steps = self.repository.list_steps(self.run.run_id)
+        events, _ = self.repository.list_events(self.run.run_id, limit=200, offset=0)
+        self.assertEqual(run.status, WorkflowStatus.FINISHED)
+        self.assertEqual(run.verdict.value, "SUCCESS")
+        self.assertEqual(run.fix_attempt, 1)
+        self.assertEqual(run.code_version, 2)
+        self.assertEqual(
+            [artifact.artifact_version for artifact in artifacts if artifact.artifact_type == "SOURCE"],
+            [1, 2],
+        )
+        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 5)
+        self.assertEqual(
+            sum(event.event_type == "FIX_ATTEMPT_STARTED" for event in events), 1
+        )
+        self.assertIn("FIX_ATTEMPT_STARTED", [event.event_type for event in events])
+        self.assertEqual(
+            sum(step.agent_role == AgentRole.DEVELOPER for step in steps), 2
+        )
+        fix_payload = next(
+            payload for payload, metadata, _ in client.sent
+            if "fixRequest" in payload
+        )
+        self.assertEqual(fix_payload["fixRequest"]["attempt"], 1)
+        self.assertEqual(fix_payload["fixRequest"]["issues"][0]["codeVersion"], 1)
+        self.assertIn("REQ-001", fix_payload["plan"]["requirements"][0]["key"])
+        self.assertNotIn("description", fix_payload["fixRequest"]["issues"][0])
+        with sqlite3.connect(self.repository.database_path) as connection:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE issue_records SET fingerprint = ? WHERE run_id = ?",
+                    ("0" * 64, str(self.run.run_id)),
+                )
 
     async def test_confirmed_high_security_finding_requires_fix(self) -> None:
         client = FakePlannerClient(
@@ -565,8 +702,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
 
         run = self.repository.get_run(self.run.run_id)
-        self.assertEqual(run.status, WorkflowStatus.FIX_REQUIRED)
-        self.assertIsNone(run.verdict)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(run.fix_attempt, 2)
+        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 3)
+        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
 
     async def test_confirmed_medium_security_finding_requires_policy_review(self) -> None:
         client = FakePlannerClient(
@@ -596,7 +735,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
 
         run = self.repository.get_run(self.run.run_id)
-        events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
+        events, _ = self.repository.list_events(self.run.run_id, limit=200, offset=0)
         self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
         self.assertEqual(run.resume_state, WorkflowStatus.VALIDATING)
         self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 3)
@@ -628,6 +767,23 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(steps), 1)
         self.assertIn("PLANNER_OUTPUT_REJECTED", [event.event_type for event in events])
         self.assertEqual(len(client.sent), 1)
+
+    async def test_planner_cannot_weaken_scenario_acceptance_criteria(self) -> None:
+        client = FakePlannerClient(
+            "TASK_STATE_COMPLETED", weaken_planner_criteria=True
+        )
+
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+
+        run = self.repository.get_run(self.run.run_id)
+        steps = self.repository.list_steps(self.run.run_id)
+        events, _ = self.repository.list_events(self.run.run_id, limit=100, offset=0)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertEqual(len(steps), 1)
+        self.assertIn(
+            "PLANNER_REQUIREMENTS_NOT_CANONICAL",
+            [event.event_type for event in events],
+        )
 
     async def test_missing_developer_endpoint_keeps_step_pending_for_review(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED")
