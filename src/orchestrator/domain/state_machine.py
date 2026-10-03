@@ -39,7 +39,6 @@ ALLOWED_TRANSITIONS: Mapping[WorkflowStatus, frozenset[WorkflowStatus]] = (
                     WorkflowStatus.VALIDATING,
                     WorkflowStatus.FIX_REQUIRED,
                     WorkflowStatus.HUMAN_REVIEW,
-                    WorkflowStatus.FINISHED,
                 }
             ),
             WorkflowStatus.VALIDATING: frozenset(
@@ -117,7 +116,8 @@ def transition_run(
         raise TransitionError(
             "code-fix limit reached; finish with FAIL or move to HUMAN_REVIEW"
         )
-    if target == WorkflowStatus.FIXING and run.fix_attempt >= MAX_CODE_FIX_ATTEMPTS:
+    starts_fix = target == WorkflowStatus.FIXING and not is_resume
+    if starts_fix and run.fix_attempt >= MAX_CODE_FIX_ATTEMPTS:
         raise TransitionError("maximum code-fix attempts already reached")
 
     if target == WorkflowStatus.FINISHED and verdict is None:
@@ -145,7 +145,7 @@ def transition_run(
         resume_state=next_resume_state,
         verdict=verdict,
         termination_reason=termination_reason,
-        fix_attempt=run.fix_attempt + int(target == WorkflowStatus.FIXING),
+        fix_attempt=run.fix_attempt + int(starts_fix),
         updated_at=utc_now(),
     )
     return WorkflowRun.model_validate(values)

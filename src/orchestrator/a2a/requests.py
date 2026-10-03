@@ -9,6 +9,7 @@ from google.protobuf.json_format import ParseDict, ParseError
 from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 from a2a.types import SendMessageRequest
 
+from orchestrator.core.security import redact_data
 from orchestrator.domain.snapshot_handoff import SnapshotHandoff
 from orchestrator.domain.states import AgentRole
 
@@ -66,7 +67,7 @@ def build_send_message_request(
         raise A2AProjectContractError("task_id must not be blank")
 
     try:
-        json_payload = json.loads(json.dumps(dict(payload), allow_nan=False))
+        json_payload = redact_data(json.loads(json.dumps(dict(payload), allow_nan=False)))
     except (TypeError, ValueError) as exc:
         raise A2AProjectContractError("Agent input payload must be JSON-compatible") from exc
 

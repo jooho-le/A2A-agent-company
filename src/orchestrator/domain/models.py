@@ -34,6 +34,7 @@ class WorkflowRun(DomainModel):
 
     run_id: UUID4 = Field(default_factory=uuid4)
     scenario_id: UUID4
+    workspace_id: UUID4 = Field(default_factory=uuid4)
     request_text: str = Field(min_length=1)
     status: WorkflowStatus = WorkflowStatus.RECEIVED
     resume_state: WorkflowStatus | None = None

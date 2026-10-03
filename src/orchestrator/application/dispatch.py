@@ -53,6 +53,8 @@ from orchestrator.infrastructure import (
     RunNotFoundError,
     SQLiteWorkflowRepository,
 )
+from orchestrator.domain.tool_evidence import ToolExecutionOutcome
+from orchestrator.core.security import redact_data as redact, redact_text
 
 
 logger = logging.getLogger(__name__)
@@ -113,8 +115,29 @@ class PlannerRunDispatcher:
         self._repository = repository
         self._agent_registry = agent_registry
         self._client_factory = client_factory
+        self._active_runs: set[UUID] = set()
+
+    def is_run_active(self, run_id: UUID) -> bool:
+        return run_id in self._active_runs
 
     async def dispatch_planner(self, run_id: UUID) -> None:
+        if run_id in self._active_runs:
+            return
+        try:
+            token = self._repository.acquire_control(run_id)
+        except (RunDispatchConflict, RunNotFoundError):
+            logger.info("Planner dispatch skipped for busy or missing Run %s", run_id)
+            return
+        self._active_runs.add(run_id)
+        try:
+            await self._dispatch_planner(run_id)
+        finally:
+            try:
+                self._repository.release_control(run_id, token)
+            finally:
+                self._active_runs.discard(run_id)
+
+    async def _dispatch_planner(self, run_id: UUID) -> None:
         """Claim the Planner Step, execute/poll its A2A Task, then map disposition."""
         try:
             run, step = self._repository.claim_planner_dispatch(run_id)
@@ -123,7 +146,7 @@ class PlannerRunDispatcher:
             logger.info("Planner dispatch skipped for Run %s", run_id)
             return
 
-        scenario = get_scenario(run.scenario_id)
+        scenario = self._scenario_for_run(run)
         if scenario is None:
             self._move_to_human_review(
                 run_id,
@@ -144,6 +167,8 @@ class PlannerRunDispatcher:
                     agent_id="planner",
                     payload={
                         "request": run.request_text,
+                        "workspaceId": str(run.workspace_id),
+                        "runConfiguration": self._run_configuration_payload(run.run_id),
                         "scenarioContract": scenario.planner_contract(),
                     },
                     observer=self._repository.task_update_observer(run),
@@ -195,7 +220,7 @@ class PlannerRunDispatcher:
                 run_id=run.run_id,
                 workflow_step_id=planner_step_id,
             )
-            scenario = get_scenario(run.scenario_id)
+            scenario = self._scenario_for_run(run)
             if scenario is None:
                 raise ValueError("Run scenario is not supported by the Scenario Registry")
             scenario.validate_planner_requirements(planner_output.plan.requirements)
@@ -239,6 +264,9 @@ class PlannerRunDispatcher:
                 ],
                 project_artifact_id=planner_output.project_artifact_id,
                 developer_configured=developer_url is not None,
+                requirement_payload=planner_output.plan.model_dump(mode="json", by_alias=True),
+                artifact_version=planner_output.artifact_version,
+                artifact_uri=f"artifact://{planner_output.project_artifact_id}/requirements.json",
             )
         except Exception as exc:
             logger.error(
@@ -259,6 +287,9 @@ class PlannerRunDispatcher:
             return
 
         payload = {
+            "workspaceId": str(run.workspace_id),
+            "scenario": scenario.planner_contract(),
+            "runConfiguration": self._run_configuration_payload(run.run_id),
             "plan": planner_output.plan.model_dump(mode="json", by_alias=True),
             "sourceArtifact": {
                 "a2aArtifactId": planner_output.a2a_artifact_id,
@@ -351,16 +382,28 @@ class PlannerRunDispatcher:
             )
             return
 
+        configuration = self._repository.get_run_configuration(run.run_id)
+        baseline = configuration.configuration.environment if configuration is not None else None
+        if baseline is not None and (
+            output.source.container_image_digest != baseline.container_image_digest
+            or output.source.dependency_lock_hash != baseline.dependency_lock_hash
+        ):
+            self._move_to_human_review(run.run_id, developer_step.workflow_step_id, developer_step.attempt, additional_event_types=("FROZEN_EXECUTION_BASELINE_MISMATCH",))
+            return
+
         qa_url = self._agent_registry.get_base_url(AgentRole.QA)
         security_url = self._agent_registry.get_base_url(AgentRole.SECURITY)
         validators_configured = qa_url is not None and security_url is not None
         try:
+            if output.build_report.tool_evidence is not None:
+                self._repository.ingest_tool_evidence(run.run_id, developer_step.workflow_step_id, (output.build_report.tool_evidence,))
             updated_run, _, validation_steps = self._repository.record_developer_candidate(
                 run.run_id,
                 developer_step.workflow_step_id,
                 source=output.source,
                 change_report=output.change_report,
                 build_report=output.build_report,
+                detected_issues=(self._build_issue(run, output.source, output.build_report),) if output.build_report.execution_outcome == ToolExecutionOutcome.FAIL and output.build_report.tool_evidence is not None else (),
                 validation_agents_configured=validators_configured,
                 validation_requirement_ids={
                     AgentRole.QA: scenario.requirement_ids_for(RequirementValidator.QA),
@@ -383,11 +426,17 @@ class PlannerRunDispatcher:
             )
             return
 
+        if output.build_report.execution_outcome == ToolExecutionOutcome.UNVERIFIED:
+            return
+        if output.build_report.tool_evidence is None:
+            self._move_to_human_review(run.run_id, developer_step.workflow_step_id, developer_step.attempt, additional_event_types=("BUILD_TOOL_EVIDENCE_MISSING",))
+            return
         if not output.build_report.passed:
             current = self._repository.get_run(run.run_id)
-            if current is not None and current.status == WorkflowStatus.FIX_REQUIRED:
-                issue = self._build_issue(current, output.source, output.build_report)
-                await self._dispatch_fix(current, plan, scenario, (issue,))
+            if current is not None:
+                stored = tuple(item for item in self._repository.list_issue_records(run.run_id) if item.code_version == current.code_version and item.report_artifact_id == output.build_report.artifact_id)
+                if current.status == WorkflowStatus.FIX_REQUIRED:
+                    await self._dispatch_fix(current, plan, scenario, stored)
             return
         if not validators_configured:
             return
@@ -423,6 +472,9 @@ class PlannerRunDispatcher:
                 else "보안 취약점을 점검하고 Security 결과를 보고한다."
             )
             request_text = (
+                f"workspaceId={run.workspace_id}\n"
+                + "Run Configuration: " + json.dumps(self._run_configuration_payload(run.run_id, include_scenario=False), ensure_ascii=False, separators=(",", ":")) + "\n"
+                +
                 "검증 대상은 전달된 불변 Source Snapshot이다. 파일을 수정하지 말고 "
                 "READ_ONLY로 접근한다. 요구사항과 Acceptance Criteria를 확인해 "
                 f"{duty} 요구사항: "
@@ -434,6 +486,8 @@ class PlannerRunDispatcher:
                     ensure_ascii=False,
                     separators=(",", ":"),
                 )
+                + "\n\n"
+                + "동결 보안/이메일 정책: " + json.dumps({key: value for key, value in scenario.planner_contract().items() if key in {"securityPolicy", "emailPolicy"}}, ensure_ascii=False, separators=(",", ":"))
                 + "\n\n"
                 "완료 시 A2A Task Artifact를 정확히 하나 반환한다. "
                 "QA는 qa-report.json, Security는 security-report.json을 사용하고, "
@@ -453,6 +507,7 @@ class PlannerRunDispatcher:
                         agent_id=role.value.lower(),
                         recipient=role,
                         request_text=request_text,
+                        agent_context=self._context_for(run.run_id, role),
                         observer=self._repository.task_update_observer(run),
                     )
                 return result
@@ -488,6 +543,19 @@ class PlannerRunDispatcher:
             )
             return
 
+        await self.consume_validation_results(run, steps, handoff, outcomes, plan=plan, scenario=scenario)
+
+    async def consume_validation_results(
+        self,
+        run: WorkflowRun,
+        steps: tuple[WorkflowStep, ...],
+        handoff: SnapshotHandoff,
+        outcomes: list[A2ATaskRunResult | Exception],
+        *,
+        plan: PlannerPlan,
+        scenario: ScenarioDefinition,
+    ) -> None:
+        """Consume completed Tasks after initial dispatch or safe recovery polling."""
         artifacts = self._repository.list_project_artifacts(run.run_id)
         source = next(
             (
@@ -530,12 +598,18 @@ class PlannerRunDispatcher:
             security_report = reports[AgentRole.SECURITY]
             assert isinstance(qa_report, QAReportArtifact)
             assert isinstance(security_report, SecurityReportArtifact)
+            for report in (qa_report, security_report):
+                result_items = report.tests if isinstance(report, QAReportArtifact) else report.requirement_results
+                evidence = tuple(item.tool_evidence for item in result_items if item.tool_evidence is not None)
+                self._repository.ingest_tool_evidence(run.run_id, report.workflow_step_id, evidence)
             decision = decide_verdict(
                 qa_report,
                 security_report,
                 fix_attempt=run.fix_attempt,
                 requirements_authoritative=True,
             )
+            if build.tool_evidence is None:
+                decision = VerdictDecision(WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW, "Build PASS lacks successful MCP Tool provenance")
             if (
                 decision.target_status == WorkflowStatus.FINISHED
                 and decision.verdict == FinalVerdict.SUCCESS
@@ -552,13 +626,19 @@ class PlannerRunDispatcher:
                 security_report=security_report,
                 decision_status=decision.target_status,
                 verdict=decision.verdict,
+                detected_issues=self._validation_issues(run, source, qa_report, security_report) if decision.target_status == WorkflowStatus.FIX_REQUIRED or decision.verdict == FinalVerdict.FAIL else (),
             )
             current = self._repository.get_run(run.run_id)
-            if current is not None and current.status == WorkflowStatus.FIX_REQUIRED:
-                issues = self._validation_issues(
-                    current, source, qa_report, security_report
-                )
-                await self._dispatch_fix(current, plan, scenario, issues)
+            if current is not None and (
+                any(item.outcome == ValidationOutcome.FAIL for item in qa_report.tests)
+                or any(item.outcome == ValidationOutcome.FAIL for item in security_report.requirement_results)
+                or any(item.disposition == FindingDisposition.CONFIRMED and item.severity in (SecuritySeverity.HIGH, SecuritySeverity.CRITICAL) for item in security_report.findings)
+            ):
+                stored = tuple(item for item in self._repository.list_issue_records(run.run_id) if item.code_version == current.code_version and item.report_artifact_id in {qa_report.artifact_id, security_report.artifact_id})
+                if not stored:
+                    stored = self._repository.record_detected_issues(run.run_id, self._validation_issues(current, source, qa_report, security_report), allow_terminal=True)
+                if current.status == WorkflowStatus.FIX_REQUIRED:
+                    await self._dispatch_fix(current, plan, scenario, stored)
         except Exception as exc:
             logger.error(
                 "QA/Security result requires review for Run %s (error type: %s)",
@@ -592,7 +672,7 @@ class PlannerRunDispatcher:
             logger.error(
                 "Could not start fix cycle for Run %s (error type: %s)",
                 run.run_id,
-                type(exc).__name__ + ": " + str(exc),
+                type(exc).__name__ + ": " + redact_text(str(exc)),
             )
             self._move_to_human_review(
                 run.run_id,
@@ -606,41 +686,13 @@ class PlannerRunDispatcher:
 
         artifacts = self._repository.list_project_artifacts(run.run_id)
         input_artifacts = [
-            {
-                "artifactId": str(artifact.artifact_id),
-                "artifactType": artifact.artifact_type,
-                "artifactVersion": artifact.artifact_version,
-            }
+            artifact
             for artifact in artifacts
             if artifact.artifact_id in input_artifact_ids
+            or artifact.artifact_id in {issue.report_artifact_id for issue in stored_issues}
         ]
-        payload = {
-            "plan": plan.model_dump(mode="json", by_alias=True),
-            "fixRequest": {
-                "attempt": fixing_run.fix_attempt,
-                "issues": [
-                    {
-                        "issueId": str(issue.issue_id),
-                        "fingerprint": issue.fingerprint,
-                        "category": issue.category,
-                        "referenceId": issue.reference_id,
-                        "severity": issue.severity,
-                        "requirementIds": [str(value) for value in issue.requirement_ids],
-                        "codeVersion": issue.code_version,
-                    }
-                    for issue in stored_issues
-                ],
-                "inputArtifacts": input_artifacts,
-                "constraints": [
-                    "수정 Issue만 해결하고 기존 Requirement와 Acceptance Criteria를 변경하지 않는다.",
-                    "이전 Candidate와 다른 새 codeVersion의 불변 Source Snapshot을 생성한다.",
-                    "새 Snapshot으로 Build를 실제 실행하고 결과를 보고한다.",
-                    "QA/Security Report와 보호된 테스트를 수정하지 않는다.",
-                ],
-            },
-            "outputContract": _DEVELOPER_OUTPUT_CONTRACT,
-            "scenario": scenario.planner_contract(),
-        }
+        payload = self.build_fix_payload(fixing_run, step, plan, scenario, stored_issues, input_artifacts)
+        payload["runConfiguration"] = self._run_configuration_payload(run.run_id)
         try:
             async with self._client_factory(developer_url) as client:
                 await client.resolve_agent_card()
@@ -649,6 +701,7 @@ class PlannerRunDispatcher:
                     step,
                     agent_id="developer",
                     payload=payload,
+                    agent_context=self._context_for(run.run_id, AgentRole.DEVELOPER),
                     observer=self._repository.task_update_observer(fixing_run),
                 )
         except Exception as exc:
@@ -681,6 +734,69 @@ class PlannerRunDispatcher:
             additional_event_types=("FIX_TASK_REQUIRES_REVIEW",),
         )
 
+    def _context_for(self, run_id: UUID, role: AgentRole):
+        return next((item for item in self._repository.list_agent_contexts(run_id) if item.agent_id == role.value.lower()), None)
+
+    def _run_configuration_payload(self, run_id: UUID, *, include_scenario=True):
+        configuration = self._repository.get_run_configuration(run_id)
+        if configuration is None:
+            return None
+        payload = configuration.to_artifact_json()
+        if not include_scenario:
+            payload.pop("scenarioContract", None)
+            payload.pop("frozenScenarioContractJson", None)
+        return payload
+
+    def _scenario_for_run(self, run: WorkflowRun) -> ScenarioDefinition | None:
+        configuration = self._repository.get_run_configuration(run.run_id)
+        contract = getattr(configuration, "scenario_contract", None)
+        if contract:
+            try:
+                scenario = ScenarioDefinition.from_contract(contract)
+            except (ValueError, TypeError, KeyError):
+                return None
+            return scenario if scenario.scenario_id == run.scenario_id else None
+        return get_scenario(run.scenario_id)
+
+    @staticmethod
+    def build_fix_payload(run, step, plan, scenario, issues, input_artifacts):
+        """Create a recoverable Fix Request with scrubbed, actionable evidence."""
+        return {
+            "workspaceId": str(run.workspace_id),
+            "plan": redact(plan.model_dump(mode="json", by_alias=True)),
+            "fixRequest": {
+                "attempt": run.fix_attempt,
+                "issues": [redact({
+                    "issueId": str(issue.issue_id), "fingerprint": issue.fingerprint,
+                    "category": issue.category, "referenceId": issue.reference_id,
+                    "severity": issue.severity,
+                    "requirementIds": [str(value) for value in issue.requirement_ids],
+                    "codeVersion": issue.code_version,
+                    "sourceArtifactId": str(issue.source_artifact_id),
+                    "reportArtifactId": str(issue.report_artifact_id) if issue.report_artifact_id else None,
+                    "title": issue.title, "description": issue.description,
+                    "expectedResult": issue.expected_result, "actualResult": issue.actual_result,
+                    "normalizedLocation": issue.normalized_location,
+                    "evidenceRefs": list(issue.evidence_refs),
+                }) for issue in issues],
+                "inputArtifacts": [{
+                    "artifactId": str(artifact.artifact_id),
+                    "artifactType": artifact.artifact_type,
+                    "artifactVersion": artifact.artifact_version,
+                    "artifactUri": artifact.artifact_uri,
+                    "record": redact(artifact.model_dump(mode="json", by_alias=True)),
+                } for artifact in input_artifacts],
+                "constraints": [
+                    "수정 Issue만 해결하고 기존 Requirement와 Acceptance Criteria를 변경하지 않는다.",
+                    "이전 Candidate와 다른 새 codeVersion의 불변 Source Snapshot을 생성한다.",
+                    "새 Snapshot으로 Build를 실제 실행하고 결과를 보고한다.",
+                    "QA/Security Report와 보호된 테스트를 수정하지 않는다.",
+                ],
+            },
+            "outputContract": _DEVELOPER_OUTPUT_CONTRACT,
+            "scenario": scenario.planner_contract(),
+        }
+
     @staticmethod
     def _build_issue(
         run: WorkflowRun,
@@ -688,10 +804,19 @@ class PlannerRunDispatcher:
         build: BuildReportArtifact,
     ) -> IssueRecord:
         requirement_ids = list(source.requirement_ids)
+        diagnostic_identity = tuple((item.rule_id, item.normalized_location.casefold()) for item in build.diagnostics)
+        if diagnostic_identity:
+            diagnostic_key = json.dumps(sorted(diagnostic_identity), ensure_ascii=False, separators=(",", ":"))
+            location = ";".join(sorted(item.normalized_location for item in build.diagnostics))
+        else:
+            # Unknown diagnostics cannot prove the same defect across different code.
+            # Re-delivery of one recorded report retains the same identity.
+            diagnostic_key = str(build.artifact_id)
+            location = "unknown"
         return IssueRecord(
             run_id=run.run_id,
             fingerprint=make_issue_fingerprint(
-                "BUILD", "BUILD", "BUILD_CODE_FAILURE", "build"
+                "BUILD", diagnostic_key, "BUILD_CODE_FAILURE", location
             ),
             code_version=source.code_version,
             source_artifact_id=source.artifact_id,
@@ -702,7 +827,12 @@ class PlannerRunDispatcher:
             reference_id="BUILD",
             severity="ERROR",
             title="Build failed",
-            description=f"Build exited with code {build.exit_code}.",
+            description="; ".join(item.message for item in build.diagnostics) or f"Build exited with code {build.exit_code}; diagnostic location is unverified.",
+            expected_result="Build command exits with code 0.",
+            actual_result=f"Build command exited with code {build.exit_code}.",
+            normalized_location=location,
+            evidence_refs=tuple(ref for ref in (build.stderr_ref, build.stdout_ref, build.tool_evidence.evidence_ref if build.tool_evidence else None) if ref),
+            cause_status="CONFIRMED" if diagnostic_identity else "UNKNOWN",
             consecutive_repeat_count=0,
         )
 
@@ -722,7 +852,7 @@ class PlannerRunDispatcher:
                 IssueRecord(
                     run_id=run.run_id,
                     fingerprint=make_issue_fingerprint(
-                        requirement, test.test_id, "QA_ASSERTION_FAILURE", "test"
+                        requirement, test.test_id, "QA_ASSERTION_FAILURE", test.normalized_location or test.test_id
                     ),
                     code_version=source.code_version,
                     source_artifact_id=source.artifact_id,
@@ -734,6 +864,11 @@ class PlannerRunDispatcher:
                     severity="FUNCTIONAL",
                     title=test.title,
                     description=test.details or test.title,
+                    expected_result=test.expected_result or "Acceptance criterion passes.",
+                    actual_result=test.actual_result or test.details or "Required QA assertion failed.",
+                    normalized_location=test.normalized_location or test.test_id,
+                    evidence_refs=(test.tool_evidence.evidence_ref,) if test.tool_evidence else (),
+                    cause_status="CONFIRMED",
                     consecutive_repeat_count=0,
                 )
             )
@@ -745,7 +880,7 @@ class PlannerRunDispatcher:
                 IssueRecord(
                     run_id=run.run_id,
                     fingerprint=make_issue_fingerprint(
-                        requirement, requirement, "SECURITY_REQUIREMENT_FAILURE", "requirement"
+                        requirement, requirement, "SECURITY_REQUIREMENT_FAILURE", result.normalized_location or requirement
                     ),
                     code_version=source.code_version,
                     source_artifact_id=source.artifact_id,
@@ -757,6 +892,11 @@ class PlannerRunDispatcher:
                     severity="HIGH",
                     title="Security requirement failed",
                     description=result.details or "Security acceptance criterion failed.",
+                    expected_result=result.expected_result or "Security acceptance criterion passes.",
+                    actual_result=result.actual_result or result.details or "Required Security check failed.",
+                    normalized_location=result.normalized_location or requirement,
+                    evidence_refs=(result.tool_evidence.evidence_ref,) if result.tool_evidence else (),
+                    cause_status="CONFIRMED",
                     consecutive_repeat_count=0,
                 )
             )
@@ -777,9 +917,9 @@ class PlannerRunDispatcher:
                     run_id=run.run_id,
                     fingerprint=make_issue_fingerprint(
                         requirement_key,
-                        finding.finding_id,
+                        finding.rule_id or finding.finding_id,
                         f"SECURITY_FINDING_{finding.severity.value}",
-                        (finding.evidence_ref or "finding").strip().casefold(),
+                        (finding.normalized_location or finding.rule_id or finding.finding_id).strip().casefold(),
                     ),
                     code_version=source.code_version,
                     source_artifact_id=source.artifact_id,
@@ -791,6 +931,11 @@ class PlannerRunDispatcher:
                     severity=finding.severity.value,
                     title=finding.title,
                     description=finding.description,
+                    expected_result="No confirmed blocking Security finding.",
+                    actual_result=finding.description,
+                    normalized_location=finding.normalized_location or finding.rule_id or finding.finding_id,
+                    evidence_refs=(finding.evidence_ref,) if finding.evidence_ref else (),
+                    cause_status="CONFIRMED",
                     consecutive_repeat_count=0,
                 )
             )

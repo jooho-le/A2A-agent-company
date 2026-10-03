@@ -21,6 +21,7 @@ from orchestrator.domain import (
     WorkflowStatus,
 )
 from orchestrator.infrastructure import SQLiteWorkflowRepository
+from test_dispatch import tool_evidence
 
 
 class ValidationArtifactTests(unittest.TestCase):
@@ -58,6 +59,7 @@ class ValidationArtifactTests(unittest.TestCase):
                     requirement_id=self.requirement_id,
                     outcome=outcome,
                     title="Required behavior",
+                    tool_evidence=tool_evidence("run_unit_tests", self.manifest.model_dump(mode="json", by_alias=True), outcome="UNVERIFIED" if outcome == ValidationOutcome.UNVERIFIED else "PASS"),
                 ),
             ),
         )
@@ -81,6 +83,7 @@ class ValidationArtifactTests(unittest.TestCase):
                 SecurityRequirementResult(
                     requirement_id=self.requirement_id,
                     outcome=outcome,
+                    tool_evidence=tool_evidence("run_security_scan", self.manifest.model_dump(mode="json", by_alias=True), outcome="UNVERIFIED" if outcome == ValidationOutcome.UNVERIFIED else "PASS"),
                 ),
             ),
             findings=findings,
@@ -157,6 +160,34 @@ class ValidationArtifactTests(unittest.TestCase):
         self.assertFalse(security_schema["additionalProperties"])
         self.assertIn("executionManifest", qa_schema["properties"])
         self.assertFalse(manifest_schema["additionalProperties"])
+
+    def test_low_and_info_findings_are_recorded_without_blocking_success(self) -> None:
+        for severity in (SecuritySeverity.LOW, SecuritySeverity.INFO):
+            finding = SecurityFinding(finding_id="nonblocking", severity=severity, disposition=FindingDisposition.CONFIRMED, title="Recorded finding", description="No explicit Requirement violation.")
+            decision = decide_verdict(self.make_qa(), self.make_security(findings=(finding,)), fix_attempt=0, requirements_authoritative=True)
+            self.assertEqual(decision.verdict, FinalVerdict.SUCCESS)
+
+    def test_missing_tool_provenance_cannot_be_pass_or_product_failure(self) -> None:
+        for outcome in (ValidationOutcome.PASS, ValidationOutcome.FAIL):
+            qa = self.make_qa(outcome)
+            test_data = qa.tests[0].model_dump(mode="python")
+            test_data["tool_evidence"] = None
+            qa = QAReportArtifact.model_validate({**qa.model_dump(mode="python"), "tests": [test_data]})
+            decision = decide_verdict(qa, self.make_security(), fix_attempt=3, requirements_authoritative=True)
+            self.assertEqual(decision.verdict, FinalVerdict.HUMAN_REVIEW)
+
+    def test_retry_ledger_rejects_skipped_attempts_and_product_failure_retries(self) -> None:
+        from orchestrator.domain.tool_evidence import ToolExecutionEvidence
+        manifest = self.manifest.model_dump(mode="json", by_alias=True)
+        value = tool_evidence("run_unit_tests", manifest, outcome="UNVERIFIED", retries=2)
+        self.assertTrue(ToolExecutionEvidence.model_validate(value).retries_exhausted)
+        value["attempts"][0]["outcome"] = "FAIL"
+        with self.assertRaises(ValueError):
+            ToolExecutionEvidence.model_validate(value)
+        value = tool_evidence("run_unit_tests", manifest, outcome="UNVERIFIED", retries=2)
+        value["attempts"].pop(0)
+        with self.assertRaises(ValueError):
+            ToolExecutionEvidence.model_validate(value)
 
     def test_artifact_type_migration_preserves_rows_and_append_only_triggers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

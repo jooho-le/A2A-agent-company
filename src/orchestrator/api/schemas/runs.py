@@ -1,7 +1,7 @@
 """Run API schemas kept separate from the internal domain models."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 
@@ -14,7 +14,10 @@ from orchestrator.domain import (
     WorkflowStatus,
     WorkflowStep,
     WorkflowStepStatus,
+    RunConfiguration,
+    SCN_001_ID,
 )
+from orchestrator.core.security import redact_data, redact_text
 
 
 class APIModel(BaseModel):
@@ -22,8 +25,36 @@ class APIModel(BaseModel):
 
 
 class CreateRunRequest(APIModel):
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True,
+        json_schema_extra={"examples": [{
+            "scenarioId": str(SCN_001_ID),
+            "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+        }]},
+    )
     scenario_id: UUID4 = Field(alias="scenarioId")
     request_text: str = Field(alias="requestText", min_length=1)
+    configuration: RunConfiguration = Field(default_factory=RunConfiguration)
+
+    @field_validator("request_text")
+    @classmethod
+    def nonblank_request(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("requestText must not be blank")
+        return redact_text(value)
+
+
+class ResumeRunRequest(APIModel):
+    workflow_step_id: UUID4 | None = Field(default=None, alias="workflowStepId")
+    input_data: dict[str, Any] | None = Field(default=None, alias="inputData")
+
+    @field_validator("input_data")
+    @classmethod
+    def safe_input(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is not None and not value:
+            raise ValueError("inputData must not be empty")
+        return redact_data(value) if value is not None else None
 
 
 class CancelRunRequest(APIModel):
@@ -35,12 +66,13 @@ class CancelRunRequest(APIModel):
         value = value.strip()
         if not value:
             raise ValueError("reason must not be blank")
-        return value
+        return redact_text(value)
 
 
 class RunStatusResponse(APIModel):
     run_id: UUID4 = Field(alias="runId")
     scenario_id: UUID4 = Field(alias="scenarioId")
+    workspace_id: UUID4 = Field(alias="workspaceId")
     status: WorkflowStatus
     resume_state: WorkflowStatus | None = Field(alias="resumeState")
     verdict: FinalVerdict | None
@@ -95,3 +127,8 @@ class RunEventsResponse(APIModel):
     total: int
     limit: int
     offset: int
+
+
+class RunArtifactsResponse(APIModel):
+    run_id: UUID4 = Field(alias="runId")
+    artifacts: list[dict[str, Any]]

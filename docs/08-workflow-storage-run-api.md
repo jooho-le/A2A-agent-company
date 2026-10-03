@@ -2,7 +2,7 @@
 
 > 상태: 로컬 MVP 구현 완료; Developer Artifact metadata 저장 추가
 > 범위: SQLite 영속 저장, Run/Step/AgentContext/Trace/Artifact metadata transaction, Run 제출·조회 API
-> 13번에서 Scenario 기준 및 수정·재검증 루프 구현 완료. 다음 Orchestrator 작업은 14번 재개/복구 정책이다. 실제 Agent/MCP 팀 통합은 별도 범위다.
+> 현재 계약·지원 API·남은 경계는 [14번 정의서 준수 보완](14-orchestrator-contract-compliance.md)을 따른다. 이 문서의 단계별 미완료 항목·검증 수치는 당시 이력이며, 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목적
 
@@ -62,7 +62,7 @@ Planner Agent URL이 설정된 경우 Run 생성은 실제 Planner dispatch를 b
 
 `POST /api/v1/runs/{runId}/cancel`은 `{"reason":"USER_CANCELLED"}`를 받는다. 실행 중인 Step이나 진행 중 A2A Task가 없으면 Run을 `ABORTED`로 전이하고 pending/waiting Step을 `CANCELED`로 바꾸며 Trace를 함께 기록한다. 활성 A2A Task가 있으면 원격 Agent 취소 전송이 연결되지 않은 현 단계에서 로컬 상태만 취소된 것처럼 보이지 않도록 `409 Conflict`를 반환하고 아무 상태도 바꾸지 않는다. `WORKFLOW_STEP_CANCELED`는 프로젝트 보조 Trace Event다.
 
-Artifact Registry API/Object Store는 아직 없으므로 정의서 초안의 `GET /runs/{runId}/artifacts`는 제공하지 않는다. 11번에서 검증된 Source/Change/Build Artifact metadata만 SQLite에 append-only로 기록한다. Artifact 바이트 조회·archive hash 검증은 아직 미구현이다. Agent Registry는 9번에 추가했지만, 원격 Task cancel 요청/확인은 A2A Client 기능으로 아직 구현하지 않았다.
+14번부터 `GET /runs/{runId}/artifacts` 및 개별 Artifact 조회를 제공하며, Planner Requirement·Source/Change/Build/QA/Security와 불변 Run Configuration을 조회한다. 조회 대상은 메타데이터/보고서이며 원본 Archive bytes/Object Store·ACL은 별도 구현 경계다. 재개·복구 및 원격 Task 취소 확인 API도 추가했다. 현재 계약은 [14번](14-orchestrator-contract-compliance.md) 참조.
 
 ## 검증 및 개발정의서 대조
 

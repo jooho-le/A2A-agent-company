@@ -2,7 +2,7 @@
 
 > 상태: 구현 완료
 > 범위: Run 상태 전이, 대기 후 재개, 취소, 코드 수정 한도, MCP 재시도, 반복 Issue 감지
-> 13번에서 Issue 영속화 및 bounded 수정·재검증 루프 구현 완료. 다음 Orchestrator 작업은 14번 재개/복구 정책이다. 실제 Agent/MCP 팀 통합은 별도 범위다.
+> 현재 계약·지원 API·남은 경계는 [14번 정의서 준수 보완](14-orchestrator-contract-compliance.md)을 따른다. 이 문서의 단계별 미완료 항목·검증 수치는 당시 이력이며, 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목적
 
@@ -45,14 +45,14 @@
 
 ## 취소와 명세 예외
 
-개발정의서의 일반 전이표에는 일부 상태에만 `ABORTED` 간선이 있지만, API 계약에는 전역 `POST /runs/{runId}/cancel`이 정의되어 있다. 이 충돌은 **명시적 사용자/운영자 취소에 한해 모든 비종료 상태에서 `ABORTED`를 허용**하는 예외로 해석했다. 그 외 자동 흐름은 표의 간선만 허용한다. Run API는 [`08-workflow-storage-run-api.md`](08-workflow-storage-run-api.md)에 구현했고, 활성 원격 A2A Task가 존재하면 실제 원격 취소가 연결되기 전까지 409로 보류한다.
+개발정의서의 일반 전이표에는 일부 상태에만 `ABORTED` 간선이 있지만, API 계약에는 전역 `POST /runs/{runId}/cancel`이 정의되어 있다. 명시적 사용자/운영자 취소에 한해 모든 비종료 상태에서 `ABORTED`를 허용하고 그 외 자동 흐름은 표의 간선만 허용한다. 현재 API/A2A 계층은 원격 `CANCELED` 확인 후 취소하며, 확인 불가·동시 제어·전송 결과 불명확 상황에는 상태를 임의 종료하지 않는다. [14번](14-orchestrator-contract-compliance.md) 참조.
 
 취소 전이는 비어 있지 않은 `termination_reason`을 필수로 받고 Verdict는 저장하지 않는다. 상태 머신은 Run만 갱신한다. 실제 활성 A2A Task 취소 요청과 취소 결과 기록은 API/A2A 실행 계층의 책임이며 이번 작업 범위가 아니다.
 
 ## 코드 수정 및 최종 Verdict
 
 - 최초 구현은 `fix_attempt=0`에서 시작한다.
-- `FIX_REQUIRED → FIXING` 전이 때만 수정 횟수를 1 증가시킨다. 최대 3회다.
+- 신규 `FIX_REQUIRED → FIXING` 전이 때만 수정 횟수를 1 증가시킨다. 최대 3회다. `HUMAN_REVIEW → FIXING` 재개는 세 번째 수정 중이라도 횟수를 유지한다.
 - 세 번째 수정 뒤 재검증에서 결함이 남으면 다시 `FIX_REQUIRED`로 보내지 않는다. `FINISHED` + `FAIL`로 종료하거나 판단이 필요한 경우 `HUMAN_REVIEW`로 보낸다.
 - `FINISHED`에는 `SUCCESS`, `FAIL`, `UNVERIFIED`, `HUMAN_REVIEW` 중 하나의 Verdict가 필요하다.
 - `ABORTED`는 Verdict가 없어야 하고 종료 사유가 있어야 한다.

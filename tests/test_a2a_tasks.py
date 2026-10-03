@@ -220,6 +220,12 @@ class A2ATaskRunnerTests(unittest.IsolatedAsyncioTestCase):
             agent_context_id="qa-context/opaque",
             latest_a2a_task_id="previous-qa-task",
         )
+        observed = []
+
+        async def observer(observed_step, observed_context, event):
+            self.assertEqual(observed_step.agent_context_id, observed_context.agent_context_id)
+            self.assertEqual(observed_step.a2a_task_id, observed_context.latest_a2a_task_id)
+            observed.append((observed_step, observed_context, event))
 
         result = await runner.submit_and_wait(
             run,
@@ -227,9 +233,15 @@ class A2ATaskRunnerTests(unittest.IsolatedAsyncioTestCase):
             agent_id="qa-agent",
             payload={"request": "Run QA"},
             agent_context=known_context,
+            observer=observer,
         )
         self.assertEqual(client.send_calls[0]["context_id"], "qa-context/opaque")
         self.assertEqual(result.step.agent_context_id, "qa-context/opaque")
+        self.assertIsNone(observed[0][1].latest_a2a_task_id)
+        self.assertEqual(observed[0][0].agent_context_id, "qa-context/opaque")
+        self.assertEqual(observed[1][1].latest_a2a_task_id, "qa-task")
+        self.assertEqual(known_context.latest_a2a_task_id, "previous-qa-task")
+        self.assertIsNone(step.agent_context_id)
 
         another_step = self.make_step(run, AgentRole.SECURITY)
         with self.assertRaises(A2ATaskProtocolError):
@@ -367,6 +379,158 @@ class A2ATaskRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(client.send_calls), 1)
         self.assertEqual(client.get_task_ids[-2:], [task_id, task_id])
 
+    async def test_auth_required_continuation_needs_explicit_configuration(self) -> None:
+        task_id, context_id = "auth-task-opaque", "auth-context-opaque"
+        client = FakeAgentClient(
+            submitted=(
+                make_task(task_id, "TASK_STATE_AUTH_REQUIRED", context_id=context_id),
+                make_task(task_id, "TASK_STATE_WORKING", context_id=context_id),
+            ),
+            polled=(make_task(task_id, "TASK_STATE_COMPLETED", context_id=context_id),),
+        )
+        run = self.make_run()
+        runner = self.make_runner(client)
+        waiting = await runner.submit_and_wait(run, self.make_step(run), agent_id="planner-agent", payload={"request": "Plan"})
+        for configured, payload in (
+            (False, {"operatorAuthenticationConfigured": True}),
+            (1, {"operatorAuthenticationConfigured": True}),
+            (True, {"authorization": "Bearer DUMMY_SECRET"}),
+            (True, {"request": "password=DUMMY_SECRET"}),
+        ):
+            with self.subTest(configured=configured, payload=payload):
+                with self.assertRaises(A2ATaskProtocolError):
+                    await runner.continue_after_auth(
+                        run, waiting.step, agent_id="planner-agent", payload=payload,
+                        agent_context=waiting.agent_context, authentication_configured=configured,
+                    )
+        self.assertEqual(client.continue_calls, [])
+        completed = await runner.continue_after_auth(
+            run, waiting.step, agent_id="planner-agent",
+            payload={"operatorAuthenticationConfigured": True},
+            agent_context=waiting.agent_context, authentication_configured=True,
+        )
+        self.assertEqual(completed.disposition, TaskRunDisposition.COMPLETED)
+        self.assertEqual(completed.step.a2a_task_id, task_id)
+        self.assertEqual(completed.step.agent_context_id, context_id)
+        self.assertEqual(completed.step.attempt, waiting.step.attempt + 1)
+        self.assertEqual(client.continue_calls[0]["task_id"], task_id)
+        self.assertEqual(client.continue_calls[0]["context_id"], context_id)
+        self.assertEqual(client.continue_calls[0]["payload"], {"operatorAuthenticationConfigured": True})
+
+    async def test_input_and_auth_continuations_cannot_use_each_others_states(self) -> None:
+        run = self.make_run()
+        for state, wrong_method in (
+            ("TASK_STATE_INPUT_REQUIRED", "continue_after_auth"),
+            ("TASK_STATE_AUTH_REQUIRED", "continue_after_input"),
+        ):
+            with self.subTest(state=state):
+                client = FakeAgentClient(submitted=(make_task("task", state),), polled=())
+                runner = self.make_runner(client)
+                waiting = await runner.submit_and_wait(run, self.make_step(run), agent_id="planner-agent", payload={"request": "Plan"})
+                kwargs = {"authentication_configured": True} if wrong_method == "continue_after_auth" else {}
+                with self.assertRaises(A2ATaskProtocolError):
+                    await getattr(runner, wrong_method)(
+                        run, waiting.step, agent_id="planner-agent", payload={"request": "Continue"},
+                        agent_context=waiting.agent_context, **kwargs,
+                    )
+                self.assertEqual(client.continue_calls, [])
+
+    async def test_recovery_refetches_completed_task_output_without_resubmitting(self) -> None:
+        run = self.make_run()
+        client = FakeAgentClient(
+            submitted=(make_task("task", "TASK_STATE_COMPLETED", context_id="ctx"),),
+            polled=(make_task("task", "TASK_STATE_COMPLETED", context_id="ctx", artifact_ids=("output",)),),
+        )
+        runner = self.make_runner(client)
+        saved = await runner.submit_and_wait(run, self.make_step(run), agent_id="planner-agent", payload={"request": "Plan"})
+        recovered = await runner.resume_polling(run, saved.step, agent_id="planner-agent", agent_context=saved.agent_context)
+        self.assertEqual(recovered.disposition, TaskRunDisposition.COMPLETED)
+        self.assertEqual(recovered.step.a2a_artifact_ids, ["output"])
+        self.assertEqual(recovered.task.artifacts[0].artifact_id, "output")
+        self.assertEqual(len(client.send_calls), 1)
+        self.assertEqual(client.continue_calls, [])
+        self.assertEqual(client.get_task_ids, ["task"])
+
+    async def test_recovery_observes_interrupted_task_without_sending_continuation(self) -> None:
+        run = self.make_run()
+        for state, expected in (
+            ("TASK_STATE_INPUT_REQUIRED", TaskRunDisposition.WAITING_INPUT),
+            ("TASK_STATE_AUTH_REQUIRED", TaskRunDisposition.HUMAN_REVIEW),
+        ):
+            with self.subTest(state=state):
+                client = FakeAgentClient(
+                    submitted=(make_task("task", state, context_id="ctx"),),
+                    polled=(make_task("task", state, context_id="ctx"),),
+                )
+                runner = self.make_runner(client)
+                saved = await runner.submit_and_wait(run, self.make_step(run), agent_id="planner-agent", payload={"request": "Plan"})
+                observed = await runner.resume_polling(run, saved.step, agent_id="planner-agent", agent_context=saved.agent_context)
+                self.assertEqual(observed.disposition, expected)
+                self.assertEqual(observed.step.attempt, saved.step.attempt)
+                self.assertEqual(len(client.send_calls), 1)
+                self.assertEqual(client.continue_calls, [])
+                self.assertEqual(client.get_task_ids, ["task"])
+
+    async def test_completed_task_cannot_regress_when_recovered(self) -> None:
+        run = self.make_run()
+        client = FakeAgentClient(
+            submitted=(make_task("task", "TASK_STATE_COMPLETED", context_id="ctx"),),
+            polled=(make_task("task", "TASK_STATE_WORKING", context_id="ctx"),),
+        )
+        runner = self.make_runner(client)
+        saved = await runner.submit_and_wait(run, self.make_step(run), agent_id="planner-agent", payload={"request": "Plan"})
+        with self.assertRaises(A2ATaskProtocolError):
+            await runner.resume_polling(run, saved.step, agent_id="planner-agent", agent_context=saved.agent_context)
+        self.assertEqual(len(client.send_calls), 1)
+
+    async def test_uncertain_input_or_auth_continuation_recovers_by_get_only(self) -> None:
+        run = self.make_run()
+        for state, continuation_name in (
+            ("TASK_STATE_INPUT_REQUIRED", "continue_after_input"),
+            ("TASK_STATE_AUTH_REQUIRED", "continue_after_auth"),
+        ):
+            with self.subTest(state=state):
+                client = FakeAgentClient(
+                    submitted=(make_task("task", state, context_id="ctx"),),
+                    polled=(make_task("task", "TASK_STATE_COMPLETED", context_id="ctx"),),
+                )
+                attempts = []
+                async def uncertain_continuation(*args, **kwargs):
+                    attempts.append((args, kwargs))
+                    raise ConnectionError("Send outcome is unknown")
+                client.continue_task = uncertain_continuation
+                updates = []
+                async def observe(step, context, event):
+                    updates.append((step, context, event))
+                runner = self.make_runner(client)
+                waiting = await runner.submit_and_wait(run, self.make_step(run), agent_id="planner-agent", payload={"request": "Plan"})
+                kwargs = {"authentication_configured": True} if continuation_name == "continue_after_auth" else {}
+                with self.assertRaises(ConnectionError):
+                    await getattr(runner, continuation_name)(
+                        run, waiting.step, agent_id="planner-agent", payload={"request": "Continue"},
+                        agent_context=waiting.agent_context, observer=observe, **kwargs,
+                    )
+                persisted_step, persisted_context, _ = updates[-1]
+                self.assertEqual(persisted_step.status, WorkflowStepStatus.RUNNING)
+                recovered = await runner.resume_polling(run, persisted_step, agent_id="planner-agent", agent_context=persisted_context)
+                self.assertEqual(recovered.disposition, TaskRunDisposition.COMPLETED)
+                self.assertEqual(recovered.step.attempt, 1)
+                self.assertEqual(client.get_task_ids, ["task"])
+                self.assertEqual(len(attempts), 1)
+                self.assertEqual(len(client.send_calls), 1)
+
+    async def test_failed_or_canceled_task_is_not_restarted_by_recovery(self) -> None:
+        run = self.make_run()
+        for state in ("TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"):
+            with self.subTest(state=state):
+                client = FakeAgentClient(submitted=(make_task("task", state, context_id="ctx"),), polled=())
+                runner = self.make_runner(client)
+                saved = await runner.submit_and_wait(run, self.make_step(run), agent_id="planner-agent", payload={"request": "Plan"})
+                with self.assertRaises(A2ATaskProtocolError):
+                    await runner.resume_polling(run, saved.step, agent_id="planner-agent", agent_context=saved.agent_context)
+                self.assertEqual(len(client.send_calls), 1)
+                self.assertEqual(client.get_task_ids, [])
+
     async def test_snapshot_handoff_checks_same_run_step_artifact_and_code_version(self) -> None:
         archive = b"frozen"
         snapshot = CodeSnapshotArtifact(
@@ -400,6 +564,16 @@ class A2ATaskRunnerTests(unittest.IsolatedAsyncioTestCase):
         client = FakeAgentClient(
             submitted=(make_task("qa-task", "TASK_STATE_COMPLETED"),), polled=()
         )
+        known_context = AgentContext(
+            run_id=run.run_id, agent_id="qa-agent",
+            agent_context_id="qa-context-opaque", latest_a2a_task_id="previous-qa-task",
+        )
+        observed = []
+
+        async def observer(observed_step, observed_context, event):
+            self.assertEqual(observed_step.agent_context_id, observed_context.agent_context_id)
+            self.assertEqual(observed_step.a2a_task_id, observed_context.latest_a2a_task_id)
+            observed.append((observed_step, observed_context, event))
 
         result = await self.make_runner(client).submit_snapshot_and_wait(
             run,
@@ -408,10 +582,18 @@ class A2ATaskRunnerTests(unittest.IsolatedAsyncioTestCase):
             agent_id="qa-agent",
             recipient=AgentRole.QA,
             request_text="Check the acceptance tests",
+            agent_context=known_context,
+            observer=observer,
         )
         self.assertEqual(result.disposition, TaskRunDisposition.COMPLETED)
         self.assertEqual(client.snapshot_calls[0]["recipient"], AgentRole.QA)
         self.assertEqual(client.snapshot_calls[0]["workflow_step_id"], step.workflow_step_id)
+        self.assertEqual(client.snapshot_calls[0]["context_id"], "qa-context-opaque")
+        self.assertIsNone(observed[0][1].latest_a2a_task_id)
+        self.assertEqual(observed[0][0].agent_context_id, "qa-context-opaque")
+        self.assertEqual(observed[1][1].latest_a2a_task_id, "qa-task")
+        self.assertEqual(known_context.latest_a2a_task_id, "previous-qa-task")
+        self.assertIsNone(step.agent_context_id)
         self.assertEqual(
             client.snapshot_calls[0]["requirement_ids"], snapshot.requirement_ids
         )

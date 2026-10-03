@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+import json
 from types import MappingProxyType
 from typing import Mapping, Sequence
 from uuid import UUID
@@ -30,6 +31,34 @@ class ScenarioDefinition:
     name: str
     requirements: tuple[ScenarioRequirement, ...]
     excluded_features: tuple[str, ...]
+    security_policy_json: str | None = None
+    email_policy_json: str | None = None
+
+    @classmethod
+    def from_contract(cls, contract: Mapping[str, object]) -> "ScenarioDefinition":
+        """Restore the exact trusted scenario baseline frozen at Run creation."""
+        scenario_id = UUID(str(contract["scenarioId"]))
+        if scenario_id.version != 4:
+            raise ValueError("scenarioId must be UUIDv4")
+        requirements = []
+        for item in contract["requirements"]:
+            requirement_id = UUID(item["requirementId"])
+            if requirement_id.version != 4:
+                raise ValueError("Requirement IDs must be UUIDv4")
+            requirements.append(ScenarioRequirement(
+                requirement_id, item["key"], item["category"], item["description"],
+                tuple(item["acceptanceCriteria"]),
+                tuple(RequirementValidator(value) for value in item["validators"]),
+            ))
+        if not requirements or len({item.requirement_id for item in requirements}) != len(requirements):
+            raise ValueError("frozen scenario requirements must be present and unique")
+        return cls(
+            scenario_id=scenario_id, key=str(contract["scenarioKey"]),
+            name=str(contract["name"]), requirements=tuple(requirements),
+            excluded_features=tuple(contract["excludedFeatures"]),
+            security_policy_json=json.dumps(contract["securityPolicy"], ensure_ascii=False),
+            email_policy_json=json.dumps(contract["emailPolicy"], ensure_ascii=False),
+        )
 
     @property
     def requirement_ids(self) -> tuple[UUID, ...]:
@@ -44,7 +73,7 @@ class ScenarioDefinition:
 
     def planner_contract(self) -> dict[str, object]:
         """Return immutable acceptance criteria as the Planner's trusted input."""
-        return {
+        contract = {
             "scenarioId": str(self.scenario_id),
             "scenarioKey": self.key,
             "name": self.name,
@@ -60,7 +89,25 @@ class ScenarioDefinition:
                 for requirement in self.requirements
             ],
             "excludedFeatures": list(self.excluded_features),
+            "securityPolicy": {
+                "passwordHashPolicy": {
+                    "algorithm": "argon2id", "memoryKiB": 19456,
+                    "iterations": 2, "parallelism": 1,
+                    "uniqueSalt": True, "storage": "encoded-library-hash",
+                },
+                "secretExposure": "Passwords and password hashes must not appear in API, A2A, logs or Trace.",
+            },
+            "emailPolicy": {
+                "trimWhitespace": True, "domainCase": "lowercase",
+                "localPartCase": "lowercase", "gmailDotRemoval": False,
+                "plusTagRemoval": False, "canonicalEmailUniqueConstraint": True,
+            },
         }
+        if self.security_policy_json is not None:
+            contract["securityPolicy"] = json.loads(self.security_policy_json)
+        if self.email_policy_json is not None:
+            contract["emailPolicy"] = json.loads(self.email_policy_json)
+        return contract
 
     def validate_planner_requirements(self, requirements: Sequence[object]) -> None:
         """Reject any omitted, added, or weakened requirement in Planner output."""

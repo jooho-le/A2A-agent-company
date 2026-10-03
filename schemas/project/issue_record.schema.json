@@ -1,0 +1,248 @@
+{
+  "$defs": {
+    "AgentRole": {
+      "description": "Known agent roles that can own a workflow step.",
+      "enum": [
+        "PLANNER",
+        "DEVELOPER",
+        "QA",
+        "SECURITY"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "issueId": {
+      "format": "uuid4",
+      "title": "Issueid",
+      "type": "string"
+    },
+    "runId": {
+      "format": "uuid4",
+      "title": "Runid",
+      "type": "string"
+    },
+    "fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Fingerprint",
+      "type": "string"
+    },
+    "codeVersion": {
+      "minimum": 1,
+      "title": "Codeversion",
+      "type": "integer"
+    },
+    "sourceArtifactId": {
+      "format": "uuid4",
+      "title": "Sourceartifactid",
+      "type": "string"
+    },
+    "reportArtifactId": {
+      "anyOf": [
+        {
+          "format": "uuid4",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reportartifactid"
+    },
+    "requirementIds": {
+      "items": {
+        "format": "uuid4",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Requirementids",
+      "type": "array"
+    },
+    "reporter": {
+      "$ref": "#/$defs/AgentRole"
+    },
+    "category": {
+      "minLength": 1,
+      "title": "Category",
+      "type": "string"
+    },
+    "referenceId": {
+      "minLength": 1,
+      "title": "Referenceid",
+      "type": "string"
+    },
+    "severity": {
+      "minLength": 1,
+      "title": "Severity",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "consecutiveRepeatCount": {
+      "minimum": 0,
+      "title": "Consecutiverepeatcount",
+      "type": "integer"
+    },
+    "expectedResult": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expectedresult"
+    },
+    "actualResult": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actualresult"
+    },
+    "evidenceRefs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidencerefs",
+      "type": "array"
+    },
+    "normalizedLocation": {
+      "default": "unknown",
+      "minLength": 1,
+      "title": "Normalizedlocation",
+      "type": "string"
+    },
+    "causeStatus": {
+      "default": "UNKNOWN",
+      "enum": [
+        "SUSPECTED",
+        "CONFIRMED",
+        "UNKNOWN"
+      ],
+      "title": "Causestatus",
+      "type": "string"
+    },
+    "suspectedCause": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Suspectedcause"
+    },
+    "fixedBy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentRole"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "fixWorkflowStepId": {
+      "anyOf": [
+        {
+          "format": "uuid4",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fixworkflowstepid"
+    },
+    "previousCodeVersion": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Previouscodeversion"
+    },
+    "newCodeVersion": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Newcodeversion"
+    },
+    "revalidationResult": {
+      "anyOf": [
+        {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNVERIFIED"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Revalidationresult"
+    },
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "runId",
+    "fingerprint",
+    "codeVersion",
+    "sourceArtifactId",
+    "requirementIds",
+    "reporter",
+    "category",
+    "referenceId",
+    "severity",
+    "title",
+    "description",
+    "consecutiveRepeatCount"
+  ],
+  "title": "IssueRecord",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "issue_record.schema.json"
+}

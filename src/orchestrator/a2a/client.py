@@ -6,7 +6,12 @@ from uuid import UUID
 
 import httpx
 from a2a.client import A2ACardResolver, Client, ClientConfig, ClientFactory
-from a2a.types import AgentCard, GetTaskRequest, SendMessageRequest, StreamResponse, Task
+from a2a.client.client import ClientCallContext
+from a2a.client.transports.rest import RestTransport
+from a2a.types import (
+    AgentCard, CancelTaskRequest, GetTaskRequest, SendMessageRequest, StreamResponse, Task,
+)
+from google.protobuf.json_format import MessageToDict, ParseDict
 from a2a.utils.constants import (
     A2A_JSON_MEDIA_TYPE,
     PROTOCOL_VERSION_1_0,
@@ -27,6 +32,37 @@ from orchestrator.domain.states import AgentRole
 
 class AgentCardContractError(ValueError):
     """Raised when an Agent Card does not satisfy the project interface contract."""
+
+
+def _task_id_path_segment(task_id: str) -> str:
+    encoded = quote(task_id, safe="")
+    # quote never escapes dots, but httpx normalizes a literal '.'/'..' segment.
+    return encoded.replace(".", "%2E") if task_id in {".", ".."} else encoded
+
+
+class _OpaqueTaskRestTransport(RestTransport):
+    """Extend the SDK HTTP+JSON binding only where it omits ID path escaping."""
+
+    async def get_task(
+        self, request: GetTaskRequest, *, context: ClientCallContext | None = None
+    ) -> Task:
+        params = MessageToDict(request)
+        params.pop("id", None)
+        params.pop("tenant", None)
+        response = await self._execute_request(
+            "GET", f"/tasks/{_task_id_path_segment(request.id)}", request.tenant,
+            context=context, params=params,
+        )
+        return ParseDict(response, Task())
+
+    async def cancel_task(
+        self, request: CancelTaskRequest, *, context: ClientCallContext | None = None
+    ) -> Task:
+        response = await self._execute_request(
+            "POST", f"/tasks/{_task_id_path_segment(request.id)}:cancel", request.tenant,
+            context=context, json=MessageToDict(request),
+        )
+        return ParseDict(response, Task())
 
 
 def validate_agent_card(card: AgentCard) -> str:
@@ -95,6 +131,7 @@ class A2AAgentClient:
         *,
         httpx_client: httpx.AsyncClient | None = None,
         timeout_seconds: float = 10.0,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         parsed = urlsplit(agent_base_url)
         if (
@@ -116,7 +153,9 @@ class A2AAgentClient:
 
         self._agent_base_url = agent_base_url.rstrip("/")
         self._owns_httpx_client = httpx_client is None
-        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=timeout_seconds)
+        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=timeout_seconds, headers=headers)
+        if httpx_client is not None and headers:
+            self._httpx_client.headers.update(headers)
         self._httpx_client.headers[VERSION_HEADER] = PROTOCOL_VERSION_1_0
         self._httpx_client.headers["Content-Type"] = A2A_JSON_MEDIA_TYPE
         self._resolver = A2ACardResolver(self._httpx_client, self._agent_base_url)
@@ -128,6 +167,10 @@ class A2AAgentClient:
                 supported_protocol_bindings=[TransportProtocol.HTTP_JSON.value],
                 accepted_output_modes=["application/json"],
             )
+        )
+        self._factory.register(
+            TransportProtocol.HTTP_JSON.value,
+            lambda card, url, config: _OpaqueTaskRestTransport(self._httpx_client, card, url),
         )
         self._card: AgentCard | None = None
         self._client: Client | None = None
@@ -245,9 +288,17 @@ class A2AAgentClient:
         if not task_id.strip():
             raise A2AProjectContractError("task_id must not be blank")
         client = await self._require_client()
-        # The SDK appends this value to a path template without escaping it.
-        # Encode only for the URL segment; never parse or persist a derived ID.
-        return await client.get_task(GetTaskRequest(id=quote(task_id, safe="")))
+        return await client.get_task(GetTaskRequest(id=task_id))
+
+    async def cancel_task(self, task_id: str) -> Task:
+        """Request cancellation remotely; return the Agent's actual Task state."""
+        if not task_id.strip():
+            raise A2AProjectContractError("task_id must not be blank")
+        client = await self._require_client()
+        task = await client.cancel_task(CancelTaskRequest(id=task_id))
+        if task.id != task_id:
+            raise A2AProjectContractError("CancelTask response changed the Agent Task ID")
+        return task
 
     async def aclose(self) -> None:
         if self._owns_httpx_client:

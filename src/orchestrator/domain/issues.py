@@ -1,6 +1,7 @@
 """Append-only, traceable issues that can be handed back to Developer."""
 
 from datetime import datetime
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import ConfigDict, Field, UUID4, field_validator
@@ -11,7 +12,7 @@ from orchestrator.domain.states import AgentRole
 
 class IssueRecord(DomainModel):
     model_config = ConfigDict(
-        extra="forbid", validate_assignment=True, populate_by_name=True
+        extra="forbid", frozen=True, populate_by_name=True
     )
 
     issue_id: UUID4 = Field(default_factory=uuid4, alias="issueId")
@@ -28,6 +29,21 @@ class IssueRecord(DomainModel):
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
     consecutive_repeat_count: int = Field(ge=0, alias="consecutiveRepeatCount")
+    expected_result: str | None = Field(default=None, alias="expectedResult")
+    actual_result: str | None = Field(default=None, alias="actualResult")
+    evidence_refs: tuple[str, ...] = Field(default=(), alias="evidenceRefs")
+    normalized_location: str = Field(default="unknown", min_length=1, alias="normalizedLocation")
+    cause_status: Literal["SUSPECTED", "CONFIRMED", "UNKNOWN"] = Field(
+        default="UNKNOWN", alias="causeStatus"
+    )
+    suspected_cause: str | None = Field(default=None, alias="suspectedCause")
+    fixed_by: AgentRole | None = Field(default=None, alias="fixedBy")
+    fix_workflow_step_id: UUID4 | None = Field(default=None, alias="fixWorkflowStepId")
+    previous_code_version: int | None = Field(default=None, ge=1, alias="previousCodeVersion")
+    new_code_version: int | None = Field(default=None, ge=1, alias="newCodeVersion")
+    revalidation_result: Literal["PASS", "FAIL", "UNVERIFIED"] | None = Field(
+        default=None, alias="revalidationResult"
+    )
     created_at: datetime = Field(default_factory=utc_now, alias="createdAt")
 
     @field_validator("requirement_ids")

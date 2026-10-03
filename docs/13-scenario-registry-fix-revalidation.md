@@ -2,7 +2,7 @@
 
 > 상태: SCN-001 기준 검증, Issue 영속화, 자동 수정·새 Snapshot 재검증 구현 완료
 > 범위: Planner 기준 고정, QA/Security 역할 분리, 최대 3회 Developer 수정, 반복 Issue 검토 전환
-> 다음 Orchestrator 작업: 14번 — Human Review 재개 및 중단 Step 안전 복구 (팀 통합 제외)
+> 현재 계약·지원 API·남은 경계는 [14번 정의서 준수 보완](14-orchestrator-contract-compliance.md)을 따른다. 이 문서의 단계별 미완료 항목·검증 수치는 당시 이력이며, 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목표
 
@@ -45,7 +45,7 @@ Developer는 모든 canonical Requirement를 입력으로 받는다. 검증 Agen
 
 `issue_records`는 SQLite append-only 테이블이다. 각 Issue에는 Run, fingerprint, 실패 시점 `codeVersion`, Source/Report Artifact 참조, Requirement ID, 보고 Agent, 종류·참조 ID·심각도·설명, 연속 반복 횟수가 들어간다. `ISSUE_CREATED` Trace도 Issue 및 근거 Artifact 참조를 기록한다.
 
-QA 실패 테스트, Security Requirement 실패, Confirmed HIGH/CRITICAL Finding, Build 실패를 Developer 수정 Issue로 전환한다. 검증 보고서와 기존 Acceptance Criteria는 수정 대상이 아니다. Developer 요청에는 Issue 식별자·종류·심각도·참조 ID·Requirement·codeVersion만 전달하고 원문 제목/설명이나 QA/Security Report Artifact 본문은 A2A Message에 복사하지 않는다. 이전 Source/Change/Build Artifact ID·버전, 보존해야 할 제약과 출력 계약도 함께 전달한다.
+QA 실패 테스트, Security Requirement 실패, Confirmed HIGH/CRITICAL Finding, Build 실패를 Developer 수정 Issue로 전환한다. 검증 보고서와 기존 Acceptance Criteria는 수정 대상이 아니다. 14번 보완부터 Developer에게 마스킹된 제목·설명·기대/실제 결과·실패 위치·근거 참조와 Source/Build/QA/Security Record/URI를 전달한다. Issue 및 Source/Change/Build Artifact ID·버전, 보존해야 할 제약과 출력 계약도 함께 전달한다.
 
 | 정책 | 동작 |
 | --- | --- |
@@ -53,10 +53,11 @@ QA 실패 테스트, Security Requirement 실패, Confirmed HIGH/CRITICAL Findin
 | 같은 Issue가 연속 반복 | fingerprint가 같은 Issue가 2회 연속 재발하면 추가 자동 수정을 멈추고 `HUMAN_REVIEW`로 전환한다. |
 | Build 실패 | QA/Security에 넘기지 않고 Build Issue를 기록한 뒤 수정한다. 수정 한도 도달 시 `FINISHED/FAIL`. |
 | QA/Security 실패 | 보고서 저장과 `FIX_REQUIRED` 전환 후 Issue를 기록하고 새 Candidate를 만든다. |
-| UNVERIFIED, 의심 Finding, MEDIUM/LOW 정책 미확정 | 제품 결함으로 추정하거나 수정 루프에 넣지 않고 `HUMAN_REVIEW`로 보낸다. |
+| UNVERIFIED | 필수 Tool의 최초 실행+안전 재시도 2회 소진 입증 시 `FINISHED/UNVERIFIED`, 근거 부족은 `HUMAN_REVIEW`. |
+| 의심 Finding, MEDIUM 정책 미확정 | 제품 결함으로 추정하지 않고 `HUMAN_REVIEW`. LOW/INFO는 Report 기록만 한다. |
 | Agent/A2A 호출 실패 또는 결과가 불명확 | 중복 실행을 무조건 시도하지 않고 `HUMAN_REVIEW`로 보낸다. |
 
-MCP Tool 오류 재시도는 코드에 별도 정책 헬퍼가 있지만 실제 MCP 호출은 Agent/MCP 담당자 통합 후 연결해야 한다. 이 작업은 MCP 오류 재시도 소진을 뜻하는 `UNVERIFIED` 최종화를 새로 구현했다고 주장하지 않는다.
+실제 MCP 호출·재시도는 Agent/MCP 담당 범위다. Orchestrator는 14번에서 구조화된 Tool 실행·Retry 이력 및 Manifest를 검증·영속화하고, 한도 소진의 근거가 있을 때만 `UNVERIFIED`를 최종화한다.
 
 ## 상태 및 Artifact 보장
 
@@ -88,4 +89,4 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 커밋 메시지(아직 커밋하지 않음): `시나리오 기준 및 자동 수정 재검증 루프 구현`
 
-다음 작업 번호: **14번 — Human Review 재개 및 중단 Step 안전 복구**. 실제 Agent/MCP 서버 연결과 팀 통합은 사용자가 제외한 범위이므로 별도 팀 통합 단계로 남긴다.
+14번에서 Human Review 재개·중단 Step 안전 복구와 정의서 준수 보완을 구현했다. 실제 Agent/MCP 서버 연결과 팀 통합은 사용자가 제외한 별도 범위다.

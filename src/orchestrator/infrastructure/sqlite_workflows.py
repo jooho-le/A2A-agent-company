@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Awaitable, Callable, Iterator, Sequence
-from uuid import UUID
+from typing import Awaitable, Callable, Iterator, Mapping, Sequence
+from urllib.parse import quote, unquote_plus, urlsplit, urlunsplit
+from uuid import UUID, uuid4
 
 from orchestrator.domain import (
     A2ATaskState,
@@ -32,6 +34,8 @@ from orchestrator.domain import (
     transition_run,
 )
 from orchestrator.domain.models import utc_now
+from orchestrator.domain.planning_artifacts import RequirementArtifact
+from orchestrator.core.security import redact_data, redact_text
 
 
 class RunNotFoundError(LookupError):
@@ -52,6 +56,7 @@ ProjectArtifact = (
     | BuildReportArtifact
     | QAReportArtifact
     | SecurityReportArtifact
+    | RequirementArtifact
 )
 
 
@@ -76,8 +81,22 @@ class SQLiteWorkflowRepository:
         run: WorkflowRun,
         steps: Sequence[WorkflowStep],
         events: Sequence[TraceEvent],
+        *,
+        run_configuration=None,
+        workspace=None,
     ) -> None:
         _validate_bundle(run, steps, events)
+        if run_configuration is None:
+            from orchestrator.domain.run_configuration import RunConfigurationArtifact
+            run_configuration = RunConfigurationArtifact(
+                run_id=run.run_id, scenario_id=run.scenario_id, workspace_id=run.workspace_id,
+            )
+        if workspace is None:
+            from orchestrator.domain.workspaces import WorkspaceRecord
+            workspace = WorkspaceRecord(
+                workspace_id=run.workspace_id, run_id=run.run_id,
+                root_path=str((self.database_path.parent / "workspaces" / str(run.workspace_id)).resolve()),
+            )
         with self._transaction() as connection:
             connection.execute(
                 "INSERT INTO workflow_runs(run_id, status, created_at, updated_at, payload_json) "
@@ -88,6 +107,227 @@ class SQLiteWorkflowRepository:
                 _insert_step(connection, step)
             for event in events:
                 _insert_event(connection, event)
+            if run_configuration is not None:
+                if (run_configuration.run_id != run.run_id
+                    or run_configuration.scenario_id != run.scenario_id
+                    or run_configuration.workspace_id != run.workspace_id):
+                    raise ValueError("Run Configuration belongs to another Run")
+                if connection.execute(
+                    "SELECT 1 FROM project_artifacts WHERE artifact_id=?",
+                    (str(run_configuration.artifact_id),),
+                ).fetchone() is not None:
+                    raise ValueError("Run Configuration Artifact ID is already registered")
+                connection.execute(
+                    "INSERT INTO run_configurations(run_id, payload_json) VALUES (?, ?)",
+                    (str(run.run_id), _sanitized_json(run_configuration)),
+                )
+                _insert_event(connection, TraceEvent(
+                    run_id=run.run_id, event_type="ARTIFACT_REGISTERED",
+                    actor="Orchestrator", attempt=0,
+                    output_artifact_ids=[run_configuration.artifact_id],
+                    workflow_state=run.status,
+                ))
+            if workspace is not None:
+                if workspace.run_id != run.run_id or workspace.workspace_id != run.workspace_id:
+                    raise ValueError("Workspace identity differs from the Run")
+                connection.execute(
+                    "INSERT INTO workspaces(workspace_id, run_id, payload_json) VALUES (?, ?, ?)",
+                    (str(workspace.workspace_id), str(run.run_id), workspace.model_dump_json()),
+                )
+
+    def get_run_configuration(self, run_id: UUID):
+        from orchestrator.domain.run_configuration import RunConfigurationArtifact
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM run_configurations WHERE run_id = ?", (str(run_id),)
+            ).fetchone()
+        return RunConfigurationArtifact.model_validate_json(row[0]) if row else None
+
+    def get_workspace(self, workspace_id: UUID):
+        from orchestrator.domain.workspaces import WorkspaceRecord
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM workspaces WHERE workspace_id = ?", (str(workspace_id),)
+            ).fetchone()
+        return WorkspaceRecord.model_validate_json(row[0]) if row else None
+
+    def get_planner_plan(self, run_id: UUID):
+        from orchestrator.application.planner_output import PlannerPlan
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM project_artifacts WHERE run_id = ? "
+                "AND artifact_type = 'REQUIREMENT' ORDER BY artifact_version DESC LIMIT 1",
+                (str(run_id),),
+            ).fetchone()
+        return PlannerPlan.model_validate(RequirementArtifact.model_validate_json(row[0]).payload) if row else None
+
+    def get_planning_artifact(self, run_id: UUID) -> RequirementArtifact | None:
+        return next((artifact for artifact in self.list_project_artifacts(run_id)
+                     if isinstance(artifact, RequirementArtifact)), None)
+
+    def acquire_control(self, run_id: UUID) -> str:
+        """Claim a human-controlled operation without permitting concurrent resumes."""
+        token = str(uuid4())
+        with self._transaction() as connection:
+            if connection.execute("SELECT 1 FROM workflow_runs WHERE run_id = ?", (str(run_id),)).fetchone() is None:
+                raise RunNotFoundError(str(run_id))
+            existing = connection.execute(
+                "SELECT token, owner_pid FROM control_leases WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+            if existing is not None:
+                if existing[1] is None:
+                    raise RunDispatchConflict("Run control owner is unknown; manual recovery is required")
+                try:
+                    os.kill(existing[1], 0)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    raise RunDispatchConflict("Run control owner cannot be verified")
+                else:
+                    raise RunDispatchConflict("Run already has an active control operation")
+            connection.execute(
+                "INSERT INTO control_leases(run_id, token, owner_pid) VALUES (?, ?, ?) "
+                "ON CONFLICT(run_id) DO UPDATE SET token=excluded.token, owner_pid=excluded.owner_pid",
+                (str(run_id), token, os.getpid()),
+            )
+        return token
+
+    def release_control(self, run_id: UUID, token: str) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM control_leases WHERE run_id = ? AND token = ?", (str(run_id), token))
+
+    def resume_run_with_step(
+        self, run_id: UUID, step_id: UUID | None = None,
+    ) -> tuple[WorkflowRun, WorkflowStep | None]:
+        """Resume the recorded stage; preserve completed Tasks and the existing fix cycle."""
+        with self._transaction() as connection:
+            row = connection.execute("SELECT payload_json FROM workflow_runs WHERE run_id = ?", (str(run_id),)).fetchone()
+            if row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, row[0])
+            if run.status not in (WorkflowStatus.WAITING_INPUT, WorkflowStatus.HUMAN_REVIEW):
+                raise RunDispatchConflict("Run is not paused for safe resumption")
+            step = None
+            if step_id is not None:
+                row = connection.execute(
+                    "SELECT payload_json FROM workflow_steps WHERE run_id = ? AND workflow_step_id = ?",
+                    (str(run_id), str(step_id)),
+                ).fetchone()
+                if row is None:
+                    raise RunDispatchConflict("Resume Step is not owned by this Run")
+                step = _load_model(WorkflowStep, row[0])
+                if step.status in (WorkflowStepStatus.CANCELED, WorkflowStepStatus.FAILED):
+                    raise RunDispatchConflict("A terminal failed or canceled Task cannot be resumed")
+            updated = transition_run(run, run.resume_state)
+            connection.execute(
+                "UPDATE workflow_runs SET status=?, updated_at=?, payload_json=? WHERE run_id=?",
+                (updated.status.value, updated.updated_at.isoformat(), _json_model(updated), str(run_id)),
+            )
+            _insert_event(connection, TraceEvent(
+                run_id=run_id, workflow_step_id=step_id, event_type="WORKFLOW_RESUMED",
+                actor="Orchestrator", attempt=updated.fix_attempt, workflow_state=updated.status,
+            ))
+        return updated, step
+
+    def complete_remote_cancellation(
+        self, run_id: UUID, reason: str, remote_tasks: Mapping[UUID, A2ATaskState],
+    ) -> WorkflowRun:
+        """Abort only after every unresolved remote Task has confirmed CANCELED."""
+        with self._transaction() as connection:
+            row = connection.execute("SELECT payload_json FROM workflow_runs WHERE run_id = ?", (str(run_id),)).fetchone()
+            if row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, row[0])
+            steps = [_load_model(WorkflowStep, row[0]) for row in connection.execute(
+                "SELECT payload_json FROM workflow_steps WHERE run_id = ?", (str(run_id),)
+            ).fetchall()]
+            unresolved = [step for step in steps if step.a2a_task_id is not None
+                          and step.a2a_task_state not in _TERMINAL_TASK_STATES]
+            if any(remote_tasks.get(step.workflow_step_id) != A2ATaskState.CANCELED for step in unresolved):
+                raise ActiveAgentTaskError("Every unresolved remote Task requires confirmed cancellation")
+            if any(step.status == WorkflowStepStatus.RUNNING and step.a2a_task_id is None for step in steps):
+                raise ActiveAgentTaskError("An uncertain send without a Task ID cannot be canceled safely")
+            updated = transition_run(run, WorkflowStatus.ABORTED, termination_reason=reason)
+            for step in steps:
+                if step in unresolved or step.status in (WorkflowStepStatus.PENDING, WorkflowStepStatus.WAITING_INPUT):
+                    canceled = WorkflowStep.model_validate({
+                        **step.model_dump(), "status": WorkflowStepStatus.CANCELED,
+                        "a2a_task_state": A2ATaskState.CANCELED if step in unresolved else step.a2a_task_state,
+                        "updated_at": utc_now(),
+                    })
+                    _upsert_step(connection, canceled)
+                    _insert_event(connection, TraceEvent(
+                        run_id=run_id, workflow_step_id=step.workflow_step_id,
+                        a2a_task_id=step.a2a_task_id, agent_context_id=step.agent_context_id,
+                        event_type="WORKFLOW_STEP_CANCELED", actor="Orchestrator",
+                        attempt=step.attempt, a2a_task_state=canceled.a2a_task_state,
+                        workflow_state=WorkflowStatus.ABORTED,
+                    ))
+            connection.execute(
+                "UPDATE workflow_runs SET status=?, updated_at=?, payload_json=? WHERE run_id=?",
+                (updated.status.value, updated.updated_at.isoformat(), _json_model(updated), str(run_id)),
+            )
+            _insert_event(connection, TraceEvent(
+                run_id=run_id, event_type="RUN_ABORTED", actor="Orchestrator",
+                attempt=run.fix_attempt, workflow_state=updated.status,
+            ))
+        return updated
+
+    def ingest_tool_evidence(self, run_id: UUID, step_id: UUID, evidences: Sequence) -> None:
+        """Persist each observed Tool attempt once, including its retry-safe evidence."""
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM workflow_steps WHERE run_id=? AND workflow_step_id=?",
+                (str(run_id), str(step_id)),
+            ).fetchone()
+            if row is None:
+                raise RunDispatchConflict("Tool evidence Step is not owned by this Run")
+            step = _load_model(WorkflowStep, row[0])
+            for evidence in evidences:
+                if step.code_version is not None and evidence.execution_manifest.code_version != step.code_version:
+                    raise ValueError("Tool execution evidence refers to another Step codeVersion")
+                for attempt in evidence.attempts:
+                    payload = _sanitize_storage_value({
+                        "toolEvidence": evidence.model_dump(mode="json", by_alias=True),
+                        "attempt": attempt.model_dump(mode="json", by_alias=True),
+                    })
+                    old = connection.execute(
+                        "SELECT payload_json,workflow_step_id FROM tool_attempts WHERE run_id=? AND execution_id=? AND attempt=?",
+                        (str(run_id), str(evidence.execution_id), attempt.attempt),
+                    ).fetchone()
+                    if old is not None:
+                        # Re-observing a later report may add more attempts to the same execution;
+                        # the already observed individual attempt must remain identical.
+                        previous = _sanitize_storage_value(json.loads(old[0]))
+                        identity = ("toolName", "executionManifest", "evidenceRef")
+                        if (
+                            old[1] != str(step_id)
+                            or previous["attempt"] != payload["attempt"]
+                            or any(previous["toolEvidence"][key] != payload["toolEvidence"][key] for key in identity)
+                        ):
+                            raise ValueError("Tool attempt evidence cannot be rewritten")
+                        continue
+                    connection.execute(
+                        "INSERT INTO tool_attempts(run_id, workflow_step_id, execution_id, attempt, payload_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (str(run_id), str(step_id), str(evidence.execution_id), attempt.attempt, json.dumps(payload)),
+                    )
+                    for event_type in ("MCP_TOOL_CALLED", "MCP_TOOL_FINISHED"):
+                        _insert_event(connection, TraceEvent(
+                            run_id=run_id, workflow_step_id=step_id, event_type=event_type,
+                            actor=step.agent_role.value, attempt=attempt.attempt,
+                            requirement_ids=step.requirement_ids,
+                            input_artifact_ids=step.input_artifact_ids,
+                            code_version=step.code_version,
+                            snapshot_sha256=evidence.execution_manifest.snapshot_sha256,
+                            duration_ms=attempt.duration_ms if event_type == "MCP_TOOL_FINISHED" else None,
+                        ))
+
+    def list_tool_attempts(self, run_id: UUID) -> list[dict[str, object]]:
+        with self._connection() as connection:
+            rows = connection.execute("SELECT payload_json FROM tool_attempts WHERE run_id=? ORDER BY rowid", (str(run_id),)).fetchall()
+        return [_sanitize_storage_value(json.loads(row[0])) for row in rows]
 
     def claim_planner_dispatch(
         self, run_id: UUID
@@ -172,6 +412,9 @@ class SQLiteWorkflowRepository:
         requirement_ids: Sequence[UUID],
         project_artifact_id: UUID,
         developer_configured: bool,
+        requirement_payload: dict[str, object] | None = None,
+        artifact_version: int = 1,
+        artifact_uri: str | None = None,
     ) -> tuple[WorkflowRun, WorkflowStep]:
         """Atomically link a validated Planner Artifact and create one Developer Step."""
         if not requirement_ids or len(requirement_ids) != len(set(requirement_ids)):
@@ -221,6 +464,16 @@ class SQLiteWorkflowRepository:
                 else transition_run(implementing_run, WorkflowStatus.HUMAN_REVIEW)
             )
             planner_step = planner_steps[0]
+            if requirement_payload is not None:
+                requirement_artifact = RequirementArtifact(
+                    artifact_id=project_artifact_id, artifact_version=artifact_version,
+                    run_id=run_id, workflow_step_id=planner_step_id,
+                    a2a_task_id=planner_step.a2a_task_id, a2a_artifact_id=a2a_artifact_id,
+                    requirement_ids=tuple(requirement_ids),
+                    artifact_uri=artifact_uri or f"artifact://{project_artifact_id}/requirements.json",
+                    payload=requirement_payload,
+                )
+                _insert_artifact(connection, requirement_artifact, run.status)
             linked_artifact_ids = list(
                 dict.fromkeys([*planner_step.output_artifact_ids, project_artifact_id])
             )
@@ -347,6 +600,7 @@ class SQLiteWorkflowRepository:
         build_report: BuildReportArtifact,
         validation_agents_configured: bool,
         validation_requirement_ids: dict[AgentRole, Sequence[UUID]] | None = None,
+        detected_issues: Sequence[IssueRecord] = (),
     ) -> tuple[WorkflowRun, WorkflowStep, tuple[WorkflowStep, ...]]:
         """Atomically append Developer Artifacts and prepare the next workflow state."""
         artifacts: tuple[ProjectArtifact, ...] = (source, change_report, build_report)
@@ -426,18 +680,7 @@ class SQLiteWorkflowRepository:
                     raise ValueError("Artifact predecessor must exist in the same Run and lineage")
 
             for artifact in artifacts:
-                connection.execute(
-                    "INSERT INTO project_artifacts("
-                    "artifact_id, run_id, artifact_type, artifact_version, payload_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (
-                        str(artifact.artifact_id),
-                        str(run_id),
-                        artifact.artifact_type,
-                        artifact.artifact_version,
-                        artifact.model_dump_json(),
-                    ),
-                )
+                _insert_artifact(connection, artifact, run.status)
 
             updated_developer_step = WorkflowStep.model_validate(
                 {
@@ -453,11 +696,29 @@ class SQLiteWorkflowRepository:
                     "code_version": source.code_version,
                 }
             )
+            _store_detected_issues(connection, run_with_code_version, detected_issues)
+            _record_build_revalidation_results(connection, run_with_code_version, build_report)
             is_fix = run.status == WorkflowStatus.FIXING
             intermediate_state = (
                 WorkflowStatus.REVALIDATING if is_fix else WorkflowStatus.SNAPSHOT_READY
             )
             intermediate_run = transition_run(run_with_code_version, intermediate_state)
+            _insert_event(connection, TraceEvent(
+                run_id=run_id, workflow_step_id=developer_step_id,
+                event_type="SNAPSHOT_FROZEN", actor="Orchestrator",
+                attempt=run.fix_attempt, requirement_ids=developer_step.requirement_ids,
+                output_artifact_ids=[source.artifact_id], code_version=source.code_version,
+                snapshot_sha256=source.snapshot_sha256, workflow_state=intermediate_run.status,
+            ))
+            if is_fix:
+                _insert_event(connection, TraceEvent(
+                    run_id=run_id, workflow_step_id=developer_step_id,
+                    event_type="FIX_COMPLETED", actor="DEVELOPER",
+                    attempt=run.fix_attempt, requirement_ids=developer_step.requirement_ids,
+                    input_artifact_ids=developer_step.input_artifact_ids,
+                    output_artifact_ids=[source.artifact_id], code_version=source.code_version,
+                    snapshot_sha256=source.snapshot_sha256, workflow_state=intermediate_run.status,
+                ))
             _insert_event(
                 connection,
                 TraceEvent(
@@ -486,7 +747,28 @@ class SQLiteWorkflowRepository:
             )
 
             validation_steps: tuple[WorkflowStep, ...] = ()
-            if not build_report.passed:
+            if getattr(build_report, "execution_outcome", None) == "UNVERIFIED":
+                evidence = getattr(build_report, "tool_evidence", None)
+                if evidence is not None and evidence.retries_exhausted:
+                    ready_run = (
+                        intermediate_run if is_fix
+                        else transition_run(intermediate_run, WorkflowStatus.VALIDATING)
+                    )
+                    final_run = transition_run(
+                        ready_run, WorkflowStatus.FINISHED, verdict=FinalVerdict.UNVERIFIED
+                    )
+                else:
+                    final_run = transition_run(
+                        intermediate_run, WorkflowStatus.HUMAN_REVIEW,
+                        verdict=FinalVerdict.HUMAN_REVIEW,
+                    )
+                _insert_event(connection, TraceEvent(
+                    run_id=run_id, workflow_step_id=developer_step_id,
+                    event_type="BUILD_UNVERIFIED", actor="Orchestrator",
+                    attempt=run.fix_attempt, output_artifact_ids=[build_report.artifact_id],
+                    code_version=source.code_version, workflow_state=final_run.status,
+                ))
+            elif not build_report.passed:
                 if intermediate_run.fix_attempt >= MAX_CODE_FIX_ATTEMPTS:
                     final_run = transition_run(
                         intermediate_run,
@@ -556,6 +838,13 @@ class SQLiteWorkflowRepository:
                     if validation_agents_configured
                     else transition_run(validating_run, WorkflowStatus.HUMAN_REVIEW)
                 )
+                _insert_event(connection, TraceEvent(
+                    run_id=run_id, event_type=("REVALIDATION_STARTED" if is_fix else "VALIDATION_STARTED"),
+                    actor="Orchestrator", attempt=run.fix_attempt,
+                    requirement_ids=developer_step.requirement_ids,
+                    input_artifact_ids=[source.artifact_id], code_version=source.code_version,
+                    snapshot_sha256=source.snapshot_sha256, workflow_state=validating_run.status,
+                ))
                 _insert_event(
                     connection,
                     TraceEvent(
@@ -582,6 +871,14 @@ class SQLiteWorkflowRepository:
                 )
                 for validation_step in validation_steps:
                     _insert_step(connection, validation_step)
+                    if validation_agents_configured:
+                        _insert_event(connection, TraceEvent(
+                            run_id=run_id, workflow_step_id=validation_step.workflow_step_id,
+                            event_type="WORKFLOW_STEP_CREATED", actor="Orchestrator",
+                            attempt=run.fix_attempt, requirement_ids=validation_step.requirement_ids,
+                            input_artifact_ids=[source.artifact_id], code_version=source.code_version,
+                            workflow_state=final_run.status,
+                        ))
                     _insert_event(
                         connection,
                         TraceEvent(
@@ -634,8 +931,26 @@ class SQLiteWorkflowRepository:
                 ),
             )
             _upsert_step(connection, updated_developer_step)
+            _record_terminal_events(connection, final_run)
 
         return final_run, updated_developer_step, validation_steps
+
+    def record_detected_issues(
+        self, run_id: UUID, issues: Sequence[IssueRecord], *, allow_terminal: bool = False,
+    ) -> tuple[IssueRecord, ...]:
+        """Keep failures even when a final limit or policy decision prevents another fix."""
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id = ?", (str(run_id),)
+            ).fetchone()
+            if row is None:
+                raise RunNotFoundError(str(run_id))
+            run = _load_model(WorkflowRun, row[0])
+            if run.status == WorkflowStatus.ABORTED or (
+                run.status == WorkflowStatus.FINISHED and not allow_terminal
+            ):
+                raise RunDispatchConflict("Run is not eligible for Issue detection")
+            return _store_detected_issues(connection, run, issues)
 
     def start_fix_cycle(
         self,
@@ -675,86 +990,7 @@ class SQLiteWorkflowRepository:
             if previous_developer is None:
                 raise RunDispatchConflict("fix attempt has no prior Developer Step")
 
-            stored_issues: list[IssueRecord] = []
-            for issue in issues:
-                previous_issue = connection.execute(
-                    "SELECT fingerprint, consecutive_repeat_count, code_version "
-                    "FROM issue_records WHERE run_id = ? AND fingerprint = ? "
-                    "ORDER BY code_version DESC, created_at DESC, issue_id DESC LIMIT 1",
-                    (str(run_id), issue.fingerprint),
-                ).fetchone()
-                if issue.code_version != run.code_version:
-                    raise ValueError("Issue codeVersion must match the current failed candidate")
-                if not set(issue.requirement_ids).issubset(set(previous_developer.requirement_ids)):
-                    raise ValueError("Issue references a Requirement outside the Plan")
-                source_row = connection.execute(
-                    "SELECT artifact_type, artifact_version FROM project_artifacts "
-                    "WHERE run_id = ? AND artifact_id = ?",
-                    (str(run_id), str(issue.source_artifact_id)),
-                ).fetchone()
-                if source_row is None or tuple(source_row) != ("SOURCE", run.code_version):
-                    raise ValueError("Issue Source reference must be the current Run candidate")
-                if issue.report_artifact_id is not None:
-                    report_row = connection.execute(
-                        "SELECT artifact_type, artifact_version FROM project_artifacts "
-                        "WHERE run_id = ? AND artifact_id = ?",
-                        (str(run_id), str(issue.report_artifact_id)),
-                    ).fetchone()
-                    expected_report_types = {
-                        AgentRole.DEVELOPER: {"BUILD_REPORT"},
-                        AgentRole.QA: {"QA_REPORT"},
-                        AgentRole.SECURITY: {"SECURITY_REPORT"},
-                    }[issue.reporter]
-                    if (
-                        report_row is None
-                        or report_row[0] not in expected_report_types
-                        or report_row[1] != run.code_version
-                    ):
-                        raise ValueError("Issue Report reference must match its reporter and candidate")
-                repeat_count = (
-                    int(previous_issue[1]) + 1
-                    if previous_issue is not None
-                    and previous_issue[0] == issue.fingerprint
-                    and int(previous_issue[2]) == run.code_version - 1
-                    else 0
-                )
-                stored = IssueRecord.model_validate(
-                    {
-                        **issue.model_dump(mode="python", by_alias=False),
-                        "consecutive_repeat_count": repeat_count,
-                    }
-                )
-                connection.execute(
-                    "INSERT INTO issue_records(issue_id, run_id, fingerprint, code_version, "
-                    "consecutive_repeat_count, created_at, payload_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        str(stored.issue_id), str(run_id), stored.fingerprint,
-                        stored.code_version, stored.consecutive_repeat_count,
-                        stored.created_at.isoformat(),
-                        stored.model_dump_json(by_alias=True),
-                    ),
-                )
-                stored_issues.append(stored)
-                _insert_event(
-                    connection,
-                    TraceEvent(
-                        run_id=run_id,
-                        workflow_step_id=previous_developer.workflow_step_id,
-                        event_type="ISSUE_CREATED",
-                        actor=stored.reporter.value,
-                        attempt=run.fix_attempt,
-                        requirement_ids=stored.requirement_ids,
-                        input_artifact_ids=[stored.source_artifact_id],
-                        output_artifact_ids=(
-                            [stored.report_artifact_id]
-                            if stored.report_artifact_id is not None else []
-                        ),
-                        issue_id=stored.issue_id,
-                        code_version=stored.code_version,
-                        workflow_state=run.status,
-                    ),
-                )
+            stored_issues = list(_store_detected_issues(connection, run, issues))
 
             if any(requires_human_review(item.consecutive_repeat_count) for item in stored_issues):
                 final_run = transition_run(
@@ -806,7 +1042,13 @@ class SQLiteWorkflowRepository:
                 required_types = {"SOURCE", "CHANGE_REPORT", "BUILD_REPORT"}
                 if not required_types.issubset(by_type):
                     raise RunDispatchConflict("fix cycle is missing prior candidate Artifacts")
-                input_artifact_ids = list(by_type.values())
+                report_ids = [UUID(row[0]) for row in connection.execute(
+                    "SELECT artifact_id FROM project_artifacts WHERE run_id=? "
+                    "AND artifact_type IN ('QA_REPORT','SECURITY_REPORT') "
+                    "AND json_extract(payload_json,'$.code_version')=? ORDER BY rowid",
+                    (str(run_id), run.code_version),
+                ).fetchall()]
+                input_artifact_ids = list(by_type.values()) + report_ids
                 fixing_run = transition_run(run, WorkflowStatus.FIXING)
                 step = WorkflowStep(
                     run_id=run_id,
@@ -818,6 +1060,21 @@ class SQLiteWorkflowRepository:
                 )
                 final_run = fixing_run
                 _insert_step(connection, step)
+                for issue in stored_issues:
+                    _insert_issue_event(connection, issue, "FIX_REQUESTED", {
+                        "fixed_by": AgentRole.DEVELOPER.value,
+                        "fix_workflow_step_id": str(step.workflow_step_id),
+                        "previous_code_version": issue.code_version,
+                        "new_code_version": step.code_version,
+                    })
+                    _insert_event(connection, TraceEvent(
+                        run_id=run_id, workflow_step_id=step.workflow_step_id,
+                        event_type="FIX_REQUESTED", actor="Orchestrator",
+                        attempt=fixing_run.fix_attempt, issue_id=issue.issue_id,
+                        requirement_ids=issue.requirement_ids,
+                        input_artifact_ids=input_artifact_ids, code_version=step.code_version,
+                        workflow_state=fixing_run.status,
+                    ))
                 _insert_event(
                     connection,
                     TraceEvent(
@@ -851,6 +1108,7 @@ class SQLiteWorkflowRepository:
                     _json_model(final_run), str(run_id),
                 ),
             )
+            _record_terminal_events(connection, final_run)
         return final_run, step, tuple(stored_issues), input_artifact_ids
 
     def list_issue_records(self, run_id: UUID) -> list[IssueRecord]:
@@ -860,7 +1118,20 @@ class SQLiteWorkflowRepository:
                 "ORDER BY created_at, issue_id",
                 (str(run_id),),
             ).fetchall()
-        return [IssueRecord.model_validate_json(row[0]) for row in rows]
+            updates = connection.execute(
+                "SELECT issue_id, payload_json FROM issue_events WHERE run_id = ? ORDER BY sequence",
+                (str(run_id),),
+            ).fetchall()
+        by_id = {issue.issue_id: issue for issue in (
+            _load_model(IssueRecord, row[0]) for row in rows
+        )}
+        for event in updates:
+            issue_id = UUID(event[0])
+            if issue_id in by_id:
+                by_id[issue_id] = IssueRecord.model_validate({
+                    **by_id[issue_id].model_dump(), **_sanitize_storage_value(json.loads(event[1])),
+                })
+        return list(by_id.values())
 
     def list_project_artifacts(self, run_id: UUID) -> list[ProjectArtifact]:
         """Return append-only Artifact Registry metadata rows for one Run."""
@@ -876,6 +1147,7 @@ class SQLiteWorkflowRepository:
             "BUILD_REPORT": BuildReportArtifact,
             "QA_REPORT": QAReportArtifact,
             "SECURITY_REPORT": SecurityReportArtifact,
+            "REQUIREMENT": RequirementArtifact,
         }
         return [
             _load_model(model_by_type[row[0]], row[1])
@@ -890,6 +1162,7 @@ class SQLiteWorkflowRepository:
         security_report: SecurityReportArtifact,
         decision_status: WorkflowStatus,
         verdict: FinalVerdict | None,
+        detected_issues: Sequence[IssueRecord] = (),
     ) -> WorkflowRun:
         """Atomically append both validated reports and the derived Run Verdict."""
         artifacts: tuple[ProjectArtifact, ...] = (qa_report, security_report)
@@ -1016,15 +1289,8 @@ class SQLiteWorkflowRepository:
                 else list(dict.fromkeys([*qa_report.requirement_ids, *security_report.requirement_ids]))
             )
             for artifact in artifacts:
-                connection.execute(
-                    "INSERT INTO project_artifacts("
-                    "artifact_id, run_id, artifact_type, artifact_version, payload_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (
-                        str(artifact.artifact_id), str(run_id), artifact.artifact_type,
-                        artifact.artifact_version, artifact.model_dump_json(),
-                    ),
-                )
+                _insert_artifact(connection, artifact, run.status)
+            _store_detected_issues(connection, run, detected_issues)
             for step, report, event_type in (
                 (updated_steps[0], qa_report, "QA_REPORT_VALIDATED"),
                 (updated_steps[1], security_report, "SECURITY_REPORT_VALIDATED"),
@@ -1048,6 +1314,16 @@ class SQLiteWorkflowRepository:
                         workflow_state=final_run.status,
                     ),
                 )
+                _insert_event(connection, TraceEvent(
+                    run_id=run_id, workflow_step_id=step.workflow_step_id,
+                    event_type="VALIDATION_FINISHED", actor=step.agent_role.value,
+                    attempt=run.fix_attempt, requirement_ids=step.requirement_ids,
+                    input_artifact_ids=step.input_artifact_ids,
+                    output_artifact_ids=[report.artifact_id], code_version=report.code_version,
+                    snapshot_sha256=report.execution_manifest.snapshot_sha256,
+                    workflow_state=final_run.status,
+                ))
+            _record_revalidation_results(connection, run, qa_report, security_report)
             _insert_event(
                 connection,
                 TraceEvent(
@@ -1072,6 +1348,7 @@ class SQLiteWorkflowRepository:
                     str(run_id),
                 ),
             )
+            _record_terminal_events(connection, final_run)
         return final_run
 
     def get_run(self, run_id: UUID) -> WorkflowRun | None:
@@ -1132,6 +1409,23 @@ class SQLiteWorkflowRepository:
             if row is None:
                 raise RunNotFoundError(str(run.run_id))
             current_run = _load_model(WorkflowRun, row[0])
+            if current_run.status in (WorkflowStatus.ABORTED, WorkflowStatus.FINISHED):
+                raise RunDispatchConflict("A terminal Run cannot accept Task updates")
+            step_row = connection.execute(
+                "SELECT payload_json FROM workflow_steps WHERE run_id=? AND workflow_step_id=?",
+                (str(run.run_id), str(step.workflow_step_id)),
+            ).fetchone()
+            if step_row is not None:
+                stored_step = _load_model(WorkflowStep, step_row[0])
+                if stored_step.a2a_task_state in _TERMINAL_TASK_STATES and (
+                    step.a2a_task_state != stored_step.a2a_task_state
+                    or step.a2a_task_id != stored_step.a2a_task_id
+                ):
+                    raise RunDispatchConflict("A terminal remote Task cannot change identity or state")
+                if stored_step.status in (
+                    WorkflowStepStatus.SUCCEEDED, WorkflowStepStatus.FAILED, WorkflowStepStatus.CANCELED,
+                ) and step.status != stored_step.status:
+                    raise RunDispatchConflict("A terminal WorkflowStep cannot change status")
             updated_run = current_run.model_copy(update={"updated_at": utc_now()})
             connection.execute(
                 "UPDATE workflow_runs SET updated_at = ?, payload_json = ? WHERE run_id = ?",
@@ -1179,6 +1473,7 @@ class SQLiteWorkflowRepository:
                 raise RunNotFoundError(str(run.run_id))
             for event in events:
                 _insert_event(connection, event)
+            _record_terminal_events(connection, run)
 
     def transition_run_and_record(
         self,
@@ -1188,6 +1483,7 @@ class SQLiteWorkflowRepository:
         additional_event_types: Sequence[str] = (),
         workflow_step_id: UUID | None = None,
         attempt: int = 0,
+        verdict: FinalVerdict | None = None,
     ) -> WorkflowRun:
         """Apply a validated Run transition and append its Trace atomically."""
         with self._transaction() as connection:
@@ -1198,7 +1494,7 @@ class SQLiteWorkflowRepository:
             if row is None:
                 raise RunNotFoundError(str(run_id))
             current_run = _load_model(WorkflowRun, row[0])
-            updated_run = transition_run(current_run, target)
+            updated_run = transition_run(current_run, target, verdict=verdict)
             trace_events = [
                 "WORKFLOW_STATE_CHANGED",
                 *additional_event_types,
@@ -1225,6 +1521,7 @@ class SQLiteWorkflowRepository:
                     str(run_id),
                 ),
             )
+            _record_terminal_events(connection, updated_run)
         return updated_run
 
     def cancel_run(self, run_id: UUID, reason: str) -> WorkflowRun:
@@ -1254,6 +1551,7 @@ class SQLiteWorkflowRepository:
                 if step.status == WorkflowStepStatus.RUNNING
                 or step.a2a_task_state
                 in (A2ATaskState.SUBMITTED, A2ATaskState.WORKING)
+                or (step.a2a_task_id is not None and step.a2a_task_state not in _TERMINAL_TASK_STATES)
             ]
             if active_steps:
                 raise ActiveAgentTaskError(
@@ -1378,6 +1676,53 @@ class SQLiteWorkflowRepository:
                 );
                 CREATE INDEX IF NOT EXISTS trace_events_by_run
                     ON trace_events(run_id, sequence);
+                CREATE TRIGGER IF NOT EXISTS trace_events_no_update
+                    BEFORE UPDATE ON trace_events
+                    BEGIN SELECT RAISE(ABORT, 'trace_events are append-only'); END;
+                CREATE TRIGGER IF NOT EXISTS trace_events_no_delete
+                    BEFORE DELETE ON trace_events
+                    BEGIN SELECT RAISE(ABORT, 'trace_events are append-only'); END;
+                CREATE TABLE IF NOT EXISTS run_configurations (
+                    run_id TEXT PRIMARY KEY REFERENCES workflow_runs(run_id),
+                    payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
+                );
+                CREATE TRIGGER IF NOT EXISTS run_configurations_no_update
+                    BEFORE UPDATE ON run_configurations
+                    BEGIN SELECT RAISE(ABORT, 'run_configurations are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS run_configurations_no_delete
+                    BEFORE DELETE ON run_configurations
+                    BEGIN SELECT RAISE(ABORT, 'run_configurations are immutable'); END;
+                CREATE UNIQUE INDEX IF NOT EXISTS run_configuration_artifact_ids
+                    ON run_configurations(COALESCE(json_extract(payload_json,'$.artifact_id'),
+                                                  json_extract(payload_json,'$.artifactId')));
+                CREATE TABLE IF NOT EXISTS workspaces (
+                    workspace_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL UNIQUE REFERENCES workflow_runs(run_id),
+                    payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
+                );
+                CREATE TRIGGER IF NOT EXISTS workspaces_no_update
+                    BEFORE UPDATE ON workspaces
+                    BEGIN SELECT RAISE(ABORT, 'workspaces are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS workspaces_no_delete
+                    BEFORE DELETE ON workspaces
+                    BEGIN SELECT RAISE(ABORT, 'workspaces are immutable'); END;
+                CREATE TABLE IF NOT EXISTS control_leases (
+                    run_id TEXT PRIMARY KEY REFERENCES workflow_runs(run_id),
+                    token TEXT NOT NULL, owner_pid INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS tool_attempts (
+                    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+                    workflow_step_id TEXT NOT NULL REFERENCES workflow_steps(workflow_step_id),
+                    execution_id TEXT NOT NULL, attempt INTEGER NOT NULL CHECK(attempt BETWEEN 0 AND 2),
+                    payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+                    PRIMARY KEY(run_id, execution_id, attempt)
+                );
+                CREATE TRIGGER IF NOT EXISTS tool_attempts_no_update
+                    BEFORE UPDATE ON tool_attempts
+                    BEGIN SELECT RAISE(ABORT, 'tool_attempts are append-only'); END;
+                CREATE TRIGGER IF NOT EXISTS tool_attempts_no_delete
+                    BEFORE DELETE ON tool_attempts
+                    BEGIN SELECT RAISE(ABORT, 'tool_attempts are append-only'); END;
                 CREATE TABLE IF NOT EXISTS issue_records (
                     issue_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
@@ -1399,6 +1744,19 @@ class SQLiteWorkflowRepository:
                 CREATE TRIGGER IF NOT EXISTS issue_records_no_delete
                     BEFORE DELETE ON issue_records
                     BEGIN SELECT RAISE(ABORT, 'issue_records are append-only'); END;
+                CREATE TABLE IF NOT EXISTS issue_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_id TEXT NOT NULL REFERENCES issue_records(issue_id),
+                    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+                );
+                CREATE TRIGGER IF NOT EXISTS issue_events_no_update
+                    BEFORE UPDATE ON issue_events
+                    BEGIN SELECT RAISE(ABORT, 'issue_events are append-only'); END;
+                CREATE TRIGGER IF NOT EXISTS issue_events_no_delete
+                    BEFORE DELETE ON issue_events
+                    BEGIN SELECT RAISE(ABORT, 'issue_events are append-only'); END;
                 CREATE TABLE IF NOT EXISTS project_artifacts (
                     artifact_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
@@ -1420,6 +1778,74 @@ class SQLiteWorkflowRepository:
                 """
             )
             self._migrate_validation_artifact_types(connection)
+            lease_columns = {row[1] for row in connection.execute("PRAGMA table_info(control_leases)")}
+            if "owner_pid" not in lease_columns:
+                connection.execute("ALTER TABLE control_leases ADD COLUMN owner_pid INTEGER")
+            self._backfill_run_resources(connection)
+
+    def _backfill_run_resources(self, connection: sqlite3.Connection) -> None:
+        """Materialize a stable workspace ID once for payloads saved before this version."""
+        from orchestrator.domain.run_configuration import RunConfigurationArtifact
+        from orchestrator.domain.workspaces import WorkspaceRecord
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(workflow_runs)")}
+        if "payload_json" not in columns:
+            # Isolated Artifact migrations may reference a minimal historical Run table.
+            return
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for row in connection.execute("SELECT run_id, payload_json FROM workflow_runs").fetchall():
+                payload = json.loads(row[1])
+                config_row = connection.execute(
+                    "SELECT payload_json FROM run_configurations WHERE run_id=?", (row[0],),
+                ).fetchone()
+                config = RunConfigurationArtifact.model_validate_json(config_row[0]) if config_row else None
+                workspace_row = connection.execute(
+                    "SELECT workspace_id,payload_json FROM workspaces WHERE run_id=?", (row[0],),
+                ).fetchone()
+                workspace = WorkspaceRecord.model_validate_json(workspace_row[1]) if workspace_row else None
+                missing_workspace_id = "workspace_id" not in payload
+                if missing_workspace_id:
+                    historical_ids = {
+                        resource.workspace_id for resource in (config, workspace) if resource is not None
+                    }
+                    if len(historical_ids) > 1:
+                        raise ValueError("Historical Run Configuration and Workspace identities disagree")
+                    # Existing immutable resources are authoritative; do not invent a new
+                    # ID when a legacy Run payload lacks a field already stored elsewhere.
+                    payload["workspace_id"] = str(next(iter(historical_ids), uuid4()))
+                run = WorkflowRun.model_validate(payload)
+                if str(run.run_id) != row[0]:
+                    raise ValueError("Historical Run payload disagrees with its database identity")
+                if config is not None and (
+                    config.run_id != run.run_id or config.scenario_id != run.scenario_id
+                    or config.workspace_id != run.workspace_id
+                ):
+                    raise ValueError("Historical Run Configuration belongs to another Run or Workspace")
+                if workspace is not None and (
+                    workspace.run_id != run.run_id or workspace.workspace_id != run.workspace_id
+                    or str(workspace.workspace_id) != workspace_row[0]
+                ):
+                    raise ValueError("Historical Workspace identity differs from the Run")
+                if missing_workspace_id:
+                    # Preserve legacy contents byte-for-byte apart from the new identity.
+                    connection.execute("UPDATE workflow_runs SET payload_json=? WHERE run_id=?",
+                                       (json.dumps(payload), row[0]))
+                if config is None:
+                    config = RunConfigurationArtifact(run_id=run.run_id, scenario_id=run.scenario_id,
+                                                       workspace_id=run.workspace_id)
+                    connection.execute("INSERT INTO run_configurations(run_id,payload_json) VALUES (?,?)",
+                                       (row[0], _sanitized_json(config)))
+                if workspace is None:
+                    workspace = WorkspaceRecord(
+                        run_id=run.run_id, workspace_id=run.workspace_id,
+                        root_path=str((self.database_path.parent / "workspaces" / str(run.workspace_id)).resolve()),
+                    )
+                    connection.execute("INSERT INTO workspaces(workspace_id,run_id,payload_json) VALUES (?,?,?)",
+                                       (str(workspace.workspace_id), row[0], workspace.model_dump_json()))
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
 
     @staticmethod
     def _migrate_validation_artifact_types(connection: sqlite3.Connection) -> None:
@@ -1427,7 +1853,7 @@ class SQLiteWorkflowRepository:
         row = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_artifacts'"
         ).fetchone()
-        if row is None or "QA_REPORT" in row[0] and "SECURITY_REPORT" in row[0]:
+        if row is None or all(name in row[0] for name in ("QA_REPORT", "SECURITY_REPORT", "REQUIREMENT")):
             return
 
         connection.execute("BEGIN IMMEDIATE")
@@ -1439,7 +1865,7 @@ class SQLiteWorkflowRepository:
                 "artifact_id TEXT PRIMARY KEY, "
                 "run_id TEXT NOT NULL REFERENCES workflow_runs(run_id), "
                 "artifact_type TEXT NOT NULL CHECK (artifact_type IN ("
-                "'SOURCE', 'CHANGE_REPORT', 'BUILD_REPORT', 'QA_REPORT', 'SECURITY_REPORT')), "
+                "'SOURCE', 'CHANGE_REPORT', 'BUILD_REPORT', 'QA_REPORT', 'SECURITY_REPORT', 'REQUIREMENT')), "
                 "artifact_version INTEGER NOT NULL CHECK (artifact_version >= 1), "
                 "payload_json TEXT NOT NULL CHECK (json_valid(payload_json)), "
                 "UNIQUE(run_id, artifact_type, artifact_version))"
@@ -1469,6 +1895,294 @@ class SQLiteWorkflowRepository:
         except Exception:
             connection.rollback()
             raise
+
+
+_TERMINAL_TASK_STATES = frozenset({
+    A2ATaskState.COMPLETED, A2ATaskState.FAILED,
+    A2ATaskState.CANCELED, A2ATaskState.REJECTED,
+})
+
+
+def _store_detected_issues(
+    connection: sqlite3.Connection, run: WorkflowRun, issues: Sequence[IssueRecord],
+) -> tuple[IssueRecord, ...]:
+    stored_issues = []
+    for issue in issues:
+        if issue.run_id != run.run_id or issue.code_version != run.code_version:
+            raise ValueError("Issue identity must match the current Run candidate")
+        existing = connection.execute("SELECT payload_json FROM issue_records WHERE issue_id=?", (str(issue.issue_id),)).fetchone()
+        if existing is not None:
+            stored = _load_model(IssueRecord, existing[0])
+            if (stored.run_id, stored.fingerprint, stored.code_version) != (issue.run_id, issue.fingerprint, issue.code_version):
+                raise ValueError("Issue identity cannot be rewritten")
+            stored_issues.append(stored)
+            continue
+        source_row = connection.execute(
+            "SELECT artifact_type,payload_json FROM project_artifacts WHERE run_id=? AND artifact_id=?",
+            (str(run.run_id), str(issue.source_artifact_id)),
+        ).fetchone()
+        if source_row is None or source_row[0] != "SOURCE":
+            raise ValueError("Issue Source must be registered in this Run")
+        source = _load_model(CodeSnapshotArtifact, source_row[1])
+        if source.code_version != issue.code_version:
+            raise ValueError("Issue Source must identify the current failed candidate")
+        if not set(issue.requirement_ids).issubset(set(source.requirement_ids)):
+            raise ValueError("Issue references a Requirement outside the Plan")
+        report_step_id = source.workflow_step_id
+        if issue.report_artifact_id is not None:
+            report_row = connection.execute(
+                "SELECT artifact_type,payload_json FROM project_artifacts WHERE run_id=? AND artifact_id=?",
+                (str(run.run_id), str(issue.report_artifact_id)),
+            ).fetchone()
+            expected_type = {
+                AgentRole.DEVELOPER: "BUILD_REPORT", AgentRole.QA: "QA_REPORT",
+                AgentRole.SECURITY: "SECURITY_REPORT",
+            }.get(issue.reporter)
+            if report_row is None or report_row[0] != expected_type:
+                raise ValueError("Issue Report reference must match its reporter and candidate")
+            report = json.loads(report_row[1])
+            # Artifact lineage increments only when that report is produced. A prior
+            # failed Build can leave the first QA report at version 1 for code 2.
+            if report.get("code_version") != issue.code_version:
+                raise ValueError("Issue Report reference must match its reporter and candidate")
+            if report.get("execution_manifest", {}).get("project_artifact_id") != str(source.artifact_id):
+                raise ValueError("Issue Report refers to another Source Snapshot")
+            report_step_id = UUID(report["workflow_step_id"])
+        previous = connection.execute(
+            "SELECT consecutive_repeat_count,code_version FROM issue_records WHERE run_id=? AND fingerprint=? "
+            "ORDER BY code_version DESC,created_at DESC,issue_id DESC LIMIT 1",
+            (str(run.run_id), issue.fingerprint),
+        ).fetchone()
+        repeats = previous[0] + 1 if previous is not None and previous[1] == issue.code_version - 1 else 0
+        stored = IssueRecord.model_validate({
+            **_sanitize_storage_value(issue.model_dump(mode="json")),
+            "consecutive_repeat_count": repeats,
+        })
+        connection.execute(
+            "INSERT INTO issue_records(issue_id,run_id,fingerprint,code_version,consecutive_repeat_count,created_at,payload_json) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (str(stored.issue_id),str(run.run_id),stored.fingerprint,stored.code_version,
+             stored.consecutive_repeat_count,stored.created_at.isoformat(),_sanitized_json(stored)),
+        )
+        for event_type in ("ISSUE_CREATED", "ISSUE_DETECTED"):
+            _insert_event(connection, TraceEvent(
+                run_id=run.run_id, workflow_step_id=report_step_id, event_type=event_type,
+                actor=stored.reporter.value, attempt=run.fix_attempt,
+                requirement_ids=stored.requirement_ids, input_artifact_ids=[stored.source_artifact_id],
+                output_artifact_ids=[stored.report_artifact_id] if stored.report_artifact_id else [],
+                issue_id=stored.issue_id, code_version=stored.code_version,
+                snapshot_sha256=source.snapshot_sha256, workflow_state=run.status,
+            ))
+        stored_issues.append(stored)
+    return tuple(stored_issues)
+
+
+def _insert_issue_event(connection, issue: IssueRecord, event_type: str, changes: dict) -> None:
+    # Validate each projected append-only update before writing its journal row.
+    IssueRecord.model_validate({**issue.model_dump(), **changes})
+    connection.execute(
+        "INSERT INTO issue_events(issue_id,run_id,event_type,payload_json) VALUES (?,?,?,?)",
+        (str(issue.issue_id), str(issue.run_id), event_type,
+         json.dumps(_sanitize_storage_value(changes))),
+    )
+
+
+def _fixed_issues_for_candidate(connection, run, code_version):
+    if run.fix_attempt == 0:
+        return ()
+    rows = connection.execute(
+        "SELECT payload_json FROM issue_records WHERE run_id=? AND code_version < ?",
+        (str(run.run_id), code_version),
+    ).fetchall()
+    issues = []
+    for row in rows:
+        issue = _load_model(IssueRecord, row[0])
+        fix_event = connection.execute(
+            "SELECT payload_json FROM issue_events WHERE issue_id=? AND event_type='FIX_REQUESTED' "
+            "ORDER BY sequence DESC LIMIT 1", (str(issue.issue_id),),
+        ).fetchone()
+        if fix_event is None or json.loads(fix_event[0])["new_code_version"] != code_version:
+            continue
+        issues.append(issue)
+    return tuple(issues)
+
+
+def _record_build_revalidation_results(connection, run, build_report) -> None:
+    evidence = build_report.tool_evidence
+    outcome = build_report.execution_outcome.value
+    # No guessed resolution from exitCode or a later QA dispatch: only the matching
+    # actual Build execution can resolve the previous Build Issue.
+    if evidence is None or evidence.outcome.value != "PASS":
+        outcome = "UNVERIFIED"
+    for issue in _fixed_issues_for_candidate(connection, run, build_report.code_version):
+        if issue.reporter == AgentRole.DEVELOPER:
+            _insert_issue_event(connection, issue, "REVALIDATION_FINISHED", {"revalidation_result": outcome})
+
+
+def _security_finding_revalidation(connection, issue, security_report) -> str:
+    original = None
+    if issue.report_artifact_id is not None:
+        report_row = connection.execute(
+            "SELECT payload_json FROM project_artifacts WHERE run_id=? AND artifact_id=? AND artifact_type='SECURITY_REPORT'",
+            (str(issue.run_id), str(issue.report_artifact_id)),
+        ).fetchone()
+        if report_row is not None:
+            original_report = _load_model(SecurityReportArtifact, report_row[0])
+            original = next((finding for finding in original_report.findings if finding.finding_id == issue.reference_id), None)
+    if original is not None and original.rule_id:
+        location = (original.normalized_location or issue.normalized_location).strip().casefold()
+        matching = [finding for finding in security_report.findings
+                    if finding.requirement_id == original.requirement_id
+                    and finding.rule_id == original.rule_id
+                    and (finding.normalized_location or finding.rule_id or finding.finding_id).strip().casefold() == location]
+    else:
+        # Older reports did not carry scanner rule identities; preserve their exact
+        # finding-ID matching instead of pretending to infer a stable identity.
+        matching = [finding for finding in security_report.findings if finding.finding_id == issue.reference_id]
+    if any(finding.disposition.value == "CONFIRMED" for finding in matching):
+        return "FAIL"
+    if any(finding.disposition.value == "SUSPECTED" for finding in matching):
+        return "UNVERIFIED"
+    results = [result for result in security_report.requirement_results if result.requirement_id in issue.requirement_ids]
+    # An unavailable or unproven scan cannot demonstrate that an absent finding
+    # disappeared. A different, actually evaluated requirement failure remains a
+    # separate Issue rather than turning this resolved finding into a false FAIL.
+    if not results or any(result.outcome.value == "UNVERIFIED" or result.tool_evidence is None
+                          or result.tool_evidence.outcome.value != "PASS" for result in results):
+        return "UNVERIFIED"
+    return "PASS"
+
+
+def _record_revalidation_results(connection, run, qa_report, security_report) -> None:
+    for issue in _fixed_issues_for_candidate(connection, run, qa_report.code_version):
+        if issue.reporter == AgentRole.DEVELOPER:
+            continue  # Already evaluated by the candidate's own Build transaction.
+        if issue.reporter == AgentRole.QA:
+            matching = [test.outcome.value for test in qa_report.tests
+                        if test.requirement_id in issue.requirement_ids
+                        and test.test_id == issue.reference_id]
+            outcome = _combined_outcome(matching)
+        elif issue.category.startswith("SECURITY_FINDING"):
+            outcome = _security_finding_revalidation(connection, issue, security_report)
+        else:
+            matching = [result.outcome.value for result in security_report.requirement_results
+                        if result.requirement_id in issue.requirement_ids]
+            outcome = _combined_outcome(matching)
+        _insert_issue_event(connection, issue, "REVALIDATION_FINISHED", {"revalidation_result": outcome})
+
+
+def _combined_outcome(outcomes: Sequence[str]) -> str:
+    if "FAIL" in outcomes:
+        return "FAIL"
+    return "PASS" if outcomes and all(value == "PASS" for value in outcomes) else "UNVERIFIED"
+
+
+def _insert_artifact(connection, artifact, workflow_state) -> None:
+    if connection.execute(
+        "SELECT 1 FROM run_configurations WHERE COALESCE(json_extract(payload_json,'$.artifact_id'),"
+        "json_extract(payload_json,'$.artifactId'))=?",
+        (str(artifact.artifact_id),),
+    ).fetchone() is not None:
+        raise ValueError("Project Artifact ID is already registered as a Run Configuration")
+    connection.execute(
+        "INSERT INTO project_artifacts(artifact_id,run_id,artifact_type,artifact_version,payload_json) VALUES (?,?,?,?,?)",
+        (str(artifact.artifact_id), str(artifact.run_id), artifact.artifact_type,
+         artifact.artifact_version, _sanitized_json(artifact)),
+    )
+    _insert_event(connection, TraceEvent(
+        run_id=artifact.run_id, workflow_step_id=artifact.workflow_step_id,
+        a2a_task_id=artifact.a2a_task_id, event_type="ARTIFACT_REGISTERED",
+        actor=artifact.created_by.value, attempt=0,
+        requirement_ids=list(artifact.requirement_ids), output_artifact_ids=[artifact.artifact_id],
+        code_version=getattr(artifact, "code_version", None), workflow_state=workflow_state,
+    ))
+
+
+def _record_terminal_events(connection, run) -> None:
+    if run.verdict is not None and run.status in (WorkflowStatus.FINISHED, WorkflowStatus.HUMAN_REVIEW):
+        _insert_event(connection, TraceEvent(
+            run_id=run.run_id, event_type="VERDICT_CREATED", actor="Orchestrator",
+            attempt=run.fix_attempt, code_version=run.code_version, workflow_state=run.status,
+        ))
+    if run.status == WorkflowStatus.FINISHED:
+        _insert_event(connection, TraceEvent(
+            run_id=run.run_id, event_type="RUN_FINISHED", actor="Orchestrator",
+            attempt=run.fix_attempt, code_version=run.code_version, workflow_state=run.status,
+        ))
+
+
+_OPAQUE_FIELDS = frozenset({
+    "a2a_task_id", "a2aTaskId", "a2a_artifact_id", "a2aArtifactId", "agent_context_id", "agentContextId",
+    "a2a_artifact_ids", "a2aArtifactIds", "latest_a2a_task_id", "agent_id", "agentId",
+    "path", "root_path",
+    "fingerprint", "snapshot_sha256", "snapshotSha256", "commit_hash", "commitHash", "tree_hash", "treeHash",
+    "container_image_digest", "containerImageDigest", "dependency_lock_hash", "dependencyLockHash",
+})
+
+_REFERENCE_FIELDS = frozenset({
+    "artifact_uri", "artifactUri", "evidence_refs", "evidenceRefs", "evidence_ref", "evidenceRef",
+    "stdout_ref", "stdoutRef", "stderr_ref", "stderrRef",
+})
+
+
+def _redact_reference(value):
+    """Keep routing paths intact, but never persist credential-bearing URI metadata."""
+    if isinstance(value, (tuple, list)):
+        return [_redact_reference(item) for item in value]
+    if not isinstance(value, str):
+        return value
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return redact_text(value)
+    if not parts.scheme:
+        return redact_text(value)
+    query_parts = []
+    for parameter in parts.query.split("&"):
+        name, separator, original = parameter.partition("=")
+        if not separator:
+            query_parts.append(parameter)
+            continue
+        decoded = unquote_plus(original)
+        masked = redact_data({unquote_plus(name): decoded})[unquote_plus(name)]
+        query_parts.append(parameter if masked == decoded else name + "=" + quote(masked, safe="[]"))
+    netloc = parts.netloc
+    if "@" in netloc:
+        userinfo, host = netloc.rsplit("@", 1)
+        username, separator, _ = userinfo.partition(":")
+        if separator:
+            netloc = username + ":[REDACTED]@" + host
+    # Fragments can hold access-token assignments as well; ordinary bytes stay unchanged.
+    fragment = redact_text(parts.fragment)
+    if netloc == parts.netloc and "&".join(query_parts) == parts.query and fragment == parts.fragment:
+        return value
+    return urlunsplit((parts.scheme, netloc, parts.path, "&".join(query_parts), fragment))
+
+
+def _sanitize_storage_value(value, key: str = ""):
+    if key in _OPAQUE_FIELDS:
+        return value
+    if key in _REFERENCE_FIELDS:
+        return _redact_reference(value)
+    if isinstance(value, dict):
+        result = {}
+        for name, item in value.items():
+            if name in _OPAQUE_FIELDS or name in _REFERENCE_FIELDS:
+                result[name] = _sanitize_storage_value(item, name)
+            elif redact_data({name: None})[name] is not None:
+                result[name] = redact_data({name: item})[name]
+            else:
+                result[name] = _sanitize_storage_value(item, name)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_storage_value(item, key) for item in value]
+    if isinstance(value, str):
+        return redact_text(value)
+    return value
+
+
+def _sanitized_json(model) -> str:
+    return json.dumps(_sanitize_storage_value(model.model_dump(mode="json")), separators=(",", ":"))
 
 
 def _validate_bundle(
@@ -1573,14 +2287,14 @@ def _insert_event(connection: sqlite3.Connection, event: TraceEvent) -> None:
             str(event.run_id),
             event.occurred_at.isoformat(),
             event.event_type,
-            json.dumps(event.to_trace_json(), separators=(",", ":")),
+            json.dumps(_sanitize_storage_value(event.to_trace_json()), separators=(",", ":")),
         ),
     )
 
 
 def _json_model(model: WorkflowRun | WorkflowStep | AgentContext) -> str:
-    return model.model_dump_json()
+    return _sanitized_json(model)
 
 
 def _load_model(model_type, payload: str):
-    return model_type.model_validate_json(payload)
+    return model_type.model_validate(_sanitize_storage_value(json.loads(payload)))

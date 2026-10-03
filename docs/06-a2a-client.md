@@ -2,7 +2,7 @@
 
 > 상태: Client 경계 구현 완료
 > 범위: Agent Card 검증, A2A 1.0 HTTP+JSON 요청, 프로젝트 metadata 및 Snapshot payload 전달, Task 조회
-> 13번에서 bounded 수정·재검증 dispatch 구현 완료. 다음 Orchestrator 작업은 14번 안전 재개/복구이며, 실제 Agent/MCP 팀 통합은 별도 범위다.
+> 현재 계약·지원 API·남은 경계는 [14번 정의서 준수 보완](14-orchestrator-contract-compliance.md)을 따른다. 이 문서의 단계별 미완료 항목·검증 수치는 당시 이력이며, 실제 Agent/MCP 팀 통합은 별도 범위다.
 
 ## 목적
 

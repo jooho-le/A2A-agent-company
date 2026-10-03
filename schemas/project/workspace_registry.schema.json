@@ -1,0 +1,34 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "workspaceId": {
+      "format": "uuid4",
+      "title": "Workspaceid",
+      "type": "string"
+    },
+    "runId": {
+      "format": "uuid4",
+      "title": "Runid",
+      "type": "string"
+    },
+    "rootPath": {
+      "minLength": 1,
+      "title": "Rootpath",
+      "type": "string"
+    },
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workspaceId",
+    "runId",
+    "rootPath"
+  ],
+  "title": "WorkspaceRecord",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "workspace_registry.schema.json"
+}

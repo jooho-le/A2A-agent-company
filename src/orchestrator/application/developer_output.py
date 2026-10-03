@@ -66,6 +66,11 @@ _PAYLOAD_FIELDS_BY_MODEL = {
         "stderrRef", "createdAt",
     },
 }
+_OPTIONAL_FIELDS_BY_MODEL = {
+    CodeSnapshotArtifact: set(),
+    ChangeReportArtifact: {"artifactUri"},
+    BuildReportArtifact: {"artifactUri", "executionOutcome", "failureKind", "toolEvidence", "diagnostics"},
+}
 
 
 def parse_developer_output(
@@ -179,7 +184,8 @@ def _parse_artifact(
     artifact_version = _positive_integer(metadata.get("artifactVersion"))
 
     payload = MessageToDict(part.data)
-    if set(payload) != _PAYLOAD_FIELDS_BY_MODEL[model_type]:
+    required_fields = _PAYLOAD_FIELDS_BY_MODEL[model_type]
+    if not required_fields.issubset(payload) or set(payload) - required_fields - _OPTIONAL_FIELDS_BY_MODEL[model_type]:
         raise ValueError(f"{artifact.name} payload has unexpected or missing fields")
     if payload.get("a2aTaskId") != task.id:
         raise ValueError(f"{artifact.name} must reference the completed A2A Task")

@@ -1,0 +1,337 @@
+{
+  "$defs": {
+    "ExecutionBaseline": {
+      "additionalProperties": false,
+      "properties": {
+        "containerImageDigest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Containerimagedigest",
+          "type": "string"
+        },
+        "dependencyLockHash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dependencylockhash",
+          "type": "string"
+        },
+        "hardwareProfile": {
+          "minLength": 1,
+          "title": "Hardwareprofile",
+          "type": "string"
+        },
+        "networkPolicy": {
+          "default": "DENY",
+          "enum": [
+            "DENY",
+            "ALLOWLIST"
+          ],
+          "title": "Networkpolicy",
+          "type": "string"
+        },
+        "allowedHosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowedhosts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "containerImageDigest",
+        "dependencyLockHash",
+        "hardwareProfile"
+      ],
+      "title": "ExecutionBaseline",
+      "type": "object"
+    },
+    "ExecutionLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "maxFixAttempts": {
+          "const": 3,
+          "default": 3,
+          "title": "Maxfixattempts",
+          "type": "integer"
+        },
+        "maxToolRetries": {
+          "const": 2,
+          "default": 2,
+          "title": "Maxtoolretries",
+          "type": "integer"
+        },
+        "runtimeBudgetMs": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtimebudgetms"
+        }
+      },
+      "title": "ExecutionLimits",
+      "type": "object"
+    },
+    "ModelConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "modelId": {
+          "minLength": 1,
+          "title": "Modelid",
+          "type": "string"
+        },
+        "modelRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Modelrevision"
+        },
+        "temperature": {
+          "minimum": 0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        }
+      },
+      "required": [
+        "provider",
+        "modelId",
+        "temperature"
+      ],
+      "title": "ModelConfiguration",
+      "type": "object"
+    },
+    "RunConfiguration": {
+      "additionalProperties": false,
+      "description": "Experiment metadata must be complete before labeling a Run an experiment.",
+      "properties": {
+        "experimentId": {
+          "anyOf": [
+            {
+              "format": "uuid4",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Experimentid"
+        },
+        "architecture": {
+          "const": "MULTI_AGENT",
+          "default": "MULTI_AGENT",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "startingCommitHash": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Startingcommithash"
+        },
+        "startingSnapshotSha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Startingsnapshotsha256"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelConfiguration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limits": {
+          "$ref": "#/$defs/ExecutionLimits"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionBaseline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "protectedTestSuiteRef": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protectedtestsuiteref"
+        },
+        "scannerProfileRef": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scannerprofileref"
+        },
+        "warmupState": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warmupstate"
+        },
+        "executionOrder": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executionorder"
+        }
+      },
+      "title": "RunConfiguration",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifactId": {
+      "format": "uuid4",
+      "title": "Artifactid",
+      "type": "string"
+    },
+    "artifactType": {
+      "const": "RUN_CONFIGURATION",
+      "default": "RUN_CONFIGURATION",
+      "title": "Artifacttype",
+      "type": "string"
+    },
+    "artifactVersion": {
+      "const": 1,
+      "default": 1,
+      "title": "Artifactversion",
+      "type": "integer"
+    },
+    "createdBy": {
+      "const": "Orchestrator",
+      "default": "Orchestrator",
+      "title": "Createdby",
+      "type": "string"
+    },
+    "runId": {
+      "format": "uuid4",
+      "title": "Runid",
+      "type": "string"
+    },
+    "scenarioId": {
+      "format": "uuid4",
+      "title": "Scenarioid",
+      "type": "string"
+    },
+    "workspaceId": {
+      "format": "uuid4",
+      "title": "Workspaceid",
+      "type": "string"
+    },
+    "configuration": {
+      "$ref": "#/$defs/RunConfiguration"
+    },
+    "frozenScenarioContractJson": {
+      "default": "",
+      "title": "Frozenscenariocontractjson",
+      "type": "string"
+    },
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    },
+    "artifactUri": {
+      "type": "string",
+      "pattern": "^artifact://"
+    },
+    "scenarioContract": {
+      "type": "object"
+    },
+    "scenarioContractSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "runId",
+    "scenarioId",
+    "workspaceId",
+    "artifactUri",
+    "scenarioContract",
+    "scenarioContractSha256"
+  ],
+  "title": "RunConfigurationArtifact",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run_configuration.schema.json"
+}

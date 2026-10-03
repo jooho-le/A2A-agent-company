@@ -12,6 +12,7 @@ from orchestrator.domain import (
     CodeSnapshotArtifact,
     GitObjectFormat,
 )
+from test_dispatch import tool_evidence
 
 
 class DeveloperArtifactTests(unittest.TestCase):
@@ -126,6 +127,38 @@ class DeveloperArtifactTests(unittest.TestCase):
             artifactId=uuid4(),
         )
         self.assertEqual(next_report.artifact_version, 2)
+
+    def test_build_infrastructure_and_product_outcomes_are_distinct(self) -> None:
+        manifest = self.source.execution_manifest().model_dump(mode="json", by_alias=True)
+        report = self.make_build(exitCode=-1, executionOutcome="UNVERIFIED", failureKind="INFRASTRUCTURE", toolEvidence=tool_evidence("run_build", manifest, outcome="UNVERIFIED", retries=2))
+        self.assertFalse(report.passed)
+        self.assertTrue(report.tool_evidence.retries_exhausted)
+        with self.assertRaises(ValidationError):
+            self.make_build(exitCode=1, executionOutcome="FAIL", failureKind="INFRASTRUCTURE")
+        with self.assertRaises(ValidationError):
+            self.make_build(exitCode=1, executionOutcome="PASS")
+
+    def test_tool_evidence_is_bound_to_build_snapshot_and_tool(self) -> None:
+        manifest = self.source.execution_manifest().model_dump(mode="json", by_alias=True)
+        wrong_tool = tool_evidence("run_security_scan", manifest)
+        with self.assertRaises(ValidationError):
+            self.make_build(toolEvidence=wrong_tool)
+        wrong_snapshot = dict(manifest, snapshotSha256="f" * 64)
+        with self.assertRaises(ValidationError):
+            self.make_build(toolEvidence=tool_evidence("run_build", wrong_snapshot))
+
+    def test_inline_change_and_build_records_have_immutable_artifact_uris(self) -> None:
+        for record in (self.make_change(), self.make_build()):
+            self.assertTrue(record.artifact_uri.startswith(f"artifact://{record.artifact_id}/"))
+
+    def test_manifest_schemas_share_git_format_specific_hash_constraints(self) -> None:
+        schema_root = Path(__file__).resolve().parents[1] / "schemas" / "project"
+        primary = json.loads((schema_root / "snapshot_execution_manifest.schema.json").read_text())
+        report = json.loads((schema_root / "execution_manifest.schema.json").read_text())
+        source = json.loads((schema_root / "developer_source_snapshot.schema.json").read_text())
+        self.assertEqual(primary["properties"], report["properties"])
+        self.assertEqual(primary["allOf"], report["allOf"])
+        self.assertEqual(primary["allOf"], source["allOf"])
 
     def test_shared_developer_artifact_schemas_are_valid_json_and_strict_objects(self) -> None:
         schema_root = Path(__file__).resolve().parents[1] / "schemas" / "project"

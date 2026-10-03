@@ -63,6 +63,14 @@ from orchestrator.domain.validation_artifacts import (
     SecuritySeverity,
     ValidationOutcome,
 )
+from orchestrator.domain.run_configuration import (
+    ExecutionBaseline,
+    ExecutionLimits,
+    ModelConfiguration,
+    RunConfiguration,
+    RunConfigurationArtifact,
+)
+from orchestrator.domain.workspaces import WorkspaceRecord
 
 __all__ = [
     "A2ATaskState",
@@ -79,11 +87,16 @@ __all__ = [
     "ChangeReportArtifact",
     "ChangeReportFile",
     "ExecutionManifest",
+    "ExecutionBaseline",
+    "ExecutionLimits",
     "GitObjectFormat",
     "IssueRecord",
+    "ModelConfiguration",
     "QAReportArtifact",
     "QATestResult",
     "RetryDecision",
+    "RunConfiguration",
+    "RunConfigurationArtifact",
     "RequirementValidator",
     "SCN_001_ID",
     "SCENARIO_REGISTRY",
@@ -104,6 +117,7 @@ __all__ = [
     "WorkflowStatus",
     "WorkflowStep",
     "WorkflowStepStatus",
+    "WorkspaceRecord",
     "ValidationOutcome",
     "decide_tool_retry",
     "get_scenario",

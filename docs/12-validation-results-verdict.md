@@ -1,7 +1,7 @@
 # 12. QA/Security 결과 검증 및 Verdict
 
 > 상태: 12번 작업 당시의 QA/Security Report 검증·저장 및 제한된 Verdict 판정 구현 기록
-> 후속: Scenario Registry와 Developer 수정·재검증 루프는 [13번 작업](13-scenario-registry-fix-revalidation.md)에서 구현됨
+> 이 문서는 12번 완료 당시 이력이다. 최신 정책은 [14번 정의서 준수 보완](14-orchestrator-contract-compliance.md)을 따른다. LOW는 기록만 하고, Tool 재시도 소진 근거가 있으면 UNVERIFIED를 확정한다.
 
 ## 목적
 
@@ -50,13 +50,14 @@ Report 등록 전 아래 조건을 확인한다.
 | --- | --- |
 | QA 필수 Test 또는 명시 Requirement 실패, Confirmed CRITICAL/HIGH Finding | 수정 한도 전 `FIX_REQUIRED`; 수정 한도 소진 시 `FINISHED/FAIL` |
 | 필수 결과 `UNVERIFIED`이나 retry 기록/자동 Tool 재시도가 없음 | `HUMAN_REVIEW`; 제품 FAIL로 오인하지 않음 |
-| Confirmed MEDIUM/LOW 또는 SUSPECTED Finding | 정책/재현 확인 전 `HUMAN_REVIEW` |
+| Confirmed LOW/INFO | Report에 기록. 필수 Requirement 실패는 별도로 차단 |
+| Confirmed MEDIUM 또는 SUSPECTED Finding | 정책/재현 확인 전 `HUMAN_REVIEW` |
 | 잘못된/누락 Report, 다른 Snapshot, Agent Task 실패·timeout 등 | `HUMAN_REVIEW`; 결과 일부를 Registry에 남기지 않음 |
 | 모든 QA/Security 결과 PASS, blocking finding 없음, 기준 Requirement가 권위 있는 Registry에서 확인됨 | `FINISHED/SUCCESS` 후보 |
 
 현재 마지막 행의 전제인 권위 있는 Requirement Registry가 연결되지 않았으므로 실제 dispatcher에서는 PASS 보고서도 `HUMAN_REVIEW`로 끝난다. 이는 Planner가 요구사항을 낮추거나 생략해도 성공으로 처리하는 것을 막기 위한 의도적인 차단이다. `decide_verdict`에는 이후 Registry 연결 시 성공 판정을 허용할 입력이 있지만 현재 dispatcher는 그 값을 승인하지 않는다.
 
-Confirmed CRITICAL/HIGH는 명시 Requirement 결과가 PASS여도 SUCCESS를 막고 수정 요구로 보낸다. MEDIUM/LOW 정책은 개발정의서에서 팀 미결정이므로 현재 자동 성공·실패시키지 않고 사람 검토로 보낸다. FALSE_POSITIVE는 blocker로 보지 않는다. `UNVERIFIED`를 전체 `UNVERIFIED`로 확정하려면 정의서대로 Tool/Infrastructure 재시도 한도 소진을 알아야 하지만, 현재 Report/A2A 연결에는 retry count와 자동 재시도 경로가 없으므로 성급한 최종 Verdict를 만들지 않는다.
+Confirmed CRITICAL/HIGH는 Requirement 결과가 PASS여도 수정 요구로 보낸다. MEDIUM은 팀의 수용 정책이 정해지기 전 사람 검토, LOW/INFO는 기록만 한다. FALSE_POSITIVE는 blocker가 아니다. 14번에서 Tool 실행별 최초 호출·안전 재시도 2회 이력을 검증하도록 보완했으며, 필수 검증 불가와 한도 소진이 입증된 경우에만 `FINISHED/UNVERIFIED`를 확정한다. 실제 Tool 호출 및 Retry 수행은 Agent/MCP 담당이다.
 
 Build가 수정 한도에 도달한 뒤에도 실패하면 `FINISHED/FAIL`로 기록한다. QA/Security의 수정 한도 내 실패는 `FIX_REQUIRED`까지 기록하지만, 자동 Developer 수정 호출이나 새 Snapshot 재검증은 아직 연결하지 않았다.
 

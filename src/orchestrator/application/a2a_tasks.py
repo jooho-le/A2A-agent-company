@@ -21,6 +21,7 @@ from orchestrator.domain import (
     WorkflowStepStatus,
 )
 from orchestrator.domain.models import utc_now
+from orchestrator.core.security import redact_data
 
 
 class A2ATaskProtocolError(A2AProjectContractError):
@@ -117,6 +118,8 @@ class A2ATaskRunner:
     ) -> A2ATaskRunResult:
         """Send one new Task and poll until terminal, interrupted, or timed out."""
         context = self._prepare_new_step(run, step, agent_id, agent_context)
+        step = step.model_copy(update={"agent_context_id": context.agent_context_id})
+        context = context.model_copy(update={"latest_a2a_task_id": None})
         metadata = _metadata_for_step(run, step)
         sent = _make_trace_event(
             run,
@@ -173,6 +176,8 @@ class A2ATaskRunner:
     ) -> A2ATaskRunResult:
         """Send a frozen QA/Security Snapshot to the matching Agent and poll it."""
         context = self._prepare_new_step(run, step, agent_id, agent_context)
+        step = step.model_copy(update={"agent_context_id": context.agent_context_id})
+        context = context.model_copy(update={"latest_a2a_task_id": None})
         if recipient != step.agent_role:
             raise A2ATaskProtocolError("Snapshot recipient must match WorkflowStep role")
         if handoff.run_id != run.run_id:
@@ -243,8 +248,11 @@ class A2ATaskRunner:
         context = self._validate_existing_step(run, step, agent_id, agent_context)
         if step.a2a_task_id is None:
             raise A2ATaskProtocolError("WorkflowStep has no server-issued Task ID")
-        if step.a2a_task_state not in (A2ATaskState.SUBMITTED, A2ATaskState.WORKING):
-            raise A2ATaskProtocolError("Only a nonterminal WorkflowStep can be polled")
+        if step.a2a_task_state not in (
+            A2ATaskState.SUBMITTED, A2ATaskState.WORKING, A2ATaskState.COMPLETED,
+            A2ATaskState.INPUT_REQUIRED, A2ATaskState.AUTH_REQUIRED,
+        ):
+            raise A2ATaskProtocolError("This WorkflowStep state cannot resume observation")
 
         started_at = self._clock()
         task = await self._client.get_task(step.a2a_task_id)
@@ -291,16 +299,57 @@ class A2ATaskRunner:
         observer: TaskUpdateObserver | None = None,
     ) -> A2ATaskRunResult:
         """Send user-provided input to the same interrupted Task and resume polling."""
+        return await self._continue_interrupted(
+            run, step, agent_id=agent_id, payload=payload, agent_context=agent_context,
+            expected_state=A2ATaskState.INPUT_REQUIRED, observer=observer,
+        )
+
+    async def continue_after_auth(
+        self,
+        run: WorkflowRun,
+        step: WorkflowStep,
+        *,
+        agent_id: str,
+        payload: Mapping[str, object],
+        agent_context: AgentContext,
+        authentication_configured: bool,
+        observer: TaskUpdateObserver | None = None,
+    ) -> A2ATaskRunResult:
+        """Continue AUTH_REQUIRED only after explicit operator credential setup.
+
+        Credentials belong in the configured HTTP client headers, never in the
+        continuation Message, metadata, or persistence records.
+        """
+        if authentication_configured is not True:
+            raise A2ATaskProtocolError("Operator authentication must be explicitly configured")
+        if redact_data(dict(payload)) != dict(payload):
+            raise A2ATaskProtocolError("Authentication credentials must not appear in the payload")
+        return await self._continue_interrupted(
+            run, step, agent_id=agent_id, payload=payload, agent_context=agent_context,
+            expected_state=A2ATaskState.AUTH_REQUIRED, observer=observer,
+        )
+
+    async def _continue_interrupted(
+        self,
+        run: WorkflowRun,
+        step: WorkflowStep,
+        *,
+        agent_id: str,
+        payload: Mapping[str, object],
+        agent_context: AgentContext,
+        expected_state: A2ATaskState,
+        observer: TaskUpdateObserver | None,
+    ) -> A2ATaskRunResult:
         context = _make_or_check_context(run, step, agent_id, agent_context)
         if run.run_id != step.run_id:
             raise A2ATaskProtocolError("WorkflowRun and WorkflowStep IDs do not match")
         if (
             step.status != WorkflowStepStatus.WAITING_INPUT
-            or step.a2a_task_state != A2ATaskState.INPUT_REQUIRED
+            or step.a2a_task_state != expected_state
             or step.a2a_task_id is None
         ):
             raise A2ATaskProtocolError(
-                "Only a Task in INPUT_REQUIRED state can continue with user input"
+                f"Only a Task in {expected_state.value} state can use this continuation"
             )
         if context.latest_a2a_task_id != step.a2a_task_id:
             raise A2ATaskProtocolError("AgentContext does not reference this WorkflowStep Task")
@@ -396,8 +445,21 @@ class A2ATaskRunner:
     ) -> AgentContext:
         if run.run_id != step.run_id:
             raise A2ATaskProtocolError("WorkflowRun and WorkflowStep IDs do not match")
-        if step.status != WorkflowStepStatus.RUNNING:
-            raise A2ATaskProtocolError("Only a RUNNING WorkflowStep can resume polling")
+        expected_status = {
+            A2ATaskState.SUBMITTED: WorkflowStepStatus.RUNNING,
+            A2ATaskState.WORKING: WorkflowStepStatus.RUNNING,
+            A2ATaskState.COMPLETED: WorkflowStepStatus.SUCCEEDED,
+            A2ATaskState.INPUT_REQUIRED: WorkflowStepStatus.WAITING_INPUT,
+            A2ATaskState.AUTH_REQUIRED: WorkflowStepStatus.WAITING_INPUT,
+        }.get(step.a2a_task_state)
+        interrupted_send_in_flight = (
+            step.a2a_task_state in (A2ATaskState.INPUT_REQUIRED, A2ATaskState.AUTH_REQUIRED)
+            and step.status == WorkflowStepStatus.RUNNING
+        )
+        if expected_status is None or (
+            step.status != expected_status and not interrupted_send_in_flight
+        ):
+            raise A2ATaskProtocolError("WorkflowStep cannot safely resume Task observation")
         context = _make_or_check_context(run, step, agent_id, agent_context)
         if context.latest_a2a_task_id != step.a2a_task_id:
             raise A2ATaskProtocolError("AgentContext does not reference this WorkflowStep Task")
@@ -582,6 +644,11 @@ def _apply_task(
         raise A2ATaskProtocolError("A WorkflowStep cannot change its A2A Task ID")
 
     state = _get_task_state(task)
+    if previous_state in (
+        A2ATaskState.COMPLETED, A2ATaskState.FAILED,
+        A2ATaskState.CANCELED, A2ATaskState.REJECTED,
+    ) and state != previous_state:
+        raise A2ATaskProtocolError("A terminal A2A Task cannot change state")
     if previous_state is not None and state == A2ATaskState.UNSPECIFIED:
         disposition = TaskRunDisposition.PROTOCOL_ERROR
     else:

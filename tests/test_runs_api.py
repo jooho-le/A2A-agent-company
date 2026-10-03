@@ -13,6 +13,7 @@ from orchestrator.domain import (
     WorkflowStatus,
     WorkflowStep,
     WorkflowStepStatus,
+    SCN_001_ID,
 )
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.core.config import Settings
@@ -55,7 +56,7 @@ class RunsAPITests(unittest.TestCase):
         response = self.request(
             "POST",
             "/api/v1/runs",
-            json={"scenarioId": str(uuid4()), "requestText": "회원가입 기능 구현"},
+            json={"scenarioId": str(SCN_001_ID), "requestText": "회원가입 기능 구현"},
         )
 
         self.assertEqual(response.status_code, 201)
@@ -74,7 +75,7 @@ class RunsAPITests(unittest.TestCase):
         self.assertEqual(event_response.status_code, 200)
         self.assertEqual(
             [event["eventType"] for event in event_response.json()["events"]],
-            ["RUN_STARTED", "WORKFLOW_STEP_CREATED"],
+            ["RUN_STARTED", "WORKFLOW_STEP_CREATED", "ARTIFACT_REGISTERED"],
         )
 
     def test_configured_planner_is_scheduled_after_run_creation(self) -> None:
@@ -88,7 +89,7 @@ class RunsAPITests(unittest.TestCase):
         response = self.request(
             "POST",
             "/api/v1/runs",
-            json={"scenarioId": str(uuid4()), "requestText": "Plan this request"},
+            json={"scenarioId": str(SCN_001_ID), "requestText": "Plan this request"},
         )
 
         self.assertEqual(response.status_code, 201)
@@ -99,7 +100,7 @@ class RunsAPITests(unittest.TestCase):
         created = self.request(
             "POST",
             "/api/v1/runs",
-            json={"scenarioId": str(uuid4()), "requestText": "Add tests"},
+            json={"scenarioId": str(SCN_001_ID), "requestText": "Add tests"},
         ).json()
         run_id = created["run"]["runId"]
 
@@ -110,7 +111,7 @@ class RunsAPITests(unittest.TestCase):
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(status_response.json()["scenarioId"], created["run"]["scenarioId"])
         self.assertEqual(steps_response.json()["steps"][0]["workflowStepId"], created["firstStep"]["workflowStepId"])
-        self.assertEqual(events_response.json()["total"], 2)
+        self.assertEqual(events_response.json()["total"], 3)
         self.assertEqual(events_response.json()["events"][0]["eventType"], "WORKFLOW_STEP_CREATED")
 
     def test_invalid_create_and_missing_run_return_client_errors(self) -> None:
@@ -130,7 +131,7 @@ class RunsAPITests(unittest.TestCase):
         created = self.request(
             "POST",
             "/api/v1/runs",
-            json={"scenarioId": str(uuid4()), "requestText": "Cancel me"},
+            json={"scenarioId": str(SCN_001_ID), "requestText": "Cancel me"},
         ).json()
         run_id = created["run"]["runId"]
 
@@ -168,6 +169,44 @@ class RunsAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.repository.get_run(run.run_id).status, WorkflowStatus.IMPLEMENTING)
+
+    def test_discovery_validation_and_secret_safe_run_configuration(self) -> None:
+        discovered = self.request("GET", "/api/v1/scenarios").json()["scenarios"]
+        self.assertEqual(discovered[0]["scenarioId"], str(SCN_001_ID))
+        for payload in (
+            {"scenarioId": str(SCN_001_ID), "requestText": "   "},
+            {"scenarioId": str(uuid4()), "requestText": "not registered"},
+            {"scenarioId": str(SCN_001_ID), "requestText": "experiment", "configuration": {"experimentId": str(uuid4())}},
+        ):
+            self.assertEqual(self.request("POST", "/api/v1/runs", json=payload).status_code, 422)
+        response = self.request("POST", "/api/v1/runs", json={
+            "scenarioId": str(SCN_001_ID), "requestText": "password=sample-credential 개발",
+        })
+        self.assertEqual(response.status_code, 201)
+        run_id = UUID(response.json()["run"]["runId"])
+        run = self.repository.get_run(run_id)
+        self.assertNotIn("sample-credential", run.request_text)
+        workspace = self.request("GET", f"/api/v1/runs/{run_id}/workspace").json()
+        self.assertEqual(workspace["workspaceId"], str(run.workspace_id))
+        self.assertNotIn("rootPath", workspace)
+        artifacts = self.request("GET", f"/api/v1/runs/{run_id}/artifacts").json()["artifacts"]
+        self.assertEqual([a["artifactType"] for a in artifacts], ["RUN_CONFIGURATION"])
+        config = self.request("GET", f"/api/v1/runs/{run_id}/configuration").json()
+        self.assertEqual(config["configuration"]["limits"]["maxFixAttempts"], 3)
+        self.assertIsNone(config["configuration"]["model"])
+        self.assertEqual(self.request("GET", f"/api/v1/runs/{run_id}/artifacts/{config['artifactId']}").json(), config)
+        self.assertEqual(self.request("GET", f"/api/v1/runs/{run_id}/artifacts/{uuid4()}").status_code, 404)
+        self.assertEqual(self.request("GET", f"/api/v1/runs/{run_id}/issues").json()["issues"], [])
+        self.assertEqual(self.request("GET", f"/api/v1/runs/{run_id}/tool-attempts").json()["attempts"], [])
+
+    def test_resume_recover_require_valid_stage_without_resending(self) -> None:
+        created = self.request("POST", "/api/v1/runs", json={
+            "scenarioId": str(SCN_001_ID), "requestText": "resume guards",
+        }).json()
+        run_id = created["run"]["runId"]
+        self.assertEqual(self.request("POST", f"/api/v1/runs/{run_id}/resume", json={}).status_code, 409)
+        self.assertEqual(self.request("POST", f"/api/v1/runs/{run_id}/recover", json={}).status_code, 409)
+        self.assertEqual(self.request("POST", f"/api/v1/runs/{uuid4()}/recover", json={}).status_code, 404)
 
 
 if __name__ == "__main__":

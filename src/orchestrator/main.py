@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from orchestrator.api.routes.health import router as health_router
 from orchestrator.api.routes.runs import router as runs_router
+from orchestrator.api.routes.scenarios import router as scenarios_router
 from orchestrator.application import PlannerRunDispatcher
 from orchestrator.core.config import Settings, get_settings
 from orchestrator.core.logging import configure_logging
@@ -30,6 +31,7 @@ def create_app(
     app.state.dispatcher_lock = Lock()
     app.include_router(health_router)
     app.include_router(runs_router, prefix=settings.api_prefix)
+    app.include_router(scenarios_router, prefix=settings.api_prefix)
     return app
 
 

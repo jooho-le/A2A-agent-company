@@ -145,6 +145,19 @@ class A2ARequestContractTests(unittest.TestCase):
         with self.assertRaises(A2AProjectContractError):
             build_send_message_request({"not_json": object()}, self.metadata)
 
+    def test_outgoing_payload_masks_secrets_and_preserves_snapshot_identity(self) -> None:
+        payload = {
+            "request": "회원가입. password=DUMMY_PASSWORD",
+            "credentials": {"authorization": "Bearer DUMMY_TOKEN"},
+            "snapshotSha256": "a" * 64,
+        }
+        wire = MessageToDict(build_send_message_request(payload, self.metadata))
+        encoded = json.dumps(wire)
+        self.assertNotIn("DUMMY_PASSWORD", encoded)
+        self.assertNotIn("DUMMY_TOKEN", encoded)
+        self.assertEqual(wire["message"]["parts"][0]["data"]["snapshotSha256"], "a" * 64)
+        self.assertEqual(payload["request"], "회원가입. password=DUMMY_PASSWORD")
+
 
 class A2AAgentClientTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -339,6 +352,74 @@ class A2AAgentClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["message"]["taskId"], "planner-task-opaque")
         self.assertEqual(body["message"]["contextId"], "planner-context-opaque")
         self.assertEqual(body["metadata"]["attempt"], 1)
+
+    async def test_dot_only_opaque_task_ids_are_not_normalized_by_httpx(self) -> None:
+        for task_id, expected in ((".", b"%2E"), ("..", b"%2E%2E")):
+            with self.subTest(task_id=task_id):
+                sent = []
+                async def handler(request):
+                    if request.url.path == "/.well-known/agent-card.json":
+                        return httpx.Response(200, json=MessageToDict(agent_card()))
+                    sent.append(request)
+                    return httpx.Response(200, json={"id": task_id, "contextId": "ctx", "status": {"state": "TASK_STATE_WORKING"}})
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                    client = A2AAgentClient("https://qa.example.test", httpx_client=http)
+                    task = await client.get_task(task_id)
+                self.assertEqual(task.id, task_id)
+                self.assertEqual(sent[0].url.raw_path, b"/a2a/tasks/" + expected)
+
+    async def test_remote_cancel_preserves_raw_opaque_id_in_json_body(self) -> None:
+        cases = (
+            ("agent/task?opaque#7", b"agent%2Ftask%3Fopaque%237"),
+            ("..", b"%2E%2E"),
+        )
+        for task_id, path_segment in cases:
+            with self.subTest(task_id=task_id):
+                sent = []
+                async def handler(request):
+                    if request.url.path == "/.well-known/agent-card.json":
+                        return httpx.Response(200, json=MessageToDict(agent_card()))
+                    sent.append(request)
+                    return httpx.Response(200, json={"id": task_id, "contextId": "ctx", "status": {"state": "TASK_STATE_CANCELED"}})
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                    client = A2AAgentClient("https://qa.example.test", httpx_client=http)
+                    task = await client.cancel_task(task_id)
+                self.assertEqual(task.id, task_id)
+                self.assertEqual(task.status.state, TaskState.TASK_STATE_CANCELED)
+                self.assertEqual(sent[0].method, "POST")
+                self.assertEqual(sent[0].url.raw_path, b"/a2a/tasks/" + path_segment + b":cancel")
+                self.assertEqual(json.loads(sent[0].content)["id"], task_id)
+                self.assertEqual(sent[0].headers[VERSION_HEADER], "1.0")
+                self.assertEqual(sent[0].headers["Content-Type"], A2A_JSON_MEDIA_TYPE)
+
+    async def test_cancel_rejects_identity_change_and_keeps_non_canceled_state(self) -> None:
+        response_id = "server-task"
+        async def handler(request):
+            if request.url.path == "/.well-known/agent-card.json":
+                return httpx.Response(200, json=MessageToDict(agent_card()))
+            return httpx.Response(200, json={"id": response_id, "contextId": "ctx", "status": {"state": "TASK_STATE_WORKING"}})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = A2AAgentClient("https://qa.example.test", httpx_client=http)
+            actual = await client.cancel_task("server-task")
+            self.assertEqual(actual.status.state, TaskState.TASK_STATE_WORKING)
+            with self.assertRaises(A2AProjectContractError):
+                await client.cancel_task("different-task")
+            with self.assertRaises(A2AProjectContractError):
+                await client.cancel_task(" ")
+
+    async def test_operator_http_credentials_are_only_in_headers(self) -> None:
+        sent = []
+        async def handler(request):
+            sent.append(request)
+            if request.url.path == "/.well-known/agent-card.json":
+                return httpx.Response(200, json=MessageToDict(agent_card()))
+            return httpx.Response(200, json={"task": {"id": "agent-task", "contextId": "ctx", "status": {"state": "TASK_STATE_SUBMITTED"}}})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), headers={"X-Existing": "preserved"}) as http:
+            client = A2AAgentClient("https://qa.example.test", httpx_client=http, headers={"Authorization": "Bearer DUMMY_OPERATOR_TOKEN"})
+            await client.send_task({"request": "Run QA"}, A2AWorkflowMetadata(runId=uuid4(), workflowStepId=uuid4(), scenarioId=uuid4(), attempt=0))
+        self.assertTrue(all(item.headers["Authorization"] == "Bearer DUMMY_OPERATOR_TOKEN" for item in sent))
+        self.assertTrue(all(item.headers["X-Existing"] == "preserved" for item in sent))
+        self.assertNotIn("DUMMY_OPERATOR_TOKEN", sent[-1].content.decode())
 
 
 class SnapshotA2AHandoffTests(unittest.TestCase):

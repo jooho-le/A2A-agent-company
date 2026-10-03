@@ -57,7 +57,6 @@ class WorkflowStateMachineTests(unittest.TestCase):
                 WorkflowStatus.VALIDATING,
                 WorkflowStatus.FIX_REQUIRED,
                 WorkflowStatus.HUMAN_REVIEW,
-                WorkflowStatus.FINISHED,
             },
             WorkflowStatus.VALIDATING: {
                 WorkflowStatus.FINISHED,
@@ -172,6 +171,24 @@ class WorkflowStateMachineTests(unittest.TestCase):
             run, WorkflowStatus.FINISHED, verdict=FinalVerdict.FAIL
         )
         self.assertEqual(finished.verdict, FinalVerdict.FAIL)
+
+    def test_resuming_fixing_preserves_actual_cycle_count_including_third_attempt(self) -> None:
+        for attempt in (1, 2, 3):
+            run = WorkflowRun(
+                scenario_id=uuid4(), request_text="Resume the existing fix",
+                status=WorkflowStatus.FIXING, fix_attempt=attempt,
+            )
+            paused = transition_run(run, WorkflowStatus.HUMAN_REVIEW)
+            resumed = transition_run(paused, WorkflowStatus.FIXING)
+            self.assertEqual(resumed.fix_attempt, attempt)
+
+    def test_snapshot_ready_cannot_finish_without_validation(self) -> None:
+        run = self.advance(
+            self.make_run(), WorkflowStatus.PLANNING, WorkflowStatus.IMPLEMENTING,
+            WorkflowStatus.SNAPSHOT_READY,
+        )
+        with self.assertRaises(TransitionError):
+            transition_run(run, WorkflowStatus.FINISHED, verdict=FinalVerdict.SUCCESS)
 
 
 if __name__ == "__main__":

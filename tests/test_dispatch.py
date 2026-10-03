@@ -25,6 +25,20 @@ from orchestrator.domain import (
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 
 
+def tool_evidence(tool_name, manifest, *, outcome="PASS", retries=0):
+    execution_id = str(uuid4())
+    return {
+        "toolName": tool_name, "executionId": execution_id,
+        "executionManifest": manifest, "evidenceRef": f"artifact://{execution_id}/tool-result.json",
+        "attempts": [{
+            "attempt": index, "outcome": outcome if index == retries else "UNVERIFIED",
+            "errorKind": "PROCESS_STARTUP_FAILURE" if outcome == "UNVERIFIED" or index < retries else None,
+            "retrySafe": True, "durationMs": 100,
+            "evidenceRef": f"artifact://{execution_id}/attempt-{index}.json",
+        } for index in range(retries + 1)],
+    }
+
+
 class FakePlannerClient:
     def __init__(
         self,
@@ -42,6 +56,11 @@ class FakePlannerClient:
         build_exit_code_after_fix: int | None = None,
         security_findings: list[dict[str, object]] | None = None,
         include_validation_artifacts: bool = True,
+        include_tool_evidence: bool = True,
+        build_infra_retries: int | None = None,
+        distinct_build_diagnostics: bool = False,
+        qa_version_outcomes: dict[int, str] | None = None,
+        qa_unverified_retries: int = 0,
     ) -> None:
         self.state = state
         self.include_artifact = include_artifact
@@ -56,6 +75,11 @@ class FakePlannerClient:
         self.build_exit_code_after_fix = build_exit_code_after_fix
         self.security_findings = security_findings or []
         self.include_validation_artifacts = include_validation_artifacts
+        self.include_tool_evidence = include_tool_evidence
+        self.build_infra_retries = build_infra_retries
+        self.distinct_build_diagnostics = distinct_build_diagnostics
+        self.qa_version_outcomes = qa_version_outcomes or {}
+        self.qa_unverified_retries = qa_unverified_retries
         self.sent: list[tuple[dict[str, object], object, str | None]] = []
         self.handoffs: list[tuple[object, object, str]] = []
         self.closed = False
@@ -74,6 +98,8 @@ class FakePlannerClient:
         self.requirement_id = UUID(self.requirements[0]["requirementId"])
         self.previous_developer_artifacts: dict[str, object] = {}
         self.previous_validation_artifacts: dict[AgentRole, object] = {}
+        self.validation_versions: dict[AgentRole, int] = {}
+        self.validation_context_ids: list[tuple[AgentRole, str | None]] = []
         self.project_artifact_id = uuid4()
         self.source_artifact_id = uuid4()
         self.change_artifact_id = uuid4()
@@ -241,6 +267,10 @@ class FakePlannerClient:
                     "exitCode": exit_code, "durationMs": 1200,
                     "executionManifestId": str(uuid4()), "executionManifest": build_manifest,
                     "stdoutRef": None, "stderrRef": None, "createdAt": now,
+                    "executionOutcome": "UNVERIFIED" if self.build_infra_retries is not None else "PASS" if exit_code == 0 else "FAIL",
+                    "failureKind": "INFRASTRUCTURE" if self.build_infra_retries is not None else "PRODUCT" if exit_code else None,
+                    "toolEvidence": tool_evidence("run_build", manifest, outcome="UNVERIFIED" if self.build_infra_retries is not None else "PASS", retries=self.build_infra_retries or 0) if self.include_tool_evidence else None,
+                    "diagnostics": [{"ruleId": f"ERR-{code_version}" if self.distinct_build_diagnostics else "ERR-001", "normalizedLocation": f"src/module{code_version}.py:1" if self.distinct_build_diagnostics else "src/signup.py:1", "message": "Required symbol is undefined."}] if exit_code else [],
                 },
             ),
         ]
@@ -266,11 +296,13 @@ class FakePlannerClient:
         ]
     async def send_snapshot_handoff(self, handoff, recipient, request_text, **kwargs):
         self.handoffs.append((handoff, recipient, request_text))
+        self.validation_context_ids.append((recipient, kwargs.get("context_id")))
         code_version = handoff.execution_manifest.code_version
         task_id = f"{recipient.value.lower()}-task-v{code_version}-opaque"
         a2a_artifact_id = f"{recipient.value.lower()}-report-v{code_version}-a2a"
         project_artifact_id = uuid4()
         previous_report = self.previous_validation_artifacts.get(recipient)
+        report_version = self.validation_versions.get(recipient, 0) + 1
         requirement_ids = [str(value) for value in kwargs["requirement_ids"]]
         outcome = (
             self.qa_outcome_after_fix
@@ -279,10 +311,12 @@ class FakePlannerClient:
             and self.qa_outcome_after_fix is not None
             else self.qa_outcome if recipient == AgentRole.QA else self.security_outcome
         )
+        if recipient == AgentRole.QA:
+            outcome = self.qa_version_outcomes.get(code_version, outcome)
         common = {
             "artifactId": str(project_artifact_id),
             "artifactType": "QA_REPORT" if recipient == AgentRole.QA else "SECURITY_REPORT",
-            "artifactVersion": code_version,
+            "artifactVersion": report_version,
             "previousArtifactId": str(previous_report) if previous_report is not None else None,
             "runId": str(handoff.run_id),
             "workflowStepId": str(kwargs["workflow_step_id"]),
@@ -307,13 +341,18 @@ class FakePlannerClient:
                     "requirementId": requirement_id,
                     "outcome": outcome,
                     "title": "요구사항 수락 테스트",
+                    "details": "Expected one account, actual duplicate account." if outcome == "FAIL" else None,
+                    "expectedResult": "Acceptance criterion passes.",
+                    "actualResult": "Assertion failed." if outcome == "FAIL" else "Check passed." if outcome == "PASS" else "Runner unavailable.",
+                    "normalizedLocation": f"qa/requirements.py:{index + 1}",
+                    "toolEvidence": tool_evidence("run_unit_tests", common["executionManifest"], outcome="UNVERIFIED" if outcome == "UNVERIFIED" else "PASS", retries=self.qa_unverified_retries if outcome == "UNVERIFIED" else 0) if self.include_tool_evidence else None,
                 }
                 for index, requirement_id in enumerate(requirement_ids)
             ]
             name = "qa-report.json"
         else:
             common["requirementResults"] = [
-                {"requirementId": requirement_id, "outcome": outcome}
+                {"requirementId": requirement_id, "outcome": outcome, "toolEvidence": tool_evidence("run_security_scan", common["executionManifest"], outcome="UNVERIFIED" if outcome == "UNVERIFIED" else "PASS") if self.include_tool_evidence else None}
                 for requirement_id in requirement_ids
             ]
             common["findings"] = self.security_findings
@@ -329,11 +368,12 @@ class FakePlannerClient:
                         "runId": str(handoff.run_id),
                         "workflowStepId": str(kwargs["workflow_step_id"]),
                         "projectArtifactId": str(project_artifact_id),
-                        "artifactVersion": code_version,
+                        "artifactVersion": report_version,
                     },
                 }
             ]
             self.previous_validation_artifacts[recipient] = project_artifact_id
+            self.validation_versions[recipient] = report_version
         return ParseDict(
             {
                 "id": task_id,
@@ -424,7 +464,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
             context.agent_id: context
             for context in self.repository.list_agent_contexts(self.run.run_id)
         }
-        events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
+        events, _ = self.repository.list_events(self.run.run_id, limit=500, offset=0)
         self.assertEqual(run.status, WorkflowStatus.FINISHED)
         self.assertEqual(run.code_version, 1)
         self.assertEqual(run.verdict.value, "SUCCESS")
@@ -518,10 +558,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("WORKFLOW_STEP_DISPATCH_STARTED", [event.event_type for event in events])
         self.assertIn("DEVELOPER_ARTIFACTS_VALIDATED", [event.event_type for event in events])
         project_artifacts = self.repository.list_project_artifacts(self.run.run_id)
-        self.assertEqual(len(project_artifacts), 5)
+        self.assertEqual(len(project_artifacts), 6)
         self.assertEqual(
             {artifact.artifact_type for artifact in project_artifacts},
-            {"SOURCE", "CHANGE_REPORT", "BUILD_REPORT", "QA_REPORT", "SECURITY_REPORT"},
+            {"REQUIREMENT", "SOURCE", "CHANGE_REPORT", "BUILD_REPORT", "QA_REPORT", "SECURITY_REPORT"},
         )
         self.assertIn("QA_REPORT_VALIDATED", [event.event_type for event in events])
         self.assertIn("SECURITY_REPORT_VALIDATED", [event.event_type for event in events])
@@ -544,7 +584,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         events, _ = self.repository.list_events(self.run.run_id, limit=50, offset=0)
         self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
         self.assertEqual(run.resume_state, WorkflowStatus.IMPLEMENTING)
-        self.assertEqual(self.repository.list_project_artifacts(self.run.run_id), [])
+        self.assertEqual([item.artifact_type for item in self.repository.list_project_artifacts(self.run.run_id)], ["REQUIREMENT"])
         self.assertIn("DEVELOPER_OUTPUT_REJECTED", [event.event_type for event in events])
         self.assertFalse(client.handoffs)
 
@@ -557,7 +597,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         run = self.repository.get_run(self.run.run_id)
         self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
-        self.assertEqual(self.repository.list_project_artifacts(self.run.run_id), [])
+        self.assertEqual([item.artifact_type for item in self.repository.list_project_artifacts(self.run.run_id)], ["REQUIREMENT"])
         self.assertFalse(client.handoffs)
 
     async def test_repeated_build_issue_stops_the_fix_loop(self) -> None:
@@ -572,7 +612,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
         self.assertEqual(run.fix_attempt, 2)
         self.assertEqual(run.code_version, 3)
-        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 9)
+        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 10)
         self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 3)
         self.assertFalse(
             any(step.agent_role in (AgentRole.QA, AgentRole.SECURITY) for step in steps)
@@ -629,7 +669,8 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.verdict.value, "FAIL")
         self.assertEqual(run.fix_attempt, 3)
         self.assertEqual(run.code_version, 4)
-        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 15)
+        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 20)
+        self.assertTrue(any(issue.code_version == 4 for issue in self.repository.list_issue_records(self.run.run_id)))
 
     async def test_unverified_validation_requires_review_not_product_failure(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED", security_outcome="UNVERIFIED")
@@ -677,7 +718,14 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fix_payload["fixRequest"]["attempt"], 1)
         self.assertEqual(fix_payload["fixRequest"]["issues"][0]["codeVersion"], 1)
         self.assertIn("REQ-001", fix_payload["plan"]["requirements"][0]["key"])
-        self.assertNotIn("description", fix_payload["fixRequest"]["issues"][0])
+        self.assertIn("description", fix_payload["fixRequest"]["issues"][0])
+        self.assertIn("expectedResult", fix_payload["fixRequest"]["issues"][0])
+        self.assertIn("actualResult", fix_payload["fixRequest"]["issues"][0])
+        self.assertTrue(fix_payload["fixRequest"]["issues"][0]["evidenceRefs"])
+        self.assertIn("QA_REPORT", {item["artifactType"] for item in fix_payload["fixRequest"]["inputArtifacts"]})
+        fix_context = next(context for payload, _, context in client.sent if "fixRequest" in payload)
+        self.assertEqual(fix_context, "developer-context-opaque")
+        self.assertTrue(all(context is not None for role, context in client.validation_context_ids[2:]))
         with sqlite3.connect(self.repository.database_path) as connection:
             with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute(
@@ -738,7 +786,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         events, _ = self.repository.list_events(self.run.run_id, limit=200, offset=0)
         self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
         self.assertEqual(run.resume_state, WorkflowStatus.VALIDATING)
-        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 3)
+        self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 4)
         self.assertIn("QA_SECURITY_OUTPUT_REJECTED", [e.event_type for e in events])
 
     async def test_planner_input_required_pauses_workflow(self) -> None:
@@ -751,6 +799,166 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.status, WorkflowStatus.WAITING_INPUT)
         self.assertEqual(run.resume_state, WorkflowStatus.PLANNING)
         self.assertEqual(step.status, WorkflowStepStatus.WAITING_INPUT)
+
+    async def test_build_failure_then_validation_failure_uses_independent_report_versions(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", build_exit_code=1, build_exit_code_after_fix=0, qa_version_outcomes={2: "FAIL", 3: "PASS"})
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.verdict.value, "SUCCESS")
+        self.assertEqual(run.code_version, 3)
+        qa_reports = [item for item in self.repository.list_project_artifacts(self.run.run_id) if item.artifact_type == "QA_REPORT"]
+        self.assertEqual([(item.artifact_version, item.code_version) for item in qa_reports], [(1, 2), (2, 3)])
+
+    async def test_distinct_build_diagnostics_exhaust_fixes_instead_of_same_issue_review(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", build_exit_code=1, distinct_build_diagnostics=True)
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.verdict.value, "FAIL")
+        self.assertEqual(run.fix_attempt, 3)
+        issues = self.repository.list_issue_records(self.run.run_id)
+        self.assertEqual(len({item.fingerprint for item in issues}), 4)
+        self.assertEqual({item.code_version for item in issues}, {1, 2, 3, 4})
+
+    async def test_missing_mcp_provenance_blocks_success(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", include_tool_evidence=False)
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertNotEqual(run.verdict.value if run.verdict else None, "SUCCESS")
+        self.assertFalse(client.handoffs)
+
+    async def test_declared_execution_environment_cannot_be_changed_by_developer(self) -> None:
+        from orchestrator.domain.run_configuration import RunConfiguration, RunConfigurationArtifact, ExecutionBaseline
+        self.run = WorkflowRun(scenario_id=SCN_001_ID, request_text="회원가입")
+        self.step = WorkflowStep(run_id=self.run.run_id, agent_role=AgentRole.PLANNER)
+        config = RunConfigurationArtifact(run_id=self.run.run_id, scenario_id=self.run.scenario_id, workspace_id=self.run.workspace_id, configuration=RunConfiguration(environment=ExecutionBaseline(containerImageDigest="sha256:" + "f" * 64, dependencyLockHash="sha256:" + "e" * 64, hardwareProfile="local")))
+        self.repository.create_run(self.run, (self.step,), (TraceEvent(run_id=self.run.run_id, event_type="RUN_STARTED", actor="Orchestrator", attempt=0, workflow_state=self.run.status),), run_configuration=config)
+        client = FakePlannerClient("TASK_STATE_COMPLETED")
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        self.assertFalse(client.handoffs)
+        events, _ = self.repository.list_events(run.run_id, limit=500, offset=0)
+        self.assertIn("FROZEN_EXECUTION_BASELINE_MISMATCH", [item.event_type for item in events])
+
+    async def test_agent_contracts_carry_workspace_and_password_email_policy(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED")
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        planner = client.sent[0][0]
+        developer = client.sent[1][0]
+        self.assertEqual(planner["workspaceId"], str(self.run.workspace_id))
+        self.assertEqual(developer["workspaceId"], str(self.run.workspace_id))
+        policy = developer["scenario"]["securityPolicy"]["passwordHashPolicy"]
+        self.assertEqual(policy, {"algorithm": "argon2id", "memoryKiB": 19456, "iterations": 2, "parallelism": 1, "uniqueSalt": True, "storage": "encoded-library-hash"})
+        for _, _, text in client.handoffs:
+            self.assertIn("19456", text)
+            self.assertIn("canonicalEmailUniqueConstraint", text)
+            self.assertIn(str(self.run.workspace_id), text)
+
+    async def test_run_uses_its_frozen_scenario_after_live_registry_changes(self) -> None:
+        from unittest.mock import patch
+        dispatcher = self.dispatcher_for(FakePlannerClient("TASK_STATE_COMPLETED"))
+        scenario = dispatcher._scenario_for_run(self.run)
+        restored = scenario.planner_contract()
+        restored["securityPolicy"]["passwordHashPolicy"]["memoryKiB"] = 1
+        self.assertEqual(dispatcher._scenario_for_run(self.run).planner_contract()["securityPolicy"]["passwordHashPolicy"]["memoryKiB"], 19456)
+        with patch("orchestrator.application.dispatch.get_scenario", return_value=None):
+            await dispatcher.dispatch_planner(self.run.run_id)
+        self.assertEqual(self.repository.get_run(self.run.run_id).verdict.value, "SUCCESS")
+
+    async def test_active_control_lease_blocks_normal_dispatch_without_sending(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED")
+        dispatcher = self.dispatcher_for(client)
+        token = self.repository.acquire_control(self.run.run_id)
+        try:
+            await dispatcher.dispatch_planner(self.run.run_id)
+            self.assertFalse(client.sent)
+            self.assertFalse(dispatcher.is_run_active(self.run.run_id))
+            self.assertEqual(self.repository.get_run(self.run.run_id).status, WorkflowStatus.RECEIVED)
+        finally:
+            self.repository.release_control(self.run.run_id, token)
+        await dispatcher.dispatch_planner(self.run.run_id)
+        self.assertEqual(self.repository.get_run(self.run.run_id).verdict.value, "SUCCESS")
+        replacement = self.repository.acquire_control(self.run.run_id)
+        self.repository.release_control(self.run.run_id, replacement)
+
+    async def test_normal_dispatch_holds_lease_between_claim_and_first_message(self) -> None:
+        import asyncio
+        from orchestrator.infrastructure import RunDispatchConflict
+        entered, release = asyncio.Event(), asyncio.Event()
+        first = FakePlannerClient("TASK_STATE_COMPLETED")
+        original = first.resolve_agent_card
+        async def wait_on_first_card():
+            if not entered.is_set():
+                entered.set()
+                await release.wait()
+            await original()
+        first.resolve_agent_card = wait_on_first_card
+        first_dispatcher = self.dispatcher_for(first)
+        competing = FakePlannerClient("TASK_STATE_COMPLETED")
+        other_dispatcher = self.dispatcher_for(competing)
+        pending = asyncio.create_task(first_dispatcher.dispatch_planner(self.run.run_id))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2)
+            self.assertEqual(self.repository.get_run(self.run.run_id).status, WorkflowStatus.PLANNING)
+            self.assertFalse(first.sent)
+            with self.assertRaises(RunDispatchConflict):
+                self.repository.acquire_control(self.run.run_id)
+            await other_dispatcher.dispatch_planner(self.run.run_id)
+            self.assertFalse(competing.sent)
+        finally:
+            release.set()
+            await asyncio.wait_for(pending, timeout=5)
+        self.assertEqual(len(first.sent), 2)
+        self.assertEqual(self.repository.get_run(self.run.run_id).verdict.value, "SUCCESS")
+
+    async def test_build_infrastructure_failure_requires_exhausted_retry_proof(self) -> None:
+        for retries in (0, 2):
+            with self.subTest(retries=retries):
+                if retries:
+                    self.tearDown()
+                    self.setUp()
+                client = FakePlannerClient("TASK_STATE_COMPLETED", build_infra_retries=retries)
+                await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+                run = self.repository.get_run(self.run.run_id)
+                self.assertEqual(run.status, WorkflowStatus.FINISHED if retries == 2 else WorkflowStatus.HUMAN_REVIEW)
+                self.assertEqual(run.verdict.value, "UNVERIFIED" if retries == 2 else "HUMAN_REVIEW")
+                self.assertEqual(run.fix_attempt, 0)
+                self.assertFalse(self.repository.list_issue_records(self.run.run_id))
+
+    async def test_unverified_qa_with_two_safe_retries_ends_unverified(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", qa_outcome="UNVERIFIED", qa_unverified_retries=2)
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        run = self.repository.get_run(self.run.run_id)
+        self.assertEqual(run.verdict.value, "UNVERIFIED")
+        self.assertEqual(run.fix_attempt, 0)
+
+    async def test_low_security_finding_is_nonblocking(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", security_findings=[{"findingId": "LOW-1", "severity": "LOW", "disposition": "CONFIRMED", "title": "Recorded", "description": "No explicit Requirement violation."}])
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        self.assertEqual(self.repository.get_run(self.run.run_id).verdict.value, "SUCCESS")
+
+    async def test_fix_request_preserves_failure_context_while_redacting_secret(self) -> None:
+        client = FakePlannerClient("TASK_STATE_COMPLETED", qa_outcome="FAIL", qa_outcome_after_fix="PASS")
+        original = client.send_snapshot_handoff
+        async def with_secret(*args, **kwargs):
+            task = await original(*args, **kwargs)
+            if args[1] == AgentRole.QA:
+                from google.protobuf.json_format import MessageToDict
+                data = MessageToDict(task.artifacts[0].parts[0].data)
+                if data["tests"][0]["outcome"] == "FAIL":
+                    data["tests"][0]["details"] = "Expected duplicate rejection; actual password=synthetic-audit-value appeared."
+                    ParseDict(data, task.artifacts[0].parts[0].data)
+            return task
+        client.send_snapshot_handoff = with_secret
+        await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
+        payload = next(value for value, _, _ in client.sent if "fixRequest" in value)
+        serialized = __import__("json").dumps(payload)
+        self.assertNotIn("synthetic-audit-value", serialized)
+        self.assertIn("Expected duplicate rejection", serialized)
+        with sqlite3.connect(self.repository.database_path) as connection:
+            for table in ("issue_records", "project_artifacts"):
+                self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table} WHERE payload_json LIKE '%synthetic-audit-value%'").fetchone()[0], 0)
 
     async def test_invalid_planner_artifact_is_reviewed_without_creating_developer_step(
         self,

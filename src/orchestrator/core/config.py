@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,10 +18,15 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     api_prefix: str = "/api/v1"
     database_path: str = ".data/orchestrator.sqlite3"
+    workspace_root: str = ".data/workspaces"
     planner_agent_url: str | None = None
     developer_agent_url: str | None = None
     qa_agent_url: str | None = None
     security_agent_url: str | None = None
+    planner_bearer_token: SecretStr | None = None
+    developer_bearer_token: SecretStr | None = None
+    qa_bearer_token: SecretStr | None = None
+    security_bearer_token: SecretStr | None = None
 
 
 @lru_cache

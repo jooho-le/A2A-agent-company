@@ -6,8 +6,9 @@ from typing import Literal
 
 from pydantic import Field, UUID4, field_validator, model_validator
 
-from orchestrator.domain.snapshot_handoff import ExecutionManifest, ImmutableDomainModel
+from orchestrator.domain.snapshot_handoff import ExecutionManifest, ImmutableDomainModel, _validate_artifact_uri
 from orchestrator.domain.states import AgentRole
+from orchestrator.domain.tool_evidence import ToolExecutionEvidence, ToolExecutionOutcome
 
 
 class ChangeReportFile(ImmutableDomainModel):
@@ -45,6 +46,7 @@ class ChangeReportArtifact(ImmutableDomainModel):
     requirement_ids: tuple[UUID4, ...] = Field(min_length=1, alias="requirementIds")
     code_version: int = Field(ge=1, le=4, alias="codeVersion")
     summary: str = Field(min_length=1)
+    artifact_uri: str = Field(default="", alias="artifactUri")
     changes: tuple[ChangeReportFile, ...] = Field(min_length=1, alias="fileChanges")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), alias="createdAt"
@@ -76,6 +78,9 @@ class ChangeReportArtifact(ImmutableDomainModel):
 
     @model_validator(mode="after")
     def validate_report(self) -> "ChangeReportArtifact":
+        if not self.artifact_uri:
+            object.__setattr__(self, "artifact_uri", f"artifact://{self.artifact_id}/change-report.json")
+        _validate_artifact_uri(self.artifact_uri)
         _validate_artifact_lineage(
             self.artifact_id, self.artifact_version, self.previous_artifact_id
         )
@@ -85,6 +90,20 @@ class ChangeReportArtifact(ImmutableDomainModel):
         if len(paths) != len(set(paths)):
             raise ValueError("Change Report paths must be unique")
         return self
+
+
+class BuildDiagnostic(ImmutableDomainModel):
+    rule_id: str = Field(alias="ruleId", min_length=1)
+    normalized_location: str = Field(alias="normalizedLocation", min_length=1)
+    message: str = Field(min_length=1)
+
+    @field_validator("rule_id", "normalized_location", "message")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Build diagnostics must not be blank")
+        return value
 
 
 class BuildReportArtifact(ImmutableDomainModel):
@@ -106,6 +125,11 @@ class BuildReportArtifact(ImmutableDomainModel):
     duration_ms: int = Field(ge=0, strict=True, alias="durationMs")
     execution_manifest_id: UUID4 = Field(alias="executionManifestId")
     execution_manifest: ExecutionManifest = Field(alias="executionManifest")
+    artifact_uri: str = Field(default="", alias="artifactUri")
+    execution_outcome: ToolExecutionOutcome | None = Field(default=None, alias="executionOutcome")
+    failure_kind: Literal["PRODUCT", "INFRASTRUCTURE"] | None = Field(default=None, alias="failureKind")
+    tool_evidence: ToolExecutionEvidence | None = Field(default=None, alias="toolEvidence")
+    diagnostics: tuple[BuildDiagnostic, ...] = ()
     stdout_ref: str | None = Field(default=None, min_length=1, alias="stdoutRef")
     stderr_ref: str | None = Field(default=None, min_length=1, alias="stderrRef")
     created_at: datetime = Field(
@@ -149,6 +173,25 @@ class BuildReportArtifact(ImmutableDomainModel):
 
     @model_validator(mode="after")
     def validate_report(self) -> "BuildReportArtifact":
+        if not self.artifact_uri:
+            object.__setattr__(self, "artifact_uri", f"artifact://{self.artifact_id}/build-report.json")
+        _validate_artifact_uri(self.artifact_uri)
+        if self.execution_outcome is None:
+            object.__setattr__(self, "execution_outcome", ToolExecutionOutcome.PASS if self.exit_code == 0 else ToolExecutionOutcome.FAIL)
+        if self.execution_outcome == ToolExecutionOutcome.PASS and self.exit_code != 0:
+            raise ValueError("Build PASS requires exitCode=0")
+        if self.execution_outcome == ToolExecutionOutcome.FAIL and self.exit_code == 0:
+            raise ValueError("Build FAIL requires a nonzero product Build exitCode")
+        if self.execution_outcome == ToolExecutionOutcome.UNVERIFIED and self.failure_kind != "INFRASTRUCTURE":
+            raise ValueError("unverified Build requires an infrastructure failure classification")
+        if self.failure_kind == "INFRASTRUCTURE" and self.execution_outcome != ToolExecutionOutcome.UNVERIFIED:
+            raise ValueError("infrastructure failures cannot be reported as product Build failures")
+        if self.tool_evidence is not None:
+            if self.tool_evidence.tool_name != "run_build" or self.tool_evidence.execution_manifest != self.execution_manifest:
+                raise ValueError("Build evidence must prove run_build on the reported Snapshot")
+            expected_tool_outcome = ToolExecutionOutcome.UNVERIFIED if self.execution_outcome == ToolExecutionOutcome.UNVERIFIED else ToolExecutionOutcome.PASS
+            if self.tool_evidence.outcome != expected_tool_outcome:
+                raise ValueError("Build Tool evidence does not match its execution classification")
         _validate_artifact_lineage(
             self.artifact_id, self.artifact_version, self.previous_artifact_id
         )
@@ -162,7 +205,7 @@ class BuildReportArtifact(ImmutableDomainModel):
 
     @property
     def passed(self) -> bool:
-        return self.exit_code == 0
+        return self.execution_outcome == ToolExecutionOutcome.PASS and self.exit_code == 0
 
 
 def _validate_artifact_lineage(

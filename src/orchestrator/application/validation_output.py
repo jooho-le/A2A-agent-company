@@ -48,6 +48,7 @@ _SECURITY_REPORT_FIELDS = {
     "requirementIds", "codeVersion", "executionManifest", "createdAt",
     "requirementResults", "findings",
 }
+_OPTIONAL_REPORT_FIELDS = {"artifactUri"}
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,7 @@ def parse_validation_output(
             if model_type is QAReportArtifact
             else _SECURITY_REPORT_FIELDS
         )
-        if set(payload) != expected_fields:
+        if not expected_fields.issubset(payload) or set(payload) - expected_fields - _OPTIONAL_REPORT_FIELDS:
             raise ValueError(f"{name} payload has unexpected or missing fields")
         if payload.get("a2aTaskId") != task.id:
             raise ValueError(f"{name} must reference the completed A2A Task")
@@ -136,6 +137,17 @@ def parse_validation_output(
             raise ValueError(f"{name} codeVersion differs from the Source Snapshot")
         if report.execution_manifest != source.execution_manifest():
             raise ValueError(f"{name} Execution Manifest differs from the Source Snapshot")
+
+        result_items = report.tests if isinstance(report, QAReportArtifact) else report.requirement_results
+        allowed_tools = {"run_unit_tests", "run_browser_tests"} if isinstance(report, QAReportArtifact) else {"run_security_scan"}
+        for item in result_items:
+            evidence = item.tool_evidence
+            if evidence is not None and (
+                evidence.execution_manifest != report.execution_manifest
+                or evidence.tool_name not in allowed_tools
+                or (item.outcome == ValidationOutcome.UNVERIFIED) != (evidence.outcome == ValidationOutcome.UNVERIFIED)
+            ):
+                raise ValueError("validation Tool evidence must match the Agent role, result and Snapshot")
 
         required_ids = set(step.requirement_ids)
         if isinstance(report, QAReportArtifact):
@@ -167,16 +179,23 @@ def decide_verdict(
             "QA and Security reports refer to different execution manifests",
         )
 
+    result_items = (*qa_report.tests, *security_report.requirement_results)
+    if any(item.tool_evidence is None for item in result_items):
+        return VerdictDecision(
+            WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW,
+            "Required results lack MCP Tool execution provenance",
+        )
+
     confirmed_blocker = any(
         finding.disposition == FindingDisposition.CONFIRMED
         and finding.severity in (SecuritySeverity.CRITICAL, SecuritySeverity.HIGH)
         for finding in security_report.findings
     )
     policy_ambiguous_finding = any(
-        finding.disposition == FindingDisposition.SUSPECTED
+        finding.disposition in (FindingDisposition.SUSPECTED, FindingDisposition.UNVERIFIED)
         or (
             finding.disposition == FindingDisposition.CONFIRMED
-            and finding.severity in (SecuritySeverity.MEDIUM, SecuritySeverity.LOW)
+            and finding.severity == SecuritySeverity.MEDIUM
         )
         for finding in security_report.findings
     )
@@ -200,12 +219,29 @@ def decide_verdict(
             WorkflowStatus.FIX_REQUIRED, None,
             "A verifiable required check failed and requires a code fix",
         )
-    if has_unverified or policy_ambiguous_finding:
-        # Tool retry counts and automatic retry dispatch are not present yet;
-        # do not turn an incomplete/ambiguous result into a product verdict.
+    if has_unverified:
+        unverified_items = [
+            item for item in (*qa_report.tests, *security_report.requirement_results)
+            if item.outcome == ValidationOutcome.UNVERIFIED
+        ]
+        if all(item.tool_evidence is not None and item.tool_evidence.retries_exhausted for item in unverified_items):
+            return VerdictDecision(
+                WorkflowStatus.FINISHED, FinalVerdict.UNVERIFIED,
+                "Required Tool validation remains unverified after the initial call and two safe retries",
+            )
+        return VerdictDecision(
+            WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW,
+            "Required Tool validation is incomplete without proof that safe retries were exhausted",
+        )
+    if policy_ambiguous_finding:
         return VerdictDecision(
             WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW,
             "A required check is unverified or a Security finding needs policy review",
+        )
+    if any(item.tool_evidence is None or item.tool_evidence.outcome != ValidationOutcome.PASS for item in result_items):
+        return VerdictDecision(
+            WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW,
+            "Required PASS results lack successful MCP Tool execution provenance",
         )
     if not requirements_authoritative:
         return VerdictDecision(
