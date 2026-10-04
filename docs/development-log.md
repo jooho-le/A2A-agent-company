@@ -751,3 +751,186 @@ git check-ignore -v backend/app.db
 현재 Frontend 회원가입 화면과 Backend 회원가입 API는 각각 구현되어 있으나 아직 서로 HTTP API로 연결하지 않은 상태이다. 로그인 기능과 CORS 설정도 아직 추가하지 않았다.
 
 다음 개발 단계는 React 회원가입 화면과 FastAPI `POST /api/auth/signup` API를 연결하는 것이다. 시나리오 2의 전자문서 제출·조회 기능은 이후 개발 대상이다.
+
+---
+
+## Frontend-Backend 회원가입 API 연결
+
+추가 기록일: 2026-10-05
+
+아래 내용은 기존 기록 이후에 진행한 통합 개발 및 사용자 제공 통합 테스트 결과이다. 현재 진행 상태는 문서 마지막의 「현재 시나리오 1 상태」에 정리하였다.
+
+### 구현 내용
+
+- React 회원가입 화면에서 브라우저 기본 `fetch`를 사용하여 FastAPI를 호출하였다.
+- `POST http://127.0.0.1:8000/api/auth/signup`으로 회원가입 요청을 전송하였다.
+- `Content-Type: application/json`을 설정하였다.
+- 이메일과 비밀번호를 `JSON.stringify`로 JSON 문자열로 변환하여 전송하였다.
+- 회원가입 성공 시 백엔드에서 받은 성공 메시지를 화면에 표시하였다.
+- 회원가입 실패 시 백엔드에서 받은 실패 메시지를 화면에 표시하였다.
+- 네트워크 오류로 백엔드에 연결할 수 없으면 `서버에 연결할 수 없습니다.`를 표시하였다.
+- 요청 중에는 중복 클릭을 막기 위해 회원가입 버튼을 비활성화하였다.
+
+요청 예시:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "Password123"
+}
+```
+
+### CORS 설정
+
+다음 두 개발용 React 주소를 허용하였다.
+
+- `http://localhost:5173`
+- `http://localhost:5174`
+
+```python
+allow_origins=["http://localhost:5173", "http://localhost:5174"]
+```
+
+`allow_origins=["*"]`처럼 모든 출처를 허용하는 설정은 사용하지 않았다.
+
+### 5174를 추가한 이유
+
+Vite 개발 서버의 `5173` 포트가 이미 사용 중이어서 새 Frontend 개발 서버가 `5174`에서 실행되었기 때문이다. 브라우저는 포트가 다르면 다른 출처로 판단하므로, `5174`에서 실행 중인 React 화면도 API 응답을 사용할 수 있도록 허용 주소에 추가하였다.
+
+---
+
+## DEBUG-007 FastAPI Address already in use
+
+### 증상
+
+다음 명령으로 FastAPI를 실행하려고 할 때 오류가 발생하였다.
+
+```bash
+uvicorn main:app --reload
+```
+
+```text
+[Errno 48] Address already in use
+```
+
+### 원인
+
+기존 FastAPI 서버가 이미 `8000`번 포트에서 실행 중인 상태에서 새로운 Uvicorn 서버를 다시 실행하려고 하였다.
+
+### 확인
+
+브라우저에서 다음 주소에 접속하였다.
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### 결과
+
+Swagger UI가 정상 표시되어 기존 Backend 서버가 정상 실행 중임을 확인하였다.
+
+### 해결
+
+추가 Uvicorn 서버를 실행하지 않고 기존 실행 중인 서버를 그대로 사용하였다.
+
+**판정: 해결 완료**
+
+---
+
+## DEBUG-008 React 개발 서버 포트 변경 및 CORS
+
+### 관찰
+
+Frontend가 기존 `localhost:5173`이 아니라 `localhost:5174`에서 실행되었다.
+
+### 원인
+
+`5173` 포트가 이미 사용 중이어서 Vite가 다음 포트인 `5174`를 자동으로 사용하였다.
+
+### 문제 가능성
+
+FastAPI CORS에는 `localhost:5173`만 허용되어 있었기 때문에 `5174`에서 API 요청 시 브라우저가 요청을 차단할 가능성이 있었다.
+
+### 해결
+
+FastAPI CORS의 `allow_origins`에 다음 주소를 모두 추가하였다.
+
+- `http://localhost:5173`
+- `http://localhost:5174`
+
+### 검증
+
+React 회원가입 화면에서 FastAPI 요청이 성공하였다.
+
+---
+
+## INT-SIGNUP-001 정상 회원가입 통합 테스트
+
+### 목적
+
+React → FastAPI → SQLite 전체 연결을 검증한다.
+
+### 입력
+
+```json
+{
+  "email": "test3@example.com",
+  "password": "Password123"
+}
+```
+
+### 실제 결과
+
+- `OPTIONS /api/auth/signup` → `200 OK`
+- `POST /api/auth/signup` → `201 Created`
+- React 화면에 `회원가입에 성공했습니다.` 표시
+- 사용자 DB 저장 성공
+
+**판정: PASS**
+
+---
+
+## INT-SIGNUP-002 중복 이메일 통합 테스트
+
+### 사전 조건
+
+`test3@example.com` 사용자가 이미 등록되어 있다.
+
+### 입력
+
+```json
+{
+  "email": "test3@example.com",
+  "password": "Password123"
+}
+```
+
+### 기대 결과
+
+중복 가입을 거부하고 오류 메시지를 표시한다.
+
+### 실제 결과
+
+- Backend에서 중복 이메일 감지
+- HTTP `409 Conflict`
+- React 화면에 `이미 등록된 이메일입니다.` 표시
+
+**판정: PASS**
+
+---
+
+## 현재 시나리오 1 상태
+
+- 회원가입 화면 구현: PASS
+- 정상 회원가입: PASS
+- 이메일 형식 검사: PASS
+- 비밀번호 최소 8자 검사: PASS
+- 이메일 중복 검사: PASS
+- Argon2 비밀번호 해시 저장: PASS
+- React-FastAPI API 연결: PASS
+- Backend 성공 응답 표시: PASS
+- Backend 실패 응답 표시: PASS
+
+### 다음 개발 단계
+
+로그인 및 사용자 인증 기능 구현.
