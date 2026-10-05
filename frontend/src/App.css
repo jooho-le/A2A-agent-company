@@ -1,5 +1,6 @@
 .intro,
-.signup {
+.signup,
+.login {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -9,7 +10,8 @@
 }
 
 .intro h1,
-.signup h1 {
+.signup h1,
+.login h1 {
   margin: 0 0 16px;
   line-height: 1.2;
 }
@@ -38,12 +40,14 @@
 }
 
 .app-button:focus-visible,
-.signup-field input:focus-visible {
+.signup-field input:focus-visible,
+.login-field input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.signup-form {
+.signup-form,
+.login-form {
   width: 100%;
   max-width: 420px;
   display: flex;
@@ -52,13 +56,15 @@
   text-align: left;
 }
 
-.signup-field {
+.signup-field,
+.login-field {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.signup-field input {
+.signup-field input,
+.login-field input {
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
@@ -73,7 +79,8 @@
   font-size: 0.875rem;
 }
 
-.signup-actions {
+.signup-actions,
+.login-actions {
   display: flex;
   flex-direction: column;
   gap: 12px;

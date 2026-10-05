@@ -1,12 +1,18 @@
 import { useState } from 'react'
 import SignupPage from './pages/SignupPage'
+import LoginPage from './pages/LoginPage'
 import './App.css'
 
 function App() {
   const [showSignup, setShowSignup] = useState(false)
+  const [showLogin, setShowLogin] = useState(false)
 
   if (showSignup) {
     return <SignupPage onBack={() => setShowSignup(false)} />
+  }
+
+  if (showLogin) {
+    return <LoginPage onBack={() => setShowLogin(false)} />
   }
 
   return (
@@ -21,7 +27,13 @@ function App() {
         >
           회원가입
         </button>
-        <button type="button" className="app-button" disabled>로그인</button>
+        <button
+          type="button"
+          className="app-button"
+          onClick={() => setShowLogin(true)}
+        >
+          로그인
+        </button>
       </div>
     </main>
   )

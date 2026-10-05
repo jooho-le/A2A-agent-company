@@ -34,3 +34,18 @@ class SignupRequest(BaseModel):
         if len(value) < 8:
             raise ValueError("비밀번호는 최소 8자 이상이어야 합니다.")
         return value
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str
+    password: str
+
+
+class CurrentUserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    role: str
