@@ -51,3 +51,8 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 ```bash
 PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ```
+
+## 평가 모듈 (Evaluation / QA / Security)
+
+평가 코드·테스트·보고서 변환의 사용 방법과 현재 범위는
+[평가 모듈 README](evaluation/README.md)를 참고하세요.

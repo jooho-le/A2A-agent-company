@@ -10,3 +10,14 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Local evaluation environment and outputs
+.idea/
+venv/
+.env.*
+!.env.example
+!.env.template
+.coverage
+.coverage.*
+htmlcov/
+results/
