@@ -3,10 +3,11 @@
 | 항목 | 내용 |
 |---|---|
 | 담당자 | 강석민 |
-| 작성일 / 버전 | 2026-09-28 / 0.2 |
+| 작성일 / 버전 | 2026-09-28 작성 · 2026-10-06 갱신 / 0.3 |
 | 상태 | 팀 검수용 설계 초안. 구현·실험 완료 보고서가 아님 |
-| 담당 범위 | 검증 시스템, QA·보안 평가 기준, 비교 실험, 결과 분석·발표 근거 |
+| 담당 범위 | 독립 평가 시스템(보호 테스트·QA/보안 관점 채점), 비교 실험, 결과 분석·발표 근거 |
 | 첫 구현 대상 | 회원가입 MVP 확정, 표시 Key SCN-001 |
+| 평가 위치 | 개발 순환(Planner→Developer→QA/Security Agent→수정) 밖에서 최종 결과물을 채점하는 독립 평가. 0.3에서 정리, 팀 확정 대기(OPEN-11) |
 
 ## 1. 목적
 
@@ -26,10 +27,10 @@ Multi-Agent의 우수성을 전제하지 않는다. 동일 조건에서 공정�
 
 | 작업 | 4번 책임 | 연결 담당 및 경계 |
 |---|---|---|
-| QA 기준 | 요구사항별 기대 결과·경계값·독립 평가 테스트 | 2번 QA Agent의 테스트 생성과 병행 |
-| 보안 기준 | 검사 대상·재현·적용 여부·판정 근거 | 2번 Security Agent의 분석·도구 사용과 연결 |
-| 검증 실행 | 보호 평가 테스트·도구 결과 변환·보고서·집계 | MCP 실행·컨테이너·권한은 2번, 평가 어댑터는 4번. 함수 연결은 협의 |
-| 최종 판단 | 항목별 결과와 전체 평가 권고 | 최종 상태·재시도·종료 결정은 1번 |
+| QA 관점 평가 | 기능 요구(REQ-001·002·003·004·007)의 기대 결과·경계값·보호 테스트 | 순환 안의 QA Agent(2번)는 자체 테스트로 개발을 돕는 별도 역할 |
+| 보안 관점 평가 | 보안 요구(REQ-003·005·006)의 검사 대상·재현·판정 근거·보호 테스트 | 순환 안의 Security Agent(2번)와 별도 |
+| 검증 실행 | 보호 테스트 작성, 결과 정규화·집계, 독립 평가 보고서 생성 | 실행 컨테이너·MCP 도구는 2번, 실행 종료 후 최종 Snapshot 전달은 1번 |
+| 최종 판단 | 독립 평가 결과(evaluationVerdict)와 근거 | 순환 안의 최종 상태·재시도·종료 결정(finalVerdict)은 1번. 서로 덮어쓰지 않음 |
 | 로그 | 검사 증거 생성·필드 정의·분석 | 전체 이벤트 저장·Task 상태 DB는 1번 |
 | 대상 서비스 | API·DB·환경에 맞춘 검사 | 서비스·화면·인증·DB 구현은 3번 |
 | 비교 실험 | 조건·반복 계획·공통 평가·집계 | Single/Multi 실행 진입점은 1·2번과 연결 |
@@ -41,9 +42,11 @@ Multi-Agent의 우수성을 전제하지 않는다. 동일 조건에서 공정�
 
 | 담당 | 제공받을 정보 | 전달할 정보 |
 |---|---|---|
-| 1번 | run/Workflow Step/A2A ID 매핑, Artifact Registry, Execution Manifest, 실행 한도 | 결과 스키마·종료 권고·증거·수정 회차 |
-| 2번 | 기획 Artifact, Agent 검사 결과, MCP 호출·응답 형식 | 검사 진입점·입력 검증·정규화 규칙 |
-| 3번 | API 규격, 기동·준비 확인·종료, 테스트 DB·계정·조회 수단 | 케이스·테스트 데이터·실패 재현 절차 |
+| 1번 | ID 규칙·Artifact·Manifest·실행 한도(확인 완료). 실행 종료 시 최종 Snapshot·작업공간·finalVerdict를 넘겨받는 지점, Single 실행 진입점, Run Configuration 위치(요청 예정) | 독립 평가 보고서와 실험 지표 |
+| 2번 | 보호 테스트를 실행 컨테이너에 포함·실행하는 방법, run_unit_tests의 testScope와 scannerProfile, read_test_report/read_security_report 결과 JSON 형식(요청 예정) | 보호 테스트 묶음과 필요한 결과 필드 |
+| 3번 | API 규격·응답 코드·실행 방법·DB 구조·이메일 검증 위치(수령, 2026-10-05). 테스트 DB 경로 분리·데이터 초기화·서버 로그 수집(요청 예정) | 케이스·테스트 데이터·실패 재현 절차 |
+
+독립 평가 구조에서는 4번 모듈을 QA/Security Agent 내부에 연결하지 않는다. 따라서 Agent 내부 호출 위치와 A2A Artifact 포장은 4번의 필수 업무가 아니다.
 
 실행기가 실제 시간·종료 코드를 기록하고, 모델 호출 담당이 사용량을 제공해야 한다. 4번이 Agent 설명으로 시간·토큰 수·실행 결과를 추정하지 않는다.
 
@@ -74,7 +77,19 @@ QA Agent의 요구사항 기반 독립 테스트와 팀의 공통 평가 테스�
 
 공통 요구사항·테스트는 버전과 해시로 관리한다. Developer는 평가 기준을 수정할 수 없다. 기준 자체의 오류를 고칠 경우 변경 사유·담당·이전 버전을 남기고 양쪽을 새 기준으로 다시 평가한다. 기존 점수를 덮어쓰지 않는다.
 
-초기 제안은 공통 평가 피드백을 양쪽에 동일하게 제공하고 예산 내 수정을 허용하는 방식이다. 비공개 최종 테스트를 도입하면 공개 범위·수정 기회를 양쪽에 동일하게 적용하고 실험 조건에 명시한다.
+### 4.1 독립 평가 원칙 (0.3)
+
+개발 순환 안의 QA·Security Agent는 결과물을 검사해 Developer에게 피드백하는 참가자다. 4번 평가는 순환이 끝난 뒤 순환 밖에서 최종 결과물을 채점하는 심판이다. 0.2의 "공통 평가 피드백을 양쪽에 동일하게 제공" 제안은 아래 원칙으로 대체한다(팀 확정 대기, OPEN-11).
+
+| 원칙 | 내용 |
+|---|---|
+| 같은 시험지 | Multi와 Single의 최종 결과물을 같은 보호 테스트 묶음(suite 이름·버전·SHA-256)과 같은 컨테이너 이미지·Manifest에서 채점한다. |
+| 모든 종료 상태 채점 | SUCCESS뿐 아니라 FAIL·UNVERIFIED·HUMAN_REVIEW로 끝난 실행의 마지막 Snapshot도 채점한다. 실패한 실행을 빼면 성공률이 부풀려진다. |
+| 결과 비공개 | 채점 결과를 Agent에게 피드백하지 않는다. 보호 테스트는 Agent 작업공간에서 보이거나 수정될 수 없어야 한다. |
+| 중간 버전 | 수정 전후 비교(Regression Count)를 위해 CODE-1, CODE-2 등을 채점할 수 있으나 기록만 하고 순환에 전달하지 않는다. |
+| 판정 분리 | 독립 평가는 evaluationVerdict를 남기고 1번의 finalVerdict를 덮어쓰지 않는다. 두 값을 나란히 저장해 "Orchestrator SUCCESS + 보호 테스트 FAIL"(협업이 놓친 결함)을 센다. |
+
+개발정의서 11-A의 "Single-Agent도 테스트 결과를 받고 수정할 기회를 갖는다"는 순환 안에서 Agent가 만든 테스트와 도구 결과에 대한 규칙이다. 보호 테스트 결과를 공개한다는 뜻으로 해석하지 않는다.
 
 ## 5. 입력·출력 인터페이스
 
@@ -116,9 +131,21 @@ QA Agent의 요구사항 기반 독립 테스트와 팀의 공통 평가 테스�
 
 MCP protocol error, isError=true인 도구 실행 오류, 정상 도구 실행 후 제품 FAIL을 구분한다. QA assertion 실패나 scanner finding 자체는 도구 장애가 아니다. testScope/testSuite/scannerProfile과 보안 HTTP·DB 재현 실행 경로, 보고서 세부 스키마는 2번과 확정한다.
 
-### 5.3 평가 모듈 제안
+### 5.3 평가 모듈 구성
 
-validation은 입력·ID·버전, adapters는 MCP 결과 변환, reporting은 검사·Issue·증거, evaluation은 요구사항 집계와 판정 입력, experiments는 실행 조건·측정값·통계를 담당한다. 최종 Verdict 계산은 1번 Orchestrator가 담당하며 4번은 판정 규칙 검증용 fixture와 결과를 제공한다. 실제 실행 명령과 함수 API는 구현 전 확정한다.
+2026-10-06 기준 실제 모듈 구성은 다음과 같다. 상세 현황은 15.1절에 있다.
+
+| 모듈 | 역할 | 상태 |
+|---|---|---|
+| aggregation.py | 검사 계획·결과 대조, 상태별 개수·통과율·실패/미검증 목록 | 구현 |
+| manifest.py | Manifest 형식 검사, 기준·관측 일치 시에만 집계 | 구현 |
+| independent.py | 독립 평가 보고서(INDEPENDENT_EVALUATION) 생성 | 구현 |
+| reporting.py | 1번이 받는 QA_REPORT/SECURITY_REPORT 형식 변환(에이전트 호환용 보조 경로) | 구현 |
+| protected_tests/ | 회원가입 보호 테스트 | 예정 |
+| 결과 어댑터 | 컨테이너 결과 JSON → CheckResult 정규화 | 2번 형식 수령 후 |
+| experiments/ | 실행 조건·측정값·지표·그래프 | 예정 |
+
+최종 finalVerdict 계산은 1번 Orchestrator가 담당한다. 4번은 독립 평가 결과와 판정 규칙 검증용 fixture를 제공한다.
 
 ## 6. 실행 환경과 생명주기
 
@@ -286,76 +313,84 @@ A2A 요청·Task·Artifact와 MCP 실제 실행 기록을 연결한다. A2A 상�
 | NOT_RUN | 예정 검사 미실행 | UNVERIFIED 입력 |
 | NOT_APPLICABLE | 사전 승인된 비대상, 사유·승인 참조 필수 | 승인 범위만 제외 |
 
-필수 미검증이 있으면 검증 집계는 UNVERIFIED로 두되 확인된 FAIL 목록을 함께 보존하는 평가안이다. 미검증 없이 필수 실패가 있으면 FAIL, 전체 적용 필수가 통과해야 PASS다. 선택 검사는 별도 summary로 표시한다. 적용 대상 0개는 100%가 아닌 null이며 필수 MVP 검사를 전부 제외할 수 없다.
+필수 미검증이 있으면 검증 집계는 UNVERIFIED로 두되 확인된 FAIL 목록을 함께 보존하는 평가안이다. 미검증 없이 필수 실패가 있으면 FAIL, 전체 적용 필수가 통과해야 PASS다. 선택 검사는 별도 summary로 표시한다. 적용 대상 0개는 100%가 아닌 null이며 필수 MVP 검사를 전부 제외할 수 없다. Manifest가 없거나 다르면 아무것도 측정하지 못한 것이므로 통과율도 0%가 아닌 null이고, 검사별 errorCode는 MANIFEST_MISSING/MANIFEST_MISMATCH로 남긴다.
 
-### 11.2 보고서 계약 제안
+### 11.2 보고서 형식 (0.3, 구현 기준)
 
-공통 식별·Manifest를 재사용하고 다음 평가 payload를 구체화한다. 보고서 생성 주체·공통 Registry 저장 경로는 OPEN-03에서 확정한다.
+0.2의 제안 필드표는 실제 구현과 달라 아래 두 형식으로 대체한다. 기본은 독립 평가 보고서이고, 에이전트 호환 보고서는 보조 경로다.
+
+**(1) 독립 평가 보고서 — `independent.build_evaluation_report()`, reportType `INDEPENDENT_EVALUATION`**
+
+| 영역 | 필드 | 설명 |
+|---|---|---|
+| 식별 | schemaVersion, reportType, evaluationId, sourceRunId, architecture, createdAt | evaluationId(채점 실행)와 sourceRunId(대상 개발 실행)는 서로 다른 UUIDv4. A2A ID는 쓰지 않는다. createdAt은 시간대 포함 ISO 시각 |
+| 시험지 | suite.id, suite.version, suite.sha256 | 이름이 같아도 내용이 바뀌었을 수 있으므로 파일 묶음 해시로 같은 시험지임을 증명 |
+| 대상 | expectedManifest, observedManifest, manifestCheck | 불일치·누락이면 결과를 쓰지 않고 UNVERIFIED |
+| 전체 요약 | evaluationVerdict, summary(required/optional 상태 수), confirmedFailureIds, unverifiedTestIds, optionalConfirmedFailureIds, optionalUnverifiedTestIds, requiredCheckPassRate, requiredRequirementPassRate | evaluationVerdict는 finalVerdict가 아님. 실패·미검증 ID는 필수와 선택(optional…)을 나눠 기록. 검사 통과율과 요구사항 통과율을 따로 계산 |
+| 요구사항별 | requirements[].requirementId, checkIds, validationVerdict, summary, confirmedFailureIds, unverifiedTestIds, optionalConfirmedFailureIds, optionalUnverifiedTestIds, requiredPassRate | 한 요구사항에 검사를 여러 개 연결 가능 |
+| 관점별 | perspectives.QA, perspectives.SECURITY | 검사가 없는 관점은 null(통과로 표시하지 않음) |
+| 검사별 | checks[].testId, required, status, evidenceIds, errorCode, expectedResult, actualResult, reason, normalizedLocation, exclusionApprovalRef, exclusionReason, requirementId, perspective, title | status는 PASS/FAIL/ERROR/NOT_RUN/NOT_APPLICABLE 원래 값 그대로 |
+
+**(2) 에이전트 호환 보고서 — `reporting.build_report()`, dev 2b4fc60의 QA_REPORT/SECURITY_REPORT**
 
 | 영역 | 필드 |
 |---|---|
-| 식별 | schemaVersion, reportId, runId, workflowStepId, a2aTaskId, agentContextId, scenarioId, scenarioKey, architecture |
-| 기준 | requirementsVersion, suiteVersion, attempt, suite, executionManifestId |
-| 실행 | startedAt, finishedAt, durationMs, tool(name/version/exitCode), mock |
-| results | testId, testKey, requirementIds, required, status, expected, actual, errorCode, evidenceIds, durationMs |
-| findings | issueId, issueFingerprint, category, severity, findingState, resolutionState, requirementIds, testIds, reproduction, evidenceIds |
-| 증거 | evidenceId, 저장소 상대경로, sha256, kind, producer, redacted |
-| 요약 | validationVerdict, 필수/선택별 상태 수, confirmedFailureIds, unverifiedTestIds |
+| 공통 | artifactId, artifactType, artifactVersion, previousArtifactId, runId, workflowStepId, a2aTaskId, a2aArtifactId, createdBy, createdAt, requirementIds, codeVersion, executionManifest, artifactUri(선택) |
+| QA | tests[].testId, requirementId, outcome(PASS/FAIL/UNVERIFIED), title, details, expectedResult, actualResult, normalizedLocation, toolEvidence |
+| SECURITY | requirementResults[].requirementId, outcome, details, expectedResult, actualResult, normalizedLocation, toolEvidence / findings[].findingId, severity, disposition, title, description, requirementId, evidenceRef, ruleId, normalizedLocation |
 
-보고서는 Registry의 QA_REPORT/SECURITY_REPORT 등에 등록하고 run·workflowStep·생성자·요구사항·소스 버전·artifact_uri·생성시각을 연결한다. A2A artifactId와 프로젝트 artifact_id는 별도 필드로 보존한다.
+ERROR·NOT_RUN은 outcome UNVERIFIED로 바뀌고 원래 상태·오류 코드·사유·증거 ID는 details(JSON 문자열)에 보존한다. SECURITY는 요구사항당 결과 1개만 허용하며 NOT_APPLICABLE은 표현할 방법이 없어 거부한다. 실제 A2A Task·Artifact ID가 있어야 만들 수 있다.
 
-reportId/evidenceId/testId 생성 계약은 협의하되 내부 기계 ID는 UUIDv4 원칙을 따른다. 등록된 ID만 수락한다. 개별 보고서는 finalVerdict를 생성하지 않는다. 예전 completion_recommendation 필드는 제거한다. 최종 결과와 단일 검사 권고를 혼동하지 않는다.
+두 형식 모두 finalVerdict를 만들지 않는다. 내부 기계 ID는 UUIDv4이며, 등록 여부 확인·Registry 저장 경로·보고서 ID 발급 주체는 OPEN-03에서 확정한다. 0.2 제안표의 실행 시간(startedAt, durationMs), 도구 버전, 증거 저장 정보(경로·sha256·producer)는 아직 구현하지 않았으며 결과 어댑터 구현 시 추가를 검토한다.
 
-### 11.3 합성 결과 예시
+### 11.3 합성 결과 예시 (독립 평가 보고서)
 
-아래는 부분 검사 형식 예시이며 실제 결과·증거가 아니다. 요구사항 UUID는 Registry에서 REQ-003으로 연결된다는 가정이다. 생략된 전체 검사를 통과한 것으로 해석하지 않는다.
+아래는 `build_evaluation_report()`로 실제 생성한 출력에서 반복되는 부분을 줄인 예시다. 모든 ID와 해시는 가짜이며 실제 서비스 결과가 아니다. 요구사항 2개(QA 1, SECURITY 1) 중 로그 비밀번호 노출 검사가 FAIL인 경우다. 생략한 `requirements[1]`, `perspectives`, 첫 번째 검사 행도 같은 구조다.
 
 ```json
 {
-  "schemaVersion": "0.2",
-  "reportId": "39c287b5-b677-4a46-a2a3-c169a355c2a1",
-  "runId": "9f4cb335-772c-4607-93fb-f3534839cc7b",
-  "workflowStepId": "90787967-e7c5-4af2-b128-48d2c3e41436",
-  "a2aTaskId": "example-qa-server-task",
-  "agentContextId": "example-qa-context",
-  "scenarioId": "99ee3b44-3ec4-4be5-a23f-22acf65dff66",
-  "scenarioKey": "SCN-001",
+  "schemaVersion": "1.0",
+  "reportType": "INDEPENDENT_EVALUATION",
+  "evaluationId": "00000000-0000-4000-8000-000000000002",
+  "sourceRunId": "00000000-0000-4000-8000-000000000003",
   "architecture": "MULTI_AGENT",
-  "requirementsVersion": "membership-0.2",
-  "suiteVersion": "evaluation-0.2",
-  "attempt": 0,
-  "suite": "qa",
-  "executionManifestId": "c792dc7c-e476-4f84-b1d6-ab1371800ca9",
-  "startedAt": "2026-09-28T00:00:00Z",
-  "finishedAt": "2026-09-28T00:00:01Z",
-  "durationMs": 1000,
-  "tool": {"name": "example-runner", "version": "example", "exitCode": 1},
-  "mock": true,
-  "results": [{
-    "testId": "131c17a2-a9a0-48aa-babf-745e9b8c9d0b",
-    "testKey": "QA-SIGNUP-003",
-    "requirementIds": ["3b839b52-9daa-4e9c-9cb1-1d7d98d8deba"],
-    "required": true,
-    "status": "FAIL",
-    "expected": {"accountCount": 1},
-    "actual": {"accountCount": 2},
-    "errorCode": null,
-    "evidenceIds": ["ffcc7fe8-0e73-4d10-9615-e1878038b294"],
-    "durationMs": 1000
-  }],
-  "findings": [],
-  "evidence": [{
-    "evidenceId": "ffcc7fe8-0e73-4d10-9615-e1878038b294",
-    "path": "examples/duplicate-account.json",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-    "kind": "request-response-and-db-check",
-    "producer": "example-runner",
-    "redacted": true
-  }],
-  "validationVerdict": "FAIL",
-  "summary": {"required": {"pass": 0, "fail": 1, "error": 0, "notRun": 0, "notApplicable": 0}, "optional": {}},
-  "confirmedFailureIds": ["131c17a2-a9a0-48aa-babf-745e9b8c9d0b"],
-  "unverifiedTestIds": []
+  "createdAt": "2026-10-06T12:00:00+09:00",
+  "suite": {"id": "membership-protected", "version": "0.1", "sha256": "ffff…(64자리)"},
+  "expectedManifest": {"repositoryId": "synthetic-repository", "codeVersion": 2, "…": "9개 필드"},
+  "observedManifest": {"repositoryId": "synthetic-repository", "codeVersion": 2, "…": "9개 필드"},
+  "evaluationVerdict": "FAIL",
+  "manifestCheck": {"errorCode": null, "mismatchedFields": [], "metadataMatches": true},
+  "summary": {
+    "required": {"pass": 1, "fail": 1, "error": 0, "notRun": 0, "notApplicable": 0},
+    "optional": {"pass": 0, "fail": 0, "error": 0, "notRun": 0, "notApplicable": 0}
+  },
+  "confirmedFailureIds": ["00000000-0000-4000-8000-000000000015"],
+  "unverifiedTestIds": [],
+  "optionalConfirmedFailureIds": [],
+  "optionalUnverifiedTestIds": [],
+  "requiredCheckPassRate": 0.5,
+  "requiredRequirementPassRate": 0.5,
+  "requirements": [
+    {"requirementId": "00000000-0000-4000-8000-00000000000a",
+     "checkIds": ["00000000-0000-4000-8000-000000000014"],
+     "validationVerdict": "PASS", "requiredPassRate": 1.0,
+     "confirmedFailureIds": [], "unverifiedTestIds": [], "summary": {"…": "위와 같은 구조"}}
+  ],
+  "perspectives": {
+    "QA": {"validationVerdict": "PASS", "requiredPassRate": 1.0, "…": "요구사항별 요약과 같은 구조"},
+    "SECURITY": {"validationVerdict": "FAIL", "requiredPassRate": 0.0, "…": "요구사항별 요약과 같은 구조"}
+  },
+  "checks": [
+    {"testId": "00000000-0000-4000-8000-000000000015", "required": true, "status": "FAIL",
+     "evidenceIds": ["00000000-0000-4000-8000-000000000079"], "errorCode": null,
+     "expectedResult": "서버 로그에 합성 비밀번호 없음",
+     "actualResult": "요청 본문 로그에서 [REDACTED] 발견",
+     "reason": "요청 본문 전체를 로그로 출력",
+     "normalizedLocation": "server.log:request-body",
+     "exclusionApprovalRef": null, "exclusionReason": null,
+     "requirementId": "00000000-0000-4000-8000-00000000000b",
+     "perspective": "SECURITY", "title": "로그 비밀번호 노출"}
+  ]
 }
 ```
 
@@ -473,48 +508,55 @@ ABORTED에는 Verdict 시간이 없으므로 null과 종료까지의 시간을 �
 
 허용 경로·명령·네트워크 대상으로 제한하고 생성 코드·검사를 격리한다. 임의 외부 사이트를 시험 대상으로 삼지 않는다. 외부 배포·실제 개인정보 전송·외부 계정 접근은 승인 경로를 사용하고 검사 PASS로 대체하지 않는다. 관련 제어 구현은 1·2번, 확인 기준은 4번과 분담한다.
 
-## 15. 산출물과 제안 디렉터리
+## 15. 산출물과 디렉터리
 
 ```text
-docs/evaluation/evaluation_spec.md          # 이 명세
-src/evaluation/                     # 집계·합성 데모 로컬 초안, 나머지 기능 예정
-tests/evaluation/               # 집계 코드 자체 검사 로컬 초안
-src/evaluation/protected_tests/membership/       # 공통 평가·fixture (예정)
-src/evaluation/protected_tests/document/     # 확장 시 추가
-src/evaluation/protected_tests/mystery_game/         # 확장 시 추가
-experiments/                    # 실험 설정·집계 절차 (예정)
-docs/evaluation/examples/       # 합성 결과 예시 (예정)
+docs/evaluation/evaluation_spec.md        # 이 명세
+docs/evaluation/development_progress.md   # 구현 현황·검토 결과·다음 작업
+docs/evaluation/environment_setup.md      # 설치·실행 안내
+src/evaluation/                           # 평가 모듈 (15.1)
+src/evaluation/contracts/                 # dev 2b4fc60 공통 스키마 사본
+src/evaluation/protected_tests/membership/  # 회원가입 보호 테스트·fixture (예정)
+src/evaluation/protected_tests/document/    # 확장 시 추가
+src/evaluation/protected_tests/mystery_game/  # 확장 시 추가
+tests/evaluation/                         # 평가 모듈 자체 테스트
+experiments/                              # 실험 설정·집계 절차 (예정)
 ```
 
-보호 평가는 src/evaluation/protected_tests 아래에 두는 공통 권장 구조를 따른다. single_agent/multi_agent 실행 연결과 schemas/project·Registry는 담당 구현을 재사용한다. 세부 구조·스택 합의 후 확정한다. 2026-10-04 기준 집계 코드·합성 데모·자체 테스트의 로컬 초안이 존재하며, 보호 평가·실제 실행 연결·실험 코드는 아직 구현하지 않았다. 가상환경·개인 IDE 설정·비밀정보·대용량 원시 증거는 커밋하지 않는다.
+보호 테스트는 src/evaluation/protected_tests 아래에 둔다. 단, 실행 시에는 Agent 작업공간에서 보이거나 수정될 수 없는 위치에 넣어야 하며 그 방법은 2번과 정한다(OPEN-06). single_agent/multi_agent 실행 연결과 schemas/project·Registry는 담당 구현을 재사용한다. 가상환경·개인 IDE 설정·비밀정보·대용량 원시 증거는 커밋하지 않는다.
 
 최종 제출물은 명세, 요구사항-검사 표, 실제 검사 코드·fixture, 실행·초기화 안내, 스키마, 실제 보고서·증거, 수정 이력, 실험 설정·원본 측정값·집계 코드, 그래프·발표 사례다. 피드백 ID→변경 요구→반영 버전/커밋→재검증 결과의 이력도 남긴다.
 
-### 15.1 로컬 구현 현황 (2026-10-04)
+### 15.1 구현 현황 (2026-10-06)
 
-이 현황은 설계 v0.2의 확정 정책이나 협의 상태를 변경하지 않는다. 평가 초기 구현의 범위를 기록하며 실제 서비스 검증 완료를 뜻하지 않는다.
+이 현황은 확정 정책이나 협의 상태를 바꾸지 않는다. 실제 서비스 검증 완료를 뜻하지 않으며, 모든 예시 출력은 합성 데이터다.
 
 | 파일 | 구현 범위 |
 |---|---|
-| src/evaluation/aggregation.py | 고정 검사 계획과 정규화된 결과의 집계, 누락·중복·증거 참조 누락 처리, 필수·선택 분리 |
-| src/evaluation/__main__.py | 정상·기능 실패·보안 실패·환경 오류·실패와 누락의 합성 입력 데모 |
-| tests/evaluation/test_aggregation.py | 집계 동작과 잘못된 입력의 자체 검사 |
-| checks/test_setup.py | Python 가상환경과 HTTP 라이브러리 확인 |
-| src/evaluation/manifest.py | 기대 Manifest와 보고서의 코드·환경 메타데이터 비교, 누락·불일치 시 미검증 처리 |
-| tests/evaluation/test_manifest.py | Manifest 형식·누락·불일치와 다른 버전 결과 혼합 방지 검사 |
-| src/evaluation/reporting.py | 명시적 검사 ID 대응, 공통 보고서 변환, Tool 실행 근거 정합성 및 dev 스키마 검사 |
-| src/evaluation/report_demo.py | QA/Security × PASS/FAIL/ERROR/NOT_RUN 합성 보고서 8개 |
-| pyproject.toml / uv.lock | dev 공통 패키지 설정과 고정 의존성 |
+| src/evaluation/aggregation.py | 검사 계획과 결과 대조, 누락·중복·증거 없는 판정·승인 없는 제외 처리, 필수·선택 분리(판정·통과율·실패/미검증 ID 목록 모두), 진단 정보(기대값·실제값·사유·위치·오류 코드) 보존, 알려진 민감값 치환 |
+| src/evaluation/manifest.py | Manifest 형식 검사(UUID·해시 길이·sha256 접두사), 기준·관측 불일치 시 결과 미사용 및 UNVERIFIED |
+| src/evaluation/independent.py | 독립 평가 보고서. 평가 ID·대상 Run 분리, suite 해시, 요구사항 범위 검사, 요구사항별·관점별 요약, 검사 통과율과 요구사항 통과율 분리 |
+| src/evaluation/reporting.py | 에이전트 호환 QA_REPORT/SECURITY_REPORT 변환, ID 대응표·도구 실행 근거·재시도 규칙·dev 스키마 검사 |
+| src/evaluation/__main__.py, report_demo.py | 집계·보고서 합성 예시 |
+| tests/evaluation/ | 평가 모듈 자체 테스트 113개 |
+| checks/test_setup.py | Python 버전·가상환경·HTTP 라이브러리 확인 2개. 기본 pytest 대상이 아니며 `pytest checks`로 따로 실행 |
+| scripts/check_dev_reports.py | dev의 실제 보고서 모델이 합성 보고서 8개를 받는지 확인 |
 
-집계 코드는 11.1절 평가안을 시험하는 내부 초안이다. 반환값은 전체 보고서 계약이 아닌 부분 집계이며 finalVerdict를 계산하지 않는다. UUID 형식과 증거 ID 유무를 검사하지만 Registry 등록 여부, 증거 내용·해시·마스킹, 요구사항별 완전성, Manifest 일치, 보안 차단 Finding을 검증하지 않는다. 필수 여부와 적용 제외 승인은 신뢰된 계획에서 제공해야 한다. 실제 서비스 검증에 사용하려면 이 선행 검증과 계약 연결이 필요하다. 정규화 결과를 공통 QA/Security 보고서로 변환하는 로컬 어댑터는 아래 범위로 추가 구현했다.
+평가 코드와 테스트에는 모듈·함수 단위의 간결한 한국어 설명과 처리 단계 표시를 달았다(2026-10-06). 주석 정리 전후로 의도한 수정 외에는 코드 구조(AST)가 같음을 확인했다.
 
-별도 `aggregate_report` 진입점은 Manifest 메타데이터 일치를 확인한다. dev `2b4fc60`의 공통 스키마에 맞춰 containerImageDigest와 dependencyLockHash는 `sha256:` + 64자리 소문자 16진수 형식을 검사한다. 실제 소스·환경 해시, Registry 조회, 증거 진위 확인은 아직 연결하지 않았다.
+아직 하지 않은 것: 보호 테스트, 컨테이너 결과 어댑터, 실행 종료 후 자동 채점 연결, 평가 기록 저장, Registry·증거 진위 확인, 실험 코드.
 
-`build_report`는 필수 검사 계획과 명시적 ID 대응을 사용하며 ERROR/NOT_RUN을 UNVERIFIED로 변환하고 details에 내부 상태·사유를 보존한다. N/A는 공통 정책 합의 전 거부한다. Security는 요구사항별 사전 집계 결과 1개만 지원하며 여러 증거를 임의 병합하지 않는다. 증거 진위·마스킹·A2A 포장·실제 도구 실행은 연결 전이다.
+### 15.2 코드 검토에서 확인한 제약 (2026-10-06)
 
-현재 dev 구현과 본 명세의 ID·상태·증거·정책 차이는 [개발진행사항](development_progress.md)에 기록했다. 이 검토는 OPEN-01/03/04/06의 팀 승인을 대신하지 않는다.
-
-합성 예시의 PASS는 실제 서비스 통과나 16절 완료 조건 충족을 의미하지 않는다. 실행 방법과 환경 상태는 [로컬 환경 안내](environment_setup.md)에서 관리한다.
+| 구분 | 내용 | 조치 |
+|---|---|---|
+| 결정 필요 | SEC-SIGNUP-004·006·007은 연결된 요구사항이 없다. 독립 평가 보고서는 요구사항당 여러 검사를 받을 수 있지만 검사마다 요구사항 ID가 필요하다. 에이전트 호환 SECURITY_REPORT는 요구사항당 결과 1개만 받는다. | 기존 요구사항에 연결할지 새 보안 요구사항으로 등록할지 결정(OPEN-12) |
+| 결정 필요 | 에이전트 호환 경로에서 도구는 정상 종료(PASS)했지만 결과 파싱에 실패해 UNVERIFIED가 된 검사는 "도구·판정 불일치" 오류로 보고서 생성이 멈춘다. dev 계약과 같은 규칙이다. 독립 평가 경로에는 해당하지 않는다. | 처리 방식 결정(OPEN-13) |
+| 수정 완료 | confirmedFailureIds·unverifiedTestIds에 선택 검사가 섞이던 문제. 필수만 담고 선택은 optionalConfirmedFailureIds·optionalUnverifiedTestIds로 분리했다. | 2026-10-06 반영 |
+| 수정 완료 | 가상환경 확인 테스트(checks/test_setup.py)가 기본 pytest 대상에 있어 가상환경 없는 컨테이너에서 실패하던 문제. pytest.ini testpaths를 tests로 바꾸고 환경 확인은 `pytest checks`로 따로 실행한다. | 2026-10-06 반영 |
+| 참고 | 민감값 치환은 호출자가 알려 준 문자열만, 진단 필드에서만 수행한다. 검사 제목·suite 이름·findings·toolEvidence·context는 치환하지 않는다. | 호출자가 사전 정리 |
+| 참고 | Manifest 불일치 시 requiredRequirementPassRate는 null이 아니라 0이다. UNVERIFIED를 분모에서 빼지 않는 개발정의서 원칙과 같은 방향이다. | 실험 집계 시 manifestCheck와 함께 해석 |
+| 참고 | created_at은 Python 3.10의 datetime.fromisoformat으로 해석한다. 3.10에서는 소수점 초 자릿수 등 일부 ISO 표기를 읽지 못한다. | "YYYY-MM-DDTHH:MM:SS+09:00" 형식 사용 |
 
 ## 16. 완료 조건과 자체 검증
 
@@ -533,15 +575,15 @@ docs/evaluation/examples/       # 합성 결과 예시 (예정)
 
 ## 17. 구현 순서와 이번 검수 범위
 
-1. 확정 회원가입 MVP·8개 요구·입출력과 남은 정책 검수.
-2. API·Artifact에 맞춰 대응표와 결과 형식 확정.
-3. 실행기·변환·판정 구현, 통제된 정상·실패·오류 확인.
-4. 첫 서비스 실제 QA·보안 증거 확보.
-5. 실패 전달·수정·재검증·중단 통합.
-6. 파일럿 비용·시간으로 반복 횟수·예산 확정 후 본 실험.
+1. 팀에서 독립 평가 구조(4.1절)와 OPEN-11~13 확정.
+2. 15.2절의 결정 필요 항목 반영(정리 항목은 반영 완료).
+3. 회원가입 보호 테스트 작성. 3번 서버(sehwa-dev backend)를 로컬에서 띄워 직접 실행하고, 일부러 고장 낸 버전(평문 저장, 7자 허용, 중복 허용)에서 FAIL을 잡는지 확인.
+4. pytest 결과 → CheckResult 정규화 → 독립 평가 보고서까지 로컬에서 연결.
+5. 1번(실행 종료 후 최종 Snapshot 전달)·2번(컨테이너 실행·결과 형식) 정보 수령 후 자동 채점 연결과 평가 기록 저장.
+6. 파일럿 비용·시간으로 반복 횟수·예산 확정 후 Single/Multi 본 실험. 여유가 되면 협업 과정 검증(10절).
 7. 확장 시나리오와 발표 자료 보완.
 
-명세는 팀 검수용 초안이며, 집계·Manifest 비교·자체 테스트는 15.1절 범위까지 구현했다. Agent 통합·실제 서비스 검증·비교 실험은 후속 작업이고 합성 예시는 실행 성공 증거가 아니다.
+명세는 팀 검수용 초안이며, 구현 범위는 15.1절과 같다. 실제 서비스 검증·자동 채점 연결·비교 실험은 후속 작업이고 합성 예시는 실행 성공 증거가 아니다.
 
 ## 18. 협의 필요 사항
 
@@ -559,6 +601,11 @@ docs/evaluation/examples/       # 합성 결과 예시 (예정)
 | OPEN-08 | CPU/Memory/PID/timeout/출력 및 총시간 예산, 의존성 준비, Single 실행 진입점 | 1·2번 |
 | OPEN-09 | 모델 lock·실험 횟수·실행 순서·단가·비용 예산 | 전원 |
 | OPEN-10 | 증거 공유·접근·보존, 확장 시나리오 채택·상세 검사 | 전원 |
+| OPEN-11 | 독립 평가 구조 확정: 순환 밖 채점, 결과 비공개, 모든 종료 상태 채점, 중간 버전 기록 방식(4.1절) | 전원 |
+| OPEN-12 | SEC-SIGNUP-004·006·007을 기존 요구사항에 연결할지 새 보안 요구사항으로 등록할지 | 1번·4번 |
+| OPEN-13 | 에이전트 호환 경로에서 "도구 정상 종료 + 결과 파싱 실패" 기록 방식 | 1번·2번 |
+
+3번 구현(sehwa-dev)과 개발정의서의 차이는 OPEN-01·02에서 함께 정한다. 이메일 앞뒤 공백(정의서는 제거 후 비교, 구현은 형식 오류로 거부), 별도 canonical_email 컬럼(구현은 email을 소문자로 저장해 UNIQUE 적용), Argon2 수치(정의서 m=19456·t=2·p=1, 구현은 pwdlib 기본값), 동시 가입 시 기대 응답 코드, 테스트 DB 경로 분리·초기화·로그 수집 방법이다.
 
 미정 때문에 필수 검증을 수행할 수 없으면 검증 미완료로 표시한다. 편의상 승인·PASS·NOT_APPLICABLE을 만들지 않는다. 확정 정책과 충돌하는 자동 분기는 구현 전에 공통 계약을 정정한다.
 
@@ -576,6 +623,7 @@ docs/evaluation/examples/       # 합성 결과 예시 (예정)
 | 0.1 | 2026-09-27 | 담당 경계, QA·보안·협업 검증, 결과 계약, 재검증, 실험, 완료 조건·협의 항목 작성 |
 | 0.1.1 | 2026-09-28 | 참고 자료 목록 및 자료명·페이지·질문 번호 표기 제거. 기능·판정 정책은 유지 |
 | 0.2 | 2026-09-28 | 회원가입 8개 요구, UUID·Manifest·Artifact 계약, 최종 판정·수정/도구 재시도, MCP·Trace 검증, 실험 지표·미정 정책 정합화 |
+| 0.3 | 2026-10-06 | 독립 평가 원칙(4.1) 추가, 담당 간 계약을 독립 평가 기준으로 갱신, 보고서 형식을 실제 구현(독립 평가·에이전트 호환)으로 교체하고 0.2 합성 예시 삭제, 모듈 구성·구현 현황·코드 검토 제약(15.1·15.2) 갱신, 구현 순서 재정리, OPEN-11~13 및 3번 구현 차이 추가 |
 
 
 ### 문서 유지보수 이력
@@ -586,3 +634,5 @@ docs/evaluation/examples/       # 합성 결과 예시 (예정)
 | 2026-10-04 | dev 구현과 ID·상태·증거·정책 차이를 개발진행사항에 연결 | OPEN 승인 상태 유지 |
 | 2026-10-04 | 환경/명세서/개발진행사항 구조로 링크 정리 | 문서 역할 구분, 명세 버전 0.2 유지 |
 | 2026-10-04 | 공통 보고서 어댑터·실행 근거 정합성·패키지/lock·모델 호환 검사 추가 | OPEN 정책 유지, 실제 실행 연동 전 |
+| 2026-10-06 | 독립 평가 보고서 기능 추가 기록. 문서 끝에 따로 붙어 있던 "독립 평가 출력 보완" 절을 4.1·11.2·15절로 통합 | 0.3으로 갱신, 팀 확정 대기 |
+| 2026-10-06 | 필수·선택 실패/미검증 ID 분리, 환경 확인 테스트를 기본 pytest 대상에서 분리, 코드 주석 간결화 | 보고서에 optional… 필드 추가 |

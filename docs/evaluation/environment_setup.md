@@ -1,6 +1,6 @@
 # 평가 개발 환경
 
-최종 갱신: 2026-10-05. Python 3.10 이상. dev의 공통 프로젝트 설정을 사용한다.
+최종 갱신: 2026-10-06. Python 3.10 이상. dev의 공통 프로젝트 설정을 사용한다.
 
 ## 설치 및 PyCharm
 
@@ -27,8 +27,14 @@ uv run --frozen python scripts/check_dev_reports.py .venv/bin/python
 PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ```
 
-pytest는 `checks/`와 `tests/`를 수집한다. 평가 자체 테스트와 보고서 모델 호환 검사는
-실제 A2A/MCP/회원가입 서비스 통합 검증이 아니다. 보고서 데모는 mock이다.
+기본 pytest는 `tests/`만 수집한다(2026-10-06 기준 285개: 평가 113, dev 172).
+평가 테스트만 실행하려면 `uv run --frozen python -m pytest tests/evaluation`,
+환경 확인은 `uv run --frozen python -m pytest checks`로 따로 실행한다.
+평가 자체 테스트와 보고서 모델 호환 검사는 실제 A2A/MCP/회원가입 서비스 통합 검증이 아니다.
+보고서 데모는 mock이다.
+
+`checks/test_setup.py`는 프로젝트 가상환경 안에서 실행 중인지 확인한다. 가상환경 없는 컨테이너에서는
+실패하므로 기본 실행 대상에서 뺐다. PyCharm 설정을 확인할 때만 따로 실행한다.
 
 ## 공통 계약 및 설정
 
@@ -43,3 +49,5 @@ pytest는 `checks/`와 `tests/`를 수집한다. 평가 자체 테스트와 보�
 - import 실패: 루트에서 `uv sync --frozen`을 다시 실행하고 PyCharm 인터프리터를 확인한다.
 - 계약 오류: ID 매핑, Manifest, Tool 증거와 필수 검사 계획을 확인한다.
 - 스키마·모델 통과만으로 실제 증거 진위나 서비스 성공이 보장되지는 않는다.
+- 독립 평가 보고서의 `created_at` 오류: 시간대를 붙인 `2026-10-06T12:00:00+09:00` 형식을 사용한다.
+  Python 3.10에서는 소수점 초 등 일부 ISO 표기를 읽지 못한다.
