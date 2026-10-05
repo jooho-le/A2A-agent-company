@@ -1,58 +1,81 @@
-# A2A Orchestrator
+# A2A 기반 다중 AI 에이전트 협업형 가상 소프트웨어 회사
 
-Python 3.10+와 FastAPI를 사용하는 Orchestrator 서비스입니다.
+4번 담당 강석민의 Evaluation / QA / Security 개발 공간입니다.
+첫 대상은 회원가입 MVP(SCN-001)이며, 현재 공통 보고서 연결 기준은 dev `2b4fc60`입니다.
+평가 패키지 버전은 0.2.0, 평가 명세 버전은 0.2입니다.
 
-## 로컬 실행
+## 현재 구현
 
-`uv`가 설치되어 있다면 프로젝트 루트에서 다음을 실행합니다.
+- 필수·선택 검사 집계, 누락·중복·증거 ID 확인
+- 동일 코드·환경의 Manifest 비교와 공통 camelCase 입출력
+- QA_REPORT / SECURITY_REPORT 데이터 생성, 고정된 dev JSON Schema 검증
+- 내부 UUID → 외부 testId·요구사항 ID의 명시적 대응
+- ERROR/NOT_RUN → UNVERIFIED 변환과 원래 상태·사유 보존
+- Tool 실행 근거의 역할·Manifest·시도 순서·안전 재시도·제품 결과 정합성 검사
+- 독립 설치 가능한 평가 패키지와 의존성 lock, 합성 보고서 데모
+
+실제 MCP 실행, Registry/증거 저장소 조회, 파일 해시·증거 진위 검증, A2A 전송,
+가입 API/DB 검사와 비교 실험은 아직 연결하지 않았습니다. 최종 SUCCESS는 Orchestrator 책임입니다.
+
+## 문서
+
+- [환경 설정](docs/environment_setup.md): PyCharm·설치·실행·문제 확인
+- [명세서](docs/evaluation_spec.md): 평가 기준·책임·승인 대기 정책
+- [개발진행사항](docs/development_progress.md): 구현 범위·변경·검증·다음 작업
+
+## 실행
+
+저장소 루트에서 공통 Orchestrator 환경을 설치한 뒤 평가 패키지를 추가합니다.
+Python 3.10 이상과 uv를 사용하며 PyCharm 인터프리터는 루트 `.venv/bin/python`입니다.
 
 ```bash
 uv sync --frozen
-uv run uvicorn orchestrator.main:app --app-dir src --reload
+uv pip install --python .venv/bin/python -e "./evaluation[dev]"
+.venv/bin/python -m pytest
+.venv/bin/python -m evaluation
+.venv/bin/python -m evaluation.report_demo
+.venv/bin/python scripts/check_dev_reports.py .venv/bin/python
 ```
 
-기본 주소는 `http://127.0.0.1:8000`입니다.
+평가 전용 `evaluation/uv.lock`은 독립 환경용입니다. 통합 환경에서 평가 lock만으로
+sync하면 Orchestrator 의존성이 제거되므로 위 추가 설치 절차를 사용합니다.
+
+## 보고서 변환 사용 조건
+
+`evaluation.reporting.build_report`는 이미 정규화된 결과를 받습니다.
+실제 MCP 응답을 읽는 실행 어댑터나 HTTP 엔드포인트는 아닙니다.
+
+- `context`: 실제 등록된 Run/Step/Artifact ID, A2A ID, 보고서 버전·생성 시각·요구사항 목록
+- `expected`, `observed`: 신뢰된 실행 기준과 보고서 대상 Manifest. 불일치 시 전송용 보고서 생성 거부
+- `plan`, `results`: 고정 필수 검사 계획과 개별 결과
+- `bindings`: 각 내부 검사 UUID에 대응하는 외부 testId·requirementId·제목
+- `tool_evidence`: 실제 실행기가 제공한 검사별 근거. PASS/FAIL에는 필수
+- `findings`: Security 결과 목록. 발견사항이 없어도 빈 목록을 명시적으로 제공
+
+원문·증거는 호출자가 마스킹해야 합니다. 이 함수는 비밀정보 제거·ID 등록 여부·증거 내용을 검증하지 않습니다.
+생성 결과는 A2A Artifact의 JSON data payload이며 실제 A2A 포장·Task 연결은 후속 작업입니다.
+
+N/A는 공통 계약 확정 전 변환을 거부합니다. 선택 검사는 필수 보고서에 섞지 않습니다.
+Security는 현재 요구사항당 사전 집계된 결과 1개만 지원하며, 여러 검사·증거를 조용히 합치지 않습니다.
+Tool PASS는 도구 실행 완료를 뜻하므로 제품 결과 FAIL과 함께 올 수 있습니다.
+
+## 검증과 구조
+
+자체 테스트 91개 통과. dev의 실제 QA/Security 모델이 합성 보고서 8개를 수용한 것을 확인했습니다.
+새 브랜치의 동일 환경에서 dev 테스트 172개와 평가 테스트 91개, 총 263개 통과를 확인했습니다.
+이는 A2A/서비스 통합 테스트가 아닙니다.
 
 ```text
-GET /health
-GET /api/v1/scenarios
-POST /api/v1/runs
-GET /api/v1/runs/{runId}
-GET /api/v1/runs/{runId}/steps
-GET /api/v1/runs/{runId}/events
-GET /api/v1/runs/{runId}/artifacts
-GET /api/v1/runs/{runId}/artifacts/{artifactId}
-GET /api/v1/runs/{runId}/issues
-GET /api/v1/runs/{runId}/configuration
-GET /api/v1/runs/{runId}/workspace
-GET /api/v1/runs/{runId}/tool-attempts
-POST /api/v1/runs/{runId}/resume
-POST /api/v1/runs/{runId}/recover
-POST /api/v1/runs/{runId}/cancel
-GET /docs
+evaluation/aggregation.py       내부 검사 집계
+evaluation/manifest.py          Manifest 형식·일치·입출력
+evaluation/reporting.py         공통 보고서 데이터 변환과 검증
+evaluation/report_demo.py       mock 보고서 예시
+evaluation/contracts/           dev 고정 커밋의 공통 스키마 사본
+evaluation/pyproject.toml       독립 평가 패키지·개발 의존성
+evaluation/uv.lock              평가 의존성 고정
+tests/evaluation/               평가 자체 테스트
+scripts/check_dev_reports.py   별도 dev Python으로 보고서 모델 호환 확인
 ```
 
-설정값은 환경변수 또는 프로젝트 루트의 `.env` 파일에서 읽습니다. 시작값은 `.env.example`을 참고하세요.
-
-현재 구현은 SCN-001 고정 기준, Planner → Developer → QA/Security 실행, 최대 3회 수정·새 Snapshot 재검증, 불변 Artifact/Issue/Trace 저장 및 최종 판정입니다. Run 생성 때 workspace ID와 Scenario 정책·실행 설정을 동결하고, Build/QA/Security의 동일 Manifest 및 MCP 실행·재시도 근거가 확인되어야 `SUCCESS` 또는 `UNVERIFIED`를 확정합니다. 비밀정보는 전송·저장·로그 경계에서 마스킹하고 Agent 인증은 HTTP 헤더로만 전달합니다. 최신 변경과 제한은 [14번 정의서 준수 보완](docs/14-orchestrator-contract-compliance.md)을 참고하세요.
-
-현재 등록된 `scenarioId`는 `f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76`입니다. 다른 UUID와 공백뿐인 `requestText`는 422를 반환합니다. `/api/v1/scenarios`에서 등록 기준을 확인할 수 있습니다.
-
-재개는 저장된 Task/Context를 이어 사용하며 수정 횟수를 늘리지 않습니다. 전송됐으나 Task ID가 확인되지 않은 요청은 자동 재전송하지 않습니다. 진행 중인 다른 제어 작업과 충돌하면 409이며, 원격 Task 취소는 실제 `CANCELED` 확인 후 기록합니다. PID 기반 잠금은 단일 호스트 MVP용입니다.
-
-Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장하며, Artifact 원본 bytes·READ_ONLY ACL·실제 회원가입 코드의 성공·비교 실험 완료는 아직 주장하지 않습니다.
-
-자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
-
-기본 DB 경로는 `.data/orchestrator.sqlite3`이며 `ORCHESTRATOR_DATABASE_PATH` 환경변수로 바꿀 수 있습니다. `.data/`는 Git에서 제외됩니다.
-
-## 테스트
-
-```bash
-PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
-```
-
-## 평가 모듈 (Evaluation / QA / Security)
-
-평가 코드·테스트·보고서 변환의 사용 방법과 현재 범위는
-[평가 모듈 README](evaluation/README.md)를 참고하세요.
+공통 스키마 사본은 원본을 대체하지 않습니다. dev 계약이 바뀌면 사본과 호환 검사를 함께 갱신합니다.
+`seokmin-evaluation` 브랜치에서 개발하며 환경·DB·작업공간·비밀값·빌드 산출물은 Git에서 제외합니다.

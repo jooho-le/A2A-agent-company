@@ -1,0 +1,2 @@
+# Run from repository root. Frozen installs use evaluation/uv.lock.
+-e ./evaluation[dev]
