@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.27,<1.0",
     "pydantic-settings>=2.0,<3.0",
     "python-dotenv>=1.0,<2.0",
+    "jsonschema[format]>=4.18,<5",
 ]
 
 [tool.setuptools]
@@ -21,3 +22,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
+[tool.setuptools.package-data]
+evaluation = ["contracts/*.json", "contracts/README.md"]
