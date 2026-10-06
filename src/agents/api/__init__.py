@@ -1,1 +1,1 @@
-"""Reserved for the common A2A Agent server implemented in step 16."""
+"""Common nonstreaming A2A server, request guards, and memory-only Task storage."""

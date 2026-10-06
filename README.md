@@ -46,11 +46,11 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 
 기본 DB 경로는 `.data/orchestrator.sqlite3`이며 `ORCHESTRATOR_DATABASE_PATH` 환경변수로 바꿀 수 있습니다. `.data/`는 Git에서 제외됩니다.
 
-## Agent/MCP 개발 기반 — 15번
+## Agent/MCP 개발 기반 — 15·16번
 
-담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`와 `src/mcp_tools/`에는 패키지·설정·역할별 Tool 정책 선언만 추가되어 있습니다. 실제 Agent 서버, LLM 연결, MCP 실행, Sandbox·파일 권한 강제는 아직 구현하지 않았습니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
+담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 설정·역할별 Tool 정책 선언이 있습니다. 실제 역할별 LLM 작업, MCP 실행, Sandbox·파일 권한 강제는 아직 구현하지 않았습니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
 
-설정 접두사는 `ORCHESTRATOR_`, `AGENT_`, `MCP_`로 분리합니다. 각 Agent는 하나의 역할을 명시하며 기본 주소는 Planner `127.0.0.1:8101`, Developer `:8102`, QA `:8103`, Security `:8104`입니다. 이는 예약된 설정값이지 현재 접속 가능한 서버가 아닙니다. 기존 Orchestrator의 Agent URL은 서버 구현·연결 전까지 미설정 상태로 유지하세요.
+설정 접두사는 `ORCHESTRATOR_`, `AGENT_`, `MCP_`로 분리합니다. 각 Agent는 하나의 역할을 명시하며 기본 주소는 Planner `127.0.0.1:8101`, Developer `:8102`, QA `:8103`, Security `:8104`입니다. 기존 Orchestrator의 Agent URL은 실제 역할 구현·연결 전까지 미설정 상태로 유지하세요. 지금 연결하면 기본 런타임이 요청을 `TASK_STATE_REJECTED`로 거절하며 제품을 개발하지 않습니다.
 
 기존 의존성을 설치한 환경에서는 다음 코드로 설정 객체만 확인할 수 있습니다. 서버·DB·LLM·MCP subprocess를 실행하지 않습니다.
 
@@ -66,6 +66,18 @@ print(tools.allowed_tool_names)  # 실제 Tool 실행이 아닌 정책 선언
 ```
 
 `_env_file=None`은 `.env` 파일만 생략하며 프로세스 환경변수는 계속 적용됩니다. 모델·Provider는 기본 미설정이며, 인증값은 설정 객체의 일반 출력/직렬화에서 제외합니다. 상세 변경·정의서 점검·후속 번호는 [15번 Agent/MCP 개발 기반](docs/15-agent-mcp-bootstrap.md)을 참고하세요.
+
+### 공통 Agent 서버 실행
+
+기존 의존성이 설치된 `.venv`에서 프로젝트 루트를 기준으로 실행합니다. 역할에 따라 설정된 포트로 시작합니다.
+
+```bash
+AGENT_ROLE=PLANNER PYTHONPATH=src .venv/bin/python -m agents
+```
+
+Planner의 `/health`, `/.well-known/agent-card.json`, `/docs`는 `http://127.0.0.1:8101`에서 확인합니다. `/docs`의 `POST /message:send` 예시에 `A2A-Version: 1.0`을 넣어 실행한 뒤 반환된 `task.id`로 `GET /tasks/{id}`를 호출하면 `TASK_STATE_REJECTED`와 `AGENT_RUNTIME_NOT_CONFIGURED` 사유를 확인할 수 있습니다. `SUBMITTED`가 먼저 보일 수 있으므로 다시 조회하세요.
+
+Task는 현재 메모리 저장이므로 서버를 종료하면 사라집니다. `AGENT_BEARER_TOKEN`을 설정하면 Card·Task API에 HTTP Bearer 인증을 강제합니다. API Key·Token을 요청 본문에 넣지 않습니다. 상세 API·안전 제한·검증은 [16번 공통 A2A Agent 서버](docs/16-common-a2a-agent-server.md)를 참고하세요.
 
 ## 테스트
 
