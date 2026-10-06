@@ -51,3 +51,14 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 ```bash
 PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ```
+
+## 평가 모듈
+
+평가 모듈은 `src/evaluation/`에 있으며 공통 `pyproject.toml`, `uv.lock`, `.venv`를 사용합니다.
+[평가 안내](src/evaluation/README.md)와 [평가 개발진행사항](docs/evaluation/development_progress.md)을 참고하세요.
+
+```bash
+uv sync --frozen
+uv run --frozen python -m pytest
+uv run --frozen python -m evaluation.report_demo
+```
