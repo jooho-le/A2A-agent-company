@@ -81,6 +81,12 @@ Task·Context·요청 기록은 `.data/agents/{역할소문자}.sqlite3`에 영�
 
 `AGENT_DATABASE_PATH`로 운영자 DB 경로를 바꿀 수 있지만 **같은 DB는 한 Agent 프로세스만 사용**합니다. 여러 worker나 서로 다른 역할이 DB를 공유하지 마세요. 제품/Orchestrator DB와도 분리합니다. `AGENT_BEARER_TOKEN`을 설정하면 Card·Task API에 HTTP Bearer 인증을 강제합니다. API Key·Token을 요청 본문에 넣지 않습니다. HTTP API는 [16번](docs/16-common-a2a-agent-server.md), 생명주기는 [17번](docs/17-agent-task-lifecycle.md), 최신 계약 보완·검증·남은 이슈는 [17번 점검 후 보완](docs/17-contract-audit-fixes.md)을 참고하세요.
 
+### 역할별 Prompt와 출력 계약
+
+Planner·Developer·QA·Security의 책임/금지/입출력/Tool 선언은 `agents.roles`에 있습니다. 신뢰된 서비스 역할로 `build_system_prompt()`를 선택하고 `prepare_role_prompt()`로 정적 System 규칙과 정제된 JSON 입력을 분리합니다. 완료 출력은 `validate_completed_role_output()`이 기존 A2A Artifact 파서와 보호된 기준·Snapshot·실행 근거를 확인합니다.
+
+이 단계는 실제 LLM/MCP 실행이나 ACL 강제가 아닙니다. 기본 Agent는 여전히 미구현 작업을 거부합니다. 사용법·Schema·정의서 점검·검증 결과는 [18번 역할 Prompt와 출력 계약](docs/18-role-prompts-output-contracts.md)을 참고하세요.
+
 ## 테스트
 
 ```bash

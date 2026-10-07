@@ -169,3 +169,5 @@ git diff --check
 커밋 메시지 제안: `Agent Task 영속 저장과 중복 요청 방지 및 재시작 복구 구현`
 
 **다음 작업: 18번 — 역할별 Prompt와 출력 계약.** Planner/Developer/QA/Security의 책임·금지·입출력·근거 요구를 기존 Artifact Schema에 맞춰 정의한다. 실제 LLM Provider 연결은 19번이다. Git commit/push는 수행하지 않는다.
+
+18번 구현과 최신 검증 결과는 [역할별 Prompt와 출력 계약](18-role-prompts-output-contracts.md)에 기록했다. 이 문서의 17번 검증·다음 작업 표기는 당시 이력으로 유지한다.
