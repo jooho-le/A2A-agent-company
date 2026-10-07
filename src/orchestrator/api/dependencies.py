@@ -1,12 +1,14 @@
 """Request-scoped access to the lazily initialized persistence adapter."""
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from orchestrator.a2a import A2AAgentClient, A2AAgentRegistry
 from orchestrator.application import PlannerRunDispatcher
 from orchestrator.application.workflow_controls import WorkflowControlService
 from orchestrator.domain import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
+from orchestrator.workspaces.registry import WorkspaceRegistry
+from orchestrator.workspaces.policy import WorkspaceAccessError
 
 
 def get_workflow_repository(request: Request) -> SQLiteWorkflowRepository:
@@ -21,6 +23,20 @@ def get_workflow_repository(request: Request) -> SQLiteWorkflowRepository:
             repository = SQLiteWorkflowRepository(settings.database_path)
             request.app.state.workflow_repository = repository
     return repository
+
+
+def get_workspace_registry(request: Request) -> WorkspaceRegistry:
+    """Lazy trusted registry; import/app construction never provisions folders."""
+    repository = get_workflow_repository(request)
+    with request.app.state.workspace_registry_lock:
+        registry = request.app.state.workspace_registry
+        if registry is None:
+            try:
+                registry = WorkspaceRegistry(repository, request.app.state.settings.workspace_root)
+            except WorkspaceAccessError as error:
+                raise HTTPException(status_code=503, detail=error.code.value) from None
+            request.app.state.workspace_registry = registry
+    return registry
 
 
 def get_run_dispatcher(request: Request) -> PlannerRunDispatcher | None:

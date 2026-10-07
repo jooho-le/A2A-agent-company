@@ -19,6 +19,7 @@ from orchestrator.api.dependencies import (
     get_run_dispatcher,
     get_workflow_repository,
     get_workflow_controls,
+    get_workspace_registry,
 )
 from orchestrator.api.schemas.runs import (
     CancelRunRequest,
@@ -50,6 +51,8 @@ from orchestrator.infrastructure import (
     RunDispatchConflict,
     SQLiteWorkflowRepository,
 )
+from orchestrator.workspaces.policy import LAYOUT_VERSION, WorkspaceAccessError, WorkspaceErrorCode
+from orchestrator.workspaces.registry import WorkspaceRegistry
 
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -59,6 +62,7 @@ Dispatcher = Annotated[
     Depends(get_run_dispatcher),
 ]
 Controls = Annotated[WorkflowControlService, Depends(get_workflow_controls)]
+Workspaces = Annotated[WorkspaceRegistry, Depends(get_workspace_registry)]
 
 
 @router.post(
@@ -235,6 +239,20 @@ def get_run_configuration(run_id: UUID, repository: Repository):
 def get_run_workspace(run_id: UUID, repository: Repository):
     run = _get_run_or_404(repository, run_id)
     return repository.get_workspace(run.workspace_id).public_contract()
+
+
+@router.post("/{run_id}/workspace/provision")
+def provision_run_workspace(run_id: UUID, repository: Repository, registry: Workspaces):
+    """Explicitly prepare known server-issued storage; no role or Host path input."""
+    run = _get_run_or_404(repository, run_id)
+    try:
+        workspace = registry.provision(run.workspace_id, run_id=run.run_id)
+    except WorkspaceAccessError as error:
+        code = 409 if error.code in (
+            WorkspaceErrorCode.CONFLICT, WorkspaceErrorCode.PATH_DENIED,
+        ) else 503
+        raise HTTPException(status_code=code, detail=error.code.value) from None
+    return {**workspace.public_contract(), "provisioned": True, "layoutVersion": LAYOUT_VERSION}
 
 
 @router.get("/{run_id}/tool-attempts")

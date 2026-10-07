@@ -30,6 +30,8 @@ def create_app(
     app.state.settings = settings
     app.state.workflow_repository = repository
     app.state.repository_lock = Lock()
+    app.state.workspace_registry = None
+    app.state.workspace_registry_lock = Lock()
     app.state.run_dispatcher = dispatcher
     app.state.dispatcher_lock = Lock()
     app.include_router(health_router)
