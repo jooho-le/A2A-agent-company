@@ -63,13 +63,28 @@ class WorkflowControlService:
             if step_id is not None and input_data is None and stage == WorkflowStatus.FIX_REQUIRED:
                 raise WorkflowControlConflict("FIX_REQUIRED has no created fix Step to select")
             steps = self._stage_steps(run, stage, step_id)
-            if input_data is not None and step_id is None and sum(
-                step.a2a_task_state == A2ATaskState.INPUT_REQUIRED
+            validation_stage = stage in (
+                WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING,
+                WorkflowStatus.SNAPSHOT_READY,
+            )
+            # Recovery without an explicit target/input is observation, not
+            # permission to continue every interrupted validation Task.
+            observe_validation_only = validation_stage and recover and step_id is None and input_data is None
+            if validation_stage and not observe_validation_only and step_id is None and sum(
+                step.status == WorkflowStepStatus.WAITING_INPUT
+                and step.a2a_task_state in (A2ATaskState.INPUT_REQUIRED, A2ATaskState.AUTH_REQUIRED)
                 for step in steps
             ) > 1:
-                raise WorkflowControlConflict("Select workflowStepId instead of broadcasting input to multiple interrupted Tasks")
+                raise WorkflowControlConflict("Select workflowStepId instead of broadcasting input or authentication to multiple interrupted Tasks")
+            continuation_steps = {
+                step.workflow_step_id for step in steps
+                if not observe_validation_only and step_id in (None, step.workflow_step_id)
+            }
             for step in steps:
-                self._check_observable(step, input_data if step_id in (None, step.workflow_step_id) else None)
+                self._check_observable(
+                    step, input_data if step.workflow_step_id in continuation_steps else None,
+                    continue_interrupted=step.workflow_step_id in continuation_steps,
+                )
                 self.registry.require_base_url(step.agent_role)
             if stage == WorkflowStatus.RECEIVED:
                 # Planner's existing one-shot DB claim owns the initial send.
@@ -92,18 +107,29 @@ class WorkflowControlService:
                 if not issues:
                     raise WorkflowControlConflict("Failed candidate has no recorded Issue; reconcile its reports first")
                 await self.dispatcher._dispatch_fix(run, plan, scenario, issues)
-            elif stage in (WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING, WorkflowStatus.SNAPSHOT_READY):
+            elif validation_stage:
                 source = self._source(run)
                 handoff = SnapshotHandoff.from_snapshot(source)
                 outcomes = []
                 for step in steps:
                     outcomes.append(await self._observe_or_send(
-                        run, step, input_data if step_id in (None, step.workflow_step_id) else None,
+                        run, step, input_data if step.workflow_step_id in continuation_steps else None,
                         handoff=handoff, plan=plan,
+                        continue_interrupted=step.workflow_step_id in continuation_steps,
                     ))
-                await self.dispatcher.consume_validation_results(
-                    run, tuple(steps), handoff, tuple(outcomes), plan=plan, scenario=scenario,
-                )
+                interrupted = next((
+                    result for result in outcomes
+                    if result.disposition != TaskRunDisposition.COMPLETED
+                ), None)
+                if interrupted is not None:
+                    # Observers have already durably preserved each completed
+                    # Task. Do not parse incomplete reports or create a product
+                    # verdict while the other Task still needs input/auth.
+                    self._pause_result(run, interrupted)
+                else:
+                    await self.dispatcher.consume_validation_results(
+                        run, tuple(steps), handoff, tuple(outcomes), plan=plan, scenario=scenario,
+                    )
             else:
                 if len(steps) != 1:
                     raise WorkflowControlConflict("Recovery requires exactly one current Planner or Developer Step")
@@ -209,14 +235,17 @@ class WorkflowControlService:
             if offset >= total or not events:
                 return False
 
-    def _check_observable(self, step: WorkflowStep, input_data: Mapping[str, object] | None) -> None:
+    def _check_observable(
+        self, step: WorkflowStep, input_data: Mapping[str, object] | None,
+        *, continue_interrupted: bool = True,
+    ) -> None:
         if step.a2a_task_id is None and self._message_sent(step):
             raise WorkflowControlConflict("SendMessage outcome is unknown; automatic replay is forbidden")
         if step.a2a_task_state in (A2ATaskState.FAILED, A2ATaskState.REJECTED, A2ATaskState.CANCELED, A2ATaskState.UNSPECIFIED):
             raise WorkflowControlConflict("Terminal or invalid Tasks cannot be restarted; a new approved Step is required")
-        if step.a2a_task_state == A2ATaskState.INPUT_REQUIRED and step.status == WorkflowStepStatus.WAITING_INPUT and not input_data:
+        if continue_interrupted and step.a2a_task_state == A2ATaskState.INPUT_REQUIRED and step.status == WorkflowStepStatus.WAITING_INPUT and not input_data:
             raise WorkflowControlConflict("Task requires inputData before it can continue")
-        if step.a2a_task_state == A2ATaskState.AUTH_REQUIRED and step.status == WorkflowStepStatus.WAITING_INPUT and step.agent_role not in self.authenticated_roles:
+        if continue_interrupted and step.a2a_task_state == A2ATaskState.AUTH_REQUIRED and step.status == WorkflowStepStatus.WAITING_INPUT and step.agent_role not in self.authenticated_roles:
             raise WorkflowControlConflict("Configure this Agent's authentication out of band before resuming")
 
     def _source(self, run: WorkflowRun) -> CodeSnapshotArtifact:
@@ -225,7 +254,10 @@ class WorkflowControlService:
             raise WorkflowControlConflict("Current immutable Source Snapshot is not registered")
         return source
 
-    async def _observe_or_send(self, run, step, input_data, *, handoff=None, plan=None) -> A2ATaskRunResult:
+    async def _observe_or_send(
+        self, run, step, input_data, *, handoff=None, plan=None,
+        continue_interrupted: bool = True,
+    ) -> A2ATaskRunResult:
         role = step.agent_role
         agent_id = role.value.lower()
         saved_context = next((c for c in self.repository.list_agent_contexts(run.run_id) if c.agent_id == agent_id), None)
@@ -236,6 +268,8 @@ class WorkflowControlService:
             runner = A2ATaskRunner(client)
             kwargs = {"agent_id": agent_id, "agent_context": context, "observer": self.repository.task_update_observer(run)}
             if step.a2a_task_id is not None:
+                if not continue_interrupted:
+                    return await runner.resume_polling(run, step, **kwargs)
                 # A previous continuation may have been applied remotely. GET first.
                 if step.status == WorkflowStepStatus.RUNNING and step.a2a_task_state in (A2ATaskState.INPUT_REQUIRED, A2ATaskState.AUTH_REQUIRED):
                     return await runner.resume_polling(run, step, **kwargs)

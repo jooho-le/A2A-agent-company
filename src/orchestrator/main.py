@@ -1,7 +1,9 @@
 from threading import Lock
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 
+from orchestrator.api.errors import request_validation_error_handler
 from orchestrator.api.routes.health import router as health_router
 from orchestrator.api.routes.runs import router as runs_router
 from orchestrator.api.routes.scenarios import router as scenarios_router
@@ -24,6 +26,7 @@ def create_app(
         version="0.1.0",
         description="Coordinates A2A agents and their workflow state.",
     )
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
     app.state.settings = settings
     app.state.workflow_repository = repository
     app.state.repository_lock = Lock()

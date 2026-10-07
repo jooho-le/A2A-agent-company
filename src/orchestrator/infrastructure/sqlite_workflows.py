@@ -2039,33 +2039,54 @@ def _security_finding_revalidation(connection, issue, security_report) -> str:
         # Older reports did not carry scanner rule identities; preserve their exact
         # finding-ID matching instead of pretending to infer a stable identity.
         matching = [finding for finding in security_report.findings if finding.finding_id == issue.reference_id]
-    if any(finding.disposition.value == "CONFIRMED" for finding in matching):
-        return "FAIL"
-    if any(finding.disposition.value == "SUSPECTED" for finding in matching):
-        return "UNVERIFIED"
     results = [result for result in security_report.requirement_results if result.requirement_id in issue.requirement_ids]
     # An unavailable or unproven scan cannot demonstrate that an absent finding
     # disappeared. A different, actually evaluated requirement failure remains a
     # separate Issue rather than turning this resolved finding into a false FAIL.
-    if not results or any(result.outcome.value == "UNVERIFIED" or result.tool_evidence is None
-                          or result.tool_evidence.outcome.value != "PASS" for result in results):
+    if not results or any(
+        result.outcome.value == "UNVERIFIED"
+        or result.tool_evidence is None
+        or result.tool_evidence.tool_name != "run_security_scan"
+        or result.tool_evidence.execution_manifest != security_report.execution_manifest
+        or result.tool_evidence.outcome.value != "PASS"
+        for result in results
+    ):
+        return "UNVERIFIED"
+    if any(finding.disposition.value == "CONFIRMED" for finding in matching):
+        return "FAIL"
+    if any(finding.disposition.value in {"SUSPECTED", "UNVERIFIED"} for finding in matching):
         return "UNVERIFIED"
     return "PASS"
 
 
 def _record_revalidation_results(connection, run, qa_report, security_report) -> None:
+    def proven_outcome(result, report, allowed_tools) -> str:
+        evidence = result.tool_evidence
+        if (
+            result.outcome.value not in {"PASS", "FAIL"}
+            or evidence is None
+            or evidence.tool_name not in allowed_tools
+            or evidence.execution_manifest != report.execution_manifest
+            or evidence.outcome.value != "PASS"
+        ):
+            return "UNVERIFIED"
+        # Tool PASS proves the check executed, not that its assertions passed.
+        return result.outcome.value
+
     for issue in _fixed_issues_for_candidate(connection, run, qa_report.code_version):
         if issue.reporter == AgentRole.DEVELOPER:
             continue  # Already evaluated by the candidate's own Build transaction.
         if issue.reporter == AgentRole.QA:
-            matching = [test.outcome.value for test in qa_report.tests
+            matching = [proven_outcome(test, qa_report, {"run_unit_tests", "run_browser_tests"})
+                        for test in qa_report.tests
                         if test.requirement_id in issue.requirement_ids
                         and test.test_id == issue.reference_id]
             outcome = _combined_outcome(matching)
         elif issue.category.startswith("SECURITY_FINDING"):
             outcome = _security_finding_revalidation(connection, issue, security_report)
         else:
-            matching = [result.outcome.value for result in security_report.requirement_results
+            matching = [proven_outcome(result, security_report, {"run_security_scan"})
+                        for result in security_report.requirement_results
                         if result.requirement_id in issue.requirement_ids]
             outcome = _combined_outcome(matching)
         _insert_issue_event(connection, issue, "REVALIDATION_FINISHED", {"revalidation_result": outcome})

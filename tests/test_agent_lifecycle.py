@@ -264,6 +264,7 @@ class AgentLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(initial.execute_count, 1)
                 continuation = self.wire(
                     context_id=one["contextId"], task_id=one["id"], payload={"userInput": "Continue fixture work"},
+                    metadata=self.metadata.model_copy(update={"attempt": 1}),
                 )
                 resumed = RecordingExecutor()
                 async with self.client_for(executor=resumed, database_path=database) as (_, client):
@@ -273,7 +274,7 @@ class AgentLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(replay, completed)
                 self.assertEqual(two["id"], one["id"])
                 self.assertEqual(two["contextId"], one["contextId"])
-                self.assertEqual(completed["metadata"], self.metadata.to_a2a_json())
+                self.assertEqual(completed["metadata"], self.metadata.model_copy(update={"attempt": 1}).to_a2a_json())
                 self.assertEqual(resumed.execute_count, 1)
 
     async def test_new_message_cannot_resume_a_working_task(self):

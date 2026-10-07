@@ -79,7 +79,7 @@ Planner의 `/health`, `/.well-known/agent-card.json`, `/docs`는 `http://127.0.0
 
 Task·Context·요청 기록은 `.data/agents/{역할소문자}.sqlite3`에 영속 저장합니다. 같은 `messageId`와 같은 요청을 재전송하면 기존 Task만 반환하며 다시 실행하지 않습니다. 재시작으로 중단된 진행 Task는 `FAILED / AGENT_EXECUTION_INTERRUPTED`로 기록하고 자동 재실행하지 않습니다. 입력/인증 대기 Task는 명시적 새 Message로 같은 Task를 이어갈 수 있습니다.
 
-`AGENT_DATABASE_PATH`로 운영자 DB 경로를 바꿀 수 있지만 **같은 DB는 한 Agent 프로세스만 사용**합니다. 여러 worker나 서로 다른 역할이 DB를 공유하지 마세요. 제품/Orchestrator DB와도 분리합니다. `AGENT_BEARER_TOKEN`을 설정하면 Card·Task API에 HTTP Bearer 인증을 강제합니다. API Key·Token을 요청 본문에 넣지 않습니다. HTTP API는 [16번](docs/16-common-a2a-agent-server.md), 최신 생명주기·운영 제한·정의서 점검은 [17번](docs/17-agent-task-lifecycle.md)을 참고하세요.
+`AGENT_DATABASE_PATH`로 운영자 DB 경로를 바꿀 수 있지만 **같은 DB는 한 Agent 프로세스만 사용**합니다. 여러 worker나 서로 다른 역할이 DB를 공유하지 마세요. 제품/Orchestrator DB와도 분리합니다. `AGENT_BEARER_TOKEN`을 설정하면 Card·Task API에 HTTP Bearer 인증을 강제합니다. API Key·Token을 요청 본문에 넣지 않습니다. HTTP API는 [16번](docs/16-common-a2a-agent-server.md), 생명주기는 [17번](docs/17-agent-task-lifecycle.md), 최신 계약 보완·검증·남은 이슈는 [17번 점검 후 보완](docs/17-contract-audit-fixes.md)을 참고하세요.
 
 ## 테스트
 

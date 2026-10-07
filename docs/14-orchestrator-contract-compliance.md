@@ -3,6 +3,8 @@
 > 범위: 1번 담당 Orchestrator/A2A Client/상태 DB/Trace.
 > 기준: 사용자가 제공한 개발정의서의 확정 정책. 실제 Agent/MCP 구현, 웹 서비스, 비교 실험 수행과 팀 통합은 제외한다.
 
+이 문서는 14번 당시 구현 이력이다. 17번까지 점검 후 추가로 수정한 재개·Issue 근거·숫자 계약·opaque ID·422 응답과 미해결 설정 URL Credential 문제는 [17번 점검 후 보완](17-contract-audit-fixes.md)을 참고한다.
+
 ## 수정한 내용
 
 | 문제·누락 | 반영한 동작 |

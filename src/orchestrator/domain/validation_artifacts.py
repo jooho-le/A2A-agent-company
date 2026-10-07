@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, UUID4, field_validator, model_validator
 
+from orchestrator.domain.contract_validation import JSONInteger
 from orchestrator.domain.snapshot_handoff import ExecutionManifest, ImmutableDomainModel, _validate_artifact_uri
 from orchestrator.domain.states import AgentRole
 from orchestrator.domain.tool_evidence import ToolExecutionEvidence
@@ -95,14 +96,14 @@ class SecurityFinding(ImmutableDomainModel):
 
 class _ValidationArtifact(ImmutableDomainModel):
     artifact_id: UUID4 = Field(alias="artifactId")
-    artifact_version: int = Field(ge=1, alias="artifactVersion")
+    artifact_version: JSONInteger = Field(ge=1, alias="artifactVersion")
     previous_artifact_id: UUID4 | None = Field(default=None, alias="previousArtifactId")
     run_id: UUID4 = Field(alias="runId")
     workflow_step_id: UUID4 = Field(alias="workflowStepId")
     a2a_task_id: str = Field(min_length=1, alias="a2aTaskId")
     a2a_artifact_id: str = Field(min_length=1, alias="a2aArtifactId")
     requirement_ids: tuple[UUID4, ...] = Field(min_length=1, alias="requirementIds")
-    code_version: int = Field(ge=1, le=4, alias="codeVersion")
+    code_version: JSONInteger = Field(ge=1, le=4, alias="codeVersion")
     execution_manifest: ExecutionManifest = Field(alias="executionManifest")
     artifact_uri: str = Field(default="", alias="artifactUri")
     created_at: datetime = Field(
@@ -112,8 +113,7 @@ class _ValidationArtifact(ImmutableDomainModel):
     @field_validator("a2a_task_id", "a2a_artifact_id")
     @classmethod
     def references_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
+        if not value.strip():
             raise ValueError("A2A references must not be blank")
         return value
 

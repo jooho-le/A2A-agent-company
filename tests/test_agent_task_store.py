@@ -172,10 +172,12 @@ class AgentTaskStoreTests(unittest.IsolatedAsyncioTestCase):
                 followup = self.request(
                     {"inputData": {"answer": "Proceed"}},
                     task_id=initial.task.id, context_id=initial.task.context_id,
+                    metadata=self.metadata.model_copy(update={"attempt": 1}),
                 )
                 resumed = await self.claim(followup)
                 self.assertEqual(resumed.task.id, initial.task.id)
                 self.assertEqual(resumed.task.status.state, TaskState.TASK_STATE_SUBMITTED)
+                self.assertEqual(MessageToDict(resumed.task.metadata)["attempt"], 1)
                 self.assertFalse(resumed.task.status.HasField("message"))
                 self.assertEqual(len(resumed.task.history), 3)
                 self.assertEqual(resumed.task.history[1].message_id, prompt.message_id)
@@ -289,9 +291,201 @@ class AgentTaskStoreTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(reopened.aclose)
         current = (await reopened.get(first.task.id, self.context)).task
         self.assertEqual(current.status.state, TaskState.TASK_STATE_INPUT_REQUIRED)
-        followup = self.request(task_id=first.task.id, context_id=first.task.context_id)
+        followup = self.request(
+            task_id=first.task.id, context_id=first.task.context_id,
+            metadata=self.metadata.model_copy(update={"attempt": 1}),
+        )
         resumed = await reopened.claim_message(followup, self.context)
         self.assertEqual(resumed.task.id, first.task.id)
+        self.assertEqual(MessageToDict(resumed.task.metadata)["attempt"], 1)
+
+    async def test_continuation_only_advances_attempt_by_one_without_changing_identity(self):
+        metadata = self.metadata.model_copy(update={"attempt": 2})
+        first = await self.claim(self.request(metadata=metadata))
+        await self.write_state(first.task.id, TaskState.TASK_STATE_INPUT_REQUIRED)
+        before = await self.store.get(first.task.id, self.context)
+        for attempt in (0, 1, 2, 4):
+            with self.subTest(attempt=attempt), self.assertRaises(InvalidParamsError):
+                await self.claim(self.request(
+                    metadata=metadata.model_copy(update={"attempt": attempt}),
+                    task_id=first.task.id, context_id=first.task.context_id,
+                ))
+        for field, value in (
+            ("run_id", uuid4()), ("workflow_step_id", uuid4()), ("scenario_id", uuid4()),
+            ("requirement_ids", (uuid4(),)), ("code_version", 1),
+            ("project_artifact_ids", (uuid4(),)),
+        ):
+            with self.subTest(field=field), self.assertRaises(InvalidParamsError):
+                await self.claim(self.request(
+                    metadata=metadata.model_copy(update={"attempt": 3, field: value}),
+                    task_id=first.task.id, context_id=first.task.context_id,
+                ))
+        with patch("agents.api.sqlite_task_store.resolve_user_scope", return_value="another-owner"):
+            with self.assertRaises(TaskNotFoundError):
+                await self.claim(self.request(
+                    metadata=metadata.model_copy(update={"attempt": 3}),
+                    task_id=first.task.id, context_id=first.task.context_id,
+                ))
+        after = await self.store.get(first.task.id, self.context)
+        self.assertEqual(after.version, before.version)
+        self.assertEqual(after.task, before.task)
+        with sqlite3.connect(self.path) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM agent_message_receipts").fetchone()[0], 1)
+
+    async def test_two_continuations_persist_counter_binding_history_and_receipts_atomically(self):
+        original_request = self.request()
+        first = await self.claim(original_request)
+        accepted = [original_request]
+        for attempt, state in ((1, TaskState.TASK_STATE_INPUT_REQUIRED), (2, TaskState.TASK_STATE_AUTH_REQUIRED)):
+            await self.write_state(first.task.id, state)
+            request = self.request(
+                {"answer": f"Continuation {attempt}"},
+                task_id=first.task.id, context_id=first.task.context_id,
+                metadata=self.metadata.model_copy(update={"attempt": attempt}),
+            )
+            claim = await self.claim(request)
+            accepted.append(request)
+            self.assertEqual(claim.task.id, first.task.id)
+            self.assertEqual(claim.task.context_id, first.task.context_id)
+            self.assertEqual(MessageToDict(claim.task.metadata)["attempt"], attempt)
+            with sqlite3.connect(self.path) as connection:
+                binding, payload = connection.execute(
+                    "SELECT metadata_json, payload_json FROM agent_tasks WHERE task_id=?", (first.task.id,),
+                ).fetchone()
+                self.assertEqual(json.loads(binding)["attempt"], attempt)
+                self.assertEqual(json.loads(payload)["metadata"]["attempt"], attempt)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM agent_message_receipts").fetchone()[0], attempt + 1)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM agent_task_history").fetchone()[0], attempt + 1)
+            for request in accepted:
+                replay = await self.claim(request)
+                self.assertTrue(replay.duplicate)
+                self.assertEqual(MessageToDict(replay.task.metadata)["attempt"], attempt)
+        revisions = await self.store.revisions(first.task.id)
+        self.assertEqual([MessageToDict(task.metadata)["attempt"] for task in revisions], [0, 0, 1, 1, 2])
+        await self.write_state(first.task.id, TaskState.TASK_STATE_COMPLETED)
+        await self.store.aclose()
+        reopened = SQLiteAgentTaskStore(self.path, AgentRole.PLANNER)
+        await reopened.start()
+        self.addAsyncCleanup(reopened.aclose)
+        for request in accepted:
+            replay = await reopened.claim_message(request, self.context)
+            self.assertTrue(replay.duplicate)
+            self.assertEqual(replay.task.status.state, TaskState.TASK_STATE_COMPLETED)
+            self.assertEqual(MessageToDict(replay.task.metadata)["attempt"], 2)
+            self.assertEqual(len(replay.task.history), 3)
+
+    async def test_sdk_save_cannot_advance_or_revert_the_approved_continuation_attempt(self):
+        first = await self.claim()
+        old = await self.write_state(first.task.id, TaskState.TASK_STATE_INPUT_REQUIRED)
+        resumed = await self.claim(self.request(
+            task_id=first.task.id, context_id=first.task.context_id,
+            metadata=self.metadata.model_copy(update={"attempt": 1}),
+        ))
+        stale = task_copy(old.task)
+        stale.status.state = TaskState.TASK_STATE_WORKING
+        with self.assertRaises(ConcurrentTaskModificationError):
+            await self.store.save(stale, event=None, prev=old.task, prev_version=old.version, context=self.context)
+        current = await self.store.get(first.task.id, self.context)
+        for attempt in (0, 2):
+            updated = task_copy(current.task)
+            updated.metadata.update({"attempt": attempt})
+            with self.subTest(attempt=attempt), self.assertRaises(InvalidParamsError):
+                await self.store.save(updated, event=None, prev=current.task, prev_version=current.version, context=self.context)
+        valid = task_copy(resumed.task)
+        valid.status.state = TaskState.TASK_STATE_WORKING
+        await self.store.save(valid, event=None, prev=current.task, prev_version=current.version, context=self.context)
+        self.assertEqual(MessageToDict((await self.store.get(first.task.id, self.context)).task.metadata)["attempt"], 1)
+
+    async def test_stale_cancel_preserves_latest_approved_attempt_history_and_artifacts(self):
+        first = await self.claim()
+        old = await self.write_state(first.task.id, TaskState.TASK_STATE_INPUT_REQUIRED)
+        resumed = await self.claim(self.request(
+            task_id=first.task.id, context_id=first.task.context_id,
+            metadata=self.metadata.model_copy(update={"attempt": 1}),
+        ))
+        artifact = Artifact(artifact_id=str(uuid4()), parts=[new_data_part({"result": "New evidence"})])
+        latest = await self.write_state(resumed.task.id, TaskState.TASK_STATE_WORKING, artifact=artifact)
+        canceled = task_copy(old.task)
+        canceled.status.state = TaskState.TASK_STATE_CANCELED
+        await self.store.save(canceled, event=None, prev=old.task, prev_version=old.version, context=self.context)
+        stored = await self.store.get(first.task.id, self.context)
+        self.assertEqual(stored.task.status.state, TaskState.TASK_STATE_CANCELED)
+        self.assertEqual(MessageToDict(stored.task.metadata)["attempt"], 1)
+        self.assertEqual(stored.task.history, latest.task.history)
+        self.assertEqual(stored.task.artifacts, latest.task.artifacts)
+        with sqlite3.connect(self.path) as connection:
+            binding = connection.execute(
+                "SELECT metadata_json FROM agent_tasks WHERE task_id=?", (first.task.id,),
+            ).fetchone()[0]
+            self.assertEqual(json.loads(binding)["attempt"], 1)
+
+    async def test_cancel_cannot_use_unapproved_attempt_or_another_identity(self):
+        first = await self.claim()
+        await self.write_state(first.task.id, TaskState.TASK_STATE_INPUT_REQUIRED)
+        await self.claim(self.request(
+            task_id=first.task.id, context_id=first.task.context_id,
+            metadata=self.metadata.model_copy(update={"attempt": 1}),
+        ))
+        current = await self.store.get(first.task.id, self.context)
+        for field, value in (("attempt", 2), ("runId", str(uuid4()))):
+            invalid = task_copy(current.task)
+            invalid.status.state = TaskState.TASK_STATE_CANCELED
+            invalid.metadata.update({field: value})
+            with self.subTest(field=field), self.assertRaises(InvalidParamsError):
+                await self.store.save(
+                    invalid, event=None, prev=current.task, prev_version=current.version, context=self.context,
+                )
+        invalid = task_copy(first.task)
+        invalid.context_id = "another-context"
+        invalid.status.state = TaskState.TASK_STATE_CANCELED
+        with self.assertRaises(InvalidParamsError):
+            await self.store.save(
+                invalid, event=None, prev=current.task, prev_version=current.version, context=self.context,
+            )
+        stored = await self.store.get(first.task.id, self.context)
+        self.assertEqual(stored.version, current.version)
+        self.assertEqual(stored.task, current.task)
+
+    async def test_failed_receipt_insert_rolls_back_continuation_binding_history_and_revision(self):
+        first = await self.claim()
+        await self.write_state(first.task.id, TaskState.TASK_STATE_INPUT_REQUIRED)
+        before = await self.store.get(first.task.id, self.context)
+        revisions = await self.store.revisions(first.task.id)
+        with sqlite3.connect(self.path) as connection:
+            connection.execute(
+                "CREATE TRIGGER reject_new_receipts BEFORE INSERT ON agent_message_receipts "
+                "BEGIN SELECT RAISE(ABORT, 'fixture receipt failure'); END"
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            await self.claim(self.request(
+                task_id=first.task.id, context_id=first.task.context_id,
+                metadata=self.metadata.model_copy(update={"attempt": 1}),
+            ))
+        after = await self.store.get(first.task.id, self.context)
+        self.assertEqual(after.version, before.version)
+        self.assertEqual(after.task, before.task)
+        self.assertEqual(await self.store.revisions(first.task.id), revisions)
+        with sqlite3.connect(self.path) as connection:
+            binding = connection.execute(
+                "SELECT metadata_json FROM agent_tasks WHERE task_id=?", (first.task.id,),
+            ).fetchone()[0]
+            self.assertEqual(json.loads(binding)["attempt"], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM agent_message_receipts").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM agent_task_history").fetchone()[0], 1)
+
+    async def test_two_distinct_messages_cannot_reserve_the_same_continuation_attempt(self):
+        first = await self.claim()
+        await self.write_state(first.task.id, TaskState.TASK_STATE_AUTH_REQUIRED)
+        requests = [self.request(
+            task_id=first.task.id, context_id=first.task.context_id,
+            metadata=self.metadata.model_copy(update={"attempt": 1}),
+        ) for _ in range(2)]
+        results = await asyncio.gather(*(self.claim(request) for request in requests), return_exceptions=True)
+        self.assertEqual(sum(isinstance(result, UnsupportedOperationError) for result in results), 1)
+        self.assertEqual(sum(not isinstance(result, Exception) for result in results), 1)
+        with sqlite3.connect(self.path) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM agent_message_receipts").fetchone()[0], 2)
+        self.assertEqual(MessageToDict((await self.store.get(first.task.id, self.context)).task.metadata)["attempt"], 1)
 
     async def test_database_role_and_foreign_schema_are_guarded(self):
         alien = SQLiteAgentTaskStore(self.path, AgentRole.SECURITY)

@@ -6,12 +6,14 @@
 
 2026-10-07 재개 기록: 브랜치 정리 때 보관한 17번 작업을 15·16번이 반영된 `jooho`에 복원하고, 아래 자동 테스트 291개와 변경 범위·개발정의서 준수 여부를 다시 확인했다. 기존 stash는 복구용으로 유지했으며 브랜치·커밋·원격 저장소는 변경하지 않았다. 현재 작업이 복원되어 있으므로 동일 stash를 다시 적용할 필요는 없다.
 
+이후 17번까지 점검한 6개 계약 문제와 회귀 테스트 51개 추가는 [점검 후 보완 문서](17-contract-audit-fixes.md)에 기록했다. 아래 291개는 최초 17번 검증 수치이며 보완 후 전체 검증은 342개다. 사용자가 제외한 설정 URL Credential 보호 문제와 별도로 발견한 간헐적 동시 DB 초기화 제한은 해당 문서의 남은 이슈를 참고한다.
+
 ## 1. 이번에 개발한 내용
 
 - 16번의 메모리 Task 저장을 역할별 SQLite 영속 저장으로 바꿨다.
 - 공식 SDK `VersionedTaskStore`를 구현하여 동시 갱신의 버전을 비교한다. 공식 Task/Message/Artifact 객체와 ProtoJSON을 그대로 사용한다.
 - 요청을 실행하기 전에 `messageId`, 요청 fingerprint, 서버 발급 Task/Context, 마스킹된 입력을 하나의 트랜잭션으로 저장한다.
-- Context의 Agent/Run/Scenario 소유 관계와 Task의 Workflow Metadata를 재시작 후에도 보존한다.
+- Context의 Agent/Run/Scenario 소유 관계와 Task의 Workflow identity를 재시작 후에도 보존한다. 호출 `attempt`는 승인된 후속 Message에서만 정확히 1 증가한다.
 - 동일 요청은 기존 Task만 반환한다. 완료된 Task나 응답이 유실된 요청도 다시 실행하지 않는다.
 - INPUT_REQUIRED/AUTH_REQUIRED는 보존하고, 명시적 새 Message로만 같은 Task를 재개한다.
 - 종료/재시작으로 중단된 진행 Task는 실행 실패와 중단 사유를 기록한다. 성공이나 제품 결함으로 꾸미지 않는다.
@@ -87,14 +89,14 @@ receipt는 실행 전에 저장되므로 응답 유실이나 접수 후 crash에
 
 - 새 Context는 해당 Agent 서버가 발급한다. 다른 Agent의 Context, 알 수 없는 Context, 다른 Run/Scenario의 Context는 받지 않는다.
 - 같은 Agent/Run/Scenario에서 새 Step은 기존 Context에 새 Task를 만들 수 있다.
-- 기존 Task를 이어가려면 원래 Task ID·Context ID와 Workflow Metadata를 유지해야 한다. Run/Step/Scenario/attempt 등을 바꿔서 기존 Task를 재활용하지 않는다.
+- 기존 Task를 이어가려면 원래 Task ID·Context ID·소유자와 Workflow identity를 유지해야 한다. Run/Step/Scenario/Requirement/Code Version/Artifact 참조 등은 바꿀 수 없다.
 - SUBMITTED/WORKING Task에 새로운 후속 Message를 넣어 별도 실행을 겹치게 하지 않는다. 동일 접수 Message를 다시 보낸 경우는 상태 조회만 한다.
-- INPUT_REQUIRED/AUTH_REQUIRED 후속 입력은 **새 messageId**로 보낸다. 같은 Task/Context에서 SUBMITTED로 다시 접수하고, 이전 질문과 새 입력을 history에 보존한다.
+- INPUT_REQUIRED/AUTH_REQUIRED 후속 입력은 **새 messageId**와 **현재 `attempt + 1`**로 보낸다. `attempt`는 호출 시도 번호이며, 동일 Task 재개에서도 증가시키는 기존 7번 Orchestrator 계약을 따른다. 같은 값 재사용·역행·건너뛰기는 거부한다. 같은 Task/Context에서 SUBMITTED로 다시 접수하고, receipt·최신 metadata binding·revision·이전 질문과 새 입력 history를 원자적으로 저장한다. SDK 상태 이벤트만으로 `attempt`를 바꿀 수 없다.
 - 원래 Message를 그대로 재전송하면 대기 상태 Task만 조회된다. 재개 승인이 되지 않는다.
 - 인증 Header는 HTTP 인증 경계에서만 사용한다. AUTH_REQUIRED 해소를 위해 Credential을 Message/Artifact/history에 넣지 않는다. 실제 인증 작업 및 Human Review 연동은 후속 단계다.
 - COMPLETED/FAILED/CANCELED/REJECTED는 terminal이다. 새 입력으로 재실행하거나 저장 내용을 덮어쓰지 않는다.
 - 이미 CANCELED이면 반복 취소는 같은 Task를 반환한다. 다른 terminal Task는 취소 불가 오류다.
-- SDK 취소 CAS 특례에 따라 현재 nonterminal Task에 대한 취소는 오래된 버전이어도 적용할 수 있다. 이때 **최신 Artifact/history를 보존하고 취소 상태만 반영**한다. 이미 terminal이 된 Task에는 취소를 덮지 않는다.
+- SDK 취소 CAS 특례에 따라 현재 nonterminal Task에 대한 취소는 오래된 버전이어도 적용할 수 있다. 최신 binding 또는 과거 실제 접수 receipt의 승인된 metadata만 허용하고, **최신 attempt/Artifact/history를 보존하고 취소 상태만 반영**한다. 미승인 attempt나 다른 Task/Context identity는 거부한다. 이미 terminal이 된 Task에는 취소를 덮지 않는다.
 
 후속 실제 Agent 실행기는 INPUT_REQUIRED/AUTH_REQUIRED를 게시한 뒤 해당 `execute()`를 반환해야 한다. 이전 호출이 후속 입력 접수 뒤에도 결과를 계속 게시하면 안전한 순차 실행 계약을 깨뜨릴 수 있다.
 
@@ -133,7 +135,7 @@ AGENT_ROLE=PLANNER PYTHONPATH=src .venv/bin/python -m agents
 | 정의서 항목 | 이번 단계 점검 |
 | --- | --- |
 | §3 공식 A2A 객체·ID와 내부 Workflow 분리 | SDK Proto 객체·UUIDGenerator, 기존 Project Metadata 재사용 |
-| §3 Agent별 Context, Run/Step 추적 | 역할 DB 및 Agent/Run/Scenario binding 영속 저장, metadata 변경 금지 |
+| §3 Agent별 Context, Run/Step 추적 | 역할 DB 및 identity binding 영속 저장. 승인된 후속 Message의 attempt +1만 허용 |
 | §4 Retry·수정·결과 불확실성 | 요청 replay는 조회만 수행. 수정 최대 3회·MCP retry 최대 2회 정책 변경 없음 |
 | §6 HTTP+JSON 1.0·returnImmediately·Task poll | 기존 API 유지, 실제 실행 전 접수 이벤트 게시 |
 | §7 공식 상태·제품 Verdict 분리 | 공식 TaskState 그대로, 중단 FAILED를 제품 FAIL/SUCCESS로 매핑하지 않음 |

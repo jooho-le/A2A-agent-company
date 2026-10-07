@@ -11,6 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator, model_validator
 
 from orchestrator.domain.constants import MAX_CODE_FIX_ATTEMPTS
+from orchestrator.domain.contract_validation import JSONInteger
 from orchestrator.domain.states import AgentRole
 
 
@@ -39,7 +40,7 @@ class ExecutionManifest(ImmutableDomainModel):
     """Exact snapshot and environment identity attached to Build/QA/Security."""
 
     repository_id: str = Field(alias="repositoryId", min_length=1)
-    code_version: int = Field(
+    code_version: JSONInteger = Field(
         alias="codeVersion", ge=1, le=MAX_CODE_FIX_ATTEMPTS + 1
     )
     project_artifact_id: UUID4 = Field(alias="projectArtifactId")
@@ -78,7 +79,7 @@ class CodeSnapshotArtifact(ImmutableDomainModel):
 
     artifact_id: UUID4 = Field(default_factory=uuid4, alias="artifactId")
     artifact_type: Literal["SOURCE"] = Field(default="SOURCE", alias="artifactType")
-    artifact_version: int = Field(ge=1, alias="artifactVersion")
+    artifact_version: JSONInteger = Field(ge=1, alias="artifactVersion")
     previous_artifact_id: UUID4 | None = Field(default=None, alias="previousArtifactId")
     run_id: UUID4 = Field(alias="runId")
     workflow_step_id: UUID4 = Field(alias="workflowStepId")
@@ -86,7 +87,7 @@ class CodeSnapshotArtifact(ImmutableDomainModel):
     a2a_artifact_id: str | None = Field(default=None, min_length=1, alias="a2aArtifactId")
     created_by: AgentRole = Field(default=AgentRole.DEVELOPER, alias="createdBy")
     requirement_ids: tuple[UUID4, ...] = Field(min_length=1, alias="requirementIds")
-    code_version: int = Field(
+    code_version: JSONInteger = Field(
         ge=1, le=MAX_CODE_FIX_ATTEMPTS + 1, alias="codeVersion"
     )
     repository_id: str = Field(min_length=1, alias="repositoryId")
@@ -114,8 +115,7 @@ class CodeSnapshotArtifact(ImmutableDomainModel):
     def a2a_reference_must_not_be_blank(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        value = value.strip()
-        if not value:
+        if not value.strip():
             raise ValueError("A2A references must not be blank")
         return value
 

@@ -193,16 +193,19 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
                 if message.context_id:
                     self._check_context(connection, message.context_id, owner, metadata)
                 task = _load_task(row[0])
-                if not message.context_id or task.context_id != message.context_id or row[2] != metadata_json:
+                if not message.context_id or task.context_id != message.context_id:
                     raise InvalidParamsError(message="Continuation must preserve Task ownership")
                 if task.status.state not in _INTERRUPTED:
                     raise UnsupportedOperationError(message="Only an interrupted Task accepts a new Message")
+                self._validate_continuation_metadata(task, metadata)
                 previous = _copy_task(task)
                 if task.status.HasField("message"):
                     task.history.append(task.status.message)
                 task.status.Clear()
                 task.status.state = TaskState.TASK_STATE_SUBMITTED
                 task.status.timestamp.FromDatetime(datetime.now(timezone.utc))
+                task.metadata.Clear()
+                task.metadata.update(metadata.to_a2a_json())
                 self._append_input(task, message)
                 self._persist(connection, task, owner, row[1] + 1, "MESSAGE_CONTINUATION_RESERVED", previous)
             else:
@@ -253,9 +256,9 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
             if task.status.state == TaskState.TASK_STATE_CANCELED:
                 if row is None or row[2] != owner or previous.status.state in _TERMINAL:
                     raise ConcurrentTaskModificationError(task.id)
-                self._validate_identity(previous, task, row[3])
+                self._validate_cancel_identity(connection, previous, task, owner, row[3])
                 # Cancellation wins a stale write, but not at the cost of newer
-                # history/artifacts written since the cancel caller's snapshot.
+                # metadata/history/artifacts since the cancel caller's snapshot.
                 current = _copy_task(previous)
                 if current.status.HasField("message"):
                     current.history.append(current.status.message)
@@ -321,6 +324,32 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
             raise InvalidParamsError(message="Task identity and workflow metadata are immutable")
 
     @staticmethod
+    def _validate_cancel_identity(
+        connection: sqlite3.Connection, previous: Task, task: Task, owner: str, metadata_json: str,
+    ) -> None:
+        if previous.id != task.id or previous.context_id != task.context_id:
+            raise InvalidParamsError(message="Cancellation must preserve Task identity")
+        incoming = _metadata_json(task)
+        if incoming != metadata_json and not connection.execute(
+            "SELECT 1 FROM agent_message_receipts WHERE task_id=? AND owner=? AND metadata_json=?",
+            (task.id, owner, incoming),
+        ).fetchone():
+            raise InvalidParamsError(message="Cancellation must use approved workflow metadata")
+
+    @staticmethod
+    def _validate_continuation_metadata(previous: Task, metadata) -> None:
+        """Advance only the call counter of an explicitly interrupted Task."""
+        original = parse_workflow_metadata(MessageToDict(previous.metadata))
+        original_identity = original.to_a2a_json()
+        incoming_identity = metadata.to_a2a_json()
+        original_identity.pop("attempt")
+        incoming_identity.pop("attempt")
+        if original_identity != incoming_identity:
+            raise InvalidParamsError(message="Continuation must preserve workflow identity")
+        if metadata.attempt != original.attempt + 1:
+            raise InvalidParamsError(message="Continuation attempt must increment by one")
+
+    @staticmethod
     def _validate_transition(previous: Task, task: Task) -> None:
         old, new = previous.status.state, task.status.state
         if old in _INTERRUPTED and new not in (old, TaskState.TASK_STATE_FAILED):
@@ -374,7 +403,8 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
         connection.execute(
             "INSERT INTO agent_tasks(task_id, owner, context_id, metadata_json, state, version, payload_json, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET "
-            "state=excluded.state, version=excluded.version, payload_json=excluded.payload_json, updated_at=excluded.updated_at",
+            "metadata_json=excluded.metadata_json, state=excluded.state, version=excluded.version, "
+            "payload_json=excluded.payload_json, updated_at=excluded.updated_at",
             (task.id, owner, task.context_id, _metadata_json(task), task.status.state, version, payload_json, _now()),
         )
         connection.execute(
