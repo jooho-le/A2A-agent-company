@@ -3,6 +3,7 @@
 > 범위: 1번+2번 담당 중 공통 Agent 서버 기반.
 > 기준: 사용자 개발정의서의 A2A 1.0 HTTP+JSON 계약, 기존 01·14·15번 문서 및 Project Schema.
 > 상태: Agent Card·Task 요청/조회/취소 HTTP 계약 구현. 역할별 Agent·LLM·MCP 실행과 3번·4번 작업 및 연동은 제외.
+> 메모리 저장·dedup 미구현 등의 제한은 16번 당시 이력이다. 최신 영속 저장·재시작 정책은 [17번 문서](17-agent-task-lifecycle.md)를 따른다.
 
 ## 1. 개발한 내용
 

@@ -1,4 +1,4 @@
-"""Temporary memory-only Task storage with redaction at save/response boundaries."""
+"""Shared Task redaction and the historical step-16 in-memory adapter."""
 
 from a2a.server.context import ServerCallContext
 from a2a.server.tasks import InMemoryTaskStore

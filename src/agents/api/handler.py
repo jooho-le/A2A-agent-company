@@ -1,59 +1,104 @@
-"""Project ownership guards around the SDK's common Agent request handler."""
+"""Durable admission guards around the official SDK's asynchronous handler."""
 
+import asyncio
+
+from a2a.server.agent_execution import RequestContext
+from a2a.server.agent_execution.request_context_builder import RequestContextBuilder
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.types import CancelTaskRequest, SendMessageRequest, Task, TaskState
-from a2a.utils.errors import InvalidAgentResponseError, InvalidParamsError, TaskNotFoundError
+from a2a.utils.errors import InvalidAgentResponseError, UnsupportedOperationError
+from a2a.utils.input_mode_validator import validate_input_modes
+from a2a.utils.proto_utils import validate_proto_required_fields
+from a2a.utils.task import apply_history_length, validate_history_length
 from google.protobuf.json_format import MessageToDict
 
+from agents.api.sqlite_task_store import SQLiteAgentTaskStore
 from agents.api.validation import parse_workflow_metadata, request_metadata
 
 
-class ProjectRequestHandler(DefaultRequestHandler):
-    """Memory-only Context ownership. Durable lifecycle/dedup belongs to step 17."""
+_RESERVED_IDS = "agents.reserved_task_context"
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._context_bindings: dict[str, tuple[str, str]] = {}
+
+class ReservedTaskContextBuilder(RequestContextBuilder):
+    """Use IDs issued in the atomic receipt claim, not client-invented IDs."""
+
+    async def build(
+        self, context: ServerCallContext, params: SendMessageRequest | None = None,
+        task_id: str | None = None, context_id: str | None = None,
+        task: Task | None = None,
+    ) -> RequestContext:
+        reserved = context.state.get(_RESERVED_IDS)
+        if params is not None:
+            if reserved is None:
+                raise InvalidAgentResponseError(message="Task admission is required")
+            task_id, context_id = reserved
+        return RequestContext(
+            call_context=context, request=params, task_id=task_id,
+            context_id=context_id, task=task,
+        )
+
+
+class ProjectRequestHandler(DefaultRequestHandler):
+    """One SDK worker owner per DB, with persistent message/context admission.
+
+    Admission is serialized through the first SDK response, not through the
+    entire Agent execution. Store CAS protects subsequent background updates.
+    A receipt survives a lost response: it is never deleted to retry execution.
+    """
+
+    def __init__(self, *, task_store: SQLiteAgentTaskStore, **kwargs) -> None:
+        super().__init__(
+            task_store=task_store,
+            request_context_builder=ReservedTaskContextBuilder(), **kwargs,
+        )
+        self._store = task_store
+        self._admission = asyncio.Lock()
+        self._closing = False
+
+    def _require_open(self) -> None:
+        if self._closing:
+            raise UnsupportedOperationError(message="Agent server is stopping")
 
     async def on_message_send(
         self, params: SendMessageRequest, context: ServerCallContext
     ) -> Task:
+        # Validate everything the SDK can reject before creating a receipt.
+        validate_proto_required_fields(params)
+        validate_history_length(params.configuration)
+        if self._validate_input_modes:
+            validate_input_modes(params.message, self._agent_card)
         metadata = request_metadata(params)
-        binding = (str(metadata.run_id), str(metadata.scenario_id))
-        message = params.message
-        if message.context_id:
-            if self._context_bindings.get(message.context_id) != binding:
-                raise InvalidParamsError(message="Context does not belong to this Agent/Run")
-        if message.task_id:
-            task = await self.task_store.get(message.task_id, context)
-            if task is None:
-                raise TaskNotFoundError()
-            previous = parse_workflow_metadata(MessageToDict(task.metadata))
+        async with self._admission:
+            self._require_open()
+            claim = await self._store.claim_message(params, context)
+            if claim.duplicate:
+                # A repeated message is a read, including terminal Tasks.
+                return apply_history_length(claim.task, params.configuration)
+            context.state[_RESERVED_IDS] = (claim.task.id, claim.task.context_id)
+            result = await super().on_message_send(params, context)
+            if not isinstance(result, Task):
+                raise InvalidAgentResponseError(message="Project workflow requires a Task response")
             if (
-                previous != metadata
-                or not message.context_id
-                or message.context_id != task.context_id
+                result.id != claim.task.id
+                or result.context_id != claim.task.context_id
+                or parse_workflow_metadata(MessageToDict(result.metadata)) != metadata
             ):
-                raise InvalidParamsError(message="Continuation must preserve Task ownership")
-
-        result = await super().on_message_send(params, context)
-        if not isinstance(result, Task):
-            raise InvalidAgentResponseError(message="Project workflow requires a Task response")
-        if (
-            not result.context_id
-            or parse_workflow_metadata(MessageToDict(result.metadata)) != metadata
-            or (message.context_id and result.context_id != message.context_id)
-        ):
-            raise InvalidAgentResponseError(message="Task response must preserve workflow metadata")
-        self._context_bindings[result.context_id] = binding
-        return result
+                raise InvalidAgentResponseError(message="Task response must preserve workflow identity")
+            return result
 
     async def on_cancel_task(
         self, params: CancelTaskRequest, context: ServerCallContext
     ) -> Task | None:
-        task = await self.task_store.get(params.id, context)
-        if task is not None and task.status.state == TaskState.TASK_STATE_CANCELED:
-            # Idempotent confirmation; do not cancel/restart an already terminal Task.
-            return task
-        return await super().on_cancel_task(params, context)
+        validate_proto_required_fields(params)
+        async with self._admission:
+            self._require_open()
+            stored = await self._store.get(params.id, context)
+            if stored is not None and stored.task.status.state == TaskState.TASK_STATE_CANCELED:
+                return stored.task
+            return await super().on_cancel_task(params, context)
+
+    async def aclose(self) -> None:
+        self._closing = True
+        async with self._admission:
+            await super().aclose()

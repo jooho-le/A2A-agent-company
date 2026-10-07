@@ -46,7 +46,7 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 
 기본 DB 경로는 `.data/orchestrator.sqlite3`이며 `ORCHESTRATOR_DATABASE_PATH` 환경변수로 바꿀 수 있습니다. `.data/`는 Git에서 제외됩니다.
 
-## Agent/MCP 개발 기반 — 15·16번
+## Agent/MCP 개발 기반 — 15~17번
 
 담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 설정·역할별 Tool 정책 선언이 있습니다. 실제 역할별 LLM 작업, MCP 실행, Sandbox·파일 권한 강제는 아직 구현하지 않았습니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
 
@@ -77,7 +77,9 @@ AGENT_ROLE=PLANNER PYTHONPATH=src .venv/bin/python -m agents
 
 Planner의 `/health`, `/.well-known/agent-card.json`, `/docs`는 `http://127.0.0.1:8101`에서 확인합니다. `/docs`의 `POST /message:send` 예시에 `A2A-Version: 1.0`을 넣어 실행한 뒤 반환된 `task.id`로 `GET /tasks/{id}`를 호출하면 `TASK_STATE_REJECTED`와 `AGENT_RUNTIME_NOT_CONFIGURED` 사유를 확인할 수 있습니다. `SUBMITTED`가 먼저 보일 수 있으므로 다시 조회하세요.
 
-Task는 현재 메모리 저장이므로 서버를 종료하면 사라집니다. `AGENT_BEARER_TOKEN`을 설정하면 Card·Task API에 HTTP Bearer 인증을 강제합니다. API Key·Token을 요청 본문에 넣지 않습니다. 상세 API·안전 제한·검증은 [16번 공통 A2A Agent 서버](docs/16-common-a2a-agent-server.md)를 참고하세요.
+Task·Context·요청 기록은 `.data/agents/{역할소문자}.sqlite3`에 영속 저장합니다. 같은 `messageId`와 같은 요청을 재전송하면 기존 Task만 반환하며 다시 실행하지 않습니다. 재시작으로 중단된 진행 Task는 `FAILED / AGENT_EXECUTION_INTERRUPTED`로 기록하고 자동 재실행하지 않습니다. 입력/인증 대기 Task는 명시적 새 Message로 같은 Task를 이어갈 수 있습니다.
+
+`AGENT_DATABASE_PATH`로 운영자 DB 경로를 바꿀 수 있지만 **같은 DB는 한 Agent 프로세스만 사용**합니다. 여러 worker나 서로 다른 역할이 DB를 공유하지 마세요. 제품/Orchestrator DB와도 분리합니다. `AGENT_BEARER_TOKEN`을 설정하면 Card·Task API에 HTTP Bearer 인증을 강제합니다. API Key·Token을 요청 본문에 넣지 않습니다. HTTP API는 [16번](docs/16-common-a2a-agent-server.md), 최신 생명주기·운영 제한·정의서 점검은 [17번](docs/17-agent-task-lifecycle.md)을 참고하세요.
 
 ## 테스트
 

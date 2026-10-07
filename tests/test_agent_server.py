@@ -4,16 +4,19 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
 from a2a.helpers import new_task
 from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.cluster.task_store import VersionedTaskStore
 from a2a.server.context import ServerCallContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.server.tasks import TaskStore, TaskUpdater
+from a2a.server.tasks import TaskUpdater
 from a2a.types import AgentCard, TaskState
 from a2a.utils.constants import A2A_JSON_MEDIA_TYPE, VERSION_HEADER
 from google.protobuf.json_format import MessageToDict, ParseDict
@@ -91,12 +94,16 @@ class AgentServerTests(unittest.IsolatedAsyncioTestCase):
     @asynccontextmanager
     async def client_for(self, *, settings=None, executor=None):
         settings = settings or AgentSettings(role="PLANNER", _env_file=None)
-        app = create_app(settings, executor=executor)
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url=settings.agent_base_url,
-            ) as client:
-                yield app, client
+        with TemporaryDirectory() as temporary:
+            values = {name: getattr(settings, name) for name in AgentSettings.model_fields}
+            values["database_path"] = Path(temporary) / f"{settings.role.value.lower()}.sqlite3"
+            isolated = AgentSettings(_env_file=None, **values)
+            app = create_app(isolated, executor=executor)
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url=isolated.agent_base_url,
+                ) as client:
+                    yield app, client
 
     def wire_request(self, *, metadata=None, context_id=None, task_id=None):
         request = build_send_message_request(
@@ -174,7 +181,7 @@ class AgentServerTests(unittest.IsolatedAsyncioTestCase):
                 "status": "ok", "role": "PLANNER", "executionReady": False,
             })
             self.assertIsInstance(app.state.request_handler, DefaultRequestHandler)
-            self.assertIsInstance(app.state.task_store, TaskStore)
+            self.assertIsInstance(app.state.task_store, VersionedTaskStore)
             self.assertFalse(hasattr(app.state, "settings"))
 
     async def test_bootstrap_rejects_work_without_artifacts_and_preserves_workflow_identity(self):
@@ -374,7 +381,7 @@ class AgentServerTests(unittest.IsolatedAsyncioTestCase):
             task = await self.poll_state(client, submitted["id"], "TASK_STATE_WORKING")
             stored = await app.state.task_store.get(submitted["id"], ServerCallContext())
             self.assertIsNotNone(stored)
-            outputs = (json.dumps(task), json.dumps(executor.inputs), json.dumps(MessageToDict(stored)))
+            outputs = (json.dumps(task), json.dumps(executor.inputs), json.dumps(MessageToDict(stored.task)))
             for output in outputs:
                 for secret in ("DUMMY_RAW_PASSWORD", "DUMMY_RAW_HASH", "DUMMY_RAW_AUTH"):
                     self.assertNotIn(secret, output)

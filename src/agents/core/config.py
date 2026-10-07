@@ -31,10 +31,20 @@ class AgentSettings(BaseSettings):
     port: int | None = Field(default=None, ge=1, le=65535)
     environment: Literal["local", "development", "test", "production"] = "local"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    database_path: Path | None = None
     bearer_token: SecretStr | None = Field(default=None, exclude=True, repr=False)
     llm_provider: str | None = None
     llm_model_id: str | None = None
     llm_api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
+
+    @field_validator("database_path", mode="before")
+    @classmethod
+    def validate_database_path(cls, value):
+        if value is not None and (
+            not str(value).strip() or str(value) in (".", ":memory:")
+        ):
+            raise ValueError("Agent database must be a persistent file path")
+        return value
 
     @field_validator("llm_provider", "llm_model_id")
     @classmethod
@@ -64,7 +74,9 @@ class AgentSettings(BaseSettings):
 
     @property
     def task_database_path(self) -> Path:
-        """Reserved for step 17; accessing this property does not create a DB."""
+        """Trusted operator path; accessing this property does not create a DB."""
+        if self.database_path is not None:
+            return self.database_path
         return Path(".data") / "agents" / f"{self.role.value.lower()}.sqlite3"
 
     def require_llm_configuration(self) -> None:

@@ -2,7 +2,9 @@
 
 import logging
 import os
+from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -35,6 +37,11 @@ def wire_request() -> dict:
 
 
 class AgentParsingAndLogSafetyTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ, {}, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def test_proto_aliases_cannot_override_validated_message_configuration_or_parts(self):
         for path, alias, value in (
             (("configuration",), "return_immediately", False),
@@ -124,7 +131,12 @@ class AgentHTTPSafetyTests(unittest.IsolatedAsyncioTestCase):
         environment = patch.dict(os.environ, {}, clear=True)
         environment.start()
         self.addCleanup(environment.stop)
-        self.app = create_app(AgentSettings(role="PLANNER", _env_file=None))
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.app = create_app(AgentSettings(
+            role="PLANNER", database_path=Path(temporary.name) / "planner.sqlite3",
+            _env_file=None,
+        ))
         self.headers = {"A2A-Version": "1.0", "Content-Type": "application/a2a+json"}
 
     async def request(self, method, path, **kwargs):
