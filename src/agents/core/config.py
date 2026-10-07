@@ -7,6 +7,7 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agents.core.contracts import AGENT_PORTS
+from agents.llm.budget import LLMLimits
 from orchestrator.domain.states import AgentRole
 
 
@@ -35,7 +36,11 @@ class AgentSettings(BaseSettings):
     bearer_token: SecretStr | None = Field(default=None, exclude=True, repr=False)
     llm_provider: str | None = None
     llm_model_id: str | None = None
+    llm_model_revision: str | None = None
+    llm_temperature: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    llm_seed: int | None = None
     llm_api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
+    llm_limits: LLMLimits = Field(default_factory=LLMLimits)
 
     @field_validator("database_path", mode="before")
     @classmethod
@@ -46,7 +51,7 @@ class AgentSettings(BaseSettings):
             raise ValueError("Agent database must be a persistent file path")
         return value
 
-    @field_validator("llm_provider", "llm_model_id")
+    @field_validator("llm_provider", "llm_model_id", "llm_model_revision")
     @classmethod
     def validate_model_selection(cls, value: str | None) -> str | None:
         if value is None:

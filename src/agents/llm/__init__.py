@@ -1,1 +1,1 @@
-"""Reserved for provider adapters and the bounded LLM loop in step 19."""
+"""Provider-neutral LLM contracts; importing this package performs no I/O."""

@@ -87,6 +87,12 @@ Planner·Developer·QA·Security의 책임/금지/입출력/Tool 선언은 `agen
 
 이 단계는 실제 LLM/MCP 실행이나 ACL 강제가 아닙니다. 기본 Agent는 여전히 미구현 작업을 거부합니다. 사용법·Schema·정의서 점검·검증 결과는 [18번 역할 Prompt와 출력 계약](docs/18-role-prompts-output-contracts.md)을 참고하세요.
 
+### 공통 LLM 실행 엔진 — 19번
+
+`agents.llm`에 Provider 인터페이스·선택 가능한 OpenAI Responses 어댑터·JSON 응답 검증·역할별 Tool Loop·공유 예산·메모리 사용량 기록을 추가했습니다. Provider/모델/temperature/API Key는 직접 설정해야 하며 자동 모델 선택·fallback·실행 재시도를 하지 않습니다. 실제 API 호출은 설정된 어댑터를 명시적으로 실행할 때만 발생합니다.
+
+이 엔진은 아직 기본 A2A 서버에 연결하지 않았습니다. 역할별 Executor·실제 MCP·Workspace/Sandbox·영속 Trace는 후속 단계입니다. 설정·사용법·한계·정의서 점검은 [19번 공통 LLM 실행](docs/19-llm-runtime.md)을 참고하세요.
+
 ## 테스트
 
 ```bash
