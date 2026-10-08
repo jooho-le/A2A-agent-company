@@ -152,7 +152,13 @@ Scanner 경고는 모두 `SUSPECTED`로 반환하고, 코드 snippet·원본 설
 
 선택적 `TrackedMCPExecutor`가 실제 MCP Client 호출 전에 불변 Attempt를 기록하고, 승인된 오류 및 전달 상태에 따라 동일 논리 호출을 최대 2회 재시도합니다. 정상 Build/QA 실패·Scanner 경고는 제품 결과이므로 반복하지 않고, 불명확한 Timeout/Write/Patch는 기본적으로 재전송하지 않습니다.
 
-성공 근거는 현재 claim 이후 저장된 동일 Source/Step/Tool/Profile의 실제 실행 기록과 대조합니다. 과거 결과·다른 검사 설정·중복 실행 기록을 새로운 근거로 연결하지 못하며 입력/원문 코드/SDK 오류를 원장에 저장하지 않습니다. 기본 Agent·제품 Artifact·최종 Verdict·실시간 통합 Trace 연결은 별도입니다. 사용법·정의서 점검·한계는 [29번 실행 근거와 안전 Retry](docs/29-tool-evidence-safe-retry.md)를 참고하세요. 다음은 **30번 Planner Agent**입니다.
+성공 근거는 현재 claim 이후 저장된 동일 Source/Step/Tool/Profile의 실제 실행 기록과 대조합니다. 과거 결과·다른 검사 설정·중복 실행 기록을 새로운 근거로 연결하지 못하며 입력/원문 코드/SDK 오류를 원장에 저장하지 않습니다. 기본 Agent·제품 Artifact·최종 Verdict·실시간 통합 Trace 연결은 별도입니다. 사용법·정의서 점검·한계는 [29번 실행 근거와 안전 Retry](docs/29-tool-evidence-safe-retry.md)를 참고하세요.
+
+### Planner Agent — 30번
+
+Host가 명시적으로 구성한 `PlannerAgentExecutor`가 기존 LLMEngine으로 작업 계획을 제안받고, 동결된 Requirement UUID·기준을 그대로 보존하여 기존 `requirements.json` Artifact를 반환합니다. 전체 요구사항 coverage·Task 의존성·Schema를 검증하며 설명/인증 대기는 Artifact를 만들지 않고 interrupted 상태로 반환합니다. Planner에는 MCP Tool·Source 수정·제품 최종 판정 권한이 없습니다.
+
+실제 Planner를 `create_app(..., executor=planner)`에 주입한 경우만 Planner Skill과 `executionReady=True`를 광고합니다. 기본 CLI/서버는 여전히 Bootstrap이며 모델 환경변수만으로 자동 실행하지 않습니다. 동결 모델·공유 예산·Host DB 입력이 필요하고 기본 Pipeline 연결 및 전체 Run 예산/Trace 영속화는 후속 작업입니다. 상세 사용법·정의서 점검·검증 한계는 [30번 Planner Agent](docs/30-planner-agent.md)를 참고하세요. 다음은 **31번 Developer Agent**입니다.
 
 ## 테스트
 

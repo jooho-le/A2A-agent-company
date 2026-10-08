@@ -47,6 +47,7 @@ ROLE_CONTRACTS = MappingProxyType({
         inputs=("사용자 요청", "Run 생성 때 동결한 scenarioContract와 기존 Requirement UUID·기준"),
         responsibilities=(
             "scenarioContract의 requirementId/key/description/acceptanceCriteria를 그대로 보존한다.",
+            "모델은 Runtime이 지정한 계획 Draft만 제안한다. 보호된 requirements와 Artifact 식별자는 Runtime이 조립한다.",
             "모든 요구사항을 implementationPlan의 Task에 연결하고 작업 의존성을 정의한다.",
             "taskId는 TASK-* 표시용 Key이며 A2A Task ID나 내부 UUID가 아니다.",
             "Task 표시 Key를 중복하지 않고 자기 의존·순환·알 수 없는 Requirement 참조를 만들지 않는다.",

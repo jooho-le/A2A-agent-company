@@ -21,8 +21,18 @@ def create_app(
     settings: AgentSettings | None = None, *, executor: AgentExecutor | None = None
 ) -> FastAPI:
     settings = settings or AgentSettings()
+    execution_ready = False
+    if executor is not None:
+        # Only the explicitly implemented role advertises execution. Arbitrary
+        # test/injected executors and provider settings are not readiness proof.
+        from agents.runtime.planner import PlannerAgentExecutor
+        if isinstance(executor, PlannerAgentExecutor):
+            from orchestrator.domain.states import AgentRole
+            if settings.role is not AgentRole.PLANNER:
+                raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
+            execution_ready = True
     configure_agent_logging(settings.log_level)
-    card = build_agent_card(settings)
+    card = build_agent_card(settings, execution_ready=execution_ready)
     # Construction has no DB IO. Startup acquires exclusive process ownership
     # before the SDK may execute a Task; each role has its own durable store.
     store = SQLiteAgentTaskStore(settings.task_database_path, settings.role)
@@ -49,7 +59,7 @@ def create_app(
 
     @app.get("/health", tags=["Health"])
     async def health() -> dict:
-        return {"status": "ok", "role": settings.role.value, "executionReady": False}
+        return {"status": "ok", "role": settings.role.value, "executionReady": execution_ready}
 
     @app.get("/.well-known/agent-card.json", tags=["A2A Agent Card"])
     async def agent_card(request: Request) -> JSONResponse:
