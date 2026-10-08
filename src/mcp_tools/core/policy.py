@@ -1,4 +1,4 @@
-"""Project contract declarations; Tool discovery/enforcement arrives in step 23."""
+"""Immutable role policy enforced by the Host-bound MCP dispatcher."""
 
 from types import MappingProxyType
 
