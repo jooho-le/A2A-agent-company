@@ -1,4 +1,4 @@
-"""Honest A2A 1.0 Cards: bootstrap by default, opt-in implemented planning."""
+"""Honest A2A 1.0 Cards: bootstrap by default, opt-in implemented roles."""
 
 from a2a.types import (
     AgentCapabilities,
@@ -26,12 +26,17 @@ _ROLE_PURPOSES = {
 
 def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) -> AgentCard:
     """Use official SDK models without advertising unimplemented skills."""
-    if type(execution_ready) is not bool or execution_ready and settings.role is not AgentRole.PLANNER:
+    if type(execution_ready) is not bool or execution_ready and settings.role not in (AgentRole.PLANNER, AgentRole.DEVELOPER):
         raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
     description = (
         "Host-configured Planner: produces a validated task plan while preserving "
         "frozen requirements. Per-Run configuration and budget must be admitted; "
         "no Source modification, MCP execution or product verdict is performed."
+        if execution_ready and settings.role is AgentRole.PLANNER else
+        "Host-configured initial Developer: edits assigned Source via local MCP, "
+        "freezes a measured Git candidate and reports its real Build receipt. "
+        "Approved Host configuration and shared budget are required; "
+        "no independent QA/Security or product verdict is performed."
         if execution_ready else
         f"Intended role: {_ROLE_PURPOSES[settings.role]}. "
         "Transport-only bootstrap: the Agent runtime is not configured. "
@@ -55,6 +60,10 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
             id="protected-task-planning", name="Protected requirement task planning",
             description="Plans tasks from Host-frozen requirements; clarification or rejection does not fabricate a plan.",
             tags=["planning", "requirements"],
+        )] if execution_ready and settings.role is AgentRole.PLANNER else [AgentSkill(
+            id="measured-initial-implementation", name="Measured initial Source implementation",
+            description="Implements the protected plan through MCP and reports an immutable candidate with measured Build evidence, not project success.",
+            tags=["implementation", "snapshot", "build"],
         )] if execution_ready else [],
     )
     if settings.bearer_token is not None:

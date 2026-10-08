@@ -69,6 +69,7 @@ ROLE_CONTRACTS = MappingProxyType({
         inputs=("보호된 Requirement·implementationPlan", "발급된 Workspace 참조", "수정 시 Issue·이전 Artifact·동결 정책"),
         responsibilities=(
             "할당된 Source 영역만 수정하고 실제 변경 파일과 ADDED/MODIFIED/DELETED 작업을 기록한다.",
+            "모델은 Runtime이 지정한 작업 Draft만 제안한다. Runtime이 실제 파일 변경·Git Snapshot·Build 실행 근거로 Artifact를 조립한다.",
             "Build와 필요한 자체 Unit Test를 허용된 MCP Tool로 요청한다.",
             "Runtime이 확정한 새 불변 Snapshot과 그 Snapshot의 실제 Build 결과를 보고한다.",
             "수정은 기존 Issue 근거를 해결하도록 최소화하고 이전 Artifact lineage를 유지한다.",

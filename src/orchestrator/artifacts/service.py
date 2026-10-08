@@ -161,7 +161,8 @@ class ArtifactStore:
         if (
             step is None or step.run_id != run.run_id or step.agent_role is not role
             or step.status not in (WorkflowStepStatus.RUNNING, WorkflowStepStatus.SUCCEEDED)
-            or step.attempt != run.fix_attempt or not step.requirement_ids
+            # A2A continuation attempts are not code-fix cycles.
+            or not step.requirement_ids
             or (step.code_version is not None and step.code_version != code_version_for_fix_attempt(run.fix_attempt))
             or not isinstance(repository_id, str) or not repository_id.strip()
             or len(repository_id) > 256 or any(ord(char) < 32 for char in repository_id)

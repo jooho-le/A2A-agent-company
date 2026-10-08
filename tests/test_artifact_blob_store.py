@@ -235,14 +235,42 @@ class ArtifactBlobStoreTests(unittest.TestCase):
         self.assert_error(ArtifactErrorCode.DENIED, self.put)
         self.assertEqual(self.store.get(self.run.run_id, self.source.artifact_id).content, self.archive)
 
-    def test_step_state_attempt_codeversion_and_requirements_are_rechecked(self):
+    def test_step_state_codeversion_and_requirements_are_rechecked(self):
         for changes in (
-            {"status": WorkflowStepStatus.CANCELED}, {"attempt": 1}, {"code_version": 2},
+            {"status": WorkflowStepStatus.CANCELED}, {"status": WorkflowStepStatus.PENDING},
+            {"status": WorkflowStepStatus.FAILED}, {"status": WorkflowStepStatus.WAITING_INPUT},
+            {"code_version": 2},
             {"requirement_ids": [uuid4()]},
         ):
-            self.replace_step(**changes)
-            self.assert_error(ArtifactErrorCode.DENIED, self.put)
-            self.replace_step()
+            with self.subTest(changes=changes):
+                self.replace_step(**changes)
+                self.assert_error(ArtifactErrorCode.DENIED, self.put)
+                self.replace_step()
+
+    def test_developer_input_continuation_attempt_does_not_increment_source_code_version(self):
+        # A2A input/auth continuation is not a product Code Fix cycle. Source
+        # metadata has no A2A attempt; exact in-flight attempts are bound by
+        # the ToolExecutionStore journal, not inferred from Source version.
+        for attempt in (1, 2):
+            with self.subTest(attempt=attempt):
+                step = self.replace_step(attempt=attempt, code_version=1)
+                stored = self.put()
+                self.assertEqual(step.attempt, attempt)
+                self.assertEqual(stored.metadata.code_version, 1)
+                self.assertEqual(stored.metadata.workflow_step_id, step.workflow_step_id)
+                self.assertEqual(stored.metadata.requirement_ids, tuple(self.requirement_ids))
+                self.assertEqual(self.repository.get_run(self.run.run_id).fix_attempt, 0)
+                self.assertTrue(self.store.has_grant(self.run.run_id, self.source.artifact_id, AgentRole.QA))
+
+    def test_continuation_attempt_cannot_authorize_old_source_in_new_fix_cycle(self):
+        self.replace_run(status=WorkflowStatus.FIXING, fix_attempt=1)
+        self.replace_step(attempt=2, code_version=2)
+        self.assert_error(ArtifactErrorCode.DENIED, self.put)
+
+    def test_continuation_does_not_remove_current_task_binding(self):
+        self.replace_step(attempt=1, code_version=1, a2a_task_id="current-developer-task")
+        stale = self.make_source(a2a_task_id="other-developer-task", a2a_artifact_id="other-developer-artifact")
+        self.assert_error(ArtifactErrorCode.DENIED, lambda: self.put(stale))
 
     def test_source_image_and_dependency_baseline_must_match(self):
         for changes in (

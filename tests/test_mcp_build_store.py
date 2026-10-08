@@ -263,11 +263,39 @@ class BuildOutputStoreTests(unittest.TestCase):
         self.mutate_run(fix_attempt=1, status=WorkflowStatus.FIXING)
         self.assert_code("BUILD_CONTEXT_DENIED", self.publish)
 
-    def test_code_version_and_attempt_step_changes_are_denied(self):
+    def test_step_code_version_change_is_denied_even_after_continuation(self):
         self.mutate_step(code_version=2)
         self.assert_code("BUILD_CONTEXT_DENIED", self.publish)
-        self.mutate_step(code_version=1, attempt=1)
+        self.mutate_step(code_version=2, attempt=1)
         self.assert_code("BUILD_CONTEXT_DENIED", self.publish)
+
+    def test_developer_input_continuation_attempt_does_not_increment_build_code_version(self):
+        # Resuming the same Developer task is independent of Code Fix number.
+        # The private Build receipt preserves the exact immutable candidate;
+        # the tracked call journal separately binds its current Step attempt.
+        self.mutate_step(code_version=1, attempt=1)
+        record = self.publish()
+        self.assertEqual(record.source_artifact_id, self.source.artifact_id)
+        self.assertEqual(record.workflow_step_id, self.step.workflow_step_id)
+        self.assertEqual(record.execution_manifest, self.source.execution_manifest())
+        self.assertEqual(record.execution_manifest.code_version, 1)
+        self.assertEqual(self.fixture_step().attempt, 1)
+        self.assertEqual(self.repository.get_run(self.run.run_id).fix_attempt, 0)
+        self.assertEqual(self.store.get(self.run.run_id, record.execution_manifest_id), record)
+
+    def fixture_step(self):
+        return next(step for step in self.repository.list_steps(self.run.run_id)
+                    if step.workflow_step_id == self.step.workflow_step_id)
+
+    def test_continuation_attempt_cannot_authorize_old_build_in_new_fix_cycle(self):
+        self.mutate_run(fix_attempt=1, status=WorkflowStatus.FIXING)
+        self.mutate_step(code_version=2, attempt=2)
+        self.assert_code("BUILD_CONTEXT_DENIED", self.publish)
+
+    def test_continuation_does_not_remove_current_task_binding(self):
+        self.mutate_step(code_version=1, attempt=1, a2a_task_id="current-developer-task")
+        stale = self.source.model_copy(update={"a2a_task_id": "other-developer-task", "a2a_artifact_id": "other-developer-artifact"})
+        self.assert_code("BUILD_CONTEXT_DENIED", self.store.publish, self.binding, stale, self.result, profile=self.profile)
 
     def test_role_and_requirement_step_changes_are_denied(self):
         self.mutate_step(agent_role=AgentRole.QA)

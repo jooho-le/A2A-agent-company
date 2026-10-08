@@ -270,7 +270,8 @@ class ToolExecutionStore:
                     AgentRole.DEVELOPER: {WorkflowStatus.IMPLEMENTING, WorkflowStatus.FIXING},
                     AgentRole.QA: {WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING},
                     AgentRole.SECURITY: {WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING}}
-                if run.status not in phases[binding.role] or step.status is not WorkflowStepStatus.RUNNING or step.attempt != run.fix_attempt:
+                if (run.status not in phases[binding.role] or step.status is not WorkflowStepStatus.RUNNING
+                        or binding.role is not AgentRole.DEVELOPER and step.attempt != run.fix_attempt):
                     raise ToolStoreError("TOOL_EVIDENCE_CONTEXT_DENIED")
                 candidates = []
                 for row in connection.execute("SELECT * FROM workflow_steps WHERE run_id=?", (str(binding.run_id),)):
@@ -278,7 +279,8 @@ class ToolExecutionStore:
                     if (candidate.run_id != binding.run_id or str(candidate.workflow_step_id) != row["workflow_step_id"]
                         or candidate.status.value != row["status"]):
                         raise ToolStoreError("TOOL_EVIDENCE_INTEGRITY_ERROR")
-                    if candidate.agent_role is binding.role and candidate.status is WorkflowStepStatus.RUNNING and candidate.attempt == run.fix_attempt:
+                    if (candidate.agent_role is binding.role and candidate.status is WorkflowStepStatus.RUNNING
+                            and (binding.role is AgentRole.DEVELOPER or candidate.attempt == run.fix_attempt)):
                         candidates.append(candidate.workflow_step_id)
                 if candidates != [step_id]:
                     raise ToolStoreError("TOOL_EVIDENCE_CONTEXT_DENIED")

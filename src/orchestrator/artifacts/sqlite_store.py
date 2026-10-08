@@ -284,7 +284,7 @@ class SQLiteArtifactContentStore:
         if staging:
             if (run.status not in (WorkflowStatus.IMPLEMENTING, WorkflowStatus.FIXING)
                 or step.status not in (WorkflowStepStatus.RUNNING, WorkflowStepStatus.SUCCEEDED)
-                or step.attempt != run.fix_attempt or metadata.code_version != run.fix_attempt + 1
+                or metadata.code_version != run.fix_attempt + 1
                 or set(metadata.requirement_ids) != set(step.requirement_ids)
                 or (step.code_version is not None and step.code_version != metadata.code_version)
                 or (metadata.a2a_task_id is not None and metadata.a2a_task_id != step.a2a_task_id)):

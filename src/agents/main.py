@@ -26,9 +26,11 @@ def create_app(
         # Only the explicitly implemented role advertises execution. Arbitrary
         # test/injected executors and provider settings are not readiness proof.
         from agents.runtime.planner import PlannerAgentExecutor
-        if isinstance(executor, PlannerAgentExecutor):
+        from agents.runtime.developer import DeveloperAgentExecutor
+        if isinstance(executor, (PlannerAgentExecutor, DeveloperAgentExecutor)):
             from orchestrator.domain.states import AgentRole
-            if settings.role is not AgentRole.PLANNER:
+            expected_role = AgentRole.PLANNER if isinstance(executor, PlannerAgentExecutor) else AgentRole.DEVELOPER
+            if settings.role is not expected_role:
                 raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
             execution_ready = True
     configure_agent_logging(settings.log_level)

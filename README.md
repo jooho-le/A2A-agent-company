@@ -158,7 +158,13 @@ Scanner 경고는 모두 `SUSPECTED`로 반환하고, 코드 snippet·원본 설
 
 Host가 명시적으로 구성한 `PlannerAgentExecutor`가 기존 LLMEngine으로 작업 계획을 제안받고, 동결된 Requirement UUID·기준을 그대로 보존하여 기존 `requirements.json` Artifact를 반환합니다. 전체 요구사항 coverage·Task 의존성·Schema를 검증하며 설명/인증 대기는 Artifact를 만들지 않고 interrupted 상태로 반환합니다. Planner에는 MCP Tool·Source 수정·제품 최종 판정 권한이 없습니다.
 
-실제 Planner를 `create_app(..., executor=planner)`에 주입한 경우만 Planner Skill과 `executionReady=True`를 광고합니다. 기본 CLI/서버는 여전히 Bootstrap이며 모델 환경변수만으로 자동 실행하지 않습니다. 동결 모델·공유 예산·Host DB 입력이 필요하고 기본 Pipeline 연결 및 전체 Run 예산/Trace 영속화는 후속 작업입니다. 상세 사용법·정의서 점검·검증 한계는 [30번 Planner Agent](docs/30-planner-agent.md)를 참고하세요. 다음은 **31번 Developer Agent**입니다.
+실제 Planner를 `create_app(..., executor=planner)`에 주입한 경우만 Planner Skill과 `executionReady=True`를 광고합니다. 기본 CLI/서버는 여전히 Bootstrap이며 모델 환경변수만으로 자동 실행하지 않습니다. 동결 모델·공유 예산·Host DB 입력이 필요하고 기본 Pipeline 연결 및 전체 Run 예산/Trace 영속화는 후속 작업입니다. 상세 사용법·정의서 점검·검증 한계는 [30번 Planner Agent](docs/30-planner-agent.md)를 참고하세요.
+
+### Developer Agent — 31번
+
+Host가 명시적으로 구성한 `DeveloperAgentExecutor`가 MCP로 할당된 Source를 구현하고, 실제 파일 diff·Git commit object·불변 Snapshot·private Build/Tool 실행 기록을 대조하여 기존 Source/Change/Build Artifact 세 개를 반환합니다. 모델은 제한된 Decision만 제안하며 Hash·변경 목록·Build 근거를 작성하지 않습니다. 정상 실행된 컴파일 실패는 Tool PASS + Build FAIL/PRODUCT로 보고하고 전체 SUCCESS로 바꾸지 않습니다.
+
+현재는 최초 `codeVersion=1` 구현만 지원하며 Issue 기반 수정 루프는 35번입니다. 기본 서버는 Bootstrap 유지, 실제 Developer를 주입할 때만 실행 Skill을 광고합니다. 이미 Source를 수정한 뒤 중단한 작업은 자동 원복/재실행하지 않습니다. 실제 LLM·Docker·Developer stdio 전체 경로는 미검증이며 자동 Pipeline 연결은 후속입니다. 상세 사용법·정의서 점검·검증 한계는 [31번 Developer Agent](docs/31-developer-agent.md)를 참고하세요. 다음은 **32번 QA Agent**입니다.
 
 ## 테스트
 

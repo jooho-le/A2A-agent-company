@@ -204,7 +204,7 @@ class BuildOutputStore:
                 or step.agent_role is not AgentRole.DEVELOPER
                 or run.status not in (WorkflowStatus.IMPLEMENTING, WorkflowStatus.FIXING)
                 or step.status is not WorkflowStepStatus.RUNNING
-                or step.attempt != run.fix_attempt or source.code_version != run.fix_attempt + 1
+                or source.code_version != run.fix_attempt + 1
                 or (step.code_version is not None and step.code_version != source.code_version)
                 or set(step.requirement_ids) != set(source.requirement_ids)
                 or (source.a2a_task_id is not None and source.a2a_task_id != step.a2a_task_id)
@@ -223,8 +223,7 @@ class BuildOutputStore:
                 if (candidate.run_id != binding.run_id or str(candidate.workflow_step_id) != row["workflow_step_id"]
                         or row["status"] != candidate.status.value):
                     raise BuildStoreError("BUILD_RESULT_INTEGRITY_ERROR")
-                if (candidate.agent_role is AgentRole.DEVELOPER and candidate.status is WorkflowStepStatus.RUNNING
-                        and candidate.attempt == run.fix_attempt):
+                if candidate.agent_role is AgentRole.DEVELOPER and candidate.status is WorkflowStepStatus.RUNNING:
                     steps.append(candidate)
             if len(steps) != 1 or steps[0].workflow_step_id != source.workflow_step_id:
                 raise BuildStoreError("BUILD_CONTEXT_DENIED")
