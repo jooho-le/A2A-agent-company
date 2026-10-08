@@ -41,7 +41,7 @@ GET /docs
 
 재개는 저장된 Task/Context를 이어 사용하며 수정 횟수를 늘리지 않습니다. 전송됐으나 Task ID가 확인되지 않은 요청은 자동 재전송하지 않습니다. 진행 중인 다른 제어 작업과 충돌하면 409이며, 원격 Task 취소는 실제 `CANCELED` 확인 후 기록합니다. PID 기반 잠금은 단일 호스트 MVP용입니다.
 
-Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool을 추가했습니다. Build/Test/Scan 및 기본 Agent/Dispatch 연결은 후속 작업입니다. 실제 회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
+Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool, 25번에는 Container Build 호출과 불변 실행 기록을 추가했습니다. Test/Scan 및 기본 Agent/Dispatch 연결은 후속 작업입니다. 실제 Docker·회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
 
 자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
 
@@ -110,11 +110,11 @@ Run 생성은 기존처럼 ID·Metadata만 저장합니다. `POST /api/v1/runs/{
 
 `SandboxRuntime`은 실제 Run/Step·역할 권한·Source Hash를 확인하고, 검증된 Snapshot과 선택적 Host 입력만 Workspace 내부의 전용 실행 폴더에 준비합니다. Host가 선택한 고정 실행 Profile을 읽기 전용 Root/Source, 외부 Network 차단, 비특권 사용자, CPU/Memory/PID/시간/출력 제한이 적용된 일회용 Docker Container에서 실행하도록 구현했습니다. 실행 전 실제 Container 설정을 검사하며, 종료·타임아웃·취소 시 소유권이 확인된 Container와 준비 폴더만 정리합니다. 임의 Shell Tool이나 Host에서 생성 코드를 실행하는 fallback은 없습니다.
 
-현재 환경에는 Docker가 없어 실제 Container 실행은 검증하지 못했습니다. 테스트는 실제 Git/SQLite/파일과 Fake Docker 통신을 사용하며, 제품 Build/Test PASS를 뜻하지 않습니다. Docker·고정 이미지가 준비되지 않으면 오류로 중단합니다. MCP Tool과 기본 Agent는 아직 연결하지 않았고 자원 수치도 팀 확정 전 임시 제한입니다. 사용법·정의서 점검·검증 한계는 [22번 Container Sandbox](docs/22-container-sandbox.md)를 참고하세요.
+현재 환경에는 Docker가 없어 실제 Container 실행은 검증하지 못했습니다. 테스트는 실제 Git/SQLite/파일과 Fake Docker 통신을 사용하며, 제품 Build/Test PASS를 뜻하지 않습니다. Docker·고정 이미지가 준비되지 않으면 오류로 중단합니다. MCP `run_build`는 25번에서 연결했지만 기본 Agent 연결은 후속이며 자원 수치도 팀 확정 전 임시 제한입니다. 사용법·정의서 점검·검증 한계는 [22번 Container Sandbox](docs/22-container-sandbox.md)를 참고하세요.
 
 ### MCP stdio 통신·Tool 계약·역할 권한 — 23번
 
-공식 Python MCP SDK v2를 사용해 고정된 `2026-07-28` 버전의 로컬 자식 프로세스와 실제 `server/discover` → `tools/list` → `tools/call` 통신을 구현했습니다. Host가 Agent 역할·Run·Workspace를 고정하며, 서버는 역할별 목록 필터뿐 아니라 직접 호출 권한·JSON Schema·Registry 소유권도 검사합니다. 10개 Tool의 입출력 계약을 선언했으며, 24번의 파일 Tool을 제외한 Build/Test/Scan/Report Handler는 아직 `TOOL_NOT_IMPLEMENTED`를 반환합니다.
+공식 Python MCP SDK v2를 사용해 고정된 `2026-07-28` 버전의 로컬 자식 프로세스와 실제 `server/discover` → `tools/list` → `tools/call` 통신을 구현했습니다. Host가 Agent 역할·Run·Workspace를 고정하며, 서버는 역할별 목록 필터뿐 아니라 직접 호출 권한·JSON Schema·Registry 소유권도 검사합니다. 10개 Tool의 입출력 계약을 선언했으며, 24번 파일 Tool과 25번 Build를 제외한 Test/Scan/Report Handler는 아직 `TOOL_NOT_IMPLEMENTED`를 반환합니다.
 
 실제 stdio 자식 프로세스의 네 역할 통신과 종료를 확인했습니다. 임의 Shell·자동 Retry·기본 Agent 연결·제품 개발/검증 완료는 포함하지 않습니다. 해당 단계의 사용법·정의서 점검·검증 결과는 [23번 MCP stdio 및 역할 권한](docs/23-mcp-stdio-role-enforcement.md)을 참고하세요.
 
@@ -122,7 +122,13 @@ Run 생성은 기존처럼 ID·Metadata만 저장합니다. `POST /api/v1/runs/{
 
 `read_project_file`, `write_source_file`, `write_test_file`, `apply_patch`에 실제 파일 처리를 연결했습니다. Developer는 Working Source를 읽고 쓰며, QA/Security의 Source 읽기는 Host가 지정한 불변 Artifact bytes에서만 수행합니다. 내부 symlink로 Working Source 읽기를 우회하는 경로도 차단합니다. 파일 Hash·크기·동일 내용 여부를 실제 bytes로 계산하고, expected Hash와 Patch 기준 Snapshot을 검증합니다.
 
-쓰기와 Patch는 역할 제한·FD 기반 경로 검사·잠금·원자적 파일 교체를 사용합니다. 여러 파일 Patch는 사전 검증 및 일반 실패 rollback을 지원하지만 프로세스 crash까지 원자적으로 복구한다고 보장하지 않습니다. 실제 stdio 파일 호출을 검증했으며 제품 코드 실행이나 Git commit은 하지 않습니다. 상세 사용법·정의서 점검·한계는 [24번 파일 Tool](docs/24-file-read-write-patch.md)을 참고하세요. 다음은 **25번 Build Tool**입니다.
+쓰기와 Patch는 역할 제한·FD 기반 경로 검사·잠금·원자적 파일 교체를 사용합니다. 여러 파일 Patch는 사전 검증 및 일반 실패 rollback을 지원하지만 프로세스 crash까지 원자적으로 복구한다고 보장하지 않습니다. 실제 stdio 파일 호출을 검증했으며 제품 코드 실행이나 Git commit은 하지 않습니다. 상세 사용법·정의서 점검·한계는 [24번 파일 Tool](docs/24-file-read-write-patch.md)을 참고하세요.
+
+### 실제 Build Tool·불변 실행 기록 — 25번
+
+`run_build`를 실제 Snapshot·Container Sandbox와 연결했습니다. 명령·자원·로컬 Docker endpoint는 신뢰된 Host 설정으로 고정하며 Tool 입력으로 선택할 수 없습니다. 정상 실행의 종료 코드·시간·정제된 stdout/stderr·ExecutionManifest·실제 Profile을 SQLite에 함께 저장한 뒤 참조를 반환합니다. 저장 시점에도 현재 Run/Developer Step/Source/환경을 재검사하고 불변 기록의 덮어쓰기를 차단합니다.
+
+컴파일 오류의 비영 종료는 실제 Tool 결과이며, Container 시작/시간 초과/정리/저장 실패는 실행 오류입니다. Docker가 없는 환경에서 실제 Container 성공을 검증했다고 주장하지 않습니다. 설정 없는 Build도 fail-closed이며 기본 Agent는 여전히 자동 실행되지 않습니다. 상세 사용법·정의서 점검·검증 한계는 [25번 Build Tool](docs/25-build-tool.md)을 참고하세요. 다음은 **26번 Unit Test Tool**입니다.
 
 ## 테스트
 

@@ -3,7 +3,7 @@
 Executable, entry module, environment, role, Run and Workspace are Host-owned.
 The SDK's high-level auto-negotiation and tools/call retry helpers are bypassed:
 each discovery and Tool invocation is a single public ClientSession operation.
-This does not attach Tools to the default Agent or implement Build/Test/Scan.
+This does not attach Tools to the default Agent or implement Test/Scan.
 """
 
 import asyncio
@@ -25,6 +25,7 @@ from agents.llm.contracts import JsonSchema, ToolCall, ToolContext, ToolDefiniti
 from mcp_tools.core.catalog import MAX_JSON_BYTES, get_tool_contract
 from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, ROLE_TOOL_NAMES
 from mcp_tools.runtime import MCPBinding
+from mcp_tools.tools.build_config import BuildConfiguration, encode_build_configuration
 from mcp_tools.tools.snapshots import FrozenSourceSelection
 from orchestrator.workspaces.policy import workspace_uuid
 
@@ -72,6 +73,7 @@ class MCPChildConfiguration:
     workspace_root: Path = field(repr=False)
     max_call_seconds: float = 60
     frozen_source: FrozenSourceSelection | None = field(default=None, repr=False)
+    build_configuration: BuildConfiguration | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if (
@@ -81,6 +83,7 @@ class MCPChildConfiguration:
             or not math.isfinite(self.max_call_seconds)
             or not 0 < self.max_call_seconds <= 600
             or self.frozen_source is not None and not isinstance(self.frozen_source, FrozenSourceSelection)
+            or self.build_configuration is not None and not isinstance(self.build_configuration, BuildConfiguration)
         ):
             raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID")
         object.__setattr__(self, "database_path", _host_path(self.database_path))
@@ -119,6 +122,10 @@ def child_parameters(configuration):
         arguments.extend([
             "--source-artifact-id", str(configuration.frozen_source.project_artifact_id),
             "--source-snapshot-sha256", configuration.frozen_source.snapshot_sha256,
+        ])
+    if configuration.build_configuration is not None:
+        arguments.extend([
+            "--build-configuration-json", encode_build_configuration(configuration.build_configuration),
         ])
     return StdioServerParameters(
         command=sys.executable,

@@ -1,4 +1,4 @@
-"""Explicit Host launch; actual file Tools, no Source execution or Agent Key."""
+"""Explicit Host launch; file/Container Build Tools, no Host Source execution."""
 
 import argparse
 import asyncio
@@ -10,10 +10,15 @@ from mcp_tools.runtime import MCPBinding, MCPDispatcher
 from mcp_tools.server import create_server
 from mcp_tools.stdio import run_stdio
 from mcp_tools.tools.files import FileTools
+from mcp_tools.tools.build import BuildTools
+from mcp_tools.tools.build_config import decode_build_configuration
+from mcp_tools.tools.build_store import BuildOutputStore
 from mcp_tools.tools.snapshots import FrozenSourceSelection
 from orchestrator.artifacts.service import ArtifactStore
 from orchestrator.domain.states import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
+from orchestrator.sandbox.docker_cli import DockerCLI
+from orchestrator.sandbox.runtime import SandboxRuntime
 from orchestrator.workspaces.registry import WorkspaceRegistry
 
 
@@ -34,6 +39,7 @@ def main(argv=None):
     parser.add_argument("--max-call-seconds", type=float, default=60.0)
     parser.add_argument("--source-artifact-id")
     parser.add_argument("--source-snapshot-sha256")
+    parser.add_argument("--build-configuration-json")
     try:
         args = parser.parse_args(argv)
         binding = MCPBinding(role=AgentRole(args.role), agent_role=AgentRole(args.agent_role),
@@ -49,9 +55,16 @@ def main(argv=None):
             project_artifact_id=args.source_artifact_id,
             snapshot_sha256=args.source_snapshot_sha256,
         )
-        tools = FileTools(ArtifactStore(repository, registry), frozen_source=selection)
-        # File handlers are real. Build/Test/Scan/Report remain explicit stubs.
-        dispatcher = MCPDispatcher(binding, registry, handlers=tools.handlers(binding.role),
+        artifacts = ArtifactStore(repository, registry)
+        tools = FileTools(artifacts, frozen_source=selection)
+        configuration = None if args.build_configuration_json is None else decode_build_configuration(args.build_configuration_json)
+        docker = None if configuration is None else DockerCLI(endpoint=configuration.docker_endpoint)
+        sandbox = SandboxRuntime(repository, registry, artifacts, docker=docker)
+        build = BuildTools(artifacts, sandbox, BuildOutputStore(repository), configuration=configuration,
+                           max_call_seconds=args.max_call_seconds)
+        handlers = {**tools.handlers(binding.role), **build.handlers(binding.role)}
+        # File/Build handlers are real. Test/Scan/Report remain explicit stubs.
+        dispatcher = MCPDispatcher(binding, registry, handlers=handlers,
                                    max_call_seconds=args.max_call_seconds)
         server = create_server(dispatcher)
         # Library diagnostics are never Source/argument Trace. Suppress SDK
