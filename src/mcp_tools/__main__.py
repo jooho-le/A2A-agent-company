@@ -17,6 +17,9 @@ from mcp_tools.tools.browser import BrowserTestTools
 from mcp_tools.tools.browser_config import decode_browser_configuration
 from mcp_tools.tools.browser_store import BrowserTestOutputStore
 from mcp_tools.tools.test_reports import TestReportTools
+from mcp_tools.tools.security import SecurityScanTools
+from mcp_tools.tools.security_config import decode_security_configuration
+from mcp_tools.tools.security_store import SecurityScanOutputStore
 from mcp_tools.tools.snapshots import FrozenSourceSelection
 from mcp_tools.tools.unit import UnitTestTools
 from mcp_tools.tools.unit_config import decode_unit_configuration
@@ -49,6 +52,7 @@ def main(argv=None):
     parser.add_argument("--build-configuration-json")
     parser.add_argument("--unit-test-configuration-json")
     parser.add_argument("--browser-test-configuration-json")
+    parser.add_argument("--security-scan-configuration-json")
     try:
         args = parser.parse_args(argv)
         binding = MCPBinding(role=AgentRole(args.role), agent_role=AgentRole(args.agent_role),
@@ -75,7 +79,10 @@ def main(argv=None):
                               else decode_unit_configuration(args.unit_test_configuration_json))
         browser_configuration = (None if args.browser_test_configuration_json is None
                                  else decode_browser_configuration(args.browser_test_configuration_json))
-        endpoints = {item.docker_endpoint for item in (configuration, unit_configuration, browser_configuration) if item is not None}
+        security_configuration = (None if args.security_scan_configuration_json is None
+                                  else decode_security_configuration(args.security_scan_configuration_json))
+        endpoints = {item.docker_endpoint for item in
+                     (configuration, unit_configuration, browser_configuration, security_configuration) if item is not None}
         if len(endpoints) > 1:
             raise ValueError("MCP_CONFIGURATION_REQUIRED")
         unit_docker = None if unit_configuration is None else DockerCLI(endpoint=unit_configuration.docker_endpoint)
@@ -87,9 +94,14 @@ def main(argv=None):
         browser = BrowserTestTools(artifacts, browser_sandbox, BrowserTestOutputStore(repository),
                                   configuration=browser_configuration, max_call_seconds=args.max_call_seconds)
         reports = TestReportTools(unit, browser)
+        security_docker = None if security_configuration is None else DockerCLI(endpoint=security_configuration.docker_endpoint)
+        security_sandbox = SandboxRuntime(repository, registry, artifacts, docker=security_docker)
+        security = SecurityScanTools(artifacts, security_sandbox, SecurityScanOutputStore(repository),
+                                     configuration=security_configuration, max_call_seconds=args.max_call_seconds)
         handlers = {**tools.handlers(binding.role), **build.handlers(binding.role), **unit.handlers(binding.role),
-                    **browser.handlers(binding.role), **reports.handlers(binding.role)}
-        # File/Build/Unit/Browser/test report handlers are real. Scan remains stubbed.
+                    **browser.handlers(binding.role), **reports.handlers(binding.role), **security.handlers(binding.role)}
+        # All ten MCP Tool handlers are connected; default role executors are
+        # still separate work and no Tool result creates a product verdict.
         dispatcher = MCPDispatcher(binding, registry, handlers=handlers,
                                    max_call_seconds=args.max_call_seconds)
         server = create_server(dispatcher)

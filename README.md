@@ -41,7 +41,7 @@ GET /docs
 
 재개는 저장된 Task/Context를 이어 사용하며 수정 횟수를 늘리지 않습니다. 전송됐으나 Task ID가 확인되지 않은 요청은 자동 재전송하지 않습니다. 진행 중인 다른 제어 작업과 충돌하면 409이며, 원격 Task 취소는 실제 `CANCELED` 확인 후 기록합니다. PID 기반 잠금은 단일 호스트 MVP용입니다.
 
-Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool, 25번에는 Container Build, 26번에는 Python unittest, 27번에는 Container 전용 Playwright 브라우저 실행·불변 보고서/단계 Trace 저장 연결을 추가했습니다. Security Scan 및 기본 Agent/Dispatch 연결은 후속 작업입니다. 실제 Docker·회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
+Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool, 25번에는 Container Build, 26번에는 Python unittest, 27번에는 Playwright 브라우저 실행, 28번에는 Bandit 정적 보안 검사·불변 보고서 저장 연결을 추가했습니다. 기본 Agent/Dispatch 연결과 안전 Retry는 후속 작업입니다. 실제 Docker·회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
 
 자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
 
@@ -114,7 +114,7 @@ Run 생성은 기존처럼 ID·Metadata만 저장합니다. `POST /api/v1/runs/{
 
 ### MCP stdio 통신·Tool 계약·역할 권한 — 23번
 
-공식 Python MCP SDK v2를 사용해 고정된 `2026-07-28` 버전의 로컬 자식 프로세스와 실제 `server/discover` → `tools/list` → `tools/call` 통신을 구현했습니다. Host가 Agent 역할·Run·Workspace를 고정하며, 서버는 역할별 목록 필터뿐 아니라 직접 호출 권한·JSON Schema·Registry 소유권도 검사합니다. 10개 Tool의 입출력 계약을 선언했으며, 실제 stdio CLI는 24번 파일 Tool·25번 Build·26번 Unit Test·27번 Browser Test/테스트 보고서 읽기를 연결했습니다. Scan/Security Report Handler는 아직 `TOOL_NOT_IMPLEMENTED`를 반환합니다.
+공식 Python MCP SDK v2를 사용해 고정된 `2026-07-28` 버전의 로컬 자식 프로세스와 실제 `server/discover` → `tools/list` → `tools/call` 통신을 구현했습니다. Host가 Agent 역할·Run·Workspace를 고정하며, 서버는 역할별 목록 필터뿐 아니라 직접 호출 권한·JSON Schema·Registry 소유권도 검사합니다. 10개 Tool의 입출력 계약과 실제 stdio CLI Handler를 24~28번에서 연결했습니다. 실행에 필요한 Host 설정/환경이 없으면 오류를 반환하며, 기본 Agent에 실제 역할 실행기를 연결한 것은 아닙니다.
 
 실제 stdio 자식 프로세스의 네 역할 통신과 종료를 확인했습니다. 임의 Shell·자동 Retry·기본 Agent 연결·제품 개발/검증 완료는 포함하지 않습니다. 해당 단계의 사용법·정의서 점검·검증 결과는 [23번 MCP stdio 및 역할 권한](docs/23-mcp-stdio-role-enforcement.md)을 참고하세요.
 
@@ -140,7 +140,13 @@ Unit Tool은 **Python unittest만 지원**하며 pytest/Jest·독립 비교평�
 
 QA의 `run_browser_tests`를 Frozen Source·Container 전용 Playwright/Chromium Runner와 연결했습니다. Host가 승인한 서비스를 같은 Container의 단일 local origin에서 실행하며, QA/Host 보호 JSON Suite는 이동·입력·클릭·문구/표시/URL 검증의 6개 동작만 허용합니다. 실제 Case/Step 결과·입력 Hash·Host Profile·Manifest를 함께 불변 저장하고 `traceRefs`를 반환합니다. 기존 `read_test_report`는 Unit/Browser 보고서를 모두 조회합니다.
 
-Trace는 원문 DOM·입력값·스크린샷 없는 정제 JSON 단계 기록이며 Playwright Trace Viewer ZIP은 아닙니다. Chromium Sandbox/외부 Network 차단은 완화하지 않습니다. 실제 Docker·Chromium 실행과 팀원 서비스 연결은 미검증/미구현이며 기본 Agent도 자동 실행되지 않습니다. 상세 범위·정의서 점검·실행환경 한계는 [27번 Browser Test Tool](docs/27-browser-test-tool.md)을 참고하세요. 다음은 **28번 Security Scan Tool**입니다.
+Trace는 원문 DOM·입력값·스크린샷 없는 정제 JSON 단계 기록이며 Playwright Trace Viewer ZIP은 아닙니다. Chromium Sandbox/외부 Network 차단은 완화하지 않습니다. 실제 Docker·Chromium 실행과 팀원 서비스 연결은 미검증/미구현이며 기본 Agent도 자동 실행되지 않습니다. 상세 범위·정의서 점검·실행환경 한계는 [27번 Browser Test Tool](docs/27-browser-test-tool.md)을 참고하세요.
+
+### Security Scan Tool·불변 보안 검사 기록 — 28번
+
+Security의 `run_security_scan`과 `read_security_report`를 Frozen Source·Container 전용 Bandit AST 검사·불변 보고서 Store에 연결했습니다. Host가 정확한 Scanner 버전·Rule·Profile 참조를 선택하고, 동결 Run 설정 및 Source/Step/grant/환경을 검사합니다. 모든 Python 파일을 검사하며 검사 누락·문법/Plugin 오류·0 Python 파일은 정상 결과가 아닙니다.
+
+Scanner 경고는 모두 `SUSPECTED`로 반환하고, 코드 snippet·원본 설명·비밀값을 보고서에 남기지 않습니다. 경고0개로 보안 PASS나 전체 SUCCESS를 만들지 않습니다. Python 정적 분석만 지원하며 실제 Docker/Bandit 실행·제품 보안 검증과 기본 Agent 연결은 미완료입니다. 상세 계약·정의서 점검·한계는 [28번 Security Scan Tool](docs/28-security-scan-tool.md)을 참고하세요. 다음은 **29번 Tool 실행 근거·오류 분류·안전 Retry**입니다.
 
 ## 테스트
 

@@ -427,7 +427,7 @@ class UnitTestOutputStore:
                 args = (identity, identity) if " OR execution_id" in query else (identity,)
                 if connection.execute(query, args).fetchone() is not None:
                     raise UnitTestStoreError("UNIT_TEST_RECORD_CONFLICT")
-            for table in ("build_execution_records", "browser_test_execution_records"):
+            for table in ("build_execution_records", "browser_test_execution_records", "security_scan_execution_records"):
                 if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is None:
                     continue
                 if connection.execute(f"SELECT 1 FROM {table} WHERE execution_manifest_id=? OR execution_id=?",

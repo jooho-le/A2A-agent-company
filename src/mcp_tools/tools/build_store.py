@@ -336,7 +336,7 @@ class BuildOutputStore:
                     "SELECT 1 FROM run_configurations WHERE COALESCE(json_extract(payload_json,'$.artifact_id'),json_extract(payload_json,'$.artifactId'))=?",
                 )):
                     raise BuildStoreError("BUILD_RECORD_CONFLICT")
-                for table in ("unit_test_execution_records", "browser_test_execution_records"):
+                for table in ("unit_test_execution_records", "browser_test_execution_records", "security_scan_execution_records"):
                     if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                         continue
                     for identity in (str(manifest_id), metadata["executionId"]):

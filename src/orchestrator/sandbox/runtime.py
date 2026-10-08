@@ -280,7 +280,7 @@ class SandboxRuntime:
 
     async def _run(self, run_id, role, source_id, profile, inputs, stdout_decoder=None):
         if stdout_decoder is not None and (not callable(stdout_decoder) or not isinstance(profile, ExecutionProfile)
-                                           or profile.tool_name not in {"run_unit_tests", "run_browser_tests"}):
+                                           or profile.tool_name not in {"run_unit_tests", "run_browser_tests", "run_security_scan"}):
             raise SandboxError(SandboxErrorCode.INVALID)
         source_id = _uuid(source_id)
         started = time.monotonic()

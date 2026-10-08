@@ -3,7 +3,7 @@
 Executable, entry module, environment, role, Run and Workspace are Host-owned.
 The SDK's high-level auto-negotiation and tools/call retry helpers are bypassed:
 each discovery and Tool invocation is a single public ClientSession operation.
-This does not attach Tools to the default Agent or implement Security Scan.
+This does not attach Tools to the default Agent or decide product verdicts.
 """
 
 import asyncio
@@ -27,6 +27,7 @@ from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, ROLE_TOOL_NAMES
 from mcp_tools.runtime import MCPBinding
 from mcp_tools.tools.build_config import BuildConfiguration, encode_build_configuration
 from mcp_tools.tools.browser_config import BrowserTestConfiguration, encode_browser_configuration
+from mcp_tools.tools.security_config import SecurityScanConfiguration, encode_security_configuration
 from mcp_tools.tools.snapshots import FrozenSourceSelection
 from mcp_tools.tools.unit_config import UnitTestConfiguration, encode_unit_configuration
 from orchestrator.workspaces.policy import workspace_uuid
@@ -78,6 +79,7 @@ class MCPChildConfiguration:
     build_configuration: BuildConfiguration | None = field(default=None, repr=False)
     unit_test_configuration: UnitTestConfiguration | None = field(default=None, repr=False)
     browser_test_configuration: BrowserTestConfiguration | None = field(default=None, repr=False)
+    security_scan_configuration: SecurityScanConfiguration | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if (
@@ -90,6 +92,7 @@ class MCPChildConfiguration:
             or self.build_configuration is not None and not isinstance(self.build_configuration, BuildConfiguration)
             or self.unit_test_configuration is not None and not isinstance(self.unit_test_configuration, UnitTestConfiguration)
             or self.browser_test_configuration is not None and not isinstance(self.browser_test_configuration, BrowserTestConfiguration)
+            or self.security_scan_configuration is not None and not isinstance(self.security_scan_configuration, SecurityScanConfiguration)
         ):
             raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID")
         object.__setattr__(self, "database_path", _host_path(self.database_path))
@@ -140,6 +143,10 @@ def child_parameters(configuration):
     if configuration.browser_test_configuration is not None:
         arguments.extend([
             "--browser-test-configuration-json", encode_browser_configuration(configuration.browser_test_configuration),
+        ])
+    if configuration.security_scan_configuration is not None:
+        arguments.extend([
+            "--security-scan-configuration-json", encode_security_configuration(configuration.security_scan_configuration),
         ])
     return StdioServerParameters(
         command=sys.executable,

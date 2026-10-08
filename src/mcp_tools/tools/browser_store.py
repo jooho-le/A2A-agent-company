@@ -470,7 +470,7 @@ class BrowserTestOutputStore:
             ):
                 if connection.execute(query, (identity,)).fetchone() is not None:
                     raise BrowserStoreError("BROWSER_TEST_RECORD_CONFLICT")
-            for name in ("browser_test_execution_records", "unit_test_execution_records", "build_execution_records"):
+            for name in ("browser_test_execution_records", "unit_test_execution_records", "build_execution_records", "security_scan_execution_records"):
                 if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None:
                     if connection.execute(f"SELECT 1 FROM {name} WHERE execution_manifest_id=? OR execution_id=?", (identity, identity)).fetchone() is not None:
                         raise BrowserStoreError("BROWSER_TEST_RECORD_CONFLICT")
