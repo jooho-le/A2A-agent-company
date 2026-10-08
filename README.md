@@ -41,7 +41,7 @@ GET /docs
 
 재개는 저장된 Task/Context를 이어 사용하며 수정 횟수를 늘리지 않습니다. 전송됐으나 Task ID가 확인되지 않은 요청은 자동 재전송하지 않습니다. 진행 중인 다른 제어 작업과 충돌하면 409이며, 원격 Task 취소는 실제 `CANCELED` 확인 후 기록합니다. PID 기반 잠금은 단일 호스트 MVP용입니다.
 
-Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장하며, Artifact 원본 bytes·READ_ONLY ACL·실제 회원가입 코드의 성공·비교 실험 완료는 아직 주장하지 않습니다.
+Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 실제 Workspace·Artifact 내용/권한·Container 실행 기반을 추가했지만, 기본 Agent/Dispatch와 아직 연결하지 않았습니다. 실제 회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
 
 자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
 
@@ -49,7 +49,7 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 
 ## Agent/MCP 개발 기반 — 15~17번
 
-담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 설정·역할별 Tool 정책 선언이 있습니다. 실제 역할별 LLM 작업, MCP 실행, Sandbox·파일 권한 강제는 아직 구현하지 않았습니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
+담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 설정·역할별 Tool 정책 선언이 있습니다. 공통 LLM 엔진과 Workspace/Artifact/Sandbox 기반은 아래 후속 단계에 추가했으며, 실제 역할별 Executor와 MCP 연결은 아직 후속 작업입니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
 
 설정 접두사는 `ORCHESTRATOR_`, `AGENT_`, `MCP_`로 분리합니다. 각 Agent는 하나의 역할을 명시하며 기본 주소는 Planner `127.0.0.1:8101`, Developer `:8102`, QA `:8103`, Security `:8104`입니다. 기존 Orchestrator의 Agent URL은 실제 역할 구현·연결 전까지 미설정 상태로 유지하세요. 지금 연결하면 기본 런타임이 요청을 `TASK_STATE_REJECTED`로 거절하며 제품을 개발하지 않습니다.
 
@@ -98,13 +98,19 @@ Planner·Developer·QA·Security의 책임/금지/입출력/Tool 선언은 `agen
 
 Run 생성은 기존처럼 ID·Metadata만 저장합니다. `POST /api/v1/runs/{runId}/workspace/provision`을 호출하면 서버에 등록된 해당 workspace를 실제로 준비합니다. 기존 Source/출력은 덮어쓰지 않으며, 준비되지 않았거나 소유권이 충돌하는 폴더는 Agent 접근 대상으로 삼지 않습니다.
 
-`WorkspaceRegistry.bind()`의 신뢰된 역할별 접근기는 Developer의 `source/`, QA의 `outputs/qa/`, Security의 `outputs/security/`, Planner의 `planning/` 쓰기만 허용합니다. Snapshot 쓰기·Host 경로·Traversal·Secret 경로·Symlink 쓰기·Hardlink 및 비정규 파일 접근은 차단합니다. 실제 Snapshot 내용 저장은 아래 21번으로 이어지며, Container/MCP 강제는 아직 후속 단계입니다. 상세 사용법·정의서 점검은 [20번 실제 Workspace Registry](docs/20-workspace-registry-permissions.md)를 참고하세요.
+`WorkspaceRegistry.bind()`의 신뢰된 역할별 접근기는 Developer의 `source/`, QA의 `outputs/qa/`, Security의 `outputs/security/`, Planner의 `planning/` 쓰기만 허용합니다. Snapshot 쓰기·Host 경로·Traversal·Secret 경로·Symlink 쓰기·Hardlink 및 비정규 파일 접근은 차단합니다. 실제 Snapshot 내용 저장과 Container 기반은 아래 21~22번이며, MCP 권한 연결은 아직 후속 단계입니다. 상세 사용법·정의서 점검은 [20번 실제 Workspace Registry](docs/20-workspace-registry-permissions.md)를 참고하세요.
 
 ### 실제 Snapshot/Artifact 내용 저장 — 21번
 
 `ArtifactStore`는 등록된 Workspace의 Git full Commit에서 실제 Tree/Blob을 읽어 정규화한 `source.tar`와 SHA-256을 만듭니다. 동결 Run 환경과 실제 Commit의 Dependency Lock Hash가 일치해야 저장합니다. 실제 Archive/보고서 JSON과 읽기 권한은 기존 SQLite의 불변 BLOB 테이블에 저장하고, 매 읽기마다 내용·Metadata Hash 및 Run/역할 권한을 검사합니다. Host 경로나 외부 Artifact URL을 다운로드하는 기능은 없습니다.
 
-이 저장은 Build 전 후보 준비이며 기존 A2A 완료 등록·Workflow 성공 판정과 구분합니다. QA/Security는 같은 Snapshot을 읽기 전용으로 받으며, Container Read-only Mount·MCP·역할 Executor·기존 Dispatch의 실제 연결은 아직 후속 작업입니다. 사용법과 정의서 점검은 [21번 실제 Snapshot/Artifact 저장소](docs/21-snapshot-artifact-store.md)를 참고하세요.
+이 저장은 Build 전 후보 준비이며 기존 A2A 완료 등록·Workflow 성공 판정과 구분합니다. QA/Security는 같은 Snapshot을 읽기 전용으로 받습니다. Container 기반은 아래 22번에 추가했으며, MCP·역할 Executor·기존 Dispatch의 실제 연결은 아직 후속 작업입니다. 사용법과 정의서 점검은 [21번 실제 Snapshot/Artifact 저장소](docs/21-snapshot-artifact-store.md)를 참고하세요.
+
+### Container Sandbox — 22번
+
+`SandboxRuntime`은 실제 Run/Step·역할 권한·Source Hash를 확인하고, 검증된 Snapshot과 선택적 Host 입력만 Workspace 내부의 전용 실행 폴더에 준비합니다. Host가 선택한 고정 실행 Profile을 읽기 전용 Root/Source, 외부 Network 차단, 비특권 사용자, CPU/Memory/PID/시간/출력 제한이 적용된 일회용 Docker Container에서 실행하도록 구현했습니다. 실행 전 실제 Container 설정을 검사하며, 종료·타임아웃·취소 시 소유권이 확인된 Container와 준비 폴더만 정리합니다. 임의 Shell Tool이나 Host에서 생성 코드를 실행하는 fallback은 없습니다.
+
+현재 환경에는 Docker가 없어 실제 Container 실행은 검증하지 못했습니다. 테스트는 실제 Git/SQLite/파일과 Fake Docker 통신을 사용하며, 제품 Build/Test PASS를 뜻하지 않습니다. Docker·고정 이미지가 준비되지 않으면 오류로 중단합니다. MCP Tool과 기본 Agent는 아직 연결하지 않았고 자원 수치도 팀 확정 전 임시 제한입니다. 사용법·정의서 점검·검증 한계는 [22번 Container Sandbox](docs/22-container-sandbox.md)를 참고하세요.
 
 ## 테스트
 
