@@ -35,6 +35,10 @@
     inset -1px -1px 0 rgba(255, 255, 255, 0.05);
 }
 
+.login-page .auth-heading {
+  text-align: center;
+}
+
 .login-page .login-field input,
 .login-page .password-input {
   border-color: rgba(180, 202, 235, 0.25);
