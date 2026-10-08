@@ -98,7 +98,13 @@ Planner·Developer·QA·Security의 책임/금지/입출력/Tool 선언은 `agen
 
 Run 생성은 기존처럼 ID·Metadata만 저장합니다. `POST /api/v1/runs/{runId}/workspace/provision`을 호출하면 서버에 등록된 해당 workspace를 실제로 준비합니다. 기존 Source/출력은 덮어쓰지 않으며, 준비되지 않았거나 소유권이 충돌하는 폴더는 Agent 접근 대상으로 삼지 않습니다.
 
-`WorkspaceRegistry.bind()`의 신뢰된 역할별 접근기는 Developer의 `source/`, QA의 `outputs/qa/`, Security의 `outputs/security/`, Planner의 `planning/` 쓰기만 허용합니다. Snapshot 쓰기·Host 경로·Traversal·Secret 경로·Symlink 쓰기·Hardlink 및 비정규 파일 접근은 차단합니다. 실제 Snapshot 저장/불변성·Container/MCP 강제는 아직 후속 단계입니다. 상세 사용법·정의서 점검은 [20번 실제 Workspace Registry](docs/20-workspace-registry-permissions.md)를 참고하세요.
+`WorkspaceRegistry.bind()`의 신뢰된 역할별 접근기는 Developer의 `source/`, QA의 `outputs/qa/`, Security의 `outputs/security/`, Planner의 `planning/` 쓰기만 허용합니다. Snapshot 쓰기·Host 경로·Traversal·Secret 경로·Symlink 쓰기·Hardlink 및 비정규 파일 접근은 차단합니다. 실제 Snapshot 내용 저장은 아래 21번으로 이어지며, Container/MCP 강제는 아직 후속 단계입니다. 상세 사용법·정의서 점검은 [20번 실제 Workspace Registry](docs/20-workspace-registry-permissions.md)를 참고하세요.
+
+### 실제 Snapshot/Artifact 내용 저장 — 21번
+
+`ArtifactStore`는 등록된 Workspace의 Git full Commit에서 실제 Tree/Blob을 읽어 정규화한 `source.tar`와 SHA-256을 만듭니다. 동결 Run 환경과 실제 Commit의 Dependency Lock Hash가 일치해야 저장합니다. 실제 Archive/보고서 JSON과 읽기 권한은 기존 SQLite의 불변 BLOB 테이블에 저장하고, 매 읽기마다 내용·Metadata Hash 및 Run/역할 권한을 검사합니다. Host 경로나 외부 Artifact URL을 다운로드하는 기능은 없습니다.
+
+이 저장은 Build 전 후보 준비이며 기존 A2A 완료 등록·Workflow 성공 판정과 구분합니다. QA/Security는 같은 Snapshot을 읽기 전용으로 받으며, Container Read-only Mount·MCP·역할 Executor·기존 Dispatch의 실제 연결은 아직 후속 작업입니다. 사용법과 정의서 점검은 [21번 실제 Snapshot/Artifact 저장소](docs/21-snapshot-artifact-store.md)를 참고하세요.
 
 ## 테스트
 
