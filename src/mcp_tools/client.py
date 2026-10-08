@@ -3,12 +3,13 @@
 Executable, entry module, environment, role, Run and Workspace are Host-owned.
 The SDK's high-level auto-negotiation and tools/call retry helpers are bypassed:
 each discovery and Tool invocation is a single public ClientSession operation.
-This does not attach Tools to the default Agent or implement future handlers.
+This does not attach Tools to the default Agent or implement Build/Test/Scan.
 """
 
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from hashlib import sha256
 import math
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ from agents.llm.contracts import JsonSchema, ToolCall, ToolContext, ToolDefiniti
 from mcp_tools.core.catalog import MAX_JSON_BYTES, get_tool_contract
 from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, ROLE_TOOL_NAMES
 from mcp_tools.runtime import MCPBinding
+from mcp_tools.tools.snapshots import FrozenSourceSelection
 from orchestrator.workspaces.policy import workspace_uuid
 
 
@@ -69,6 +71,7 @@ class MCPChildConfiguration:
     database_path: Path = field(repr=False)
     workspace_root: Path = field(repr=False)
     max_call_seconds: float = 60
+    frozen_source: FrozenSourceSelection | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if (
@@ -77,6 +80,7 @@ class MCPChildConfiguration:
             or not isinstance(self.max_call_seconds, (float, int))
             or not math.isfinite(self.max_call_seconds)
             or not 0 < self.max_call_seconds <= 600
+            or self.frozen_source is not None and not isinstance(self.frozen_source, FrozenSourceSelection)
         ):
             raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID")
         object.__setattr__(self, "database_path", _host_path(self.database_path))
@@ -103,16 +107,22 @@ def child_parameters(configuration):
         "HOME": "/nonexistent", "SHELL": "/bin/false", "TERM": "dumb",
         "USER": "a2a-mcp", "LOGNAME": "a2a-mcp",
     })
+    arguments = [
+        "-I", "-c", _BOOTSTRAP, str(source_root),
+        "--role", binding.role.value, "--agent-role", binding.agent_role.value,
+        "--run-id", str(binding.run_id), "--workspace-id", str(binding.workspace_id),
+        "--database-path", str(configuration.database_path),
+        "--workspace-root", str(configuration.workspace_root),
+        "--max-call-seconds", str(configuration.max_call_seconds),
+    ]
+    if configuration.frozen_source is not None:
+        arguments.extend([
+            "--source-artifact-id", str(configuration.frozen_source.project_artifact_id),
+            "--source-snapshot-sha256", configuration.frozen_source.snapshot_sha256,
+        ])
     return StdioServerParameters(
         command=sys.executable,
-        args=[
-            "-I", "-c", _BOOTSTRAP, str(source_root),
-            "--role", binding.role.value, "--agent-role", binding.agent_role.value,
-            "--run-id", str(binding.run_id), "--workspace-id", str(binding.workspace_id),
-            "--database-path", str(configuration.database_path),
-            "--workspace-root", str(configuration.workspace_root),
-            "--max-call-seconds", str(configuration.max_call_seconds),
-        ],
+        args=arguments,
         env=environment, cwd=str(source_root),
     )
 
@@ -277,8 +287,14 @@ class BoundMCPClient:
             data = sanitize_content(
                 data, source_fields=contract.source_output_fields, reject_secrets=True,
             )
-            if name == "read_project_file" and data["path"] != arguments["path"]:
-                raise ValueError
+            if name == "read_project_file":
+                content = data["content"].encode("utf-8", errors="strict")
+                if (
+                    data["path"] != arguments["path"]
+                    or data["sha256"] != sha256(content).hexdigest()
+                    or data["sizeBytes"] != len(content)
+                ):
+                    raise ValueError
             return data
         except Exception:
             raise MCPClientError("MCP_CLIENT_OUTPUT_INVALID") from None

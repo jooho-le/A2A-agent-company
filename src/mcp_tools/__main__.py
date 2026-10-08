@@ -1,4 +1,4 @@
-"""Explicit Host launch; no dotenv, Agent Key, arbitrary imports, or Tool bodies."""
+"""Explicit Host launch; actual file Tools, no Source execution or Agent Key."""
 
 import argparse
 import asyncio
@@ -9,6 +9,9 @@ import sys
 from mcp_tools.runtime import MCPBinding, MCPDispatcher
 from mcp_tools.server import create_server
 from mcp_tools.stdio import run_stdio
+from mcp_tools.tools.files import FileTools
+from mcp_tools.tools.snapshots import FrozenSourceSelection
+from orchestrator.artifacts.service import ArtifactStore
 from orchestrator.domain.states import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.workspaces.registry import WorkspaceRegistry
@@ -29,6 +32,8 @@ def main(argv=None):
     parser.add_argument("--database-path", required=True)
     parser.add_argument("--workspace-root", required=True)
     parser.add_argument("--max-call-seconds", type=float, default=60.0)
+    parser.add_argument("--source-artifact-id")
+    parser.add_argument("--source-snapshot-sha256")
     try:
         args = parser.parse_args(argv)
         binding = MCPBinding(role=AgentRole(args.role), agent_role=AgentRole(args.agent_role),
@@ -38,9 +43,16 @@ def main(argv=None):
             raise ValueError("MCP_CONFIGURATION_REQUIRED")
         repository = SQLiteWorkflowRepository(database)
         registry = WorkspaceRegistry(repository, root)
-        # No actual Tool handlers before24–28. Each authorized contract call
-        # revalidates the existing Registry and reports TOOL_NOT_IMPLEMENTED.
-        dispatcher = MCPDispatcher(binding, registry, max_call_seconds=args.max_call_seconds)
+        if (args.source_artifact_id is None) != (args.source_snapshot_sha256 is None):
+            raise ValueError("MCP_CONFIGURATION_REQUIRED")
+        selection = None if args.source_artifact_id is None else FrozenSourceSelection(
+            project_artifact_id=args.source_artifact_id,
+            snapshot_sha256=args.source_snapshot_sha256,
+        )
+        tools = FileTools(ArtifactStore(repository, registry), frozen_source=selection)
+        # File handlers are real. Build/Test/Scan/Report remain explicit stubs.
+        dispatcher = MCPDispatcher(binding, registry, handlers=tools.handlers(binding.role),
+                                   max_call_seconds=args.max_call_seconds)
         server = create_server(dispatcher)
         # Library diagnostics are never Source/argument Trace. Suppress SDK
         # diagnostic exception formatting at the CLI boundary altogether.

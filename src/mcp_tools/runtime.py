@@ -58,6 +58,26 @@ class MCPExecutionError(str, Enum):
     TOOL_EXECUTION_FAILED = "TOOL_EXECUTION_FAILED"
     TOOL_OUTPUT_INVALID = "TOOL_OUTPUT_INVALID"
     TIMEOUT = "TIMEOUT"
+    FILE_NOT_FOUND = "FILE_NOT_FOUND"
+    FILE_TOO_LARGE = "FILE_TOO_LARGE"
+    FILE_ENCODING_ERROR = "FILE_ENCODING_ERROR"
+    WRITE_CONFLICT = "WRITE_CONFLICT"
+    WRITE_FAILED = "WRITE_FAILED"
+    BASE_MISMATCH = "BASE_MISMATCH"
+    PATCH_FAILED = "PATCH_FAILED"
+    SNAPSHOT_REQUIRED = "SNAPSHOT_REQUIRED"
+    SNAPSHOT_INTEGRITY_ERROR = "SNAPSHOT_INTEGRITY_ERROR"
+
+
+class MCPToolExecutionError(RuntimeError):
+    """Handler failure containing only an approved, stable execution code."""
+
+    def __init__(self, code):
+        try:
+            self.code = MCPExecutionError(code)
+        except (ValueError, TypeError):
+            self.code = MCPExecutionError.TOOL_EXECUTION_FAILED
+        super().__init__(self.code.value)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -268,6 +288,8 @@ class MCPDispatcher:
             return _failure(MCPExecutionError.TIMEOUT)
         except asyncio.CancelledError:
             raise
+        except MCPToolExecutionError as error:
+            return _failure(error.code)
         except Exception:
             return _failure(MCPExecutionError.TOOL_EXECUTION_FAILED)
         try:

@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import FrozenInstanceError
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -44,7 +45,8 @@ def read_arguments(config):
 
 
 def read_output(path="source/signup.py"):
-    return {"path": path, "content": "password=request.password\n", "sha256": "a" * 64, "sizeBytes": 26}
+    content = "password=request.password\n"
+    return {"path": path, "content": content, "sha256": sha256(content.encode()).hexdigest(), "sizeBytes": len(content.encode())}
 
 
 def successful_result(data):

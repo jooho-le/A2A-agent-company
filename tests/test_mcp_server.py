@@ -409,7 +409,9 @@ class MCPServerWireTests(_MCPServerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_id[1]["result"]["supportedVersions"], [MCP_PROTOCOL_VERSION])
         self.assertEqual([tool["name"] for tool in by_id[2]["result"]["tools"]], list(ROLE_TOOL_NAMES[AgentRole.QA]))
         self.assertTrue(by_id[3]["result"]["isError"])
-        self.assertEqual(by_id[3]["result"]["content"][0]["text"], "TOOL_NOT_IMPLEMENTED")
+        # Step24 now registers actual file handlers; QA without a Host Source
+        # selection must fail instead of reading the Developer working copy.
+        self.assertEqual(by_id[3]["result"]["content"][0]["text"], "SNAPSHOT_REQUIRED")
         self.assertEqual(by_id[4]["error"], {"code": types.INVALID_PARAMS, "message": "Invalid parameters"})
         self.assertEqual(by_id[5]["result"]["content"][0]["text"], "PATH_DENIED")
         self.assertEqual(by_id[6]["error"], {"code": types.INVALID_PARAMS, "message": "Invalid parameters"})
