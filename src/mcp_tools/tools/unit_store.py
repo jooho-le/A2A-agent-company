@@ -434,6 +434,12 @@ class UnitTestOutputStore:
                                       (identity, identity)).fetchone() is not None:
                     raise UnitTestStoreError("UNIT_TEST_RECORD_CONFLICT")
 
+            for table, column in (("tool_execution_calls", "logical_call_id"),
+                                  ("tool_execution_attempt_starts", "attempt_id")):
+                if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None:
+                    if connection.execute(f"SELECT 1 FROM {table} WHERE {column}=?", (identity,)).fetchone() is not None:
+                        raise UnitTestStoreError("UNIT_TEST_RECORD_CONFLICT")
+
     def publish(self, binding: MCPBinding, source: CodeSnapshotArtifact, result: SandboxResult,
                 *, profile: ExecutionProfile, scope: UnitTestScope, inputs: UnitTestInputs,
                 report: UnitTestReport) -> UnitTestExecutionRecord:

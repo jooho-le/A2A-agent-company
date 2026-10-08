@@ -474,6 +474,11 @@ class BrowserTestOutputStore:
                 if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None:
                     if connection.execute(f"SELECT 1 FROM {name} WHERE execution_manifest_id=? OR execution_id=?", (identity, identity)).fetchone() is not None:
                         raise BrowserStoreError("BROWSER_TEST_RECORD_CONFLICT")
+            for table, column in (("tool_execution_calls", "logical_call_id"),
+                                  ("tool_execution_attempt_starts", "attempt_id")):
+                if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None:
+                    if connection.execute(f"SELECT 1 FROM {table} WHERE {column}=?", (identity,)).fetchone() is not None:
+                        raise BrowserStoreError("BROWSER_TEST_RECORD_CONFLICT")
 
     def publish(self, binding, source, result, *, profile, suite, inputs, report, configuration):
         try:

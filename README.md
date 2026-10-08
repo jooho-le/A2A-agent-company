@@ -41,7 +41,7 @@ GET /docs
 
 재개는 저장된 Task/Context를 이어 사용하며 수정 횟수를 늘리지 않습니다. 전송됐으나 Task ID가 확인되지 않은 요청은 자동 재전송하지 않습니다. 진행 중인 다른 제어 작업과 충돌하면 409이며, 원격 Task 취소는 실제 `CANCELED` 확인 후 기록합니다. PID 기반 잠금은 단일 호스트 MVP용입니다.
 
-Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool, 25번에는 Container Build, 26번에는 Python unittest, 27번에는 Playwright 브라우저 실행, 28번에는 Bandit 정적 보안 검사·불변 보고서 저장 연결을 추가했습니다. 기본 Agent/Dispatch 연결과 안전 Retry는 후속 작업입니다. 실제 Docker·회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
+Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool, 25번에는 Container Build, 26번에는 Python unittest, 27번에는 Playwright 브라우저 실행, 28번에는 Bandit 정적 보안 검사, 29번에는 실제 호출 원장·오류 분류·안전 Retry 어댑터를 추가했습니다. 기본 Agent/Dispatch 연결은 후속 작업입니다. 실제 Docker·회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
 
 자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
 
@@ -146,7 +146,13 @@ Trace는 원문 DOM·입력값·스크린샷 없는 정제 JSON 단계 기록이
 
 Security의 `run_security_scan`과 `read_security_report`를 Frozen Source·Container 전용 Bandit AST 검사·불변 보고서 Store에 연결했습니다. Host가 정확한 Scanner 버전·Rule·Profile 참조를 선택하고, 동결 Run 설정 및 Source/Step/grant/환경을 검사합니다. 모든 Python 파일을 검사하며 검사 누락·문법/Plugin 오류·0 Python 파일은 정상 결과가 아닙니다.
 
-Scanner 경고는 모두 `SUSPECTED`로 반환하고, 코드 snippet·원본 설명·비밀값을 보고서에 남기지 않습니다. 경고0개로 보안 PASS나 전체 SUCCESS를 만들지 않습니다. Python 정적 분석만 지원하며 실제 Docker/Bandit 실행·제품 보안 검증과 기본 Agent 연결은 미완료입니다. 상세 계약·정의서 점검·한계는 [28번 Security Scan Tool](docs/28-security-scan-tool.md)을 참고하세요. 다음은 **29번 Tool 실행 근거·오류 분류·안전 Retry**입니다.
+Scanner 경고는 모두 `SUSPECTED`로 반환하고, 코드 snippet·원본 설명·비밀값을 보고서에 남기지 않습니다. 경고0개로 보안 PASS나 전체 SUCCESS를 만들지 않습니다. Python 정적 분석만 지원하며 실제 Docker/Bandit 실행·제품 보안 검증과 기본 Agent 연결은 미완료입니다. 상세 계약·정의서 점검·한계는 [28번 Security Scan Tool](docs/28-security-scan-tool.md)을 참고하세요.
+
+### Tool 실행 근거·오류 분류·안전 Retry — 29번
+
+선택적 `TrackedMCPExecutor`가 실제 MCP Client 호출 전에 불변 Attempt를 기록하고, 승인된 오류 및 전달 상태에 따라 동일 논리 호출을 최대 2회 재시도합니다. 정상 Build/QA 실패·Scanner 경고는 제품 결과이므로 반복하지 않고, 불명확한 Timeout/Write/Patch는 기본적으로 재전송하지 않습니다.
+
+성공 근거는 현재 claim 이후 저장된 동일 Source/Step/Tool/Profile의 실제 실행 기록과 대조합니다. 과거 결과·다른 검사 설정·중복 실행 기록을 새로운 근거로 연결하지 못하며 입력/원문 코드/SDK 오류를 원장에 저장하지 않습니다. 기본 Agent·제품 Artifact·최종 Verdict·실시간 통합 Trace 연결은 별도입니다. 사용법·정의서 점검·한계는 [29번 실행 근거와 안전 Retry](docs/29-tool-evidence-safe-retry.md)를 참고하세요. 다음은 **30번 Planner Agent**입니다.
 
 ## 테스트
 
