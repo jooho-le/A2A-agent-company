@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from mcp_tools.core.policy import ROLE_TOOL_NAMES
 from orchestrator.artifacts.contracts import ArtifactAccessError
-from orchestrator.core.security import redact_text
+from orchestrator.core.security import redact_data, redact_text
 from orchestrator.domain.snapshot_handoff import CodeSnapshotArtifact
 from orchestrator.domain.states import AgentRole, WorkflowStatus, WorkflowStepStatus
 from orchestrator.sandbox.contracts import ExecutionProfile, SandboxError, SandboxErrorCode, SandboxResult
@@ -77,6 +77,33 @@ def _environment(values):
             raise SandboxError(SandboxErrorCode.DENIED)
         result[key] = text
     return result
+
+
+def _structured_stdout(content, exit_code, decoder, maximum):
+    """Host-only pure report decoder before JSON-aware secret checking.
+
+    Applying prose regex redaction to raw JSON can corrupt its escaping or
+    discard duplicate-field evidence. The Tool first validates raw bytes and
+    returns sanitized JSON; never accept a decoder from Model arguments.
+    """
+    text = decoder(content, exit_code)
+    if type(text) is not str or len(text.encode("utf-8")) > maximum:
+        raise SandboxError(SandboxErrorCode.OUTPUT_LIMIT)
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError
+            result[key] = value
+        return result
+    def nonfinite(_value):
+        raise ValueError
+    data = json.loads(text, object_pairs_hook=unique, parse_constant=nonfinite)
+    if type(data) is not dict or redact_data(data) != data:
+        raise SandboxError(SandboxErrorCode.DENIED)
+    # Validation/sanitization belongs to the trusted Tool parser, not a
+    # rewritten string with no relationship to the actual runner result.
+    return text
 
 
 class SandboxRuntime:
@@ -249,7 +276,10 @@ class SandboxRuntime:
         except Exception:
             raise SandboxError(SandboxErrorCode.INTEGRITY) from None
 
-    async def _run(self, run_id, role, source_id, profile, inputs):
+    async def _run(self, run_id, role, source_id, profile, inputs, stdout_decoder=None):
+        if stdout_decoder is not None and (not callable(stdout_decoder) or not isinstance(profile, ExecutionProfile)
+                                           or profile.tool_name != "run_unit_tests"):
+            raise SandboxError(SandboxErrorCode.INVALID)
         source_id = _uuid(source_id)
         started = time.monotonic()
         run, configuration, workspace, content = self._context(run_id, role, source_id, profile)
@@ -305,7 +335,8 @@ class SandboxRuntime:
                 profile_name=profile.name, tool_name=profile.tool_name,
                 execution_manifest=content.metadata.execution_manifest(), image_id=image_id,
                 container_id=container_id, exit_code=state["ExitCode"], duration_ms=int((time.monotonic() - started) * 1000),
-                stdout=redact_text(attached.stdout.decode("utf-8", errors="replace")),
+                stdout=(redact_text(attached.stdout.decode("utf-8", errors="replace")) if stdout_decoder is None
+                        else _structured_stdout(attached.stdout, state["ExitCode"], stdout_decoder, limits.max_stdout_bytes)),
                 stderr=redact_text(attached.stderr.decode("utf-8", errors="replace")),
             )
         except BaseException as caught:
@@ -355,5 +386,5 @@ class BoundSandbox:
     role: AgentRole
     runtime: SandboxRuntime = field(repr=False)
 
-    async def run(self, source_artifact_id, profile, *, inputs=None):
-        return await self.runtime._run(self.run_id, self.role, source_artifact_id, profile, inputs)
+    async def run(self, source_artifact_id, profile, *, inputs=None, stdout_decoder=None):
+        return await self.runtime._run(self.run_id, self.role, source_artifact_id, profile, inputs, stdout_decoder)

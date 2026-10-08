@@ -3,7 +3,7 @@
 Executable, entry module, environment, role, Run and Workspace are Host-owned.
 The SDK's high-level auto-negotiation and tools/call retry helpers are bypassed:
 each discovery and Tool invocation is a single public ClientSession operation.
-This does not attach Tools to the default Agent or implement Test/Scan.
+This does not attach Tools to the default Agent or implement Browser/Scan.
 """
 
 import asyncio
@@ -27,6 +27,7 @@ from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, ROLE_TOOL_NAMES
 from mcp_tools.runtime import MCPBinding
 from mcp_tools.tools.build_config import BuildConfiguration, encode_build_configuration
 from mcp_tools.tools.snapshots import FrozenSourceSelection
+from mcp_tools.tools.unit_config import UnitTestConfiguration, encode_unit_configuration
 from orchestrator.workspaces.policy import workspace_uuid
 
 
@@ -74,6 +75,7 @@ class MCPChildConfiguration:
     max_call_seconds: float = 60
     frozen_source: FrozenSourceSelection | None = field(default=None, repr=False)
     build_configuration: BuildConfiguration | None = field(default=None, repr=False)
+    unit_test_configuration: UnitTestConfiguration | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if (
@@ -84,6 +86,7 @@ class MCPChildConfiguration:
             or not 0 < self.max_call_seconds <= 600
             or self.frozen_source is not None and not isinstance(self.frozen_source, FrozenSourceSelection)
             or self.build_configuration is not None and not isinstance(self.build_configuration, BuildConfiguration)
+            or self.unit_test_configuration is not None and not isinstance(self.unit_test_configuration, UnitTestConfiguration)
         ):
             raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID")
         object.__setattr__(self, "database_path", _host_path(self.database_path))
@@ -126,6 +129,10 @@ def child_parameters(configuration):
     if configuration.build_configuration is not None:
         arguments.extend([
             "--build-configuration-json", encode_build_configuration(configuration.build_configuration),
+        ])
+    if configuration.unit_test_configuration is not None:
+        arguments.extend([
+            "--unit-test-configuration-json", encode_unit_configuration(configuration.unit_test_configuration),
         ])
     return StdioServerParameters(
         command=sys.executable,

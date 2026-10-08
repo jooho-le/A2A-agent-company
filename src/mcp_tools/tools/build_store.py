@@ -336,6 +336,13 @@ class BuildOutputStore:
                     "SELECT 1 FROM run_configurations WHERE COALESCE(json_extract(payload_json,'$.artifact_id'),json_extract(payload_json,'$.artifactId'))=?",
                 )):
                     raise BuildStoreError("BUILD_RECORD_CONFLICT")
+                if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unit_test_execution_records'").fetchone():
+                    for identity in (str(manifest_id), metadata["executionId"]):
+                        if connection.execute(
+                            "SELECT 1 FROM unit_test_execution_records WHERE execution_manifest_id=? OR execution_id=?",
+                            (identity, identity),
+                        ).fetchone():
+                            raise BuildStoreError("BUILD_RECORD_CONFLICT")
                 connection.execute(
                     "INSERT INTO build_execution_records(execution_manifest_id,execution_id,run_id,workspace_id,workflow_step_id,"
                     "source_artifact_id,metadata_json,metadata_sha256,stdout,stderr) VALUES (?,?,?,?,?,?,?,?,?,?)",

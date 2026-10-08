@@ -1,4 +1,4 @@
-"""Explicit Host launch; file/Container Build Tools, no Host Source execution."""
+"""Explicit Host launch; file/Container Build/Unit Tools, no Host Source execution."""
 
 import argparse
 import asyncio
@@ -14,6 +14,9 @@ from mcp_tools.tools.build import BuildTools
 from mcp_tools.tools.build_config import decode_build_configuration
 from mcp_tools.tools.build_store import BuildOutputStore
 from mcp_tools.tools.snapshots import FrozenSourceSelection
+from mcp_tools.tools.unit import UnitTestTools
+from mcp_tools.tools.unit_config import decode_unit_configuration
+from mcp_tools.tools.unit_store import UnitTestOutputStore
 from orchestrator.artifacts.service import ArtifactStore
 from orchestrator.domain.states import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
@@ -40,6 +43,7 @@ def main(argv=None):
     parser.add_argument("--source-artifact-id")
     parser.add_argument("--source-snapshot-sha256")
     parser.add_argument("--build-configuration-json")
+    parser.add_argument("--unit-test-configuration-json")
     try:
         args = parser.parse_args(argv)
         binding = MCPBinding(role=AgentRole(args.role), agent_role=AgentRole(args.agent_role),
@@ -62,8 +66,17 @@ def main(argv=None):
         sandbox = SandboxRuntime(repository, registry, artifacts, docker=docker)
         build = BuildTools(artifacts, sandbox, BuildOutputStore(repository), configuration=configuration,
                            max_call_seconds=args.max_call_seconds)
-        handlers = {**tools.handlers(binding.role), **build.handlers(binding.role)}
-        # File/Build handlers are real. Test/Scan/Report remain explicit stubs.
+        unit_configuration = (None if args.unit_test_configuration_json is None
+                              else decode_unit_configuration(args.unit_test_configuration_json))
+        if (configuration is not None and unit_configuration is not None
+                and configuration.docker_endpoint != unit_configuration.docker_endpoint):
+            raise ValueError("MCP_CONFIGURATION_REQUIRED")
+        unit_docker = None if unit_configuration is None else DockerCLI(endpoint=unit_configuration.docker_endpoint)
+        unit_sandbox = SandboxRuntime(repository, registry, artifacts, docker=unit_docker)
+        unit = UnitTestTools(artifacts, unit_sandbox, UnitTestOutputStore(repository),
+                             configuration=unit_configuration, max_call_seconds=args.max_call_seconds)
+        handlers = {**tools.handlers(binding.role), **build.handlers(binding.role), **unit.handlers(binding.role)}
+        # File/Build/Unit/report handlers are real. Browser/Scan remain stubs.
         dispatcher = MCPDispatcher(binding, registry, handlers=handlers,
                                    max_call_seconds=args.max_call_seconds)
         server = create_server(dispatcher)
