@@ -65,7 +65,7 @@ def _one(result):
     return value[0]
 
 
-def _environment(values):
+def _environment(values, *, browser=False):
     if not isinstance(values, list):
         raise SandboxError(SandboxErrorCode.DENIED)
     result = {}
@@ -73,7 +73,9 @@ def _environment(values):
         if not isinstance(value, str) or "=" not in value or len(value) > 8192:
             raise SandboxError(SandboxErrorCode.DENIED)
         key, text = value.split("=", 1)
-        if key in result or key not in _SAFE_IMAGE_ENV or any(ord(c) < 32 for c in value) or redact_text(text) != text:
+        browser_path = browser and key == "PLAYWRIGHT_BROWSERS_PATH" and text == "/ms-playwright"
+        if (key in result or key not in _SAFE_IMAGE_ENV and not browser_path
+                or any(ord(c) < 32 for c in value) or redact_text(text) != text):
             raise SandboxError(SandboxErrorCode.DENIED)
         result[key] = text
     return result
@@ -202,7 +204,7 @@ class SandboxRuntime:
         config = image.get("Config")
         if image.get("Os") != "linux" or not isinstance(config, dict) or config.get("Volumes") or config.get("OnBuild"):
             raise SandboxError(SandboxErrorCode.DENIED)
-        env = _environment(config.get("Env") or [])
+        env = _environment(config.get("Env") or [], browser=profile.tool_name == "run_browser_tests")
         env.update(_ENV)
         return image_id, env
 
@@ -278,7 +280,7 @@ class SandboxRuntime:
 
     async def _run(self, run_id, role, source_id, profile, inputs, stdout_decoder=None):
         if stdout_decoder is not None and (not callable(stdout_decoder) or not isinstance(profile, ExecutionProfile)
-                                           or profile.tool_name != "run_unit_tests"):
+                                           or profile.tool_name not in {"run_unit_tests", "run_browser_tests"}):
             raise SandboxError(SandboxErrorCode.INVALID)
         source_id = _uuid(source_id)
         started = time.monotonic()

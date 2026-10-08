@@ -1,4 +1,4 @@
-"""Explicit Host launch; file/Container Build/Unit Tools, no Host Source execution."""
+"""Explicit Host launch; file/Container Tools, no Host Source execution."""
 
 import argparse
 import asyncio
@@ -13,6 +13,10 @@ from mcp_tools.tools.files import FileTools
 from mcp_tools.tools.build import BuildTools
 from mcp_tools.tools.build_config import decode_build_configuration
 from mcp_tools.tools.build_store import BuildOutputStore
+from mcp_tools.tools.browser import BrowserTestTools
+from mcp_tools.tools.browser_config import decode_browser_configuration
+from mcp_tools.tools.browser_store import BrowserTestOutputStore
+from mcp_tools.tools.test_reports import TestReportTools
 from mcp_tools.tools.snapshots import FrozenSourceSelection
 from mcp_tools.tools.unit import UnitTestTools
 from mcp_tools.tools.unit_config import decode_unit_configuration
@@ -44,6 +48,7 @@ def main(argv=None):
     parser.add_argument("--source-snapshot-sha256")
     parser.add_argument("--build-configuration-json")
     parser.add_argument("--unit-test-configuration-json")
+    parser.add_argument("--browser-test-configuration-json")
     try:
         args = parser.parse_args(argv)
         binding = MCPBinding(role=AgentRole(args.role), agent_role=AgentRole(args.agent_role),
@@ -68,15 +73,23 @@ def main(argv=None):
                            max_call_seconds=args.max_call_seconds)
         unit_configuration = (None if args.unit_test_configuration_json is None
                               else decode_unit_configuration(args.unit_test_configuration_json))
-        if (configuration is not None and unit_configuration is not None
-                and configuration.docker_endpoint != unit_configuration.docker_endpoint):
+        browser_configuration = (None if args.browser_test_configuration_json is None
+                                 else decode_browser_configuration(args.browser_test_configuration_json))
+        endpoints = {item.docker_endpoint for item in (configuration, unit_configuration, browser_configuration) if item is not None}
+        if len(endpoints) > 1:
             raise ValueError("MCP_CONFIGURATION_REQUIRED")
         unit_docker = None if unit_configuration is None else DockerCLI(endpoint=unit_configuration.docker_endpoint)
         unit_sandbox = SandboxRuntime(repository, registry, artifacts, docker=unit_docker)
         unit = UnitTestTools(artifacts, unit_sandbox, UnitTestOutputStore(repository),
                              configuration=unit_configuration, max_call_seconds=args.max_call_seconds)
-        handlers = {**tools.handlers(binding.role), **build.handlers(binding.role), **unit.handlers(binding.role)}
-        # File/Build/Unit/report handlers are real. Browser/Scan remain stubs.
+        browser_docker = None if browser_configuration is None else DockerCLI(endpoint=browser_configuration.docker_endpoint)
+        browser_sandbox = SandboxRuntime(repository, registry, artifacts, docker=browser_docker)
+        browser = BrowserTestTools(artifacts, browser_sandbox, BrowserTestOutputStore(repository),
+                                  configuration=browser_configuration, max_call_seconds=args.max_call_seconds)
+        reports = TestReportTools(unit, browser)
+        handlers = {**tools.handlers(binding.role), **build.handlers(binding.role), **unit.handlers(binding.role),
+                    **browser.handlers(binding.role), **reports.handlers(binding.role)}
+        # File/Build/Unit/Browser/test report handlers are real. Scan remains stubbed.
         dispatcher = MCPDispatcher(binding, registry, handlers=handlers,
                                    max_call_seconds=args.max_call_seconds)
         server = create_server(dispatcher)
