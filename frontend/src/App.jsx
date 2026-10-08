@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import SignupPage from './pages/SignupPage'
 import LoginPage from './pages/LoginPage'
+import PipelinePage from './pages/PipelinePage'
 import './App.css'
 
 function App() {
   const [showSignup, setShowSignup] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
+  const [showPipeline, setShowPipeline] = useState(false)
 
   if (showSignup) {
     return <SignupPage onBack={() => setShowSignup(false)} />
@@ -13,6 +15,10 @@ function App() {
 
   if (showLogin) {
     return <LoginPage onBack={() => setShowLogin(false)} />
+  }
+
+  if (showPipeline) {
+    return <PipelinePage onBack={() => setShowPipeline(false)} />
   }
 
   return (
@@ -33,6 +39,13 @@ function App() {
           onClick={() => setShowLogin(true)}
         >
           로그인
+        </button>
+        <button
+          type="button"
+          className="app-button"
+          onClick={() => setShowPipeline(true)}
+        >
+          시나리오 실행
         </button>
       </div>
     </main>
