@@ -2,19 +2,55 @@ import { useState } from 'react'
 import SignupPage from './pages/SignupPage'
 import LoginPage from './pages/LoginPage'
 import PipelinePage from './pages/PipelinePage'
+import DashboardPage from './pages/DashboardPage'
 import './App.css'
 
 function App() {
+  // 기존 sessionStorage 토큰으로 새로고침 후에도 화면 흐름을 복원합니다.
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(sessionStorage.getItem('access_token')))
   const [showSignup, setShowSignup] = useState(false)
-  const [showLogin, setShowLogin] = useState(false)
   const [showPipeline, setShowPipeline] = useState(false)
+  const [loginNotice, setLoginNotice] = useState('')
 
-  if (showSignup) {
-    return <SignupPage onBack={() => setShowSignup(false)} />
+  function handleLoginSuccess() {
+    setIsAuthenticated(Boolean(sessionStorage.getItem('access_token')))
+    setShowSignup(false)
+    setShowPipeline(false)
+    setLoginNotice('')
   }
 
-  if (showLogin) {
-    return <LoginPage onBack={() => setShowLogin(false)} />
+  function handleLogout() {
+    sessionStorage.removeItem('access_token')
+    setIsAuthenticated(false)
+    setShowSignup(false)
+    setShowPipeline(false)
+    setLoginNotice('')
+  }
+
+  // 인증 전에는 Dashboard와 Pipeline 화면을 표시하지 않습니다.
+  if (!isAuthenticated) {
+    if (showSignup) {
+      return (
+        <SignupPage
+          onBack={() => setShowSignup(false)}
+          onSignupSuccess={(message) => {
+            setLoginNotice(`${message} 로그인하여 시작해주세요.`)
+            setShowSignup(false)
+          }}
+        />
+      )
+    }
+
+    return (
+      <LoginPage
+        notice={loginNotice}
+        onSignup={() => {
+          setLoginNotice('')
+          setShowSignup(true)
+        }}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    )
   }
 
   if (showPipeline) {
@@ -22,33 +58,7 @@ function App() {
   }
 
   return (
-    <main className="intro">
-      <h1>A2A Multi-Agent Demo</h1>
-      <p>회원가입 및 전자문서 제출·조회 서비스</p>
-      <div className="intro-actions">
-        <button
-          type="button"
-          className="app-button"
-          onClick={() => setShowSignup(true)}
-        >
-          회원가입
-        </button>
-        <button
-          type="button"
-          className="app-button"
-          onClick={() => setShowLogin(true)}
-        >
-          로그인
-        </button>
-        <button
-          type="button"
-          className="app-button"
-          onClick={() => setShowPipeline(true)}
-        >
-          시나리오 실행
-        </button>
-      </div>
-    </main>
+    <DashboardPage onRunScenario={() => setShowPipeline(true)} onLogout={handleLogout} />
   )
 }
 

@@ -1,14 +1,13 @@
 .pipeline-page {
-  --text: #b5bdcc;
-  --text-h: #f3f4f6;
-  --border: #343742;
-  --social-bg: #252731;
   flex: 1;
-  padding: 40px 32px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px;
   text-align: left;
   color: var(--text);
-  background: #16171d;
-  color-scheme: dark;
+  background: var(--bg);
+  color-scheme: inherit;
 }
 
 .pipeline-header,
@@ -22,21 +21,21 @@
 
 .pipeline-header h1 {
   margin: 12px 0;
-  font-size: clamp(28px, 4vw, 40px);
+  font-size: 28px;
   line-height: 1.2;
   letter-spacing: -0.8px;
 }
 
 .pipeline-mock-label {
-  color: #c084fc;
-  font-size: 14px;
+  color: var(--accent);
+  font-size: 12px;
 }
 
 .pipeline-card {
   padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #1f2028;
+  border-radius: var(--radius);
+  background: var(--surface);
   overflow-wrap: anywhere;
 }
 
@@ -52,6 +51,12 @@
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 8px 16px;
+  margin: 16px 0 0;
+  font-size: 13px;
+}
+
+.pipeline-run p {
+  margin-top: 14px;
 }
 
 .pipeline-run-result dd {
@@ -64,14 +69,14 @@
 
 .pipeline-page h2 {
   margin: 0 0 16px;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.4;
 }
 
 .pipeline-page h3 {
   margin: 0 0 8px;
   color: var(--text-h);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 500;
   line-height: 1.4;
 }
@@ -102,13 +107,13 @@
 }
 
 .pipeline-agent--running {
-  border-color: #c084fc;
+  border-color: var(--accent);
 }
 
 .pipeline-agent p,
 .pipeline-info p,
 .pipeline-trace {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -119,18 +124,29 @@
 }
 
 .pipeline-status--completed {
-  color: #86efac;
-  background: #193329;
+  color: #a4dfbd;
+  background: #213d32;
 }
 
 .pipeline-status--running {
-  color: #d8b4fe;
-  background: #352344;
+  color: #cbdcfa;
+  background: #293c60;
 }
 
 .pipeline-status--waiting {
-  color: #c1c7d1;
-  background: #30333d;
+  color: #b7c3d7;
+  background: #2c3545;
+}
+
+.pipeline-status--failed {
+  color: #fca5a5;
+  background: #482b34;
+}
+
+.pipeline-step + .pipeline-step {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
 
 .pipeline-arrow {
@@ -155,7 +171,7 @@
 }
 
 .pipeline-page .app-button:focus-visible {
-  outline-color: #c084fc;
+  outline-color: var(--accent);
 }
 
 @media (max-width: 720px) {
