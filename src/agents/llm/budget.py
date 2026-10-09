@@ -1,6 +1,7 @@
 """Shared monotonic invocation budget; no timer restart inside a Tool loop."""
 
 from time import monotonic
+from threading import RLock
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,6 +38,7 @@ class ExecutionBudget:
         self._tool_calls = 0
         self._known_tokens = 0
         self._usage_complete = True
+        self._guard = RLock()
 
     @property
     def limits(self) -> LLMLimits:
@@ -48,19 +50,23 @@ class ExecutionBudget:
 
     @property
     def model_calls(self) -> int:
-        return self._model_calls
+        with self._guard:
+            return self._model_calls
 
     @property
     def tool_calls(self) -> int:
-        return self._tool_calls
+        with self._guard:
+            return self._tool_calls
 
     @property
     def known_total_tokens(self) -> int:
-        return self._known_tokens
+        with self._guard:
+            return self._known_tokens
 
     @property
     def total_tokens(self) -> int | None:
-        return self._known_tokens if self._usage_complete else None
+        with self._guard:
+            return self._known_tokens if self._usage_complete else None
 
     def remaining_seconds(self) -> float:
         remaining = self._deadline - monotonic()
@@ -69,35 +75,40 @@ class ExecutionBudget:
         return remaining
 
     def check(self) -> None:
-        self.remaining_seconds()
-        cap = self.limits.max_total_tokens
-        if cap is not None and (not self._usage_complete or self._known_tokens > cap):
-            raise LLMRuntimeError(LLMErrorCode.BUDGET)
+        with self._guard:
+            self.remaining_seconds()
+            cap = self.limits.max_total_tokens
+            if cap is not None and (not self._usage_complete or self._known_tokens > cap):
+                raise LLMRuntimeError(LLMErrorCode.BUDGET)
 
     def reserve_model_call(self) -> tuple[int, int, float]:
-        self.check()
-        if self._model_calls >= self.limits.max_model_calls:
-            raise LLMRuntimeError(LLMErrorCode.BUDGET)
-        output_cap = self.limits.max_output_tokens
-        if self.limits.max_total_tokens is not None:
-            output_cap = min(output_cap, self.limits.max_total_tokens - self._known_tokens)
-            if output_cap < 16:
+        with self._guard:
+            self.check()
+            if self._model_calls >= self.limits.max_model_calls:
                 raise LLMRuntimeError(LLMErrorCode.BUDGET)
-        self._model_calls += 1
-        return self._model_calls, output_cap, min(self.remaining_seconds(), self.limits.model_timeout_seconds)
+            output_cap = self.limits.max_output_tokens
+            if self.limits.max_total_tokens is not None:
+                output_cap = min(output_cap, self.limits.max_total_tokens - self._known_tokens)
+                if output_cap < 16:
+                    raise LLMRuntimeError(LLMErrorCode.BUDGET)
+            self._model_calls += 1
+            return self._model_calls, output_cap, min(self.remaining_seconds(), self.limits.model_timeout_seconds)
 
     def account_usage(self, usage: TokenUsage | None) -> None:
-        if usage is None:
-            self._usage_complete = False
-        else:
-            self._known_tokens += usage.total_tokens
+        with self._guard:
+            if usage is None:
+                self._usage_complete = False
+            else:
+                self._known_tokens += usage.total_tokens
 
     def check_tool_batch(self, count: int) -> None:
-        self.check()
-        if self._tool_calls + count > self.limits.max_tool_calls:
-            raise LLMRuntimeError(LLMErrorCode.BUDGET)
+        with self._guard:
+            self.check()
+            if self._tool_calls + count > self.limits.max_tool_calls:
+                raise LLMRuntimeError(LLMErrorCode.BUDGET)
 
     def reserve_tool_call(self) -> float:
-        self.check_tool_batch(1)
-        self._tool_calls += 1
-        return min(self.remaining_seconds(), self.limits.tool_timeout_seconds)
+        with self._guard:
+            self.check_tool_batch(1)
+            self._tool_calls += 1
+            return min(self.remaining_seconds(), self.limits.tool_timeout_seconds)

@@ -81,6 +81,12 @@ def create_run(
     """Create a durable Run and its initial pending Planner Step."""
     if get_scenario(body.scenario_id) is None:
         raise HTTPException(status_code=422, detail="scenarioId is not registered; see GET /api/v1/scenarios")
+    validator = request.app.state.submission_validator
+    if validator is not None:
+        try:
+            validator(body.configuration)
+        except Exception:
+            raise HTTPException(status_code=422, detail="OWNED_AGENT_CONFIGURATION_INVALID") from None
     run = WorkflowRun(
         scenario_id=body.scenario_id,
         request_text=body.request_text,

@@ -41,7 +41,7 @@ GET /docs
 
 재개는 저장된 Task/Context를 이어 사용하며 수정 횟수를 늘리지 않습니다. 전송됐으나 Task ID가 확인되지 않은 요청은 자동 재전송하지 않습니다. 진행 중인 다른 제어 작업과 충돌하면 409이며, 원격 Task 취소는 실제 `CANCELED` 확인 후 기록합니다. PID 기반 잠금은 단일 호스트 MVP용입니다.
 
-Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool, 25번에는 Container Build, 26번에는 Python unittest, 27번에는 Playwright 브라우저 실행, 28번에는 Bandit 정적 보안 검사, 29번에는 실제 호출 원장·오류 분류·안전 Retry 어댑터를 추가했습니다. 기본 Agent/Dispatch 연결은 후속 작업입니다. 실제 Docker·회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
+Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orchestrator는 전달된 실행 근거를 검증·저장합니다. 20~22번에는 Workspace·Artifact·Container 실행 기반, 23번에는 MCP stdio 통신·Schema·역할 권한, 24번에는 실제 파일 Tool, 25번에는 Container Build, 26번에는 Python unittest, 27번에는 Playwright 브라우저 실행, 28번에는 Bandit 정적 보안 검사, 29번에는 실제 호출 원장·오류 분류·안전 Retry 어댑터를 추가했습니다. 30~33번 실제 네 Agent 실행기와 기존 Dispatcher의 명시적 Host 연결은 34번에서 추가했습니다. 기본 Bootstrap 명령은 그대로이며 실제 Docker·회원가입 코드의 성공·비교 실험 완료를 뜻하지 않습니다.
 
 자동 QA/Security dispatch를 시험하려면 `.env`에 `ORCHESTRATOR_PLANNER_AGENT_URL`, `ORCHESTRATOR_DEVELOPER_AGENT_URL`, `ORCHESTRATOR_QA_AGENT_URL`, `ORCHESTRATOR_SECURITY_AGENT_URL`을 모두 설정합니다. QA/Security 중 하나라도 설정되지 않으면 Snapshot과 pending Step은 보존하고 Run을 `HUMAN_REVIEW`로 전환합니다.
 
@@ -49,7 +49,7 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 
 ## Agent/MCP 개발 기반 — 15~17번
 
-담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 stdio 서버·Client·역할별 실제 Tool이 있습니다. 공통 LLM 엔진과 Workspace/Artifact/Sandbox를 바탕으로 Planner·Developer·QA의 명시적 실행기를 추가했습니다. Security 실행기와 기본 Pipeline 자동 연결은 후속 작업이며 기본 Agent CLI는 Bootstrap을 유지합니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
+담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 stdio 서버·Client·역할별 실제 Tool이 있습니다. 공통 LLM 엔진과 Workspace/Artifact/Sandbox를 바탕으로 Planner·Developer·QA·Security의 명시적 실행기와 34번 단일 Host 연결을 추가했습니다. 기본 Agent CLI는 Bootstrap을 유지합니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
 
 설정 접두사는 `ORCHESTRATOR_`, `AGENT_`, `MCP_`로 분리합니다. 각 Agent는 하나의 역할을 명시하며 기본 주소는 Planner `127.0.0.1:8101`, Developer `:8102`, QA `:8103`, Security `:8104`입니다. 기존 Orchestrator의 Agent URL은 실제 역할 구현·연결 전까지 미설정 상태로 유지하세요. 지금 연결하면 기본 런타임이 요청을 `TASK_STATE_REJECTED`로 거절하며 제품을 개발하지 않습니다.
 
@@ -176,7 +176,21 @@ Host가 명시적으로 구성한 `QAAgentExecutor`가 같은 불변 Source를 �
 
 Host가 명시적으로 구성한 `SecurityAgentExecutor`가 같은 불변 Source에서 승인 Scanner Profile 전체를 실행하고, 실제 Scan/Tool 기록과 읽은 코드 근거를 연결하여 기존 `security-report.json` 하나를 반환합니다. 모델은 분석 Draft만 제출하며 Scanner 경고를 누락하거나 Severity·실행 근거·최종 Verdict를 만들 수 없습니다. 경고 0개로 보안 PASS를 만들지 않고, 독립 Host 의미 검증 근거가 없으면 Requirement는 UNVERIFIED, 경고는 SUSPECTED로 남깁니다.
 
-최초 후보만 지원하며 기본 CLI/서버는 Bootstrap을 유지합니다. 실제 실행기를 주입한 경우에만 Security Skill을 광고합니다. SCN-001의 모든 보안 기준을 입증하는 실제 의미 검증기와 LLM/Docker 실행은 미검증·미완료이며, 공통 Proof 연결 경계가 그 검증을 대신하지 않습니다. 상세 사용법·정의서 점검·한계는 [33번 Security Agent](docs/33-security-agent.md)를 참고하세요. 다음은 **34번 기존 Orchestrator와 실제 Agent 연결**입니다.
+최초 후보만 지원하며 기본 CLI/서버는 Bootstrap을 유지합니다. 실제 실행기를 주입한 경우에만 Security Skill을 광고합니다. SCN-001의 모든 보안 기준을 입증하는 실제 의미 검증기와 LLM/Docker 실행은 미검증·미완료이며, 공통 Proof 연결 경계가 그 검증을 대신하지 않습니다. 상세 사용법·정의서 점검·한계는 [33번 Security Agent](docs/33-security-agent.md)를 참고하세요.
+
+### Orchestrator + 실제 네 Agent 연결 — 34번
+
+`agents.platform.composition.create_platform`이 승인된 Host 저장소·설정·Provider·서비스 팩토리를 받아 기존 Orchestrator와 네 실제 실행기를 연결합니다. `RunBudgetRegistry`가 Run마다 예산 하나를 발급하고 모든 역할이 동일한 Deadline·누적 모델/Tool/토큰 사용량을 공유합니다. Run 설정 누락은 저장/스케줄 전에 422, 준비 실패는 Agent 호출 전에 `HUMAN_REVIEW`로 멈춥니다.
+
+실행하려면 승인한 Host 모듈의 함수가 `OwnedAgentPlatform`을 반환해야 합니다. 아래 `approved_host:build_platform`은 사용자가 준비할 모듈/함수의 예시이며 저장소에 자동 생성된 기본 설정이 아닙니다.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m agents.platform --factory approved_host:build_platform
+```
+
+한 프로세스/한 event loop에서 Agent 네 서버를 먼저 준비한 뒤 Orchestrator를 엽니다. 기본 포트는 8000 및 8101~8104입니다. 별도 Agent 프로세스 네 개나 reload/multi-worker로 실행하면 공유 예산이 보장되지 않으므로 이 연결 방식에 사용하지 않습니다. 시작/종료는 listener·공식 SDK Task Store·실행 Worker·Provider의 정리 순서를 지킵니다.
+
+현재 연결은 최초 후보까지이며 기존 판정이 `FIX_REQUIRED`이면 자동 수정 없이 멈춥니다. 보안 의미 검증 근거가 부족하면 `UNVERIFIED/HUMAN_REVIEW`이고, 실제 QA FAIL이 함께 있어도 기존 판정상 `HUMAN_REVIEW`에 Issue를 남길 수 있습니다. 네 Task COMPLETED만으로 SUCCESS가 되지 않습니다. 재시작한 Run 예산은 자동 복원하지 않고 거부합니다. Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs/34-owned-agent-platform.md)을 참고하세요. 다음은 **35번 실제 수정·동일 Snapshot 재검증 루프**입니다.
 
 ## 테스트
 

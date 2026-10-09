@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from a2a.types import Task
@@ -111,10 +111,18 @@ class PlannerRunDispatcher:
         agent_registry: A2AAgentRegistry,
         *,
         client_factory: ClientFactory = A2AAgentClient,
+        before_dispatch: Callable[[UUID], Awaitable[None]] | None = None,
+        allow_fix_dispatch: bool = True,
     ) -> None:
         self._repository = repository
         self._agent_registry = agent_registry
         self._client_factory = client_factory
+        if before_dispatch is not None and not callable(before_dispatch):
+            raise ValueError("DISPATCH_CONFIGURATION_INVALID")
+        if type(allow_fix_dispatch) is not bool:
+            raise ValueError("DISPATCH_CONFIGURATION_INVALID")
+        self._before_dispatch = before_dispatch
+        self._allow_fix_dispatch = allow_fix_dispatch
         self._active_runs: set[UUID] = set()
 
     def is_run_active(self, run_id: UUID) -> bool:
@@ -145,6 +153,19 @@ class PlannerRunDispatcher:
             # Background delivery may be duplicated. The durable claim is one-shot.
             logger.info("Planner dispatch skipped for Run %s", run_id)
             return
+
+        if self._before_dispatch is not None:
+            try:
+                await self._before_dispatch(run_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.error("Run preparation failed for %s (error type: %s)", run_id, type(error).__name__)
+                self._move_to_human_review(
+                    run_id, step.workflow_step_id, step.attempt,
+                    additional_event_types=("OWNED_AGENT_PREPARATION_FAILED",),
+                )
+                return
 
         scenario = self._scenario_for_run(run)
         if scenario is None:
@@ -659,6 +680,10 @@ class PlannerRunDispatcher:
         scenario: ScenarioDefinition,
         issues: tuple[IssueRecord, ...],
     ) -> None:
+        # Keep real failures at FIX_REQUIRED until owned executors support fixes.
+        # This capability gate does not change the frozen three-cycle policy.
+        if not self._allow_fix_dispatch:
+            return
         developer_url = self._agent_registry.get_base_url(AgentRole.DEVELOPER)
         try:
             fixing_run, step, stored_issues, input_artifact_ids = (

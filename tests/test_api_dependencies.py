@@ -28,3 +28,16 @@ class AgentAuthenticationTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             agent_client_factory(settings)
+
+    def test_owned_local_factory_explicitly_disables_environment_proxies(self):
+        settings = Settings(_env_file=None, planner_agent_url="http://127.0.0.1:8101",
+            planner_bearer_token="operator-local-credential")
+        with patch("orchestrator.api.dependencies.A2AAgentClient") as client:
+            factory = agent_client_factory(settings, trust_env=False)
+            factory(settings.planner_agent_url)
+            client.assert_called_once_with("http://127.0.0.1:8101", trust_env=False,
+                headers={"Authorization": "Bearer operator-local-credential"})
+
+    def test_invalid_environment_proxy_policy_is_rejected(self):
+        with self.assertRaises(ValueError):
+            agent_client_factory(Settings(_env_file=None), trust_env="false")

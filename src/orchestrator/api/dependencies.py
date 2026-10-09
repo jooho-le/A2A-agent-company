@@ -54,14 +54,19 @@ def get_run_dispatcher(request: Request) -> PlannerRunDispatcher | None:
         dispatcher = request.app.state.run_dispatcher
         if dispatcher is None:
             dispatcher = PlannerRunDispatcher(
-                repository, registry, client_factory=agent_client_factory(settings),
+                repository, registry, client_factory=(
+                    getattr(request.app.state, "agent_client_factory", None)
+                    or agent_client_factory(settings)
+                ),
             )
             request.app.state.run_dispatcher = dispatcher
     return dispatcher
 
 
-def agent_client_factory(settings):
+def agent_client_factory(settings, *, trust_env=True):
     """Keep configured credentials in HTTP headers, never in Task payloads."""
+    if type(trust_env) is not bool:
+        raise ValueError("A2A_CLIENT_CONFIGURATION_INVALID")
     credentials = {}
     for role in AgentRole:
         prefix = role.value.lower()
@@ -77,6 +82,7 @@ def agent_client_factory(settings):
         token = credentials.get(url.strip().rstrip("/"))
         return A2AAgentClient(
             url, headers={"Authorization": f"Bearer {token}"} if token else None,
+            **({"trust_env": False} if not trust_env else {}),
         )
 
     return create_client
@@ -86,7 +92,7 @@ def get_workflow_controls(request: Request) -> WorkflowControlService:
     repository = get_workflow_repository(request)
     settings = request.app.state.settings
     registry = A2AAgentRegistry.from_settings(settings)
-    factory = agent_client_factory(settings)
+    factory = getattr(request.app.state, "agent_client_factory", None) or agent_client_factory(settings)
     dispatcher = get_run_dispatcher(request)
     if dispatcher is None:
         dispatcher = PlannerRunDispatcher(repository, registry, client_factory=factory)
