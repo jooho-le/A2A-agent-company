@@ -26,7 +26,7 @@ _ROLE_PURPOSES = {
 
 def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) -> AgentCard:
     """Use official SDK models without advertising unimplemented skills."""
-    if type(execution_ready) is not bool or execution_ready and settings.role not in (AgentRole.PLANNER, AgentRole.DEVELOPER, AgentRole.QA):
+    if type(execution_ready) is not bool or execution_ready and settings.role not in tuple(AgentRole):
         raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
     description = (
         "Host-configured Planner: produces a validated task plan while preserving "
@@ -43,6 +43,11 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
         "for the same read-only Source. Approved Host policies and shared "
         "budget are required; no Source edits or product verdict are performed."
         if execution_ready and settings.role is AgentRole.QA else
+        "Host-configured initial Security: scans approved profiles on the same "
+        "read-only Source and reviews measured findings with bounded code references. "
+        "Trusted Host semantic proof is required for verified outcomes; missing "
+        "proof stays unverified. No Source edits or product verdict are performed."
+        if execution_ready and settings.role is AgentRole.SECURITY else
         f"Intended role: {_ROLE_PURPOSES[settings.role]}. "
         "Transport-only bootstrap: the Agent runtime is not configured. "
         "Tasks are explicitly rejected; no LLM or MCP execution occurs."
@@ -73,7 +78,11 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
             id="measured-initial-qa", name="Measured initial functional QA",
             description="Generates isolated tests and binds protected requirements to Host-measured Unit/Browser cases, without inventing results or project success.",
             tags=["qa", "unit-tests", "browser-tests", "snapshot"],
-        )] if execution_ready and settings.role is AgentRole.QA else [],
+        )] if execution_ready and settings.role is AgentRole.QA else [AgentSkill(
+            id="measured-initial-security", name="Measured initial security review",
+            description="Reviews all approved frozen scans with actual Source references; only Host-verified proof can establish confirmed findings or requirement outcomes, not project success.",
+            tags=["security", "scan", "code-review", "snapshot"],
+        )] if execution_ready and settings.role is AgentRole.SECURITY else [],
     )
     if settings.bearer_token is not None:
         card.security_schemes["bearerAuth"].CopyFrom(

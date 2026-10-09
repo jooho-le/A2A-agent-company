@@ -21,6 +21,7 @@ from agents.main import create_app
 from agents.runtime.developer import DeveloperAgentExecutor
 from agents.runtime.planner import PlannerAgentExecutor
 from agents.runtime.qa import QAAgentExecutor
+from agents.runtime.security import SecurityAgentExecutor
 from orchestrator.a2a import A2AWorkflowMetadata, build_send_message_request
 from orchestrator.domain.states import AgentRole
 
@@ -115,6 +116,7 @@ class AgentBootstrapTests(unittest.IsolatedAsyncioTestCase):
         for role, kind, skill in (
             (AgentRole.PLANNER, PlannerAgentExecutor, "protected-task-planning"),
             (AgentRole.DEVELOPER, DeveloperAgentExecutor, "measured-initial-implementation"),
+            (AgentRole.SECURITY, SecurityAgentExecutor, "measured-initial-security"),
         ):
             with self.subTest(role=role):
                 async with self.client_for(self.settings(role), executor=self.executor(kind)) as (_, client):
@@ -125,7 +127,8 @@ class AgentBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_each_implemented_executor_rejects_every_other_server_role(self):
         for expected, kind in ((AgentRole.PLANNER, PlannerAgentExecutor),
-                               (AgentRole.DEVELOPER, DeveloperAgentExecutor), (AgentRole.QA, QAAgentExecutor)):
+                               (AgentRole.DEVELOPER, DeveloperAgentExecutor), (AgentRole.QA, QAAgentExecutor),
+                               (AgentRole.SECURITY, SecurityAgentExecutor)):
             for role in AgentRole:
                 if role is expected:
                     continue
@@ -162,9 +165,11 @@ class AgentBootstrapTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(task.get("artifacts"))
             self.assertEqual(task["metadata"], metadata.to_a2a_json())
 
-    def test_security_cannot_advertise_an_unimplemented_executor(self):
-        with self.assertRaisesRegex(ValueError, "^AGENT_EXECUTOR_ROLE_MISMATCH$"):
-            build_agent_card(self.settings(AgentRole.SECURITY), execution_ready=True)
+    def test_explicit_security_card_is_honest_about_host_proof_and_default_off(self):
+        card = MessageToDict(build_agent_card(self.settings(AgentRole.SECURITY), execution_ready=True))
+        self.assertEqual(card["skills"][0]["id"], "measured-initial-security")
+        self.assertIn("Trusted Host semantic proof", card["description"])
+        self.assertEqual(MessageToDict(build_agent_card(self.settings(AgentRole.SECURITY))).get("skills", []), [])
 
     def test_card_ready_flag_requires_native_boolean(self):
         for value in (None, 1, "true", [], {}):

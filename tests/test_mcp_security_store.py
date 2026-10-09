@@ -229,11 +229,19 @@ class SecurityScanOutputStoreTests(unittest.TestCase):
         self.mutate_run(status=WorkflowStatus.ABORTED, termination_reason="cancel fixture")
         self.assert_code("SECURITY_SCAN_CONTEXT_DENIED", self.publish)
 
-    def test_stale_attempt_code_requirement_and_source_input_denied(self):
-        for changes in ({"attempt": 1}, {"code_version": 2}, {"requirement_ids": [uuid4()]}, {"input_artifact_ids": []}):
+    def test_wrong_code_requirement_and_source_input_denied(self):
+        for changes in ({"code_version": 2}, {"requirement_ids": [uuid4()]}, {"input_artifact_ids": []}):
             self.mutate_step(**changes)
             self.assert_code("SECURITY_SCAN_CONTEXT_DENIED", self.publish)
             self.mutate_step()
+
+    def test_continuation_attempt_does_not_change_code_version_or_erase_old_receipt(self):
+        initial = self.publish()
+        self.mutate_step(attempt=1)
+        continued = self.publish(execution_id=uuid4())
+        self.assertEqual(initial.execution_manifest, continued.execution_manifest)
+        self.assertEqual(self.store.get(self.run.run_id, initial.execution_manifest_id), initial)
+        self.assertEqual(self.store.get(self.run.run_id, continued.execution_manifest_id), continued)
 
     def test_multiple_running_security_steps_denied(self):
         self.insert_step(WorkflowStep(run_id=self.run.run_id, agent_role=AgentRole.SECURITY, status=WorkflowStepStatus.RUNNING,

@@ -229,7 +229,7 @@ class SecurityScanOutputStore:
                 step = WorkflowStep.model_validate_json(row["payload_json"])
                 if (str(step.workflow_step_id) != row["workflow_step_id"] or step.run_id != run.run_id or step.status.value != row["status"]):
                     raise SecurityStoreError("SECURITY_SCAN_RESULT_INTEGRITY_ERROR")
-                if step.agent_role is AgentRole.SECURITY and step.status is WorkflowStepStatus.RUNNING and step.attempt == run.fix_attempt:
+                if step.agent_role is AgentRole.SECURITY and step.status is WorkflowStepStatus.RUNNING:
                     active.append(step)
             if len(active) != 1:
                 raise SecurityStoreError("SECURITY_SCAN_CONTEXT_DENIED")
@@ -494,7 +494,7 @@ class SecurityScanOutputStore:
             step = WorkflowStep.model_validate_json(step_row["payload_json"])
             if (workspace_row["run_id"] != row["run_id"] or str(workspace.workspace_id) != row["workspace_id"] or str(workspace.run_id) != row["run_id"]
                     or step_row["run_id"] != row["run_id"] or str(step.workflow_step_id) != row["workflow_step_id"] or str(step.run_id) != row["run_id"]
-                    or step.agent_role is not AgentRole.SECURITY or step.attempt != source.code_version - 1
+                    or step.agent_role is not AgentRole.SECURITY
                     or not step.requirement_ids or not set(step.requirement_ids) <= set(source.requirement_ids)
                     or source.artifact_id not in step.input_artifact_ids or step.code_version is not None and step.code_version != source.code_version
                     or metadata["sourceFiles"] != inventory or metadata["sourceFilesSha256"] != sha256(_json(inventory).encode("utf-8")).hexdigest()):

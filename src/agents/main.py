@@ -28,11 +28,13 @@ def create_app(
         from agents.runtime.planner import PlannerAgentExecutor
         from agents.runtime.developer import DeveloperAgentExecutor
         from agents.runtime.qa import QAAgentExecutor
+        from agents.runtime.security import SecurityAgentExecutor
         from orchestrator.domain.states import AgentRole
         implemented_roles = (
             (PlannerAgentExecutor, AgentRole.PLANNER),
             (DeveloperAgentExecutor, AgentRole.DEVELOPER),
             (QAAgentExecutor, AgentRole.QA),
+            (SecurityAgentExecutor, AgentRole.SECURITY),
         )
         expected_role = next((role for implemented, role in implemented_roles
                               if isinstance(executor, implemented)), None)

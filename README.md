@@ -170,7 +170,13 @@ Host가 명시적으로 구성한 `DeveloperAgentExecutor`가 MCP로 할당된 S
 
 Host가 명시적으로 구성한 `QAAgentExecutor`가 같은 불변 Source를 읽고 QA 전용 테스트를 작성하며, 승인된 Unit/Browser 테스트의 실제 private 실행 기록으로 기존 `qa-report.json` Artifact를 반환합니다. 모델은 테스트 케이스와 Requirement의 연결만 제안하고 결과·Manifest·ToolEvidence를 만들지 않습니다. 모든 승인된 QA 테스트와 Host 보호 테스트를 실행하며, 실패한 assertion은 Tool PASS + QA FAIL, 누락/SKIP 케이스는 UNVERIFIED로 구분합니다.
 
-현재는 최초 `VALIDATING`·`fix_attempt=0`·`codeVersion=1`만 지원합니다. 실제 QA 실행기를 주입할 때만 `measured-initial-qa` Skill·`executionReady=True`를 광고하며 기본 CLI/서버는 Bootstrap을 유지합니다. QA는 Source·보호 테스트를 수정하거나 전체 Run을 판정하지 않습니다. 실제 LLM·Docker 실행은 미검증이고, 자동 Pipeline 연결(34번)과 수정 후 재검증(35번)은 후속입니다. 상세 범위·Host 설정·정의서 점검·검증 한계는 [32번 QA Agent](docs/32-qa-agent.md)를 참고하세요. 다음은 **33번 Security Agent**입니다.
+현재는 최초 `VALIDATING`·`fix_attempt=0`·`codeVersion=1`만 지원합니다. 실제 QA 실행기를 주입할 때만 `measured-initial-qa` Skill·`executionReady=True`를 광고하며 기본 CLI/서버는 Bootstrap을 유지합니다. QA는 Source·보호 테스트를 수정하거나 전체 Run을 판정하지 않습니다. 실제 LLM·Docker 실행은 미검증이고, 자동 Pipeline 연결(34번)과 수정 후 재검증(35번)은 후속입니다. 상세 범위·Host 설정·정의서 점검·검증 한계는 [32번 QA Agent](docs/32-qa-agent.md)를 참고하세요.
+
+### Security Agent — 33번
+
+Host가 명시적으로 구성한 `SecurityAgentExecutor`가 같은 불변 Source에서 승인 Scanner Profile 전체를 실행하고, 실제 Scan/Tool 기록과 읽은 코드 근거를 연결하여 기존 `security-report.json` 하나를 반환합니다. 모델은 분석 Draft만 제출하며 Scanner 경고를 누락하거나 Severity·실행 근거·최종 Verdict를 만들 수 없습니다. 경고 0개로 보안 PASS를 만들지 않고, 독립 Host 의미 검증 근거가 없으면 Requirement는 UNVERIFIED, 경고는 SUSPECTED로 남깁니다.
+
+최초 후보만 지원하며 기본 CLI/서버는 Bootstrap을 유지합니다. 실제 실행기를 주입한 경우에만 Security Skill을 광고합니다. SCN-001의 모든 보안 기준을 입증하는 실제 의미 검증기와 LLM/Docker 실행은 미검증·미완료이며, 공통 Proof 연결 경계가 그 검증을 대신하지 않습니다. 상세 사용법·정의서 점검·한계는 [33번 Security Agent](docs/33-security-agent.md)를 참고하세요. 다음은 **34번 기존 Orchestrator와 실제 Agent 연결**입니다.
 
 ## 테스트
 

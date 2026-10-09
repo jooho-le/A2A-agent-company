@@ -153,8 +153,8 @@ class SandboxRuntime:
         if run.status not in active_states.get(role, set()):
             raise SandboxError(SandboxErrorCode.DENIED)
         source = content.metadata
-        active = [step for step in steps if step.agent_role is role and step.status is WorkflowStepStatus.RUNNING
-                  and (role in {AgentRole.DEVELOPER, AgentRole.QA} or step.attempt == run.fix_attempt)]
+        # Continuing an interrupted Task increments attempt, not fix_attempt.
+        active = [step for step in steps if step.agent_role is role and step.status is WorkflowStepStatus.RUNNING]
         if len(active) != 1 or source.code_version != run.fix_attempt + 1:
             raise SandboxError(SandboxErrorCode.DENIED)
         if role is AgentRole.DEVELOPER:

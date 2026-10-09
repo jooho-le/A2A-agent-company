@@ -270,9 +270,9 @@ class ToolExecutionStore:
                     AgentRole.DEVELOPER: {WorkflowStatus.IMPLEMENTING, WorkflowStatus.FIXING},
                     AgentRole.QA: {WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING},
                     AgentRole.SECURITY: {WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING}}
-                if (run.status not in phases[binding.role] or step.status is not WorkflowStepStatus.RUNNING
-                        or (binding.role not in {AgentRole.DEVELOPER, AgentRole.QA}
-                            and step.attempt != run.fix_attempt)):
+                # A2A continuation attempts do not create a new code revision.
+                # Full claim identity below still binds the exact current attempt.
+                if run.status not in phases[binding.role] or step.status is not WorkflowStepStatus.RUNNING:
                     raise ToolStoreError("TOOL_EVIDENCE_CONTEXT_DENIED")
                 candidates = []
                 for row in connection.execute("SELECT * FROM workflow_steps WHERE run_id=?", (str(binding.run_id),)):
@@ -280,9 +280,7 @@ class ToolExecutionStore:
                     if (candidate.run_id != binding.run_id or str(candidate.workflow_step_id) != row["workflow_step_id"]
                         or candidate.status.value != row["status"]):
                         raise ToolStoreError("TOOL_EVIDENCE_INTEGRITY_ERROR")
-                    if (candidate.agent_role is binding.role and candidate.status is WorkflowStepStatus.RUNNING
-                            and (binding.role in {AgentRole.DEVELOPER, AgentRole.QA}
-                                 or candidate.attempt == run.fix_attempt)):
+                    if candidate.agent_role is binding.role and candidate.status is WorkflowStepStatus.RUNNING:
                         candidates.append(candidate.workflow_step_id)
                 if candidates != [step_id]:
                     raise ToolStoreError("TOOL_EVIDENCE_CONTEXT_DENIED")

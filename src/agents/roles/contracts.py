@@ -124,6 +124,8 @@ ROLE_CONTRACTS = MappingProxyType({
         responsibilities=(
             "각 할당 Requirement에 정확히 한 개의 requirementResults를 기록한다.",
             "허용된 run_security_scan의 실제 결과와 코드·재현 근거를 분석한다.",
+            "Runtime이 승인된 Scanner를 실행한다. 모델은 읽은 코드 위치와 분석 Draft만 제안하며 검증된 결과는 Host 근거 검증 후 조립한다.",
+            "Host의 독립 근거 검증이 없으면 Requirement는 UNVERIFIED, Scanner 경고는 SUSPECTED로 남긴다.",
             "findings에 findingId/severity/disposition/title/description 및 Requirement·Rule·Location·근거 참조를 연결한다.",
             "재현 또는 명확한 코드 근거가 있을 때만 CONFIRMED, 오탐 근거가 있을 때만 FALSE_POSITIVE를 사용한다.",
             "의심은 SUSPECTED, 검증 불가는 UNVERIFIED로 남기고 정책 선택이 필요하면 사람 판단을 요청한다.",
