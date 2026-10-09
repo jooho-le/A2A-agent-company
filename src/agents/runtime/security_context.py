@@ -1,8 +1,7 @@
-"""Opt-in initial Security inputs from one frozen, read-only Host handoff.
+"""Frozen Security inputs for initial and bounded candidate revalidation.
 
-Step 33 admits VALIDATING/fix_attempt=0/codeVersion=1 only. Continuation
-attempts are independent of code revisions; revalidation belongs to step 35.
-The loader never installs storage schemas or obtains a fresh Run budget.
+Continuation attempts are independent of code-fix cycles. The loader never
+installs schemas, changes a Registry or obtains a fresh Run budget.
 """
 
 from dataclasses import dataclass, field
@@ -16,6 +15,7 @@ from agents.llm.budget import ExecutionBudget
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
 from agents.runtime.planner_context import _configuration, _json, _scenario, _text
+from agents.runtime.qa_context import _context_lineage, _read_validation_lineage, _verify_role_context
 from orchestrator.a2a.requests import A2AWorkflowMetadata, build_snapshot_handoff_data
 from orchestrator.application.planner_output import PlannerPlan
 from orchestrator.artifacts.sqlite_store import SQLiteArtifactContentStore
@@ -25,6 +25,7 @@ from orchestrator.domain.run_configuration import RunConfigurationArtifact
 from orchestrator.domain.scenario_registry import RequirementValidator
 from orchestrator.domain.snapshot_handoff import CodeSnapshotArtifact, SnapshotHandoff
 from orchestrator.domain.states import A2ATaskState, AgentRole, WorkflowStatus, WorkflowStepStatus
+from orchestrator.domain.validation_artifacts import SecurityReportArtifact
 from orchestrator.domain.workspaces import WorkspaceRecord
 from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
 
@@ -75,6 +76,10 @@ class SecurityExecutionContext:
     request_text: str = field(repr=False)
     requirement_artifact: RequirementArtifact = field(repr=False)
     source: CodeSnapshotArtifact = field(repr=False)
+    previous_source: CodeSnapshotArtifact | None = field(default=None, repr=False)
+    previous_report: SecurityReportArtifact | None = field(default=None, repr=False)
+    previous_report_source: CodeSnapshotArtifact | None = field(default=None, repr=False)
+    fix_attempt: int = 0
     _initial_payload_json: str = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -93,15 +98,15 @@ class SecurityExecutionContext:
                     or requirement != self.requirement_artifact or source != self.source
                     or metadata.run_id != configuration.run_id
                     or metadata.scenario_id != configuration.scenario_id
-                    or metadata.code_version != 1 or source.code_version != 1
+                    or metadata.code_version != source.code_version
                     or source.run_id != metadata.run_id or requirement.run_id != metadata.run_id
                     or source.workflow_step_id == metadata.workflow_step_id
                     or requirement.workflow_step_id in (metadata.workflow_step_id, source.workflow_step_id)
                     or metadata.project_artifact_ids != (source.artifact_id,)
-                    or source.artifact_version != 1 or source.previous_artifact_id is not None
                     or source.artifact_uri != f"artifact://{source.artifact_id}/source.tar"
                     or requirement.artifact_uri != f"artifact://{requirement.artifact_id}/requirements.json"):
                 raise ValueError
+            _context_lineage(self, SecurityReportArtifact)
             _text(self.request_text, max_bytes=1_048_576)
             for opaque_reference in (requirement.a2a_task_id, requirement.a2a_artifact_id,
                                      source.a2a_task_id, source.a2a_artifact_id):
@@ -228,16 +233,19 @@ class SQLiteSecurityContextLoader:
                 if workspace_row is None:
                     raise ValueError
                 workspace = WorkspaceRecord.model_validate(_json(workspace_row["payload_json"]))
+                previous_source, previous_report, previous_report_source = _read_validation_lineage(
+                    connection, run, steps, source, AgentRole.SECURITY, SecurityReportArtifact, metadata.requirement_ids)
+                _verify_role_context(connection, run, steps, step, context, AgentRole.SECURITY)
             planners = [producer for producer in steps if producer.agent_role is AgentRole.PLANNER]
-            developers = [producer for producer in steps if producer.agent_role is AgentRole.DEVELOPER]
+            developers = [producer for producer in steps if producer.agent_role is AgentRole.DEVELOPER
+                          and producer.workflow_step_id == source.workflow_step_id]
             if len(planners) != 1 or len(developers) != 1:
                 raise ValueError
             planner, developer = planners[0], developers[0]
             if (run.run_id != metadata.run_id or run.scenario_id != metadata.scenario_id
-                    or run.status is not WorkflowStatus.VALIDATING or run_row["status"] != run.status.value
-                    or run.fix_attempt != 0 or run.code_version != 1
+                    or run_row["status"] != run.status.value
                     or step.run_id != run.run_id or step.workflow_step_id != metadata.workflow_step_id
-                    or step.attempt != metadata.attempt or step.code_version != 1
+                    or step.attempt != metadata.attempt or step.code_version != run.code_version
                     or tuple(step.requirement_ids) != metadata.requirement_ids
                     or tuple(step.input_artifact_ids) != metadata.project_artifact_ids
                     or step.output_artifact_ids or step.a2a_artifact_ids
@@ -266,17 +274,18 @@ class SQLiteSecurityContextLoader:
                     or planner.a2a_task_id != requirement.a2a_task_id
                     or requirement.a2a_artifact_id not in planner.a2a_artifact_ids
                     or requirement.artifact_id not in planner.output_artifact_ids
-                    or developer.input_artifact_ids != [requirement.artifact_id]
+                    or run.fix_attempt == 0 and developer.input_artifact_ids != [requirement.artifact_id]
                     or step.a2a_task_id is not None and step.a2a_task_id != context.task_id
                     or step.agent_context_id is not None and step.agent_context_id != context.context_id):
                 raise ValueError
             return SecurityExecutionContext(metadata=metadata, configuration=configuration,
                 budget=self._budget_resolver(configuration), request_text=run.request_text,
-                requirement_artifact=requirement, source=source)
+                requirement_artifact=requirement, source=source, previous_source=previous_source,
+                previous_report=previous_report, previous_report_source=previous_report_source,
+                fix_attempt=run.fix_attempt)
         except LLMRuntimeError as error:
             if error.code is LLMErrorCode.BUDGET:
                 raise LLMRuntimeError(LLMErrorCode.BUDGET) from None
             raise SecurityContextError() from None
         except Exception:
             raise SecurityContextError() from None
-

@@ -171,6 +171,20 @@ class AgentBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Trusted Host semantic proof", card["description"])
         self.assertEqual(MessageToDict(build_agent_card(self.settings(AgentRole.SECURITY))).get("skills", []), [])
 
+    def test_revision_capabilities_preserve_existing_skill_ids_and_do_not_claim_success(self):
+        expected = {
+            AgentRole.DEVELOPER: ("measured-initial-implementation", "Issue fixes"),
+            AgentRole.QA: ("measured-initial-qa", "revalidation"),
+            AgentRole.SECURITY: ("measured-initial-security", "revalidation"),
+        }
+        for role, (skill_id, capability) in expected.items():
+            with self.subTest(role=role):
+                card = MessageToDict(build_agent_card(self.settings(role), execution_ready=True))
+                self.assertEqual(card["skills"][0]["id"], skill_id)
+                self.assertIn(capability, card["skills"][0]["name"])
+                self.assertIn("no", card["description"].casefold())
+                self.assertIn("product verdict", card["description"])
+
     def test_card_ready_flag_requires_native_boolean(self):
         for value in (None, 1, "true", [], {}):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "^AGENT_EXECUTOR_ROLE_MISMATCH$"):

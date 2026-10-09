@@ -13,14 +13,17 @@ import re
 from types import MappingProxyType
 from uuid import UUID, uuid4
 
+from agents.runtime.qa_context import validation_cycle
 from mcp_tools.runtime import MCPBinding
 from mcp_tools.tools.unit_config import MAX_UNIT_FILE_BYTES, MAX_UNIT_FILES, MAX_UNIT_TOTAL_BYTES, _test_path
 from mcp_tools.tools.unit_inputs import UnitTestInputs, _files_hash, _validate_content
 from mcp_tools.tools.browser_inputs import BrowserTestInputs
 from mcp_tools.tools.browser_store import BrowserTestOutputStore
 from mcp_tools.tools.unit_store import UnitTestOutputStore
+from orchestrator.artifacts.sqlite_store import SQLiteArtifactContentStore
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
-from orchestrator.domain.states import AgentRole, WorkflowStatus, WorkflowStepStatus
+from orchestrator.domain.snapshot_handoff import CodeSnapshotArtifact
+from orchestrator.domain.states import AgentRole, WorkflowStepStatus
 from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
 from orchestrator.sandbox.materialization import _check_names
 from orchestrator.workspaces.policy import workspace_uuid
@@ -127,13 +130,13 @@ class QATestInputStore:
         if run_row is None or step_row is None:
             raise ValueError
         run, step = WorkflowRun.model_validate_json(run_row[0]), WorkflowStep.model_validate_json(step_row[0])
+        validation_cycle(run)
         if (run.run_id != binding.run_id or run.workspace_id != binding.workspace_id
-                or run.status is not WorkflowStatus.VALIDATING or run.fix_attempt != 0
                 or run_row[1] != run.status.value
                 or step.run_id != run.run_id or step.workflow_step_id != step_id
                 or step.agent_role is not AgentRole.QA or step.status is not WorkflowStepStatus.RUNNING
-                or step_row[1] != step.status.value or step.code_version != 1
-                or source_id not in step.input_artifact_ids):
+                or step_row[1] != step.status.value or step.code_version != run.code_version
+                or step.input_artifact_ids != [source_id]):
             raise ValueError
         active = []
         for row in connection.execute("SELECT payload_json,status FROM workflow_steps WHERE run_id=?", (str(run.run_id),)):
@@ -147,8 +150,17 @@ class QATestInputStore:
         if connection.execute("SELECT 1 FROM workspaces WHERE workspace_id=? AND run_id=?",
                               (str(binding.workspace_id), str(binding.run_id))).fetchone() is None:
             raise ValueError
-        if connection.execute("SELECT 1 FROM artifact_contents WHERE artifact_id=? AND run_id=? AND artifact_type='SOURCE'",
-                              (str(source_id), str(binding.run_id))).fetchone() is None:
+        source_row = connection.execute("SELECT * FROM artifact_contents WHERE artifact_id=? AND run_id=? AND artifact_type='SOURCE'",
+                                        (str(source_id), str(binding.run_id))).fetchone()
+        if source_row is None:
+            raise ValueError
+        source = SQLiteArtifactContentStore._decode(connection, source_row).metadata
+        latest = connection.execute("SELECT artifact_id FROM artifact_contents WHERE run_id=? AND artifact_type='SOURCE' ORDER BY code_version DESC LIMIT 1",
+                                    (str(binding.run_id),)).fetchone()
+        if (type(source) is not CodeSnapshotArtifact or source.artifact_id != source_id
+                or source.run_id != run.run_id or source.code_version != run.code_version
+                or source.artifact_version != run.code_version
+                or latest is None or latest["artifact_id"] != str(source_id)):
             raise ValueError
         if connection.execute("SELECT 1 FROM snapshot_read_grants WHERE artifact_id=? AND role='QA' AND access='READ_ONLY'",
                               (str(source_id),)).fetchone() is None:

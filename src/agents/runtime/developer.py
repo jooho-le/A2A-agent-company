@@ -1,4 +1,4 @@
-"""Opt-in initial Developer: real MCP edits, Host checkpoint, measured Build.
+"""Opt-in initial/Fix Developer: real MCP edits, Host checkpoint, measured Build.
 
 The Orchestrator alone owns Workflow/Registry transitions and final verdicts.
 Interrupted work with uncommitted edits is not automatically replayed or reset.
@@ -45,6 +45,8 @@ _PROTECTED = frozenset({
     "workspaceId", "scenario", "runConfiguration", "plan", "sourceArtifact", "outputContract",
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds", "projectArtifactIds",
     "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion", "fixRequest",
+    "fix_attempt", "fixAttempt", "previous_source", "previousSource", "previous_artifacts",
+    "previousArtifacts", "fix_issues", "fixIssues", "startingCommitHash", "parentCommitHash",
 })
 
 
@@ -79,11 +81,14 @@ def _prepare_input(context, execution):
             answers.append(redact_data(answer))
         return {**expected, "clarifications": answers,
             "runtimeInstructions": (
-                "Use the offered read_project_file/write_source_file tools to implement the protected plan. "
+                "Use the offered read_project_file/write_source_file tools to implement the protected plan "
+                "or resolve only the authenticated Fix Request issues on the previous candidate. "
                 "READY is only a bounded work summary, not a Build or project success claim. "
                 "The Host computes actual changed files, safely commits and freezes the candidate, "
                 "and runs Build afterward. Do not invent artifact IDs, hashes, changes or evidence. "
-                "Initial codeVersion=1 has no frozen patch base; apply_patch is not offered. "
+                "Apply_patch is not offered: the Host separately authenticates the previous candidate "
+                "and its unchanged working-copy bytes before exposing writes. "
+                "The original starting commit/environment/requirements remain frozen across fixes. "
                 "Questions do not authorize baseline changes or replay of uncertain writes."
             )}
     except asyncio.CancelledError:
@@ -102,7 +107,7 @@ async def _host_factory(factory, argument):
 
 
 class DeveloperAgentExecutor(AgentExecutor):
-    """Host opt-in; no env auto-wiring or automatic Fix cycle in step 31."""
+    """Host opt-in; Orchestrator alone schedules distinct initial/Fix Tasks."""
 
     def __init__(self, *, provider, context_factory, services_factory, usage_sink=None):
         if (not callable(context_factory) or not callable(services_factory)

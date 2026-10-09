@@ -132,7 +132,7 @@ class _SecurityReadExecutor:
 
 
 class SecurityAgentExecutor(AgentExecutor):
-    """Host opt-in initial Security; CLI auto-wiring and revalidation are later steps."""
+    """Host opt-in Security for the claimed current candidate and report lineage."""
 
     def __init__(self, *, provider, context_factory, services_factory, usage_sink=None):
         if (not callable(context_factory) or not callable(services_factory)

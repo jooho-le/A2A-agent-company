@@ -680,8 +680,8 @@ class PlannerRunDispatcher:
         scenario: ScenarioDefinition,
         issues: tuple[IssueRecord, ...],
     ) -> None:
-        # Keep real failures at FIX_REQUIRED until owned executors support fixes.
-        # This capability gate does not change the frozen three-cycle policy.
+        # An explicit Host capability gate may stop before issuing a fix.
+        # It never changes the frozen three-cycle policy or creates a new budget.
         if not self._allow_fix_dispatch:
             return
         developer_url = self._agent_registry.get_base_url(AgentRole.DEVELOPER)

@@ -230,8 +230,9 @@ def create_platform(
     Successful construction transfers provider close ownership to this object;
     construction failures do not close caller-owned providers or Host stores.
 
-    This first-cycle composition deliberately stops at FIX_REQUIRED; step 35
-    adds actual fixes/revalidation without changing frozen retry/fix policies.
+    Verified product defects can enter the existing bounded fix/revalidation
+    loop. Every cycle retains the same frozen configuration and Run budget;
+    unverified evidence does not authorize a fabricated PASS or a new budget.
     """
     try:
         if (not isinstance(repository, SQLiteWorkflowRepository)
@@ -352,7 +353,7 @@ def create_platform(
     client_factory = a2a_client_factory if a2a_client_factory is not None else agent_client_factory(settings, trust_env=False)
     dispatcher = PlannerRunDispatcher(repository, A2AAgentRegistry.from_settings(settings),
         client_factory=client_factory,
-        before_dispatch=before_dispatch, allow_fix_dispatch=False)
+        before_dispatch=before_dispatch, allow_fix_dispatch=True)
     app = create_orchestrator_app(repository=repository, dispatcher=dispatcher,
         settings=settings, submission_validator=validate_submission)
     app.state.workspace_registry = workspace_registry

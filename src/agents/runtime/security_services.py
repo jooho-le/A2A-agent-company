@@ -26,6 +26,7 @@ from referencing import Registry, Resource
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text, parse_json
 from agents.roles.outputs import validate_completed_role_output
+from agents.runtime.qa_context import validation_cycle, verify_report_predecessor
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration, open_mcp_client
 from mcp_tools.execution_policy import arguments_sha256
 from mcp_tools.execution_runtime import TrackedMCPExecutor
@@ -205,27 +206,32 @@ class SecurityRuntimeServices:
                 or binding.workspace_id != execution.configuration.workspace_id
                 or self.configuration.frozen_source.project_artifact_id != source.artifact_id
                 or self.configuration.frozen_source.snapshot_sha256 != source.snapshot_sha256
-                or source.run_id != binding.run_id or source.code_version != 1
-                or execution.metadata.code_version != 1):
+                or source.run_id != binding.run_id
+                or execution.metadata.code_version != source.code_version):
             raise ValueError
         run = self._repository.get_run(binding.run_id)
         configuration = self._repository.get_run_configuration(binding.run_id)
         active = [step for step in self._repository.list_steps(binding.run_id)
                   if step.agent_role is AgentRole.SECURITY and step.status is WorkflowStepStatus.RUNNING]
-        if (run is None or run.status is not WorkflowStatus.VALIDATING or run.fix_attempt != 0
-                or run.workspace_id != binding.workspace_id or run.code_version != 1
+        if run is None:
+            raise ValueError
+        validation_cycle(run)
+        if (run.fix_attempt != getattr(execution, "fix_attempt", 0)
+                or run.workspace_id != binding.workspace_id or run.code_version != source.code_version
                 or configuration != execution.configuration or len(active) != 1
                 or active[0].workflow_step_id != execution.metadata.workflow_step_id
-                or active[0].attempt != execution.metadata.attempt or active[0].code_version != 1
-                or source.artifact_id not in active[0].input_artifact_ids
+                or active[0].attempt != execution.metadata.attempt or active[0].code_version != source.code_version
+                or active[0].input_artifact_ids != [source.artifact_id]
+                or execution.metadata.project_artifact_ids != (source.artifact_id,)
                 or tuple(active[0].requirement_ids) != execution.metadata.requirement_ids
                 or not execution.metadata.requirement_ids
                 or not set(execution.metadata.requirement_ids) <= set(source.requirement_ids)):
             raise ValueError
         registered = [artifact for artifact in self._repository.list_project_artifacts(binding.run_id)
-                      if artifact.artifact_type == "SOURCE" and artifact.code_version == 1]
+                      if artifact.artifact_type == "SOURCE" and artifact.code_version == source.code_version]
         if len(registered) != 1 or registered[0] != source:
             raise ValueError
+        verify_report_predecessor(self._repository, execution, AgentRole.SECURITY, SecurityReportArtifact)
         self._artifacts.verify_candidate(source)
         staged, files = SnapshotReader(self._artifacts)._load(binding, self.configuration.frozen_source)
         if staged.execution_manifest() != source.execution_manifest():
@@ -552,10 +558,13 @@ class SecurityRuntimeServices:
                         else "SCANNER_CANDIDATE_REQUIRES_VERIFICATION", "codeReferences": list(anchors[identity])}),
                     evidence_ref=receipt.report_ref, rule_id=actual.rule_id,
                     normalized_location=actual.path + ":" + str(actual.line)))
-            report = SecurityReportArtifact(artifact_id=uuid4(), artifact_version=1,
+            version = verify_report_predecessor(self._repository, execution, AgentRole.SECURITY, SecurityReportArtifact)
+            previous = getattr(execution, "previous_report", None)
+            report = SecurityReportArtifact(artifact_id=uuid4(), artifact_version=version,
+                previous_artifact_id=None if previous is None else previous.artifact_id,
                 run_id=execution.metadata.run_id, workflow_step_id=execution.metadata.workflow_step_id,
                 a2a_task_id=task_id, a2a_artifact_id=str(uuid4()), requirement_ids=execution.metadata.requirement_ids,
-                code_version=1, execution_manifest=execution.source.execution_manifest(),
+                code_version=execution.source.code_version, execution_manifest=execution.source.execution_manifest(),
                 requirement_results=tuple(requirements), findings=tuple(findings))
             payload = report.model_dump(mode="json", by_alias=True)
             sanitize_content(payload, reject_secrets=True)
@@ -566,16 +575,17 @@ class SecurityRuntimeServices:
             artifact = Artifact(artifact_id=report.a2a_artifact_id, name="security-report.json",
                 parts=[new_data_part(payload, media_type="application/json")], metadata={
                     "runId": str(report.run_id), "workflowStepId": str(report.workflow_step_id),
-                    "projectArtifactId": str(report.artifact_id), "artifactVersion": 1})
+                    "projectArtifactId": str(report.artifact_id), "artifactVersion": report.artifact_version})
             task = Task(id=task_id, context_id=context_id, status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
                 artifacts=[artifact], metadata=execution.metadata.model_dump(mode="json", by_alias=True, exclude_none=True))
             run = WorkflowRun(run_id=report.run_id, workspace_id=execution.configuration.workspace_id,
                 scenario_id=execution.metadata.scenario_id, request_text=execution.request_text,
-                status=WorkflowStatus.VALIDATING, code_version=1)
+                status=WorkflowStatus.VALIDATING if execution.source.code_version == 1 else WorkflowStatus.REVALIDATING,
+                fix_attempt=getattr(execution, "fix_attempt", 0), code_version=execution.source.code_version)
             step = WorkflowStep(run_id=report.run_id, workflow_step_id=report.workflow_step_id,
                 agent_role=AgentRole.SECURITY, status=WorkflowStepStatus.SUCCEEDED,
                 a2a_task_id=task_id, agent_context_id=context_id, a2a_task_state=A2ATaskState.COMPLETED,
-                attempt=execution.metadata.attempt, code_version=1, requirement_ids=list(report.requirement_ids),
+                attempt=execution.metadata.attempt, code_version=execution.source.code_version, requirement_ids=list(report.requirement_ids),
                 input_artifact_ids=list(execution.metadata.project_artifact_ids or ()))
             validate_completed_role_output(AgentRole.SECURITY, task=task, run=run, step=step, source=execution.source)
             return (artifact,)

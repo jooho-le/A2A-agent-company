@@ -132,7 +132,7 @@ class OwnedCompositionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(platform.agent_apps), set(AgentRole))
         self.assertIs(platform.orchestrator_app.state.workflow_repository, self.repository)
         self.assertIs(platform.orchestrator_app.state.workspace_registry, self.registry)
-        self.assertFalse(platform.dispatcher._allow_fix_dispatch)
+        self.assertTrue(platform.dispatcher._allow_fix_dispatch)
         for role, app in platform.agent_apps.items():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://unit") as client:
                 response = await client.get("/health")

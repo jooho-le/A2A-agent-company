@@ -1,4 +1,4 @@
-"""Opt-in initial QA: readonly Source, generated tests, measured Host report.
+"""Opt-in QA/revalidation: readonly Source, generated tests, measured report.
 
 Neither a model verdict nor A2A COMPLETED establishes project success.
 Only the Orchestrator changes Workflow/Registry state or starts fix cycles.
@@ -128,7 +128,7 @@ def _test_targets(services):
 
 
 class QAAgentExecutor(AgentExecutor):
-    """Host opt-in initial QA; CLI auto-wiring and revalidation are later steps."""
+    """Host opt-in QA against the claimed current candidate and report lineage."""
 
     def __init__(self, *, provider, context_factory, services_factory, usage_sink=None):
         if (not callable(context_factory) or not callable(services_factory)

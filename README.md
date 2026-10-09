@@ -164,19 +164,19 @@ Host가 명시적으로 구성한 `PlannerAgentExecutor`가 기존 LLMEngine으�
 
 Host가 명시적으로 구성한 `DeveloperAgentExecutor`가 MCP로 할당된 Source를 구현하고, 실제 파일 diff·Git commit object·불변 Snapshot·private Build/Tool 실행 기록을 대조하여 기존 Source/Change/Build Artifact 세 개를 반환합니다. 모델은 제한된 Decision만 제안하며 Hash·변경 목록·Build 근거를 작성하지 않습니다. 정상 실행된 컴파일 실패는 Tool PASS + Build FAIL/PRODUCT로 보고하고 전체 SUCCESS로 바꾸지 않습니다.
 
-현재는 최초 `codeVersion=1` 구현만 지원하며 Issue 기반 수정 루프는 35번입니다. 기본 서버는 Bootstrap 유지, 실제 Developer를 주입할 때만 실행 Skill을 광고합니다. 이미 Source를 수정한 뒤 중단한 작업은 자동 원복/재실행하지 않습니다. 실제 LLM·Docker·Developer stdio 전체 경로는 미검증이며 자동 Pipeline 연결은 후속입니다. 상세 사용법·정의서 점검·검증 한계는 [31번 Developer Agent](docs/31-developer-agent.md)를 참고하세요.
+31번의 최초 구현에 더해 35번에서 저장된 Issue 기반 수정과 `codeVersion=2~4`를 지원합니다. 기본 서버는 Bootstrap 유지, 실제 Developer를 주입할 때만 실행 Skill을 광고합니다. 이미 Source를 수정한 뒤 중단한 작업은 자동 원복/재실행하지 않습니다. 실제 LLM·Docker·Developer stdio 전체 경로는 미검증입니다. 최초 구현 설정은 [31번 Developer Agent](docs/31-developer-agent.md), 현재 수정 경계는 [35번 수정·재검증](docs/35-fix-revalidation-loop.md)을 참고하세요.
 
 ### QA Agent — 32번
 
 Host가 명시적으로 구성한 `QAAgentExecutor`가 같은 불변 Source를 읽고 QA 전용 테스트를 작성하며, 승인된 Unit/Browser 테스트의 실제 private 실행 기록으로 기존 `qa-report.json` Artifact를 반환합니다. 모델은 테스트 케이스와 Requirement의 연결만 제안하고 결과·Manifest·ToolEvidence를 만들지 않습니다. 모든 승인된 QA 테스트와 Host 보호 테스트를 실행하며, 실패한 assertion은 Tool PASS + QA FAIL, 누락/SKIP 케이스는 UNVERIFIED로 구분합니다.
 
-현재는 최초 `VALIDATING`·`fix_attempt=0`·`codeVersion=1`만 지원합니다. 실제 QA 실행기를 주입할 때만 `measured-initial-qa` Skill·`executionReady=True`를 광고하며 기본 CLI/서버는 Bootstrap을 유지합니다. QA는 Source·보호 테스트를 수정하거나 전체 Run을 판정하지 않습니다. 실제 LLM·Docker 실행은 미검증이고, 자동 Pipeline 연결(34번)과 수정 후 재검증(35번)은 후속입니다. 상세 범위·Host 설정·정의서 점검·검증 한계는 [32번 QA Agent](docs/32-qa-agent.md)를 참고하세요.
+35번에서 최초 `VALIDATING`뿐 아니라 수정 후보의 `REVALIDATING`을 지원합니다. 실제 QA 실행기를 주입할 때만 Skill·`executionReady=True`를 광고하며 기본 CLI/서버는 Bootstrap을 유지합니다. QA는 Source·보호 테스트를 수정하거나 전체 Run을 판정하지 않습니다. 실제 LLM·Docker 실행은 미검증입니다. 초기 Host 설정은 [32번 QA Agent](docs/32-qa-agent.md), 현재 재검증 경계는 [35번 수정·재검증](docs/35-fix-revalidation-loop.md)을 참고하세요.
 
 ### Security Agent — 33번
 
 Host가 명시적으로 구성한 `SecurityAgentExecutor`가 같은 불변 Source에서 승인 Scanner Profile 전체를 실행하고, 실제 Scan/Tool 기록과 읽은 코드 근거를 연결하여 기존 `security-report.json` 하나를 반환합니다. 모델은 분석 Draft만 제출하며 Scanner 경고를 누락하거나 Severity·실행 근거·최종 Verdict를 만들 수 없습니다. 경고 0개로 보안 PASS를 만들지 않고, 독립 Host 의미 검증 근거가 없으면 Requirement는 UNVERIFIED, 경고는 SUSPECTED로 남깁니다.
 
-최초 후보만 지원하며 기본 CLI/서버는 Bootstrap을 유지합니다. 실제 실행기를 주입한 경우에만 Security Skill을 광고합니다. SCN-001의 모든 보안 기준을 입증하는 실제 의미 검증기와 LLM/Docker 실행은 미검증·미완료이며, 공통 Proof 연결 경계가 그 검증을 대신하지 않습니다. 상세 사용법·정의서 점검·한계는 [33번 Security Agent](docs/33-security-agent.md)를 참고하세요.
+35번에서 최초 후보와 수정 후보 재검증을 지원하며 기본 CLI/서버는 Bootstrap을 유지합니다. 실제 실행기를 주입한 경우에만 Security Skill을 광고합니다. SCN-001의 모든 보안 기준을 입증하는 실제 의미 검증기와 LLM/Docker 실행은 미검증·미완료이며, 공통 Proof 연결 경계가 그 검증을 대신하지 않습니다. 초기 Host 설정은 [33번 Security Agent](docs/33-security-agent.md), 현재 재검증 경계는 [35번 수정·재검증](docs/35-fix-revalidation-loop.md)을 참고하세요.
 
 ### Orchestrator + 실제 네 Agent 연결 — 34번
 
@@ -190,7 +190,13 @@ PYTHONPATH=src .venv/bin/python -m agents.platform --factory approved_host:build
 
 한 프로세스/한 event loop에서 Agent 네 서버를 먼저 준비한 뒤 Orchestrator를 엽니다. 기본 포트는 8000 및 8101~8104입니다. 별도 Agent 프로세스 네 개나 reload/multi-worker로 실행하면 공유 예산이 보장되지 않으므로 이 연결 방식에 사용하지 않습니다. 시작/종료는 listener·공식 SDK Task Store·실행 Worker·Provider의 정리 순서를 지킵니다.
 
-현재 연결은 최초 후보까지이며 기존 판정이 `FIX_REQUIRED`이면 자동 수정 없이 멈춥니다. 보안 의미 검증 근거가 부족하면 `UNVERIFIED/HUMAN_REVIEW`이고, 실제 QA FAIL이 함께 있어도 기존 판정상 `HUMAN_REVIEW`에 Issue를 남길 수 있습니다. 네 Task COMPLETED만으로 SUCCESS가 되지 않습니다. 재시작한 Run 예산은 자동 복원하지 않고 거부합니다. Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs/34-owned-agent-platform.md)을 참고하세요. 다음은 **35번 실제 수정·동일 Snapshot 재검증 루프**입니다.
+Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs/34-owned-agent-platform.md)을 참고하세요. 34번의 최초 후보 제한은 아래 35번에서 확장했습니다. 재시작한 Run 예산은 자동 복원하지 않고 거부합니다.
+
+### 실제 수정·동일 Snapshot 재검증 — 35번
+
+기존 Orchestrator가 검증 가능한 결함과 `FIX_REQUIRED`를 기록하면 실제 Developer에게 저장된 Issue·이전 결과물을 전달합니다. Developer는 이전 후보를 기준으로 수정하고 새 Git Snapshot·Source/Change/Build 결과물을 생성합니다. QA와 Security는 새 후보의 동일 Manifest를 다시 검사하고 이전 보고서와 Lineage를 연결합니다. 최초 구현을 제외한 수정은 최대 3회이며 전체 예산·동결 요구사항·환경을 다시 발급하거나 변경하지 않습니다.
+
+보안 의미 검증 근거가 부족하면 `UNVERIFIED/HUMAN_REVIEW`이고, 실제 QA FAIL이 함께 있어도 기존 판정상 `HUMAN_REVIEW`에 Issue를 남길 수 있습니다. 네 Task COMPLETED만으로 SUCCESS가 되지 않습니다. 실제 LLM·Docker·회원가입 서비스 시연 성공은 미검증입니다. 상세 계약·검증 결과는 [35번 수정·재검증](docs/35-fix-revalidation-loop.md)을 참고하세요. 다음은 **36번 실제 입력 재개·취소·Human Review 제어**입니다.
 
 ## 테스트
 

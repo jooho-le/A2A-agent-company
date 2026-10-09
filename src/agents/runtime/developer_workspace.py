@@ -58,6 +58,7 @@ class DeveloperCheckpointResult:
     repository_id: str = field(repr=False)
     lock_path: str = field(repr=False)
     baseline_commit_hash: str = field(repr=False)
+    parent_commit_hash: str | None = field(default=None, repr=False)
 
 
 def _check_deadline(deadline):
@@ -81,12 +82,14 @@ class GitDeveloperCheckpoint:
     """Inert Host capability: prepare once, then commit one actual nonempty diff."""
 
     def __init__(self, workspace: BoundWorkspace, *, baseline_commit_hash,
-                 lock_path, repository_id, limits=GitSnapshotLimits()):
+                 lock_path, repository_id, limits=GitSnapshotLimits(), parent_commit_hash=None):
         invalid = False
         try:
             if (not isinstance(workspace, BoundWorkspace) or workspace.role is not AgentRole.DEVELOPER
                     or not callable(workspace.opener)
                     or type(baseline_commit_hash) is not str or _OID.fullmatch(baseline_commit_hash) is None
+                    or parent_commit_hash is not None and (type(parent_commit_hash) is not str
+                        or _OID.fullmatch(parent_commit_hash) is None)
                     or type(lock_path) is not str or type(repository_id) is not str
                     or not repository_id.strip() or repository_id != repository_id.strip()
                     or len(repository_id.encode("utf-8")) > 256
@@ -109,9 +112,11 @@ class GitDeveloperCheckpoint:
             raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_INVALID")
         self._workspace, self._source = workspace, source
         self._baseline_commit, self._lock_path, self._repository_id = baseline_commit_hash, lock_path, repository_id
+        self._parent_commit = baseline_commit_hash if parent_commit_hash is None else parent_commit_hash
         self._limits = copied_limits
         self._state, self._guard = "NEW", threading.Lock()
         self._baseline = None
+        self._parent = None
 
     def __repr__(self):
         return "GitDeveloperCheckpoint()"
@@ -232,9 +237,14 @@ class GitDeveloperCheckpoint:
                 with walk_directory(root_fd, ("source",)) as source_fd:
                     self._source_identity(source_fd)
                     baseline = self._builder(deadline).build(self._baseline_commit, self._lock_path)
-                    if self._inventory(source_fd, deadline) != self._snapshot_files(baseline):
+                    parent = baseline if self._parent_commit == self._baseline_commit else self._builder(deadline).build(
+                        self._parent_commit, self._lock_path)
+                    if (parent.git_object_format != baseline.git_object_format
+                            or parent.dependency_lock_hash != baseline.dependency_lock_hash
+                            or self._inventory(source_fd, deadline) != self._snapshot_files(parent)):
                         raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_BASELINE_MISMATCH")
             self._baseline = baseline
+            self._parent = parent
             self._state = "PREPARED"
         except Exception as error:
             failure = _failure(error)
@@ -340,7 +350,7 @@ class GitDeveloperCheckpoint:
             tree = self._run(base + ["write-tree"], environment, deadline).strip().decode("ascii")
             if re.fullmatch(r"[0-9a-f]{" + str(expected_size) + r"}", tree) is None:
                 raise DeveloperCheckpointError()
-            commit = self._run(base + ["commit-tree", tree, "-p", self._baseline_commit, "--no-gpg-sign",
+            commit = self._run(base + ["commit-tree", tree, "-p", self._parent_commit, "--no-gpg-sign",
                 "-m", "A2A Developer checkpoint"], environment, deadline).strip().decode("ascii")
             if re.fullmatch(r"[0-9a-f]{" + str(expected_size) + r"}", commit) is None:
                 raise DeveloperCheckpointError()
@@ -358,8 +368,12 @@ class GitDeveloperCheckpoint:
                     baseline = self._builder(deadline).build(self._baseline_commit, self._lock_path)
                     if baseline != self._baseline:
                         raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_BASELINE_MISMATCH")
+                    parent = baseline if self._parent_commit == self._baseline_commit else self._builder(deadline).build(
+                        self._parent_commit, self._lock_path)
+                    if parent != self._parent:
+                        raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_BASELINE_MISMATCH")
                     files = self._inventory(source_fd, deadline)
-                    before = self._snapshot_files(baseline)
+                    before = self._snapshot_files(parent)
                     if files.get(self._lock_path) != before.get(self._lock_path):
                         raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_LOCK_MISMATCH")
                     changes = tuple(ChangeReportFile(path="source/" + path,
@@ -375,7 +389,7 @@ class GitDeveloperCheckpoint:
                         raise DeveloperCheckpointError()
                     result = DeveloperCheckpointResult(commit_hash=commit, changes=changes,
                         repository_id=self._repository_id, lock_path=self._lock_path,
-                        baseline_commit_hash=self._baseline_commit)
+                        baseline_commit_hash=self._baseline_commit, parent_commit_hash=self._parent_commit)
             self._state = "DONE"
         except Exception as error:
             failure = _failure(error)

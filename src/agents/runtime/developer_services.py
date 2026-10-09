@@ -136,7 +136,9 @@ class DeveloperRuntimeServices:
             self._workspaces.bind, binding.workspace_id, run_id=binding.run_id, role=AgentRole.DEVELOPER))
         checkpoint = GitDeveloperCheckpoint(workspace, baseline_commit_hash=self._baseline,
                                             repository_id=self._repository_id, lock_path=self._lock_path,
-                                            limits=self._artifacts._git_limits)
+                                            limits=self._artifacts._git_limits,
+                                            parent_commit_hash=(None if execution.previous_source is None
+                                                                else execution.previous_source.commit_hash))
         await _run_file_operation(partial(checkpoint.prepare,
                                          deadline_monotonic=execution.budget.deadline_monotonic))
         # Do not let an unapproved starting lock/environment reach a model that
@@ -150,6 +152,23 @@ class DeveloperRuntimeServices:
                 or baseline.starting_snapshot_sha256 is not None
                 and snapshot.snapshot_sha256 != baseline.starting_snapshot_sha256):
             raise DeveloperServicesError()
+        if execution.previous_source is not None:
+            previous = execution.previous_source
+            frozen = await _run_file_operation(partial(
+                self._artifacts.bind(binding.run_id, role=AgentRole.DEVELOPER).read,
+                previous.artifact_id))
+            metadata = frozen.metadata
+            parent = checkpoint._parent
+            if (type(metadata) is not type(previous)
+                    or metadata.model_copy(update={"a2a_task_id": previous.a2a_task_id,
+                        "a2a_artifact_id": previous.a2a_artifact_id}) != previous
+                    or previous.repository_id != self._repository_id
+                    or parent.commit_hash != previous.commit_hash or parent.tree_hash != previous.tree_hash
+                    or parent.git_object_format != previous.git_object_format.value
+                    or parent.snapshot_sha256 != previous.snapshot_sha256
+                    or parent.dependency_lock_hash != previous.dependency_lock_hash
+                    or parent.archive != frozen.content):
+                raise DeveloperServicesError()
         execution.budget.check()
         return checkpoint
 
@@ -163,7 +182,9 @@ class DeveloperRuntimeServices:
         candidate = await _run_file_operation(partial(
             checkpoint.checkpoint, deadline_monotonic=execution.budget.deadline_monotonic))
         if (candidate.repository_id != self._repository_id or candidate.lock_path != self._lock_path
-                or candidate.baseline_commit_hash != self._baseline):
+                or candidate.baseline_commit_hash != self._baseline
+                or candidate.parent_commit_hash != (self._baseline if execution.previous_source is None
+                                                     else execution.previous_source.commit_hash)):
             raise DeveloperServicesError()
         source = await _run_file_operation(self._freeze_candidate, execution, candidate)
         execution.budget.check()
@@ -214,18 +235,30 @@ class DeveloperRuntimeServices:
             source = type(staged).model_validate({**staged.model_dump(),
                 "a2a_task_id": task_id, "a2a_artifact_id": a2a_ids[0]})
             self._artifacts.verify_candidate(source)
-            common = dict(artifact_version=1, run_id=source.run_id,
+            previous = {item.artifact_type: item for item in execution.previous_artifacts}
+            if (source.code_version != execution.metadata.code_version
+                    or source.previous_artifact_id != (None if execution.previous_source is None
+                                                       else execution.previous_source.artifact_id)
+                    or source.artifact_version != (1 if execution.previous_source is None
+                                                    else execution.previous_source.artifact_version + 1)):
+                raise ValueError
+            def lineage(kind):
+                item = previous.get(kind)
+                return dict(artifact_version=1 if item is None else item.artifact_version + 1,
+                            previous_artifact_id=None if item is None else item.artifact_id)
+            common = dict(run_id=source.run_id,
                           workflow_step_id=source.workflow_step_id, a2a_task_id=task_id,
                           requirement_ids=source.requirement_ids, code_version=source.code_version)
             change = ChangeReportArtifact(artifact_id=uuid4(), a2a_artifact_id=a2a_ids[1],
-                                           summary=summary, changes=changes, **common)
+                                           summary=summary, changes=changes, **lineage("CHANGE_REPORT"), **common)
             build = BuildReportArtifact(artifact_id=uuid4(), a2a_artifact_id=a2a_ids[2],
                 source_artifact_id=source.artifact_id, exit_code=receipt.exit_code,
                 duration_ms=receipt.duration_ms, execution_manifest_id=receipt.execution_manifest_id,
                 execution_manifest=receipt.execution_manifest, stdout_ref=receipt.stdout_ref,
                 stderr_ref=receipt.stderr_ref,
                 execution_outcome=ToolExecutionOutcome.PASS if receipt.exit_code == 0 else ToolExecutionOutcome.FAIL,
-                failure_kind=None if receipt.exit_code == 0 else "PRODUCT", tool_evidence=evidence, **common)
+                failure_kind=None if receipt.exit_code == 0 else "PRODUCT", tool_evidence=evidence,
+                **lineage("BUILD_REPORT"), **common)
             schemas, registry = _schemas()
             names = ("source-snapshot.json", "change-report.json", "build-report.json")
             schema_names = ("developer_source_snapshot.schema.json", "developer_change_report.schema.json",
@@ -245,11 +278,13 @@ class DeveloperRuntimeServices:
                         artifacts=artifacts, metadata=execution.metadata.model_dump(mode="json", by_alias=True, exclude_none=True))
             run = WorkflowRun(run_id=source.run_id, workspace_id=execution.configuration.workspace_id,
                 scenario_id=execution.metadata.scenario_id, request_text=execution.request_text,
-                status=WorkflowStatus.IMPLEMENTING)
+                status=WorkflowStatus.IMPLEMENTING if execution.fix_attempt == 0 else WorkflowStatus.FIXING,
+                fix_attempt=execution.fix_attempt,
+                code_version=None if execution.previous_source is None else execution.previous_source.code_version)
             step = WorkflowStep(run_id=run.run_id, workflow_step_id=source.workflow_step_id,
                 agent_role=AgentRole.DEVELOPER, status=WorkflowStepStatus.SUCCEEDED,
                 a2a_task_id=task_id, agent_context_id=context_id, a2a_task_state=A2ATaskState.COMPLETED,
-                attempt=execution.metadata.attempt, code_version=1,
+                attempt=execution.metadata.attempt, code_version=source.code_version,
                 requirement_ids=list(source.requirement_ids),
                 input_artifact_ids=list(execution.metadata.project_artifact_ids or ()))
             validate_completed_role_output(AgentRole.DEVELOPER, task=task, run=run, step=step)

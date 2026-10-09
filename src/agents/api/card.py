@@ -33,17 +33,17 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
         "frozen requirements. Per-Run configuration and budget must be admitted; "
         "no Source modification, MCP execution or product verdict is performed."
         if execution_ready and settings.role is AgentRole.PLANNER else
-        "Host-configured initial Developer: edits assigned Source via local MCP, "
+        "Host-configured Developer: implements the protected plan or saved fix Issues via local MCP, "
         "freezes a measured Git candidate and reports its real Build receipt. "
         "Approved Host configuration and shared budget are required; "
         "no independent QA/Security or product verdict is performed."
         if execution_ready and settings.role is AgentRole.DEVELOPER else
-        "Host-configured initial QA: generates isolated tests and binds cases "
+        "Host-configured QA: validates initial and revised candidates, generates isolated tests and binds cases "
         "to frozen requirements, then reports measured Unit/Browser receipts "
         "for the same read-only Source. Approved Host policies and shared "
         "budget are required; no Source edits or product verdict are performed."
         if execution_ready and settings.role is AgentRole.QA else
-        "Host-configured initial Security: scans approved profiles on the same "
+        "Host-configured Security: validates initial and revised candidates, scans approved profiles on the same "
         "read-only Source and reviews measured findings with bounded code references. "
         "Trusted Host semantic proof is required for verified outcomes; missing "
         "proof stays unverified. No Source edits or product verdict are performed."
@@ -71,15 +71,15 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
             description="Plans tasks from Host-frozen requirements; clarification or rejection does not fabricate a plan.",
             tags=["planning", "requirements"],
         )] if execution_ready and settings.role is AgentRole.PLANNER else [AgentSkill(
-            id="measured-initial-implementation", name="Measured initial Source implementation",
-            description="Implements the protected plan through MCP and reports an immutable candidate with measured Build evidence, not project success.",
+            id="measured-initial-implementation", name="Measured Source implementation and Issue fixes",
+            description="Implements the protected plan or saved Issues through MCP and reports a new immutable candidate with measured Build evidence and predecessor lineage, not project success.",
             tags=["implementation", "snapshot", "build"],
         )] if execution_ready and settings.role is AgentRole.DEVELOPER else [AgentSkill(
-            id="measured-initial-qa", name="Measured initial functional QA",
-            description="Generates isolated tests and binds protected requirements to Host-measured Unit/Browser cases, without inventing results or project success.",
+            id="measured-initial-qa", name="Measured functional QA and revalidation",
+            description="Generates isolated tests and binds protected requirements to Host-measured Unit/Browser cases on the current immutable candidate, preserving report lineage without inventing results or project success.",
             tags=["qa", "unit-tests", "browser-tests", "snapshot"],
         )] if execution_ready and settings.role is AgentRole.QA else [AgentSkill(
-            id="measured-initial-security", name="Measured initial security review",
+            id="measured-initial-security", name="Measured security review and revalidation",
             description="Reviews all approved frozen scans with actual Source references; only Host-verified proof can establish confirmed findings or requirement outcomes, not project success.",
             tags=["security", "scan", "code-review", "snapshot"],
         )] if execution_ready and settings.role is AgentRole.SECURITY else [],

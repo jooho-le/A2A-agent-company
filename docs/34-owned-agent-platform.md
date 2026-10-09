@@ -2,6 +2,8 @@
 
 작성 기준: 2026-10-09. 범위: 1번 Orchestrator + 2번 본인 Agent/MCP의 최초 실행 연결. 3번 제품 서비스·4번 독립 평가·팀원 통합은 변경하지 않는다.
 
+이 문서는 34번 완료 시점의 기록이다. 최초 후보·수정 gate 제한은 [35번 실제 수정·재검증](35-fix-revalidation-loop.md)에서 확장했으며 현재 연결은 그 문서를 함께 따른다.
+
 ## 1. 구현 내용
 
 - `create_platform`: 기존 Orchestrator Dispatcher와 Planner/Developer/QA/Security 실제 실행기를 한 Host 구성으로 연결한다. 네 Agent의 Context Loader는 같은 Repository와 같은 `RunBudgetRegistry.resolve`를 사용한다.

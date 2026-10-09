@@ -78,6 +78,26 @@ class RunBudgetRegistryTests(unittest.TestCase):
             restarted.admit(run.run_id)
         self.assertEqual(original.model_calls, 1)
 
+    def test_fix_cycles_keep_the_original_budget_and_cannot_readmit_after_restart(self):
+        run, configuration = self.create()
+        budget = self.registry.admit(run.run_id)
+        budget.reserve_model_call()
+        budget.reserve_tool_call()
+        budget.account_usage(TokenUsage(input_tokens=3, output_tokens=5, total_tokens=8))
+        deadline = budget.deadline_monotonic
+        for fix_attempt in (1, 2, 3):
+            for status in (WorkflowStatus.FIXING, WorkflowStatus.REVALIDATING):
+                current = run.model_copy(update={"status": status, "fix_attempt": fix_attempt,
+                    "code_version": fix_attempt if status is WorkflowStatus.FIXING else fix_attempt + 1})
+                with patch.object(self.repository, "get_run", return_value=current):
+                    self.assertIs(self.registry.resolve(configuration), budget)
+                    self.assertIs(self.registry.admit(run.run_id), budget)
+                    restarted = RunBudgetRegistry(self.repository, limits=self.limits)
+                    with self.assertRaises(RunBudgetError):
+                        restarted.admit(run.run_id)
+                self.assertEqual((budget.model_calls, budget.tool_calls, budget.total_tokens), (1, 1, 8))
+                self.assertEqual(budget.deadline_monotonic, deadline)
+
     def test_missing_model_or_runtime_limit_cannot_admit(self):
         for config in (
             RunConfiguration(),
