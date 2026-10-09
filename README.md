@@ -27,6 +27,8 @@ GET /api/v1/runs/{runId}/configuration
 GET /api/v1/runs/{runId}/workspace
 POST /api/v1/runs/{runId}/workspace/provision
 GET /api/v1/runs/{runId}/tool-attempts
+GET /api/v1/runs/{runId}/usage
+GET /api/v1/runs/{runId}/telemetry
 POST /api/v1/runs/{runId}/resume
 POST /api/v1/runs/{runId}/recover
 POST /api/v1/runs/{runId}/cancel
@@ -190,7 +192,7 @@ PYTHONPATH=src .venv/bin/python -m agents.platform --factory approved_host:build
 
 한 프로세스/한 event loop에서 Agent 네 서버를 먼저 준비한 뒤 Orchestrator를 엽니다. 기본 포트는 8000 및 8101~8104입니다. 별도 Agent 프로세스 네 개나 reload/multi-worker로 실행하면 공유 예산이 보장되지 않으므로 이 연결 방식에 사용하지 않습니다. 시작/종료는 listener·공식 SDK Task Store·실행 Worker·Provider의 정리 순서를 지킵니다.
 
-Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs/34-owned-agent-platform.md)을 참고하세요. 34번의 최초 후보 제한은 아래 35번에서 확장했습니다. 재시작한 Run 예산은 자동 복원하지 않고 거부합니다.
+Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs/34-owned-agent-platform.md)을 참고하세요. 34번의 최초 후보 제한은 아래 35번에서 확장했고, 명시적 Owned Host의 기존 Run 예산 영속 복원은 37번에서 추가했습니다. 기본 메모리 Registry는 재시작 Run을 자동 승인하지 않습니다.
 
 ### 실제 수정·동일 Snapshot 재검증 — 35번
 
@@ -202,7 +204,13 @@ Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs
 
 기존 `/resume`·`/recover`·`/cancel`을 실제 네 Agent 실행에 연결했습니다. 입력/인증 재개는 같은 Task·Context·Step에서 이어가고 수정 횟수·Source 버전·전체 예산을 초기화하지 않습니다. QA/Security 중 완료된 쪽은 다시 실행하지 않습니다. 새 실행이 필요한 재개는 기존 예산을 확인하며, GET만 필요한 결과 회수는 새 모델 호출과 구분합니다.
 
-처음 시작하거나 재개한 실행을 추적·정리한 뒤 원격 Worker·모델·MCP·Host 작업이 종료되고 `CANCELED`가 확인돼야 Run을 `ABORTED`로 기록합니다. 불확실한 전송·Source 쓰기는 자동 재전송/원복하지 않으며, Human Review로 FAIL/UNVERIFIED를 임의 PASS로 바꾸지 못합니다. 상세 사용법·정의서 점검·검증 한계는 [36번 실제 제어](docs/36-agent-workflow-controls.md)를 참고하세요. 다음은 **37번 실제 LLM/A2A/MCP Trace·사용량·비밀정보 마스킹**입니다.
+처음 시작하거나 재개한 실행을 추적·정리한 뒤 원격 Worker·모델·MCP·Host 작업이 종료되고 `CANCELED`가 확인돼야 Run을 `ABORTED`로 기록합니다. 불확실한 전송·Source 쓰기는 자동 재전송/원복하지 않으며, Human Review로 FAIL/UNVERIFIED를 임의 PASS로 바꾸지 못합니다. 상세 사용법·정의서 점검·검증 한계는 [36번 실제 제어](docs/36-agent-workflow-controls.md)를 참고하세요.
+
+### 실제 Trace·사용량·영속 예산 — 37번
+
+명시적 Owned Host에서 실제 모델 호출과 MCP 물리 시도를 Run/Step/Task/Context에 연결해 저장합니다. 기존 닫힌 Trace Schema는 유지하고 사용량·모델·Tool 상세는 별도 append-only 원장에 기록합니다. `/usage`와 `/telemetry`로 조회할 수 있으며 미연결 기본 서버는 503입니다. 알 수 없는 Token/비용은 `null`이고 Prompt·Source·Tool 원문은 Telemetry에 저장하지 않습니다. SDK 원문 로그도 생략합니다.
+
+Run 예산 예약을 외부 호출 전에 저장하고 재시작 시 기존 호출/토큰·동결 설정·UTC Deadline만 복원합니다. pending·unknown·누락 기록·설정 변경·시간 역행은 실행을 차단하며 새 예산이나 자동 재전송을 만들지 않습니다. 1~37번 번호 로드맵의 마지막 단계이며 실제 외부 LLM/Docker·제품 시연/비교 실험 완료를 의미하지 않습니다. 상세 계약과 검증 한계는 [37번 실행 Telemetry](docs/37-runtime-telemetry-usage.md)를 참고하세요.
 
 ## 테스트
 

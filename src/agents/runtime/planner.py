@@ -27,6 +27,7 @@ from agents.runtime.planner_context import PlannerContextError, PlannerExecution
 from mcp_tools.runtime import _finish_handler
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
+from agents.platform.telemetry import bind_runtime_telemetry
 
 
 class PlannerExecutorConfigurationError(ValueError):
@@ -193,8 +194,9 @@ class PlannerAgentExecutor(AgentExecutor):
     The existing SDK/SQLite admission owns concurrency, replay and cancellation.
     """
 
-    def __init__(self, *, provider, context_factory, usage_sink=None):
+    def __init__(self, *, provider, context_factory, usage_sink=None, telemetry_factory=None):
         if (not callable(context_factory) or usage_sink is not None and not callable(usage_sink)
+                or telemetry_factory is not None and not callable(telemetry_factory)
                 or not isinstance(getattr(provider, "name", None), str) or not provider.name.strip()
                 or not callable(getattr(provider, "complete", None))
                 or not callable(getattr(provider, "validate_configuration", None))):
@@ -202,6 +204,7 @@ class PlannerAgentExecutor(AgentExecutor):
         self._engine = LLMEngine(role=AgentRole.PLANNER, provider=provider)
         self._context_factory = context_factory
         self._usage_sink = usage_sink
+        self._telemetry_factory = telemetry_factory
 
     def __repr__(self):
         return "PlannerAgentExecutor()"
@@ -261,10 +264,12 @@ class PlannerAgentExecutor(AgentExecutor):
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
             scenario = execution.scenario
+            _, usage_sink, call_started_sink = bind_runtime_telemetry(
+                self._telemetry_factory, AgentRole.PLANNER, context, execution, self._usage_sink)
             result = await self._engine.run(
                 prompt=prepare_role_prompt(AgentRole.PLANNER, task_input=task_input, metadata=execution.metadata),
                 model=execution.model, output=build_planner_output_contract(scenario),
-                budget=execution.budget, usage_sink=self._usage_sink,
+                budget=execution.budget, usage_sink=usage_sink, call_started_sink=call_started_sink,
                 workspace_id=str(execution.configuration.workspace_id),
             )
             decision = validate_planner_decision(result.data, scenario)

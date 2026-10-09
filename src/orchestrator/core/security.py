@@ -6,9 +6,32 @@ does not rewrite opaque protocol IDs or ordinary Git/Snapshot SHA-256 hashes.
 
 import re
 from collections.abc import Mapping
+from threading import RLock
 
 
 REDACTED = "[REDACTED]"
+_KNOWN_SECRETS: tuple[str, ...] = ()
+_SECRET_GUARD = RLock()
+
+
+def register_secret_values(*values: str | None) -> None:
+    """Register trusted Host credentials for unlabelled-text masking in memory.
+
+    Never reads environment files or persists this registry. Short values are
+    masked by secret field/header rules, not global substring replacement: a
+    one-character token must not corrupt every ordinary identifier or message.
+    Opaque protocol references still bypass structured-value redaction.
+    """
+    global _KNOWN_SECRETS
+    if any(value is not None and type(value) is not str for value in values):
+        raise ValueError("INVALID_SECRET_REGISTRATION")
+    with _SECRET_GUARD:
+        _KNOWN_SECRETS = tuple(sorted(
+            set(_KNOWN_SECRETS).union(value for value in values if value and len(value) >= 8),
+            key=len, reverse=True,
+        ))
+
+
 _SECRET_KEYS = frozenset(
     {
         "password", "passwd", "pwd", "passwordhash", "hashedpassword",
@@ -60,6 +83,8 @@ def redact_text(value: str) -> str:
                 replacement = f"{scheme} {REDACTED}"
         return match["label"] + quote + replacement + quote
 
+    for secret in _KNOWN_SECRETS:
+        value = value.replace(secret, REDACTED)
     value = _ASSIGNMENT.sub(replace_assignment, value)
     value = _BEARER.sub("Bearer " + REDACTED, value)
     for pattern in (_ARGON2, _BCRYPT, _JWT):

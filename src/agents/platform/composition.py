@@ -1,6 +1,7 @@
 """Explicit Host composition of the initial, owned four-Agent pipeline.
 
-Construction does not start HTTP servers, initialize Agent databases, provision
+Construction initializes only additive telemetry tables in the Host repository.
+It does not start HTTP servers, initialize Agent databases, provision
 Workspaces, seed Git, invoke models, or launch MCP/container processes.  The
 Host supplies already prepared storage capabilities and a trusted preparation
 callback; only a durably claimed new Run can invoke that callback.
@@ -24,6 +25,8 @@ from agents.llm.contracts import (
 )
 from agents.main import create_app as create_agent_app
 from agents.platform.budgets import RunBudgetRegistry
+from agents.platform.telemetry_store import AgentTelemetryStore
+from agents.platform.telemetry import RuntimeTelemetry
 from agents.runtime.developer import DeveloperAgentExecutor
 from agents.runtime.developer_context import SQLiteDeveloperContextLoader
 from agents.runtime.developer_services import DeveloperRuntimeServices
@@ -139,6 +142,7 @@ class OwnedAgentPlatform:
     budgets: RunBudgetRegistry
     endpoints: tuple[PlatformEndpoint, ...]
     _lifecycle: _Lifecycle = field(repr=False)
+    telemetry_store: AgentTelemetryStore | None = field(default=None, repr=False)
 
     def __repr__(self):
         return "OwnedAgentPlatform()"
@@ -283,7 +287,9 @@ def create_platform(
         raise PlatformConfigurationError() from None
 
     lifecycle = _Lifecycle(providers=tuple({id(value): value for value in provider_map.values()}.values()))
-    budgets = RunBudgetRegistry(repository, limits=limits)
+    telemetry_store = AgentTelemetryStore(repository.database_path)
+    budgets = RunBudgetRegistry(repository, limits=limits, telemetry_store=telemetry_store)
+    telemetry = RuntimeTelemetry(repository, telemetry_store)
 
     def validate_submission(configuration):
         try:
@@ -337,16 +343,19 @@ def create_platform(
     }
     executors = {
         AgentRole.PLANNER: PlannerAgentExecutor(provider=provider_map[AgentRole.PLANNER],
-            context_factory=contexts[AgentRole.PLANNER]),
+            context_factory=contexts[AgentRole.PLANNER], telemetry_factory=telemetry.bind),
         AgentRole.DEVELOPER: DeveloperAgentExecutor(provider=provider_map[AgentRole.DEVELOPER],
             context_factory=contexts[AgentRole.DEVELOPER], services_factory=_bound_services(
-                developer_services_factory, DeveloperRuntimeServices, repository, workspace_registry, artifact_store)),
+                developer_services_factory, DeveloperRuntimeServices, repository, workspace_registry, artifact_store),
+            telemetry_factory=telemetry.bind),
         AgentRole.QA: QAAgentExecutor(provider=provider_map[AgentRole.QA],
             context_factory=contexts[AgentRole.QA], services_factory=_bound_services(
-                qa_services_factory, QARuntimeServices, repository, workspace_registry, artifact_store)),
+                qa_services_factory, QARuntimeServices, repository, workspace_registry, artifact_store),
+            telemetry_factory=telemetry.bind),
         AgentRole.SECURITY: SecurityAgentExecutor(provider=provider_map[AgentRole.SECURITY],
             context_factory=contexts[AgentRole.SECURITY], services_factory=_bound_services(
-                security_services_factory, SecurityRuntimeServices, repository, workspace_registry, artifact_store)),
+                security_services_factory, SecurityRuntimeServices, repository, workspace_registry, artifact_store),
+            telemetry_factory=telemetry.bind),
     }
     # Local credentials/Task payloads must not follow HTTP_PROXY/ALL_PROXY.
     # The explicit test seam also stays shared with existing control endpoints.
@@ -358,6 +367,7 @@ def create_platform(
         settings=settings, submission_validator=validate_submission)
     app.state.workspace_registry = workspace_registry
     app.state.agent_client_factory = client_factory
+    app.state.telemetry_store = telemetry_store
 
     def control_preflight(run_id):
         if lifecycle.closed:
@@ -371,4 +381,5 @@ def create_platform(
         *(PlatformEndpoint(name=role.value.lower(), host=roles[role].host,
             port=roles[role].listen_port, app=apps[role]) for role in AgentRole))
     return OwnedAgentPlatform(orchestrator_app=app, agent_apps=MappingProxyType(apps),
-        dispatcher=dispatcher, budgets=budgets, endpoints=endpoints, _lifecycle=lifecycle)
+        dispatcher=dispatcher, budgets=budgets, endpoints=endpoints, _lifecycle=lifecycle,
+        telemetry_store=telemetry_store)

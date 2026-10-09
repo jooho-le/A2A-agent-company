@@ -311,10 +311,11 @@ class SecurityRuntimeServices:
             except Exception:
                 raise SecurityServicesError("SECURITY_SCAN_EVIDENCE_INVALID") from None
             execution.budget.check()
-            timeout = execution.budget.reserve_tool_call()
+            tool_sequence, timeout = execution.budget.reserve_tracked_tool_call()
             measured = await asyncio.wait_for(tracked.invoke("run_security_scan", {
                 "workspaceId": str(execution.configuration.workspace_id), "snapshotId": str(execution.source.artifact_id),
                 "scannerProfile": scanner.name}, deadline_monotonic=execution.budget.deadline_monotonic), timeout)
+            execution.budget.account_tool_call(tool_sequence)
             execution.budget.check()
             try:
                 record = await _run_file_operation(self._tools.get, self.configuration.binding, measured.record.logical_call_id)

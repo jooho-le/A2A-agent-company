@@ -26,6 +26,7 @@ from agents.runtime.qa_services import QARuntimeServices, QAServicesError
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
+from agents.platform.telemetry import bind_runtime_telemetry
 
 
 class QAExecutorConfigurationError(ValueError):
@@ -130,15 +131,17 @@ def _test_targets(services):
 class QAAgentExecutor(AgentExecutor):
     """Host opt-in QA against the claimed current candidate and report lineage."""
 
-    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None):
+    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None):
         if (not callable(context_factory) or not callable(services_factory)
                 or usage_sink is not None and not callable(usage_sink)
+                or telemetry_factory is not None and not callable(telemetry_factory)
                 or not isinstance(getattr(provider, "name", None), str) or not provider.name.strip()
                 or not callable(getattr(provider, "complete", None))
                 or not callable(getattr(provider, "validate_configuration", None))):
             raise QAExecutorConfigurationError()
         self._provider, self._context_factory, self._services_factory = provider, context_factory, services_factory
         self._usage_sink = usage_sink
+        self._telemetry_factory = telemetry_factory
 
     def __repr__(self):
         return "QAAgentExecutor()"
@@ -196,10 +199,14 @@ class QAAgentExecutor(AgentExecutor):
             return
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
+            telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
+                self._telemetry_factory, AgentRole.QA, context, execution, self._usage_sink)
             await services.prepare(execution)
             task_input["testSelectors"], task_input["testTargets"] = services.selectors, _test_targets(services)
             async with services.client_factory(services.configuration) as client:
                 tracked = services.tracked(client, execution)
+                if telemetry is not None:
+                    tracked.set_event_sink(telemetry.tool_event)
                 tools = tuple(tool for tool in tracked.list_tools()
                               if tool.name in {"read_project_file", "write_test_file", "read_test_report"})
                 if {tool.name for tool in tools} != {"read_project_file", "write_test_file", "read_test_report"}:
@@ -210,7 +217,7 @@ class QAAgentExecutor(AgentExecutor):
                     model=execution.model,
                     output=build_qa_output_contract(execution.metadata.requirement_ids, services.selectors),
                     budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
-                    usage_sink=self._usage_sink)
+                    usage_sink=usage_sink, call_started_sink=call_started_sink)
                 decision = validate_qa_decision(result.data, execution.metadata.requirement_ids, services.selectors)
                 execution.budget.check()
                 if decision.kind == "READY":

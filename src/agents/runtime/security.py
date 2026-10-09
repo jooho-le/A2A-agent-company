@@ -26,6 +26,7 @@ from agents.runtime.security_services import SecurityRuntimeServices, SecuritySe
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
+from agents.platform.telemetry import bind_runtime_telemetry
 from orchestrator.workspaces.policy import workspace_uuid
 
 
@@ -134,15 +135,17 @@ class _SecurityReadExecutor:
 class SecurityAgentExecutor(AgentExecutor):
     """Host opt-in Security for the claimed current candidate and report lineage."""
 
-    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None):
+    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None):
         if (not callable(context_factory) or not callable(services_factory)
                 or usage_sink is not None and not callable(usage_sink)
+                or telemetry_factory is not None and not callable(telemetry_factory)
                 or not isinstance(getattr(provider, "name", None), str) or not provider.name.strip()
                 or not callable(getattr(provider, "complete", None))
                 or not callable(getattr(provider, "validate_configuration", None))):
             raise SecurityExecutorConfigurationError()
         self._provider, self._context_factory, self._services_factory = provider, context_factory, services_factory
         self._usage_sink = usage_sink
+        self._telemetry_factory = telemetry_factory
 
     def __repr__(self):
         return "SecurityAgentExecutor()"
@@ -200,9 +203,13 @@ class SecurityAgentExecutor(AgentExecutor):
             return
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
+            telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
+                self._telemetry_factory, AgentRole.SECURITY, context, execution, self._usage_sink)
             await services.prepare(execution)
             async with services.client_factory(services.configuration) as client:
                 tracked = services.tracked(client, execution)
+                if telemetry is not None:
+                    tracked.set_event_sink(telemetry.tool_event)
                 measured = await services.scan(execution, tracked)
                 task_input["measuredSecurity"] = measured.analysis_input
                 task_input["sourcePaths"] = list(measured.source_paths)
@@ -217,7 +224,7 @@ class SecurityAgentExecutor(AgentExecutor):
                     model=execution.model,
                     output=build_security_output_contract(execution.metadata.requirement_ids, measured.finding_ids, measured.source_paths),
                     budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
-                    usage_sink=self._usage_sink)
+                    usage_sink=usage_sink, call_started_sink=call_started_sink)
                 decision = validate_security_decision(result.data, execution.metadata.requirement_ids, measured.finding_ids, measured.source_paths)
                 execution.budget.check()
                 if decision.kind == "READY":

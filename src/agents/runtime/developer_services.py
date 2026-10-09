@@ -188,11 +188,12 @@ class DeveloperRuntimeServices:
             raise DeveloperServicesError()
         source = await _run_file_operation(self._freeze_candidate, execution, candidate)
         execution.budget.check()
-        timeout = execution.budget.reserve_tool_call()
+        tool_sequence, timeout = execution.budget.reserve_tracked_tool_call()
         measured = await asyncio.wait_for(tracked.invoke(
             "run_build", {"workspaceId": str(execution.configuration.workspace_id),
                           "snapshotId": str(source.artifact_id)},
             deadline_monotonic=execution.budget.deadline_monotonic), timeout)
+        execution.budget.account_tool_call(tool_sequence)
         execution.budget.check()
         try:
             binding = self.configuration.binding

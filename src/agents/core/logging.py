@@ -1,40 +1,44 @@
-"""Sanitize SDK protobuf logging before it becomes opaque key/value text."""
+"""Do not publish SDK payloads, prompts, Source or provider prose into logs."""
 
 import logging
 
-from google.protobuf.json_format import MessageToDict
-from google.protobuf.message import Message as ProtoMessage
-
 from orchestrator.core.logging import SecretRedactionFilter, configure_logging
-from orchestrator.core.security import redact_data
+
+_STANDARD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__)
 
 
-def _structured_argument(value: object) -> object:
-    if isinstance(value, ProtoMessage):
-        return redact_data(MessageToDict(value))
+def _exception_types(value: object) -> tuple[str, ...]:
     if isinstance(value, BaseException):
-        return f"{type(value).__name__}: SDK error details omitted"
-    if isinstance(value, tuple):
-        return tuple(_structured_argument(item) for item in value)
-    if isinstance(value, list):
-        return [_structured_argument(item) for item in value]
+        return (type(value).__name__,)
+    if isinstance(value, (tuple, list)):
+        return tuple(name for item in value for name in _exception_types(item))
     if isinstance(value, dict):
-        return redact_data({key: _structured_argument(item) for key, item in value.items()})
-    return value
+        return tuple(name for item in value.values() for name in _exception_types(item))
+    return ()
 
 
 class AgentSDKRedactionFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        if record.name == "a2a" or record.name.startswith("a2a."):
-            record.msg = _structured_argument(record.msg)
-            record.args = _structured_argument(record.args)
+        if record.name in {"a2a", "mcp"} or record.name.startswith(("a2a.", "mcp.")):
+            types = _exception_types(record.args)
+            record.msg = "Protocol SDK log details omitted [REDACTED]"
+            if types:
+                record.msg += " (" + ", ".join(sorted(set(types))) + ")"
+            record.args = ()
             # SDK exception traces may contain model/provider input that cannot
             # be identified by a secret field name. Retain type, not raw text.
             if record.exc_info:
                 record.exc_text = f"{record.exc_info[0].__name__}: SDK error details omitted"
                 record.exc_info = None
-            # Run the normal filter immediately after protobuf conversion, even
-            # for hosts that installed their own log handler.
+            elif record.exc_text:
+                record.exc_text = "SDK error details omitted [REDACTED]"
+            if record.stack_info:
+                record.stack_info = "SDK stack details omitted [REDACTED]"
+            # Custom formatters may expose SDK bodies via extra fields. Actual
+            # Task/context IDs and diagnostic events live in canonical Trace.
+            for key in set(record.__dict__) - _STANDARD_FIELDS - {"exc_text", "message"}:
+                record.__dict__[key] = "[REDACTED]"
+            record.__dict__.pop("message", None)
             SecretRedactionFilter().filter(record)
         return True
 

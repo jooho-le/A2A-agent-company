@@ -169,6 +169,42 @@ def get_run_events(
     )
 
 
+def _telemetry_or_503(request):
+    store = request.app.state.telemetry_store
+    if store is None:
+        raise HTTPException(status_code=503, detail="RUNTIME_TELEMETRY_NOT_CONFIGURED")
+    return store
+
+
+@router.get("/{run_id}/usage")
+def get_run_usage(run_id: UUID, request: Request, repository: Repository,
+                  limit: int = Query(default=100, ge=1, le=500),
+                  offset: int = Query(default=0, ge=0)):
+    _get_run_or_404(repository, run_id)
+    store = _telemetry_or_503(request)
+    try:
+        records, total = store.list_usage(run_id, limit=limit, offset=offset)
+        summary = store.usage_summary(run_id)
+    except Exception:
+        raise HTTPException(status_code=503, detail="RUNTIME_TELEMETRY_UNAVAILABLE") from None
+    return {"runId": str(run_id), "summary": summary, "records": records,
+            "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/{run_id}/telemetry")
+def get_run_telemetry(run_id: UUID, request: Request, repository: Repository,
+                      limit: int = Query(default=100, ge=1, le=500),
+                      offset: int = Query(default=0, ge=0)):
+    _get_run_or_404(repository, run_id)
+    store = _telemetry_or_503(request)
+    try:
+        events, total = store.list_events(run_id, limit=limit, offset=offset)
+    except Exception:
+        raise HTTPException(status_code=503, detail="RUNTIME_TELEMETRY_UNAVAILABLE") from None
+    return {"runId": str(run_id), "events": events, "total": total,
+            "limit": limit, "offset": offset}
+
+
 @router.post("/{run_id}/cancel", response_model=RunStatusResponse)
 async def cancel_run(
     run_id: UUID,

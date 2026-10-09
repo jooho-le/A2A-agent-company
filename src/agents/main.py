@@ -15,6 +15,7 @@ from agents.core.config import AgentSettings
 from agents.core.logging import configure_agent_logging
 from agents.runtime.bootstrap import BootstrapAgentExecutor
 from agents.runtime.lifecycle import SafeAgentExecutor
+from orchestrator.core.security import register_secret_values
 
 
 def create_app(
@@ -42,6 +43,10 @@ def create_app(
             if settings.role is not expected_role:
                 raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
             execution_ready = True
+    register_secret_values(*(
+        None if value is None else value.get_secret_value()
+        for value in (settings.bearer_token, settings.llm_api_key)
+    ))
     configure_agent_logging(settings.log_level)
     card = build_agent_card(settings, execution_ready=execution_ready)
     # Construction has no DB IO. Startup acquires exclusive process ownership

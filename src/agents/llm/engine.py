@@ -22,7 +22,7 @@ class LLMEngine:
     """Tool executors are trusted injection points; MCP/ACL arrive in 20–29.
 
     No automatic model or Tool retry: a failed/uncertain write is never repeated.
-    Accounting is in-memory only; the optional sink must be a trusted host writer.
+    Optional accounting/lifecycle sinks are trusted Host writers, never models.
     The default A2A server stays Bootstrap/REJECTED until role executors exist.
     """
 
@@ -48,6 +48,7 @@ class LLMEngine:
         output: StructuredOutput, budget: ExecutionBudget,
         workspace_id: str | None = None,
         usage_sink: Callable[[UsageRecord], None] | None = None,
+        call_started_sink: Callable[[int], None] | None = None,
     ) -> LLMResult:
         records: list[UsageRecord] = []
         seen_calls: set[str] = set()
@@ -74,6 +75,16 @@ class LLMEngine:
                 if len(history.encode("utf-8")) + len(prompt.system_prompt.encode("utf-8")) > limit:
                     raise LLMRuntimeError(LLMErrorCode.BUDGET)
                 sequence, output_cap, timeout = budget.reserve_model_call()
+                if call_started_sink is not None:
+                    try:
+                        call_started_sink(sequence)
+                    except Exception:
+                        budget.invalidate()
+                        raise
+                # Reservation/Trace persistence consumes the same Run deadline.
+                # Never start a provider after those writes exhausted it.
+                budget.check()
+                timeout = min(timeout, budget.remaining_seconds())
                 request = LLMRequest(
                     model=model, system_prompt=prompt.system_prompt,
                     input_items_json=history, tools=self._tools, output=output,
@@ -83,12 +94,12 @@ class LLMEngine:
                 try:
                     response = await asyncio.wait_for(self._provider.complete(request), timeout=timeout)
                 except asyncio.CancelledError as canceled:
-                    budget.account_usage(None)
+                    budget.account_usage(None, sequence=sequence)
                     record = UsageRecord(sequence, self._role, model, None, "canceled", self._duration(started), None)
                     records.append(record)
                     try:
                         if usage_sink is not None:
-                            usage_sink(record)
+                            self._publish_usage(usage_sink, record, budget)
                     finally:
                         raise canceled from None
                 except Exception as error:
@@ -96,13 +107,13 @@ class LLMEngine:
                         LLMErrorCode.TIMEOUT if isinstance(error, asyncio.TimeoutError) else LLMErrorCode.PROVIDER
                     )
                     known_usage = error.usage if isinstance(error, LLMRuntimeError) else None
-                    budget.account_usage(known_usage)
+                    budget.account_usage(known_usage, sequence=sequence)
                     record = UsageRecord(sequence, self._role, model, None, code.value, self._duration(started), known_usage)
                     records.append(record)
                     if usage_sink is not None:
-                        usage_sink(record)
+                        self._publish_usage(usage_sink, record, budget)
                     raise LLMRuntimeError(code) from None
-                budget.account_usage(response.usage)
+                budget.account_usage(response.usage, sequence=sequence)
                 outcome = "refused" if response.refused else (
                     response.status if response.status in ("completed", "incomplete", "failed") else LLMErrorCode.RESPONSE.value
                 )
@@ -113,7 +124,7 @@ class LLMEngine:
                 )
                 records.append(record)
                 if usage_sink is not None:
-                    usage_sink(record)
+                    self._publish_usage(usage_sink, record, budget)
                 budget.check()
                 if response.refused:
                     raise LLMRuntimeError(LLMErrorCode.REFUSAL)
@@ -147,7 +158,7 @@ class LLMEngine:
                     self._validate_continuation(continuation, response.tool_calls)
                     items.extend(continuation)
                     for call, definition, arguments in prepared:
-                        timeout = budget.reserve_tool_call()
+                        tool_sequence, timeout = budget.reserve_tracked_tool_call()
                         seen_calls.add(call.call_id)
                         context = ToolContext(self._role, workspace_id, budget.deadline_monotonic)
                         try:
@@ -158,6 +169,7 @@ class LLMEngine:
                             raise LLMRuntimeError(LLMErrorCode.TIMEOUT) from None
                         except Exception:
                             raise LLMRuntimeError(LLMErrorCode.TOOL_FAILED) from None
+                        budget.account_tool_call(tool_sequence)
                         executed += 1
                         budget.check()
                         definition.output_schema.validate(tool_result)
@@ -182,6 +194,14 @@ class LLMEngine:
             raise
         except Exception:
             raise LLMRuntimeError(LLMErrorCode.RESPONSE, records=tuple(records)) from None
+
+    @staticmethod
+    def _publish_usage(sink, record, budget):
+        try:
+            sink(record)
+        except Exception:
+            budget.invalidate()
+            raise
 
     @staticmethod
     def _duration(started: float) -> int:

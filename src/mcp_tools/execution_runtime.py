@@ -67,10 +67,11 @@ class TrackedMCPExecutor:
     """
 
     def __init__(self, client, store, *, workflow_step_id,
-                 safety_verifier=None, retry_delay_seconds=0.05):
+                 safety_verifier=None, retry_delay_seconds=0.05, event_sink=None):
         try:
             if (not isinstance(client, BoundMCPClient) or not isinstance(store, ToolExecutionStore)
                     or safety_verifier is not None and not callable(safety_verifier)
+                    or event_sink is not None and not callable(event_sink)
                     or isinstance(retry_delay_seconds, bool)
                     or not isinstance(retry_delay_seconds, (int, float))
                     or not math.isfinite(retry_delay_seconds) or not 0 <= retry_delay_seconds <= 5):
@@ -90,6 +91,9 @@ class TrackedMCPExecutor:
         self._retry_delay = float(retry_delay_seconds)
         self._logical_call_ids = []
         self._model_call_ids = set()
+        self._event_sink = event_sink
+        self._invocation_started = False
+        self._finished_events = set()
 
     def __repr__(self):
         return "TrackedMCPExecutor()"
@@ -100,6 +104,50 @@ class TrackedMCPExecutor:
 
     def list_tools(self):
         return self._client.list_tools()
+
+    def set_event_sink(self, event_sink):
+        """Bind one trusted Host sink before this capability is invoked.
+
+        The sink receives only journal provenance, never arguments, output
+        bodies or peer error text. It may be synchronous or asynchronous.
+        Changing it after an invocation (even a rejected one) is denied.
+        """
+        if self._invocation_started or event_sink is not None and not callable(event_sink):
+            raise TrackedMCPError("MCP_EXECUTION_CONFIGURATION_INVALID")
+        self._event_sink = event_sink
+
+    async def _emit(self, event_type, record, attempt, duration_ms):
+        if self._event_sink is None:
+            return
+        from mcp_tools.runtime import _finish_handler
+        sink = self._event_sink
+
+        async def publish():
+            if inspect.iscoroutinefunction(sink):
+                result = sink(event_type, record, attempt, duration_ms)
+            else:
+                # SQLite publication must not block the SDK event loop, and
+                # its worker remains owned until the append has completed.
+                result = await asyncio.to_thread(sink, event_type, record, attempt, duration_ms)
+            if inspect.isawaitable(result):
+                await result
+            if event_type == "MCP_TOOL_FINISHED":
+                self._finished_events.add(record.attempts[attempt].attempt_id)
+
+        task = asyncio.create_task(publish())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Neither direct repeated Task.cancel nor AnyIO level cancellation
+            # may detach a Trace append after the request has relinquished it.
+            await _finish_handler(task)
+            try:
+                task.result()
+            except (asyncio.CancelledError, Exception):
+                raise ToolEvidenceStoreError("TOOL_EVIDENCE_STORAGE_ERROR") from None
+            raise
+        except Exception:
+            raise ToolEvidenceStoreError("TOOL_EVIDENCE_STORAGE_ERROR") from None
 
     def _arguments(self, name, arguments):
         binding = self._client.configuration.binding
@@ -160,18 +208,33 @@ class TrackedMCPExecutor:
             return None
 
     async def _finish(self, binding, token, **fields):
-        return await _run_file_operation(partial(self._store.finish, binding, token, **fields))
+        record = await _run_file_operation(partial(self._store.finish, binding, token, **fields))
+        await self._emit("MCP_TOOL_FINISHED", record, token.attempt,
+                         record.attempts[token.attempt].duration_ms)
+        return record
 
     async def _cancel(self, binding, token, started):
         # Shield both direct asyncio cancellation and the SDK/AnyIO caller
         # scope while recording uncertainty. Never perform another Tool call.
         from mcp_tools.runtime import _finish_handler
-        task = asyncio.create_task(self._finish(
-            binding, token, outcome=ToolExecutionOutcome.UNVERIFIED, error_kind="CANCELLED",
-            duration_ms=self._duration(started), delivery_state="UNKNOWN",
-            result_unknown=True, retry_safe=False, retry_decision=RetryDecision.DO_NOT_RETRY,
-        ))
+        async def complete():
+            record = await _run_file_operation(self._store.get, binding, token.logical_call_id)
+            attempt = record.attempts[token.attempt]
+            if attempt.status == "FINISHED":
+                # A cancelled Store.finish worker may have committed already.
+                # Preserve its receipt; only finish the missing Trace append.
+                if attempt.attempt_id not in self._finished_events:
+                    await self._emit("MCP_TOOL_FINISHED", record, token.attempt, attempt.duration_ms)
+                return
+            await self._finish(
+                binding, token, outcome=ToolExecutionOutcome.UNVERIFIED, error_kind="CANCELLED",
+                duration_ms=self._duration(started), delivery_state="UNKNOWN",
+                result_unknown=True, retry_safe=False, retry_decision=RetryDecision.DO_NOT_RETRY,
+            )
+
+        task = asyncio.create_task(complete())
         await _finish_handler(task)
+        task.result()
 
     @staticmethod
     def _duration(started):
@@ -183,6 +246,7 @@ class TrackedMCPExecutor:
                                evidence_ref=record.evidence_ref, retry_decision=decision)
 
     async def invoke(self, name, arguments, *, deadline_monotonic=None, logical_call_id=None):
+        self._invocation_started = True
         binding = self._client.configuration.binding
         copied, input_hash = self._arguments(name, arguments)
         deadline = self._deadline(deadline_monotonic)
@@ -215,6 +279,8 @@ class TrackedMCPExecutor:
                 raise self._error(record, RetryDecision.DO_NOT_RETRY, "MCP_EXECUTION_REPLAY_DENIED") from None
             started = time.monotonic()
             try:
+                record = await _run_file_operation(self._store.get, binding, record.logical_call_id)
+                await self._emit("MCP_TOOL_CALLED", record, token.attempt, None)
                 # Every physical attempt receives a fresh copy of the same
                 # bounded logical arguments and the unchanged total deadline.
                 data = await self._client.call_tool(
@@ -229,11 +295,15 @@ class TrackedMCPExecutor:
                                             product_failure_kind=product_kind, duration_ms=self._duration(started))
                 return TrackedToolResult(data=data, record=record)
             except asyncio.CancelledError:
-                await self._cancel(binding, token, started)
+                try:
+                    await self._cancel(binding, token, started)
+                except ToolEvidenceStoreError:
+                    raise self._error(record, RetryDecision.INSPECT_STATE, "MCP_EXECUTION_EVIDENCE_FAILED") from None
                 raise
             except ToolEvidenceStoreError:
-                # Publication may already have happened. Leave a STARTED
-                # journal entry rather than inventing completion or replaying.
+                # Tool/receipt publication may already have happened. Keep
+                # the actual STARTED or FINISHED journal unchanged; a failed
+                # Trace append is never classified as a retryable Tool error.
                 raise self._error(record, RetryDecision.INSPECT_STATE, "MCP_EXECUTION_EVIDENCE_FAILED") from None
             except Exception as caught:
                 error = caught if isinstance(caught, MCPClientError) else MCPClientError()
@@ -250,7 +320,10 @@ class TrackedMCPExecutor:
                         delivery_state=error.delivery_state.value, result_unknown=failure.result_unknown,
                     )
                 except asyncio.CancelledError:
-                    await self._cancel(binding, token, started)
+                    try:
+                        await self._cancel(binding, token, started)
+                    except ToolEvidenceStoreError:
+                        raise self._error(record, RetryDecision.INSPECT_STATE, "MCP_EXECUTION_EVIDENCE_FAILED") from None
                     raise
                 except ToolEvidenceStoreError:
                     raise self._error(record, RetryDecision.INSPECT_STATE, "MCP_EXECUTION_EVIDENCE_FAILED") from None

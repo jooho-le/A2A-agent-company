@@ -320,6 +320,21 @@ class SQLiteWorkflowRepository:
                         (str(run_id), str(step_id), str(evidence.execution_id), attempt.attempt, json.dumps(payload)),
                     )
                     for event_type in ("MCP_TOOL_CALLED", "MCP_TOOL_FINISHED"):
+                        # Actual owned execution already published each physical
+                        # attempt. External/legacy evidence keeps the historical
+                        # fallback, without adding a second synthetic pair.
+                        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_runtime_events'").fetchone() is not None:
+                            recorded = connection.execute(
+                                "SELECT 1 FROM agent_runtime_events runtime JOIN trace_events trace "
+                                "ON trace.event_id=runtime.trace_event_id WHERE runtime.run_id=? "
+                                "AND runtime.workflow_step_id=? AND runtime.kind='MCP' "
+                                "AND json_extract(runtime.payload_json,'$.detail.logicalCallId')=? "
+                                "AND json_extract(runtime.payload_json,'$.detail.toolAttempt')=? "
+                                "AND trace.event_type=? LIMIT 1",
+                                (str(run_id), str(step_id), str(evidence.execution_id), attempt.attempt, event_type),
+                            ).fetchone()
+                            if recorded is not None:
+                                continue
                         _insert_event(connection, TraceEvent(
                             run_id=run_id, workflow_step_id=step_id, event_type=event_type,
                             actor=step.agent_role.value, attempt=attempt.attempt,

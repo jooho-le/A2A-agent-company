@@ -28,6 +28,7 @@ from agents.runtime.planner import _host_factory, _message_data, _same_json, _TE
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
+from agents.platform.telemetry import bind_runtime_telemetry
 
 
 class DeveloperExecutorConfigurationError(ValueError):
@@ -103,15 +104,17 @@ def _prepare_input(context, execution):
 class DeveloperAgentExecutor(AgentExecutor):
     """Host opt-in; Orchestrator alone schedules distinct initial/Fix Tasks."""
 
-    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None):
+    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None):
         if (not callable(context_factory) or not callable(services_factory)
                 or usage_sink is not None and not callable(usage_sink)
+                or telemetry_factory is not None and not callable(telemetry_factory)
                 or not isinstance(getattr(provider, "name", None), str) or not provider.name.strip()
                 or not callable(getattr(provider, "complete", None))
                 or not callable(getattr(provider, "validate_configuration", None))):
             raise DeveloperExecutorConfigurationError()
         self._provider, self._context_factory, self._services_factory = provider, context_factory, services_factory
         self._usage_sink = usage_sink
+        self._telemetry_factory = telemetry_factory
 
     def __repr__(self):
         return "DeveloperAgentExecutor()"
@@ -170,9 +173,13 @@ class DeveloperAgentExecutor(AgentExecutor):
 
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
+            telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
+                self._telemetry_factory, AgentRole.DEVELOPER, context, execution, self._usage_sink)
             checkpoint = await services.prepare(execution)
             async with services.client_factory(services.configuration) as client:
                 tracked = services.tracked(client, execution)
+                if telemetry is not None:
+                    tracked.set_event_sink(telemetry.tool_event)
                 tools = tuple(tool for tool in tracked.list_tools()
                               if tool.name in {"read_project_file", "write_source_file"})
                 if {tool.name for tool in tools} != {"read_project_file", "write_source_file"}:
@@ -182,7 +189,8 @@ class DeveloperAgentExecutor(AgentExecutor):
                 result = await engine.run(prompt=prepare_role_prompt(
                     AgentRole.DEVELOPER, task_input=task_input, metadata=execution.metadata),
                     model=execution.model, output=build_developer_output_contract(), budget=execution.budget,
-                    workspace_id=str(execution.configuration.workspace_id), usage_sink=self._usage_sink)
+                    workspace_id=str(execution.configuration.workspace_id), usage_sink=usage_sink,
+                    call_started_sink=call_started_sink)
                 decision = validate_developer_decision(result.data)
                 execution.budget.check()
                 if decision.kind == "READY":
