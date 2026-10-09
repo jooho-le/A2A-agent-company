@@ -246,11 +246,17 @@ class SQLiteWorkflowRepository:
                           and step.a2a_task_state not in _TERMINAL_TASK_STATES]
             if any(remote_tasks.get(step.workflow_step_id) != A2ATaskState.CANCELED for step in unresolved):
                 raise ActiveAgentTaskError("Every unresolved remote Task requires confirmed cancellation")
-            if any(step.status == WorkflowStepStatus.RUNNING and step.a2a_task_id is None for step in steps):
-                raise ActiveAgentTaskError("An uncertain send without a Task ID cannot be canceled safely")
+            unsent = [step for step in steps if step.a2a_task_id is None]
+            for step in unsent:
+                sent = connection.execute(
+                    "SELECT 1 FROM trace_events WHERE run_id=? AND json_extract(payload_json, '$.workflowStepId')=? AND event_type='A2A_MESSAGE_SENT' LIMIT 1",
+                    (str(run_id), str(step.workflow_step_id)),
+                ).fetchone()
+                if sent is not None:
+                    raise ActiveAgentTaskError("An uncertain send without a Task ID cannot be canceled safely")
             updated = transition_run(run, WorkflowStatus.ABORTED, termination_reason=reason)
             for step in steps:
-                if step in unresolved or step.status in (WorkflowStepStatus.PENDING, WorkflowStepStatus.WAITING_INPUT):
+                if step in unresolved or step in unsent or step.status in (WorkflowStepStatus.PENDING, WorkflowStepStatus.WAITING_INPUT):
                     canceled = WorkflowStep.model_validate({
                         **step.model_dump(), "status": WorkflowStepStatus.CANCELED,
                         "a2a_task_state": A2ATaskState.CANCELED if step in unresolved else step.a2a_task_state,
@@ -1449,7 +1455,9 @@ class SQLiteWorkflowRepository:
             context: AgentContext,
             event: TraceEvent,
         ) -> None:
-            await asyncio.to_thread(self.save_task_update, run, step, context, event)
+            worker = asyncio.create_task(asyncio.to_thread(self.save_task_update, run, step, context, event))
+            from orchestrator.core.async_control import await_owned
+            return await await_owned(worker)
 
         return observe
 

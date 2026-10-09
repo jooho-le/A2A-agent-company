@@ -28,6 +28,8 @@ from orchestrator.application.validation_output import (
     decide_verdict,
     parse_validation_output,
 )
+from orchestrator.application.validation_request import build_validation_request
+from orchestrator.core.async_control import await_owned
 from orchestrator.domain import (
     AgentRole,
     BuildReportArtifact,
@@ -124,6 +126,9 @@ class PlannerRunDispatcher:
         self._before_dispatch = before_dispatch
         self._allow_fix_dispatch = allow_fix_dispatch
         self._active_runs: set[UUID] = set()
+        self._dispatch_tasks: dict[UUID, asyncio.Task] = {}
+        self._dispatch_tokens: dict[UUID, str] = {}
+        self._control_stops: set[asyncio.Task] = set()
 
     def is_run_active(self, run_id: UUID) -> bool:
         return run_id in self._active_runs
@@ -132,18 +137,72 @@ class PlannerRunDispatcher:
         if run_id in self._active_runs:
             return
         try:
-            token = self._repository.acquire_control(run_id)
+            await self.control_operation(run_id, lambda: self._dispatch_planner(run_id), swallow_stop=True)
         except (RunDispatchConflict, RunNotFoundError):
             logger.info("Planner dispatch skipped for busy or missing Run %s", run_id)
-            return
+
+    def _release_owner(self, run_id, token):
+        self._repository.release_control(run_id, token)
+        if self._dispatch_tokens.get(run_id) == token:
+            self._active_runs.discard(run_id)
+            self._dispatch_tasks.pop(run_id, None)
+            self._dispatch_tokens.pop(run_id, None)
+
+    async def control_operation(self, run_id, operation, *, swallow_stop=False):
+        """Own initial dispatch and explicit resume with the same drain/lease."""
+        if run_id in self._active_runs:
+            raise RunDispatchConflict("Run already has an active control operation")
+        token = self._repository.acquire_control(run_id)
         self._active_runs.add(run_id)
-        try:
-            await self._dispatch_planner(run_id)
-        finally:
+        self._dispatch_tokens[run_id] = token
+
+        async def dispatch_owned():
             try:
-                self._repository.release_control(run_id, token)
+                return await operation()
             finally:
-                self._active_runs.discard(run_id)
+                self._release_owner(run_id, token)
+
+        task = asyncio.create_task(dispatch_owned(), name=f"workflow-dispatch:{run_id}")
+        self._dispatch_tasks[run_id] = task
+        try:
+            return await await_owned(task, cancel_on_interrupt=True)
+        except asyncio.CancelledError:
+            # A control-owned stop cancels the child, not the HTTP/background
+            # request owning this await. Server shutdown still drains the child.
+            if asyncio.current_task().cancelling():
+                raise
+            if task not in self._control_stops:
+                # Preparation/provider self-cancellation is not a human stop.
+                raise
+            if not swallow_stop:
+                raise RunDispatchConflict("Run resumption was interrupted by cancellation; inspect its current status") from None
+
+        finally:
+            # A child cancelled before starting never enters its finally.
+            if task.done():
+                self._release_owner(run_id, token)
+                self._control_stops.discard(task)
+
+    async def stop_active_dispatch(self, run_id: UUID) -> None:
+        """Drain a local poller before a human control lease is acquired.
+
+        The caller preflights every send receipt first. This never cancels an
+        Agent remotely or claims product success; known remote Tasks are next
+        cancelled explicitly by WorkflowControlService.
+        """
+        task = self._dispatch_tasks.get(run_id)
+        if task is None:
+            return
+        token = self._dispatch_tokens[run_id]
+        self._control_stops.add(task)
+        task.cancel()
+        try:
+            await await_owned(task)
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise
+        finally:
+            self._release_owner(run_id, token)
 
     async def _dispatch_planner(self, run_id: UUID) -> None:
         """Claim the Planner Step, execute/poll its A2A Task, then map disposition."""
@@ -343,15 +402,12 @@ class PlannerRunDispatcher:
             return
 
         if result.disposition == TaskRunDisposition.WAITING_INPUT:
-            try:
-                self._repository.transition_run_and_record(
-                    run.run_id,
-                    WorkflowStatus.WAITING_INPUT,
-                    workflow_step_id=result.step.workflow_step_id,
-                    attempt=result.step.attempt,
-                )
-            except Exception as exc:
-                self._log_transition_error(run.run_id, exc)
+            # The definition's IMPLEMENTING stage pauses in HUMAN_REVIEW;
+            # WAITING_INPUT is the Planner state, not a new universal edge.
+            self._move_to_human_review(
+                run.run_id, result.step.workflow_step_id, result.step.attempt,
+                additional_event_types=("DEVELOPER_INPUT_REQUIRED",),
+            )
             return
         if result.disposition == TaskRunDisposition.COMPLETED:
             await self._advance_to_validation(
@@ -487,36 +543,9 @@ class PlannerRunDispatcher:
             agent_url = agent_urls[role]
             if agent_url is None:
                 return RuntimeError(f"{role.value} Agent is not configured")
-            duty = (
-                "기능 테스트를 수행하고 QA 결과를 보고한다."
-                if role == AgentRole.QA
-                else "보안 취약점을 점검하고 Security 결과를 보고한다."
-            )
-            request_text = (
-                f"workspaceId={run.workspace_id}\n"
-                + "Run Configuration: " + json.dumps(self._run_configuration_payload(run.run_id, include_scenario=False), ensure_ascii=False, separators=(",", ":")) + "\n"
-                +
-                "검증 대상은 전달된 불변 Source Snapshot이다. 파일을 수정하지 말고 "
-                "READ_ONLY로 접근한다. 요구사항과 Acceptance Criteria를 확인해 "
-                f"{duty} 요구사항: "
-                + json.dumps(
-                    [
-                        item for item in plan.model_dump(mode="json", by_alias=True)["requirements"]
-                        if item["requirementId"] in {str(value) for value in step.requirement_ids}
-                    ],
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                + "\n\n"
-                + "동결 보안/이메일 정책: " + json.dumps({key: value for key, value in scenario.planner_contract().items() if key in {"securityPolicy", "emailPolicy"}}, ensure_ascii=False, separators=(",", ":"))
-                + "\n\n"
-                "완료 시 A2A Task Artifact를 정확히 하나 반환한다. "
-                "QA는 qa-report.json, Security는 security-report.json을 사용하고, "
-                "각 Artifact는 application/json Data Part 하나와 project metadata를 "
-                "가져야 한다. Report Schema는 "
-                "schemas/project/qa_report.schema.json 또는 "
-                "schemas/project/security_report.schema.json을 따른다. "
-                "Task COMPLETED는 업무 완료일 뿐 결과 PASS를 뜻하지 않는다."
+            request_text = build_validation_request(
+                self._repository.get_run_configuration(run.run_id), plan,
+                scenario, step.requirement_ids, role,
             )
             try:
                 async with self._client_factory(agent_url) as client:
@@ -575,6 +604,7 @@ class PlannerRunDispatcher:
         *,
         plan: PlannerPlan,
         scenario: ScenarioDefinition,
+        allow_fix_dispatch: bool = True,
     ) -> None:
         """Consume completed Tasks after initial dispatch or safe recovery polling."""
         artifacts = self._repository.list_project_artifacts(run.run_id)
@@ -658,7 +688,7 @@ class PlannerRunDispatcher:
                 stored = tuple(item for item in self._repository.list_issue_records(run.run_id) if item.code_version == current.code_version and item.report_artifact_id in {qa_report.artifact_id, security_report.artifact_id})
                 if not stored:
                     stored = self._repository.record_detected_issues(run.run_id, self._validation_issues(current, source, qa_report, security_report), allow_terminal=True)
-                if current.status == WorkflowStatus.FIX_REQUIRED:
+                if current.status == WorkflowStatus.FIX_REQUIRED and allow_fix_dispatch:
                     await self._dispatch_fix(current, plan, scenario, stored)
         except Exception as exc:
             logger.error(

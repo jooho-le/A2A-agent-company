@@ -17,7 +17,8 @@ from orchestrator.domain import (
     RunConfiguration,
     SCN_001_ID,
 )
-from orchestrator.core.security import redact_data, redact_text
+from orchestrator.core.security import redact_text
+from orchestrator.application.control_input import validate_control_input
 
 
 class APIModel(BaseModel):
@@ -52,9 +53,7 @@ class ResumeRunRequest(APIModel):
     @field_validator("input_data")
     @classmethod
     def safe_input(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        if value is not None and not value:
-            raise ValueError("inputData must not be empty")
-        return redact_data(value) if value is not None else None
+        return validate_control_input(value)
 
 
 class CancelRunRequest(APIModel):

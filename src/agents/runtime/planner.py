@@ -24,6 +24,7 @@ from agents.roles.planner_contract import (
 )
 from agents.roles.prompts import prepare_role_prompt
 from agents.runtime.planner_context import PlannerContextError, PlannerExecutionContext
+from mcp_tools.runtime import _finish_handler
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
 
@@ -45,8 +46,52 @@ _TERMINAL = frozenset({
 _INITIAL_FIELDS = frozenset({"request", "workspaceId", "runConfiguration", "scenarioContract"})
 _PROTECTED_FIELDS = _INITIAL_FIELDS - {"request"} | frozenset({
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds",
-    "projectArtifactId", "artifactVersion", "model", "limits", "configuration",
+    "projectArtifactId", "projectArtifactIds", "artifactVersion", "model", "limits", "configuration",
+    "codeVersion", "fixRequest", "fixAttempt", "fix_attempt", "startingCommitHash", "parentCommitHash",
 })
+
+
+async def _host_factory(factory, argument):
+    """Do not detach a trusted synchronous Host reader on request cancellation.
+
+    A caller may be canceled repeatedly while SQLite/filesystem cleanup is
+    still running. Reap that worker before propagating cancellation; do not
+    invoke it again or start an awaitable it returned after cancellation.
+    Developer re-exports this helper for the other Source-bound executors.
+    """
+    if inspect.iscoroutinefunction(factory):
+        result = factory(argument)
+    else:
+        worker = asyncio.create_task(asyncio.to_thread(factory, argument))
+        try:
+            result = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            await _finish_handler(worker)
+            try:
+                abandoned = worker.result()
+            except (asyncio.CancelledError, Exception):
+                pass
+            else:
+                # Sync factories returning async loaders remain supported, but
+                # a canceled request must not begin that loader afterward.
+                if inspect.iscoroutine(abandoned):
+                    abandoned.close()
+                elif inspect.isawaitable(abandoned):
+                    pending = asyncio.ensure_future(abandoned)
+                    pending.cancel()
+                    await _finish_handler(pending)
+            raise
+    if not inspect.isawaitable(result):
+        return result
+    loader = asyncio.ensure_future(result)
+    try:
+        return await asyncio.shield(loader)
+    except asyncio.CancelledError:
+        # Inject cancellation once, then shield the loader's own finally from
+        # subsequent caller cancels. Async factory cleanup has the same owner.
+        loader.cancel()
+        await _finish_handler(loader)
+        raise
 
 
 def _same_json(left, right):
@@ -169,13 +214,9 @@ class PlannerAgentExecutor(AgentExecutor):
         return TaskUpdater(event_queue, context.task_id, context.context_id)
 
     async def _execution_context(self, context):
-        # Host readers may do SQLite I/O; do not block the SDK's event loop.
-        if inspect.iscoroutinefunction(self._context_factory):
-            result = self._context_factory(context)
-        else:
-            result = await asyncio.to_thread(self._context_factory, context)
-        if inspect.isawaitable(result):
-            result = await result
+        # Host readers may do SQLite I/O; keep the event loop responsive while
+        # retaining ownership until any canceled reader has fully drained.
+        result = await _host_factory(self._context_factory, context)
         if type(result) is not PlannerExecutionContext:
             raise PlannerContextError()
         return result

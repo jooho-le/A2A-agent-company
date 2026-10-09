@@ -102,4 +102,5 @@ def get_workflow_controls(request: Request) -> WorkflowControlService:
             role for role in AgentRole
             if getattr(settings, f"{role.value.lower()}_bearer_token")
         ),
+        preflight=getattr(request.app.state, "control_preflight", None),
     )

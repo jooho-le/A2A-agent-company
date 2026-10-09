@@ -196,7 +196,13 @@ Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs
 
 기존 Orchestrator가 검증 가능한 결함과 `FIX_REQUIRED`를 기록하면 실제 Developer에게 저장된 Issue·이전 결과물을 전달합니다. Developer는 이전 후보를 기준으로 수정하고 새 Git Snapshot·Source/Change/Build 결과물을 생성합니다. QA와 Security는 새 후보의 동일 Manifest를 다시 검사하고 이전 보고서와 Lineage를 연결합니다. 최초 구현을 제외한 수정은 최대 3회이며 전체 예산·동결 요구사항·환경을 다시 발급하거나 변경하지 않습니다.
 
-보안 의미 검증 근거가 부족하면 `UNVERIFIED/HUMAN_REVIEW`이고, 실제 QA FAIL이 함께 있어도 기존 판정상 `HUMAN_REVIEW`에 Issue를 남길 수 있습니다. 네 Task COMPLETED만으로 SUCCESS가 되지 않습니다. 실제 LLM·Docker·회원가입 서비스 시연 성공은 미검증입니다. 상세 계약·검증 결과는 [35번 수정·재검증](docs/35-fix-revalidation-loop.md)을 참고하세요. 다음은 **36번 실제 입력 재개·취소·Human Review 제어**입니다.
+보안 의미 검증 근거가 부족하면 `UNVERIFIED/HUMAN_REVIEW`이고, 실제 QA FAIL이 함께 있어도 기존 판정상 `HUMAN_REVIEW`에 Issue를 남길 수 있습니다. 네 Task COMPLETED만으로 SUCCESS가 되지 않습니다. 실제 LLM·Docker·회원가입 서비스 시연 성공은 미검증입니다. 상세 계약·검증 결과는 [35번 수정·재검증](docs/35-fix-revalidation-loop.md)을 참고하세요.
+
+### 실제 입력 재개·취소·Human Review 제어 — 36번
+
+기존 `/resume`·`/recover`·`/cancel`을 실제 네 Agent 실행에 연결했습니다. 입력/인증 재개는 같은 Task·Context·Step에서 이어가고 수정 횟수·Source 버전·전체 예산을 초기화하지 않습니다. QA/Security 중 완료된 쪽은 다시 실행하지 않습니다. 새 실행이 필요한 재개는 기존 예산을 확인하며, GET만 필요한 결과 회수는 새 모델 호출과 구분합니다.
+
+처음 시작하거나 재개한 실행을 추적·정리한 뒤 원격 Worker·모델·MCP·Host 작업이 종료되고 `CANCELED`가 확인돼야 Run을 `ABORTED`로 기록합니다. 불확실한 전송·Source 쓰기는 자동 재전송/원복하지 않으며, Human Review로 FAIL/UNVERIFIED를 임의 PASS로 바꾸지 못합니다. 상세 사용법·정의서 점검·검증 한계는 [36번 실제 제어](docs/36-agent-workflow-controls.md)를 참고하세요. 다음은 **37번 실제 LLM/A2A/MCP Trace·사용량·비밀정보 마스킹**입니다.
 
 ## 테스트
 

@@ -38,6 +38,7 @@ def create_app(
     app.state.workspace_registry_lock = Lock()
     app.state.run_dispatcher = dispatcher
     app.state.agent_client_factory = None
+    app.state.control_preflight = None
     if submission_validator is not None and not callable(submission_validator):
         raise ValueError("OWNED_AGENT_CONFIGURATION_INVALID")
     app.state.submission_validator = submission_validator

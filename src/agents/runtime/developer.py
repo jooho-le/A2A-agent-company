@@ -5,7 +5,6 @@ Interrupted work with uncommitted edits is not automatically replayed or reset.
 """
 
 import asyncio
-import inspect
 
 from a2a.helpers import new_data_part
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -25,7 +24,7 @@ from agents.roles.prompts import prepare_role_prompt
 from agents.runtime.developer_context import DeveloperContextError, DeveloperExecutionContext
 from agents.runtime.developer_services import DeveloperRuntimeServices, DeveloperServicesError
 from agents.runtime.developer_workspace import DeveloperCheckpointError
-from agents.runtime.planner import _message_data, _same_json, _TERMINAL
+from agents.runtime.planner import _host_factory, _message_data, _same_json, _TERMINAL
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
@@ -99,11 +98,6 @@ def _prepare_input(context, execution):
         raise _DeveloperInputError() from None
     except Exception:
         raise _DeveloperInputError() from None
-
-
-async def _host_factory(factory, argument):
-    result = factory(argument) if inspect.iscoroutinefunction(factory) else await asyncio.to_thread(factory, argument)
-    return await result if inspect.isawaitable(result) else result
 
 
 class DeveloperAgentExecutor(AgentExecutor):

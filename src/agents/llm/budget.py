@@ -83,9 +83,7 @@ class ExecutionBudget:
 
     def reserve_model_call(self) -> tuple[int, int, float]:
         with self._guard:
-            self.check()
-            if self._model_calls >= self.limits.max_model_calls:
-                raise LLMRuntimeError(LLMErrorCode.BUDGET)
+            self.check_model_call()
             output_cap = self.limits.max_output_tokens
             if self.limits.max_total_tokens is not None:
                 output_cap = min(output_cap, self.limits.max_total_tokens - self._known_tokens)
@@ -93,6 +91,16 @@ class ExecutionBudget:
                     raise LLMRuntimeError(LLMErrorCode.BUDGET)
             self._model_calls += 1
             return self._model_calls, output_cap, min(self.remaining_seconds(), self.limits.model_timeout_seconds)
+
+    def check_model_call(self) -> None:
+        """Non-consuming admission check; never reset a continuation budget."""
+        with self._guard:
+            self.check()
+            if self._model_calls >= self.limits.max_model_calls:
+                raise LLMRuntimeError(LLMErrorCode.BUDGET)
+            cap = self.limits.max_total_tokens
+            if cap is not None and cap - self._known_tokens < 16:
+                raise LLMRuntimeError(LLMErrorCode.BUDGET)
 
     def account_usage(self, usage: TokenUsage | None) -> None:
         with self._guard:

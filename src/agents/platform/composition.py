@@ -358,6 +358,14 @@ def create_platform(
         settings=settings, submission_validator=validate_submission)
     app.state.workspace_registry = workspace_registry
     app.state.agent_client_factory = client_factory
+
+    def control_preflight(run_id):
+        if lifecycle.closed:
+            raise PlatformPreparationError()
+        configuration = repository.get_run_configuration(run_id)
+        budgets.resolve(configuration).check_model_call()
+
+    app.state.control_preflight = control_preflight
     apps = {role: create_agent_app(roles[role], executor=executors[role]) for role in AgentRole}
     endpoints = (PlatformEndpoint(name="orchestrator", host=orchestrator_host, port=orchestrator_port, app=app),
         *(PlatformEndpoint(name=role.value.lower(), host=roles[role].host,
