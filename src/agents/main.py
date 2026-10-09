@@ -27,9 +27,16 @@ def create_app(
         # test/injected executors and provider settings are not readiness proof.
         from agents.runtime.planner import PlannerAgentExecutor
         from agents.runtime.developer import DeveloperAgentExecutor
-        if isinstance(executor, (PlannerAgentExecutor, DeveloperAgentExecutor)):
-            from orchestrator.domain.states import AgentRole
-            expected_role = AgentRole.PLANNER if isinstance(executor, PlannerAgentExecutor) else AgentRole.DEVELOPER
+        from agents.runtime.qa import QAAgentExecutor
+        from orchestrator.domain.states import AgentRole
+        implemented_roles = (
+            (PlannerAgentExecutor, AgentRole.PLANNER),
+            (DeveloperAgentExecutor, AgentRole.DEVELOPER),
+            (QAAgentExecutor, AgentRole.QA),
+        )
+        expected_role = next((role for implemented, role in implemented_roles
+                              if isinstance(executor, implemented)), None)
+        if expected_role is not None:
             if settings.role is not expected_role:
                 raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
             execution_ready = True

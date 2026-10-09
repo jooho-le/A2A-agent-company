@@ -244,8 +244,7 @@ class BrowserTestOutputStore:
                 if (str(step.workflow_step_id) != row["workflow_step_id"] or step.run_id != run.run_id
                         or step.status.value != row["status"]):
                     raise BrowserStoreError("BROWSER_TEST_RESULT_INTEGRITY_ERROR")
-                if (step.agent_role is AgentRole.QA and step.status is WorkflowStepStatus.RUNNING
-                        and step.attempt == run.fix_attempt):
+                if step.agent_role is AgentRole.QA and step.status is WorkflowStepStatus.RUNNING:
                     active.append(step)
             if len(active) != 1:
                 raise BrowserStoreError("BROWSER_TEST_CONTEXT_DENIED")
@@ -552,7 +551,7 @@ class BrowserTestOutputStore:
             if (workspace_row["run_id"] != row["run_id"] or str(workspace.workspace_id) != row["workspace_id"]
                     or str(workspace.run_id) != row["run_id"] or step_row["run_id"] != row["run_id"]
                     or str(step.workflow_step_id) != row["workflow_step_id"] or str(step.run_id) != row["run_id"]
-                    or step.agent_role is not AgentRole.QA or step.attempt != source.code_version - 1
+                    or step.agent_role is not AgentRole.QA
                     or not step.requirement_ids or not set(step.requirement_ids) <= set(source.requirement_ids)
                     or source.artifact_id not in step.input_artifact_ids
                     or step.code_version is not None and step.code_version != source.code_version):

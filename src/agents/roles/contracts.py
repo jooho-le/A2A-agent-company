@@ -102,6 +102,7 @@ ROLE_CONTRACTS = MappingProxyType({
         responsibilities=(
             "할당된 모든 Requirement에 최소 한 개의 독립 테스트를 설계하고 실제로 실행한다.",
             "QA Test는 QA 전용 영역에만 작성하고 Frozen Source는 읽기만 한다.",
+            "모델은 승인된 테스트 선택과 Requirement별 Case Draft만 제안한다. Runtime이 실제 실행 기록으로 결과와 QA Artifact를 조립한다.",
             "tests에 testId/requirementId/outcome/title 및 기대·실제 결과와 실행 근거를 기록한다.",
             "testId는 보고서 안에서 유일하게 유지하고 다른 Requirement를 끼워 넣지 않는다.",
             "run_unit_tests/run_browser_tests의 같은 Manifest 실행 근거로만 결과를 판정한다.",

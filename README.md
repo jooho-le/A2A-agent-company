@@ -49,7 +49,7 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 
 ## Agent/MCP 개발 기반 — 15~17번
 
-담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 설정·역할 정책 및 23번의 stdio 서버·Client·Tool 계약이 있습니다. 공통 LLM 엔진과 Workspace/Artifact/Sandbox 기반은 아래 후속 단계에 추가했으며, 실제 역할별 Executor와 Tool 실행 연결은 아직 후속 작업입니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
+담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 stdio 서버·Client·역할별 실제 Tool이 있습니다. 공통 LLM 엔진과 Workspace/Artifact/Sandbox를 바탕으로 Planner·Developer·QA의 명시적 실행기를 추가했습니다. Security 실행기와 기본 Pipeline 자동 연결은 후속 작업이며 기본 Agent CLI는 Bootstrap을 유지합니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
 
 설정 접두사는 `ORCHESTRATOR_`, `AGENT_`, `MCP_`로 분리합니다. 각 Agent는 하나의 역할을 명시하며 기본 주소는 Planner `127.0.0.1:8101`, Developer `:8102`, QA `:8103`, Security `:8104`입니다. 기존 Orchestrator의 Agent URL은 실제 역할 구현·연결 전까지 미설정 상태로 유지하세요. 지금 연결하면 기본 런타임이 요청을 `TASK_STATE_REJECTED`로 거절하며 제품을 개발하지 않습니다.
 
@@ -164,7 +164,13 @@ Host가 명시적으로 구성한 `PlannerAgentExecutor`가 기존 LLMEngine으�
 
 Host가 명시적으로 구성한 `DeveloperAgentExecutor`가 MCP로 할당된 Source를 구현하고, 실제 파일 diff·Git commit object·불변 Snapshot·private Build/Tool 실행 기록을 대조하여 기존 Source/Change/Build Artifact 세 개를 반환합니다. 모델은 제한된 Decision만 제안하며 Hash·변경 목록·Build 근거를 작성하지 않습니다. 정상 실행된 컴파일 실패는 Tool PASS + Build FAIL/PRODUCT로 보고하고 전체 SUCCESS로 바꾸지 않습니다.
 
-현재는 최초 `codeVersion=1` 구현만 지원하며 Issue 기반 수정 루프는 35번입니다. 기본 서버는 Bootstrap 유지, 실제 Developer를 주입할 때만 실행 Skill을 광고합니다. 이미 Source를 수정한 뒤 중단한 작업은 자동 원복/재실행하지 않습니다. 실제 LLM·Docker·Developer stdio 전체 경로는 미검증이며 자동 Pipeline 연결은 후속입니다. 상세 사용법·정의서 점검·검증 한계는 [31번 Developer Agent](docs/31-developer-agent.md)를 참고하세요. 다음은 **32번 QA Agent**입니다.
+현재는 최초 `codeVersion=1` 구현만 지원하며 Issue 기반 수정 루프는 35번입니다. 기본 서버는 Bootstrap 유지, 실제 Developer를 주입할 때만 실행 Skill을 광고합니다. 이미 Source를 수정한 뒤 중단한 작업은 자동 원복/재실행하지 않습니다. 실제 LLM·Docker·Developer stdio 전체 경로는 미검증이며 자동 Pipeline 연결은 후속입니다. 상세 사용법·정의서 점검·검증 한계는 [31번 Developer Agent](docs/31-developer-agent.md)를 참고하세요.
+
+### QA Agent — 32번
+
+Host가 명시적으로 구성한 `QAAgentExecutor`가 같은 불변 Source를 읽고 QA 전용 테스트를 작성하며, 승인된 Unit/Browser 테스트의 실제 private 실행 기록으로 기존 `qa-report.json` Artifact를 반환합니다. 모델은 테스트 케이스와 Requirement의 연결만 제안하고 결과·Manifest·ToolEvidence를 만들지 않습니다. 모든 승인된 QA 테스트와 Host 보호 테스트를 실행하며, 실패한 assertion은 Tool PASS + QA FAIL, 누락/SKIP 케이스는 UNVERIFIED로 구분합니다.
+
+현재는 최초 `VALIDATING`·`fix_attempt=0`·`codeVersion=1`만 지원합니다. 실제 QA 실행기를 주입할 때만 `measured-initial-qa` Skill·`executionReady=True`를 광고하며 기본 CLI/서버는 Bootstrap을 유지합니다. QA는 Source·보호 테스트를 수정하거나 전체 Run을 판정하지 않습니다. 실제 LLM·Docker 실행은 미검증이고, 자동 Pipeline 연결(34번)과 수정 후 재검증(35번)은 후속입니다. 상세 범위·Host 설정·정의서 점검·검증 한계는 [32번 QA Agent](docs/32-qa-agent.md)를 참고하세요. 다음은 **33번 Security Agent**입니다.
 
 ## 테스트
 

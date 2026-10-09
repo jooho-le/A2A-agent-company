@@ -244,7 +244,7 @@ class UnitTestOutputStore:
                         or step.status.value != row["status"]):
                     raise UnitTestStoreError("UNIT_TEST_RESULT_INTEGRITY_ERROR")
                 if (step.agent_role is binding.role and step.status is WorkflowStepStatus.RUNNING
-                        and step.attempt == run.fix_attempt):
+                        and (binding.role is AgentRole.QA or step.attempt == run.fix_attempt)):
                     active.append(step)
             if len(active) != 1:
                 raise UnitTestStoreError("UNIT_TEST_CONTEXT_DENIED")
@@ -525,7 +525,7 @@ class UnitTestOutputStore:
                     or step_row["run_id"] != row["run_id"] or str(step.run_id) != row["run_id"]
                     or str(step.workflow_step_id) != row["workflow_step_id"] or step.agent_role is not role):
                 raise ValueError
-            if (step.attempt != source.code_version - 1 or not step.requirement_ids
+            if ((role is not AgentRole.QA and step.attempt != source.code_version - 1) or not step.requirement_ids
                     or not set(step.requirement_ids) <= set(source.requirement_ids)
                     or step.code_version is not None and step.code_version != source.code_version):
                 raise ValueError

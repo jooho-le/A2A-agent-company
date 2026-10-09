@@ -363,6 +363,14 @@ class UnitTestOutputStoreTests(unittest.TestCase):
         self.assertEqual(record.role, AgentRole.QA)
         self.assertEqual(self.store.read_report(self.binding, record.report_ref), self.report.to_dict())
 
+    def test_qa_continuation_attempt_independent_of_code_revision(self):
+        qa = self.qa_context()
+        self.mutate_step(qa, attempt=1)
+        record = self.publish()
+        self.assertEqual(record.execution_manifest.code_version, 1)
+        self.assertEqual(self.store.get(self.run.run_id, record.execution_manifest_id), record)
+        self.assertEqual(self.store.read_report(self.binding, record.report_ref), self.report.to_dict())
+
     def test_qa_without_exact_source_input_is_denied(self):
         qa = self.qa_context()
         self.mutate_step(qa, input_artifact_ids=[])

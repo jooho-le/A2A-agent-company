@@ -154,7 +154,7 @@ class SandboxRuntime:
             raise SandboxError(SandboxErrorCode.DENIED)
         source = content.metadata
         active = [step for step in steps if step.agent_role is role and step.status is WorkflowStepStatus.RUNNING
-                  and (role is AgentRole.DEVELOPER or step.attempt == run.fix_attempt)]
+                  and (role in {AgentRole.DEVELOPER, AgentRole.QA} or step.attempt == run.fix_attempt)]
         if len(active) != 1 or source.code_version != run.fix_attempt + 1:
             raise SandboxError(SandboxErrorCode.DENIED)
         if role is AgentRole.DEVELOPER:

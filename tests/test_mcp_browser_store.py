@@ -328,11 +328,18 @@ class BrowserTestOutputStoreTests(unittest.TestCase):
         self.mutate_run(status=WorkflowStatus.ABORTED, termination_reason="cancel fixture")
         self.assert_code("BROWSER_TEST_CONTEXT_DENIED", self.publish)
 
-    def test_wrong_attempt_version_requirements_or_source_input_denied(self):
-        for changes in ({"attempt": 1}, {"code_version": 2}, {"requirement_ids": [uuid4()]}, {"input_artifact_ids": []}):
+    def test_wrong_version_requirements_or_source_input_denied(self):
+        for changes in ({"code_version": 2}, {"requirement_ids": [uuid4()]}, {"input_artifact_ids": []}):
             self.mutate_step(**changes)
             self.assert_code("BROWSER_TEST_CONTEXT_DENIED", self.publish)
             self.mutate_step()
+
+    def test_qa_continuation_attempt_does_not_change_source_revision(self):
+        self.mutate_step(attempt=1)
+        record = self.publish()
+        self.assertEqual(record.execution_manifest.code_version, 1)
+        self.assertEqual(self.store.get(self.run.run_id, record.execution_manifest_id), record)
+        self.assertEqual(self.store.read_report(self.binding, record.report_ref), self.report.to_dict())
 
     def test_multiple_running_qa_steps_denied(self):
         self.insert_step(WorkflowStep(run_id=self.run.run_id, agent_role=AgentRole.QA, status=WorkflowStepStatus.RUNNING,
