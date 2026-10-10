@@ -212,6 +212,12 @@ Host 준비 항목·사용법·검증 한계는 [34번 실제 Agent 연결](docs
 
 Run 예산 예약을 외부 호출 전에 저장하고 재시작 시 기존 호출/토큰·동결 설정·UTC Deadline만 복원합니다. pending·unknown·누락 기록·설정 변경·시간 역행은 실행을 차단하며 새 예산이나 자동 재전송을 만들지 않습니다. 1~37번 번호 로드맵의 마지막 단계이며 실제 외부 LLM/Docker·제품 시연/비교 실험 완료를 의미하지 않습니다. 상세 계약과 검증 한계는 [37번 실행 Telemetry](docs/37-runtime-telemetry-usage.md)를 참고하세요.
 
+### 개발정의서 전체 점검 후 보완
+
+같은 Run의 보호 테스트 내용·연결 기준과 Scanner Version/Rule을 최초 검증 승인 시 불변 Hash로 고정하고 재개·수정·재시작 때 변경을 차단합니다. 동일 후보의 중복 Finding은 반복 결함 카운트를 초기화하지 않으며, 최종 판정은 Trace를 페이지별로 읽어 로그 개수 때문에 정상 성공을 막지 않습니다.
+
+Orchestrator에는 네 LLM 역할과 별개인 Host 전용 MCP 주체를 추가해 `run_build`, `read_test_report`, `read_security_report`만 허용합니다. A2A Task 응답에 프로젝트 metadata가 포함되면 현재 Run/Step과 대조하며 공식 선택적 metadata와 unrelated extension 호환성은 유지합니다. 기존 보류 항목·실제 환경 검증·운영 Host 준비를 완료한 것으로 표시하지 않습니다. 상세 내용은 [개발정의서 보완 내역](docs/contract-compliance-audit-fixes.md)을 참고하세요.
+
 ## 테스트
 
 ```bash

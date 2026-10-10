@@ -26,6 +26,7 @@ from mcp_tools.tools.files import _run_file_operation
 from orchestrator.domain.constants import MAX_MCP_TOOL_RETRIES
 from orchestrator.domain.retry_policy import RetryDecision
 from orchestrator.domain.tool_evidence import ToolExecutionOutcome
+from orchestrator.domain.states import AgentRole
 from orchestrator.workspaces.policy import workspace_uuid
 
 
@@ -70,6 +71,10 @@ class TrackedMCPExecutor:
                  safety_verifier=None, retry_delay_seconds=0.05, event_sink=None):
         try:
             if (not isinstance(client, BoundMCPClient) or not isinstance(store, ToolExecutionStore)
+                    # This journal belongs to a WorkflowStep's real Agent.
+                    # Host administration must not impersonate that Agent in
+                    # its closed role/evidence/budget/Trace contracts.
+                    or not isinstance(client.configuration.binding.role, AgentRole)
                     or safety_verifier is not None and not callable(safety_verifier)
                     or event_sink is not None and not callable(event_sink)
                     or isinstance(retry_delay_seconds, bool)

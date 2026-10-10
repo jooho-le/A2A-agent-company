@@ -27,6 +27,7 @@ from agents.llm.content import sanitize_content
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text, parse_json
 from agents.roles.outputs import validate_completed_role_output
 from agents.runtime.qa_context import validation_cycle, verify_report_predecessor
+from agents.runtime.evaluation_policy_store import EvaluationPolicyStore, security_policy_sha256
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration, open_mcp_client
 from mcp_tools.execution_policy import arguments_sha256
 from mcp_tools.execution_runtime import TrackedMCPExecutor
@@ -193,6 +194,7 @@ class SecurityRuntimeServices:
         self.configuration, self.client_factory = mcp_configuration, client_factory
         self._repository, self._workspaces, self._artifacts = repository, workspace_registry, artifact_store
         self._tools, self._scans = ToolExecutionStore(repository), SecurityScanOutputStore(repository)
+        self._evaluation_policies = EvaluationPolicyStore(repository)
         self._verifier = proof_verifier
         self._issued, self._reads = {}, {}
         self._scan_started = False
@@ -246,6 +248,8 @@ class SecurityRuntimeServices:
                 or policy.image_reference is not None
                 and policy.image_reference.rsplit("@", 1)[-1] != environment.container_image_digest):
             raise ValueError
+        self._evaluation_policies.pin(binding, workflow_step_id=execution.metadata.workflow_step_id,
+            source_artifact_id=source.artifact_id, policy_sha256=security_policy_sha256(self.configuration))
         return dict(sorted(files.items()))
 
     async def prepare(self, execution):

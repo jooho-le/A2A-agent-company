@@ -8,6 +8,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from mcp_tools.runtime import MCPConfigurationError, MCPExecutionContext, MCPToolExecutionError
+from mcp_tools.runtime import delegate_host_context
 from mcp_tools.tools.files import _run_file_operation
 from mcp_tools.tools.unit_config import UnitTestConfiguration
 from mcp_tools.tools.unit_inputs import UnitTestInputsError, prepare_unit_inputs
@@ -129,6 +130,7 @@ class UnitTestTools:
             raise MCPToolExecutionError("TEST_RUNNER_ERROR") from None
 
     async def read_test_report(self, context, arguments):
+        context = delegate_host_context(context, "read_test_report")
         self._context(context, (AgentRole.QA,))
         try:
             result = await _run_file_operation(self._outputs.read_report, context.binding, arguments["reportRef"])

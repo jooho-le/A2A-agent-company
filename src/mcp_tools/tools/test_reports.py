@@ -3,6 +3,7 @@
 from types import MappingProxyType
 
 from mcp_tools.runtime import MCPConfigurationError
+from mcp_tools.core.policy import MCPHostPrincipal
 from mcp_tools.tools.browser import BrowserTestTools
 from mcp_tools.tools.unit import UnitTestTools
 from orchestrator.domain.states import AgentRole
@@ -18,9 +19,10 @@ class TestReportTools:
         return "TestReportTools()"
 
     def handlers(self, role):
-        if not isinstance(role, AgentRole):
+        if not isinstance(role, (AgentRole, MCPHostPrincipal)):
             raise MCPConfigurationError()
-        return MappingProxyType({"read_test_report": self.read_test_report} if role is AgentRole.QA else {})
+        return MappingProxyType({"read_test_report": self.read_test_report}
+                                if role in (AgentRole.QA, MCPHostPrincipal.ORCHESTRATOR) else {})
 
     async def read_test_report(self, context, arguments):
         # The dispatcher already validates artifact URI grammar. Each Store

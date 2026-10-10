@@ -1971,12 +1971,15 @@ def _store_detected_issues(
             if report.get("execution_manifest", {}).get("project_artifact_id") != str(source.artifact_id):
                 raise ValueError("Issue Report refers to another Source Snapshot")
             report_step_id = UUID(report["workflow_step_id"])
+        # A report may contain distinct Findings with the same fingerprint.
+        # Only the immediately previous candidate advances the repeat count;
+        # another Issue in this candidate must neither reset nor increment it.
         previous = connection.execute(
-            "SELECT consecutive_repeat_count,code_version FROM issue_records WHERE run_id=? AND fingerprint=? "
-            "ORDER BY code_version DESC,created_at DESC,issue_id DESC LIMIT 1",
-            (str(run.run_id), issue.fingerprint),
-        ).fetchone()
-        repeats = previous[0] + 1 if previous is not None and previous[1] == issue.code_version - 1 else 0
+            "SELECT MAX(consecutive_repeat_count) FROM issue_records "
+            "WHERE run_id=? AND fingerprint=? AND code_version=?",
+            (str(run.run_id), issue.fingerprint, issue.code_version - 1),
+        ).fetchone()[0]
+        repeats = previous + 1 if previous is not None else 0
         stored = IssueRecord.model_validate({
             **_sanitize_storage_value(issue.model_dump(mode="json")),
             "consecutive_repeat_count": repeats,

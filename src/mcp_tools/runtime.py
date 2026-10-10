@@ -20,7 +20,7 @@ import anyio
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import json_text, parse_json
 from mcp_tools.core.catalog import MAX_JSON_BYTES, ToolSchemaError, get_tool_contract
-from mcp_tools.core.policy import ROLE_TOOL_NAMES
+from mcp_tools.core.policy import MCPHostPrincipal, ORCHESTRATOR_TOOL_ROLES, MCP_TOOL_NAMES
 from orchestrator.domain.states import AgentRole
 from orchestrator.workspaces.filesystem import BoundWorkspace
 from orchestrator.workspaces.policy import (
@@ -91,19 +91,22 @@ class MCPToolExecutionError(RuntimeError):
 
 @dataclass(frozen=True, kw_only=True)
 class MCPBinding:
-    """Selected by the Agent's trusted launcher, never by a Tool argument."""
+    """Selected by the trusted Host launcher, never by a Tool argument.
 
-    role: AgentRole
-    agent_role: AgentRole
+    A Host principal has no Agent identity and cannot attach to an LLM Tool
+    executor. It receives only the three explicitly declared capabilities.
+    """
+
+    role: AgentRole | MCPHostPrincipal
+    agent_role: AgentRole | None
     run_id: UUID = field(repr=False)
     workspace_id: UUID = field(repr=False)
 
     def __post_init__(self):
-        if (
-            not isinstance(self.role, AgentRole)
-            or not isinstance(self.agent_role, AgentRole)
-            or self.role is not self.agent_role
-        ):
+        host = self.role is MCPHostPrincipal.ORCHESTRATOR
+        if not (host and self.agent_role is None or
+                isinstance(self.role, AgentRole) and
+                isinstance(self.agent_role, AgentRole) and self.role is self.agent_role):
             raise MCPConfigurationError()
         try:
             object.__setattr__(self, "run_id", workspace_uuid(self.run_id))
@@ -116,6 +119,31 @@ class MCPBinding:
 class MCPExecutionContext:
     binding: MCPBinding
     workspace: BoundWorkspace = field(repr=False)
+
+
+def delegate_host_context(context, tool_name):
+    """Narrow a verified Host call to this fixed Tool's existing ACL identity.
+
+    The delegated identity never crosses the MCP wire or escapes its handler.
+    In particular, it cannot authorize any Source write or additional scan.
+    Agent contexts retain their original identity and normal handler checks.
+    """
+    if not isinstance(context, MCPExecutionContext):
+        raise MCPToolExecutionError("PERMISSION_DENIED")
+    binding = context.binding
+    if binding.role is not MCPHostPrincipal.ORCHESTRATOR:
+        return context
+    role = ORCHESTRATOR_TOOL_ROLES.get(tool_name)
+    if (role is None or binding.agent_role is not None
+            or context.workspace.role is not role
+            or context.workspace.run_id != binding.run_id
+            or context.workspace.workspace_id != binding.workspace_id):
+        raise MCPToolExecutionError("PERMISSION_DENIED")
+    return MCPExecutionContext(
+        binding=MCPBinding(role=role, agent_role=role,
+                           run_id=binding.run_id, workspace_id=binding.workspace_id),
+        workspace=context.workspace,
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -216,7 +244,7 @@ class MCPDispatcher:
             if handlers is not None and not isinstance(handlers, Mapping):
                 raise ValueError
             copied = dict(handlers or {})
-            allowed = ROLE_TOOL_NAMES[binding.role]
+            allowed = MCP_TOOL_NAMES[binding.role]
             if any(name not in allowed or not callable(handler) for name, handler in copied.items()):
                 raise ValueError
         except Exception:
@@ -227,14 +255,14 @@ class MCPDispatcher:
         self._max_call_seconds = float(max_call_seconds)
 
     def list_tools(self):
-        return tuple(get_tool_contract(name) for name in ROLE_TOOL_NAMES[self.binding.role])
+        return tuple(get_tool_contract(name) for name in MCP_TOOL_NAMES[self.binding.role])
 
     def is_implemented(self, name) -> bool:
         return isinstance(name, str) and name in self._handlers
 
     async def call_tool(self, name, arguments) -> ToolOutcome:
         contract = get_tool_contract(name)
-        if contract is None or name not in ROLE_TOOL_NAMES[self.binding.role]:
+        if contract is None or name not in MCP_TOOL_NAMES[self.binding.role]:
             raise MCPProtocolError()
         arguments = _bounded_object(arguments)
         try:
@@ -265,15 +293,18 @@ class MCPDispatcher:
         except Exception:
             return _failure(MCPExecutionError.SECRET_DENIED)
         try:
+            workspace_role = (ORCHESTRATOR_TOOL_ROLES[name]
+                              if self.binding.role is MCPHostPrincipal.ORCHESTRATOR
+                              else self.binding.role)
             record = self._registry.get_record(workspace_id, run_id=self.binding.run_id)
             workspace = self._registry.bind(
-                workspace_id, run_id=self.binding.run_id, role=self.binding.role,
+                workspace_id, run_id=self.binding.run_id, role=workspace_role,
             )
             if (
                 record.workspace_id != workspace_id or record.run_id != self.binding.run_id
                 or not isinstance(workspace, BoundWorkspace)
                 or workspace.workspace_id != workspace_id or workspace.run_id != self.binding.run_id
-                or workspace.role is not self.binding.role or workspace.record != record
+                or workspace.role is not workspace_role or workspace.record != record
             ):
                 return _failure(MCPExecutionError.PERMISSION_DENIED)
         except WorkspaceAccessError as error:

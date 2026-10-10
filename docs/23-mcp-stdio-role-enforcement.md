@@ -38,10 +38,13 @@ Host가 고정한 현재 Python 실행 파일·프로젝트 모듈·역할·Run/
 | Developer | `read_project_file`, `write_source_file`, `apply_patch`, `run_build`, `run_unit_tests` |
 | QA | `read_project_file`, `write_test_file`, `run_unit_tests`, `run_browser_tests`, `read_test_report` |
 | Security | `read_project_file`, `run_security_scan`, `read_security_report` |
+| Orchestrator — Host 전용 관리 주체 | `run_build`, `read_test_report`, `read_security_report` |
 
 `MCPBinding`은 Host에서 고정한 두 역할이 같을 때만 생성할 수 있다. 요청 metadata나 Tool arguments로 역할을 변경할 수 없다. QA가 Developer의 `write_source_file`을 직접 호출해도 JSON-RPC `-32602` 오류가 된다.
 
-기존의 네 `AgentRole`만 유지하며 Orchestrator를 MCP 실행 Agent로 추가하지 않았다. 정의서 §8의 Orchestrator Build/Report 조회 항목 때문에 제품 실행 권한이나 직접 MCP 호출을 새로 부여하지 않는다. 기존 책임 분리대로 Orchestrator는 A2A 결과·Build/Report metadata를 관리하고, 실행 Tool은 Agent가 호출한다.
+23번 최초 구현에서는 Orchestrator의 직접 MCP 호출을 생략했지만, 개발정의서 §8-3·§8-11과 차이가 있어 1~37번 전체 점검 후 보완했다. 현재는 기존 네 `AgentRole`을 유지하고 별도 `MCPHostPrincipal.ORCHESTRATOR`를 제공한다. Host가 고정한 Run·Workspace에서 위 세 Tool만 호출할 수 있으며 Agent identity는 없다(`agent_role=None`).
+
+서버가 Tool별 고정 Workspace/Artifact 권한을 적용해 기존 Build·QA/Security Report 검사를 그대로 수행한다. 소스 Read/Write·Patch·Test 실행·Scan 실행 권한은 추가하지 않는다. LLM Tool adapter와 Agent 전용 Tracked 실행 원장에는 Host binding을 연결할 수 없다. 기본 파이프라인에 Build를 한 번 더 실행하는 동작이나 새로운 LLM 역할도 추가하지 않았다. 현재 사용법·안전 경계는 [전체 점검 후 보완](contract-compliance-audit-fixes.md)을 참고한다.
 
 현재 목록은 실제 작업이 완성됐다는 표시가 아니라 계약 선언이다. 각 Tool의 `_meta["a2a-agent-company/implemented"]`는 기본 서버에서 `false`다. 역할·입력·Workspace 검사를 통과해도 Handler가 없으면 `TOOL_NOT_IMPLEMENTED`로 실패한다.
 

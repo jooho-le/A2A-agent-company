@@ -8,6 +8,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from mcp_tools.runtime import MCPConfigurationError, MCPExecutionContext, MCPToolExecutionError
+from mcp_tools.runtime import delegate_host_context
 from mcp_tools.tools.browser_config import BrowserTestConfiguration
 from mcp_tools.tools.browser_inputs import BrowserInputsError, prepare_browser_inputs
 from mcp_tools.tools.browser_report import BrowserReportError, parse_browser_report
@@ -124,6 +125,7 @@ class BrowserTestTools:
             raise MCPToolExecutionError("TEST_RUNNER_ERROR") from None
 
     async def read_test_report(self, context, arguments):
+        context = delegate_host_context(context, "read_test_report")
         self._context(context)
         try:
             result = await _run_file_operation(self._outputs.read_report, context.binding, arguments["reportRef"])

@@ -10,7 +10,8 @@ from functools import partial
 import math
 from types import MappingProxyType
 
-from mcp_tools.runtime import MCPConfigurationError, MCPExecutionContext, MCPToolExecutionError
+from mcp_tools.runtime import MCPConfigurationError, MCPExecutionContext, MCPToolExecutionError, delegate_host_context
+from mcp_tools.core.policy import MCPHostPrincipal
 from mcp_tools.tools.build_config import BuildConfiguration
 from mcp_tools.tools.build_store import BuildOutputStore, BuildStoreError
 from mcp_tools.tools.files import _run_file_operation
@@ -48,9 +49,10 @@ class BuildTools:
         return "BuildTools()"
 
     def handlers(self, role):
-        if not isinstance(role, AgentRole):
+        if not isinstance(role, (AgentRole, MCPHostPrincipal)):
             raise MCPConfigurationError()
-        return MappingProxyType({"run_build": self.run_build} if role is AgentRole.DEVELOPER else {})
+        return MappingProxyType({"run_build": self.run_build}
+                                if role in (AgentRole.DEVELOPER, MCPHostPrincipal.ORCHESTRATOR) else {})
 
     def _profile(self):
         if self._configuration is None:
@@ -77,6 +79,7 @@ class BuildTools:
             raise MCPToolExecutionError("PERMISSION_DENIED")
 
     async def run_build(self, context, arguments):
+        context = delegate_host_context(context, "run_build")
         self._context(context)
         profile = self._profile()
         try:

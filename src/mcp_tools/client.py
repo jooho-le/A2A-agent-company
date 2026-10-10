@@ -25,7 +25,8 @@ from mcp_types import CallToolResult, DiscoverResult, TextContent
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import JsonSchema, ToolCall, ToolContext, ToolDefinition, json_text, parse_json
 from mcp_tools.core.catalog import MAX_JSON_BYTES, get_tool_contract
-from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, ROLE_TOOL_NAMES
+from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, MCP_TOOL_NAMES
+from orchestrator.domain.states import AgentRole
 from mcp_tools.runtime import MCPBinding, MCPExecutionError
 from mcp_tools.tools.build_config import BuildConfiguration, encode_build_configuration
 from mcp_tools.tools.browser_config import BrowserTestConfiguration, encode_browser_configuration
@@ -145,12 +146,16 @@ def child_parameters(configuration):
     })
     arguments = [
         "-I", "-c", _BOOTSTRAP, str(source_root),
-        "--role", binding.role.value, "--agent-role", binding.agent_role.value,
+        "--role", binding.role.value,
+    ]
+    if binding.agent_role is not None:
+        arguments.extend(["--agent-role", binding.agent_role.value])
+    arguments.extend([
         "--run-id", str(binding.run_id), "--workspace-id", str(binding.workspace_id),
         "--database-path", str(configuration.database_path),
         "--workspace-root", str(configuration.workspace_root),
         "--max-call-seconds", str(configuration.max_call_seconds),
-    ]
+    ])
     if configuration.frozen_source is not None:
         arguments.extend([
             "--source-artifact-id", str(configuration.frozen_source.project_artifact_id),
@@ -217,7 +222,7 @@ class BoundMCPClient:
         self._check_open()
         return tuple(
             _definition(get_tool_contract(name))
-            for name in ROLE_TOOL_NAMES[self.configuration.binding.role]
+            for name in MCP_TOOL_NAMES[self.configuration.binding.role]
         )
 
     async def _verify_peer(self):
@@ -245,7 +250,7 @@ class BoundMCPClient:
             listing = await asyncio.wait_for(self._client.session.list_tools(), timeout)
             encoded = listing.model_dump(mode="json", by_alias=True, exclude_none=True)
             json_text(encoded, max_bytes=_MAX_BYTES)
-            expected = ROLE_TOOL_NAMES[self.configuration.binding.role]
+            expected = MCP_TOOL_NAMES[self.configuration.binding.role]
             if listing.next_cursor is not None or len(listing.tools) != len(expected):
                 raise MCPClientError("MCP_CLIENT_PROTOCOL_INVALID", delivery_state=MCPDeliveryState.NOT_SENT)
             if set(tool.name for tool in listing.tools) != set(expected):
@@ -270,7 +275,7 @@ class BoundMCPClient:
         self._check_open()
         binding = self.configuration.binding
         contract = get_tool_contract(name)
-        if contract is None or name not in ROLE_TOOL_NAMES[binding.role]:
+        if contract is None or name not in MCP_TOOL_NAMES[binding.role]:
             raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
         timeout = self.configuration.max_call_seconds
         deadline = time.monotonic() + timeout
@@ -374,7 +379,8 @@ class BoundMCPClient:
         binding = self.configuration.binding
         try:
             if (
-                not isinstance(call, ToolCall) or not isinstance(context, ToolContext)
+                not isinstance(binding.role, AgentRole)
+                or not isinstance(call, ToolCall) or not isinstance(context, ToolContext)
                 or context.role is not binding.agent_role
                 or workspace_uuid(context.workspace_id) != binding.workspace_id
                 or parse_json(call.arguments_json) != arguments

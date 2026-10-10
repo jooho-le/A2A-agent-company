@@ -98,6 +98,14 @@ def reject_proto_field_aliases(value: object, descriptor: Descriptor) -> None:
 def parse_workflow_metadata(value: object) -> A2AWorkflowMetadata:
     if not isinstance(value, dict):
         raise InvalidParamsError(message="Project workflow metadata is required")
+    aliases = {field.alias or name for name, field in A2AWorkflowMetadata.model_fields.items()}
+    if set(value) - aliases:
+        raise InvalidParamsError(message="Invalid project workflow metadata")
+    for field in ("requirementIds", "projectArtifactIds"):
+        if field in value and type(value[field]) is not list:
+            raise InvalidParamsError(message="Invalid project workflow metadata")
+    if "codeVersion" in value and value["codeVersion"] is None:
+        raise InvalidParamsError(message="Invalid project workflow metadata")
     normalized = dict(value)
     # Protobuf Struct renders all numbers as float. Accept exactly integer
     # numeric values, but not booleans, fractions, nonfinite values, or strings.

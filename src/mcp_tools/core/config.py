@@ -7,7 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from mcp_tools.core.policy import (
     MCP_PROTOCOL_VERSION,
     MCP_TRANSPORT,
-    ROLE_TOOL_NAMES,
+    MCP_TOOL_NAMES,
+    MCPHostPrincipal,
 )
 from orchestrator.domain.constants import MAX_MCP_TOOL_RETRIES
 from orchestrator.domain.states import AgentRole
@@ -23,7 +24,7 @@ class MCPSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    role: AgentRole
+    role: AgentRole | MCPHostPrincipal
     environment: Literal["local", "development", "test", "production"] = "local"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     transport: Literal["stdio"] = MCP_TRANSPORT
@@ -32,7 +33,7 @@ class MCPSettings(BaseSettings):
     @property
     def allowed_tool_names(self) -> tuple[str, ...]:
         """Declared role policy, not yet a tools/list or tools/call implementation."""
-        return ROLE_TOOL_NAMES[self.role]
+        return MCP_TOOL_NAMES[self.role]
 
     @property
     def max_tool_retries(self) -> int:

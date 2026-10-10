@@ -21,6 +21,7 @@ from agents.roles.outputs import validate_completed_role_output
 from agents.roles.qa_contract import QACaseBinding, QADecision, validate_qa_decision
 from agents.runtime.qa_test_store import QATestInputStore, _plain
 from agents.runtime.qa_context import validation_cycle, verify_report_predecessor
+from agents.runtime.evaluation_policy_store import EvaluationPolicyStore, qa_policy_sha256
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration, open_mcp_client
 from mcp_tools.execution_runtime import TrackedMCPExecutor
 from mcp_tools.execution_store import ToolExecutionStore
@@ -133,6 +134,7 @@ class QARuntimeServices:
         self._tools = ToolExecutionStore(repository)
         self._unit, self._browser = UnitTestOutputStore(repository), BrowserTestOutputStore(repository)
         self._inputs = QATestInputStore(repository)
+        self._evaluation_policies = EvaluationPolicyStore(repository)
         self._selectors, self._protected, self._protected_cases = selected, protected, approved
 
     def __repr__(self):
@@ -212,6 +214,9 @@ class QARuntimeServices:
                 if (selector.kind == "PROTECTED"
                         and selector.protected_suite_ref != configuration.configuration.protected_test_suite_ref):
                     raise ValueError
+        self._evaluation_policies.pin(binding, workflow_step_id=execution.metadata.workflow_step_id,
+            source_artifact_id=source.artifact_id,
+            policy_sha256=qa_policy_sha256(self.configuration, self._protected_cases))
 
     def tracked(self, client, execution):
         if type(client) is not BoundMCPClient or client.configuration != self.configuration:

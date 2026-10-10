@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 from mcp_tools.runtime import MCPBinding, MCPDispatcher
+from mcp_tools.core.policy import MCPHostPrincipal
 from mcp_tools.server import create_server
 from mcp_tools.stdio import run_stdio
 from mcp_tools.tools.files import FileTools
@@ -40,8 +41,9 @@ class _Parser(argparse.ArgumentParser):
 
 def main(argv=None):
     parser = _Parser(description="Host-bound MCP stdio contract server")
-    parser.add_argument("--role", required=True, choices=[role.value for role in AgentRole])
-    parser.add_argument("--agent-role", required=True, choices=[role.value for role in AgentRole])
+    parser.add_argument("--role", required=True,
+                        choices=[role.value for role in AgentRole] + [MCPHostPrincipal.ORCHESTRATOR.value])
+    parser.add_argument("--agent-role", choices=[role.value for role in AgentRole])
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--database-path", required=True)
@@ -55,7 +57,9 @@ def main(argv=None):
     parser.add_argument("--security-scan-configuration-json")
     try:
         args = parser.parse_args(argv)
-        binding = MCPBinding(role=AgentRole(args.role), agent_role=AgentRole(args.agent_role),
+        role = (MCPHostPrincipal.ORCHESTRATOR if args.role == MCPHostPrincipal.ORCHESTRATOR.value
+                else AgentRole(args.role))
+        binding = MCPBinding(role=role, agent_role=None if args.agent_role is None else AgentRole(args.agent_role),
                              run_id=args.run_id, workspace_id=args.workspace_id)
         database, root = Path(args.database_path), Path(args.workspace_root)
         if not database.is_absolute() or not root.is_absolute() or database.is_symlink() or not database.is_file():
@@ -98,8 +102,11 @@ def main(argv=None):
         security_sandbox = SandboxRuntime(repository, registry, artifacts, docker=security_docker)
         security = SecurityScanTools(artifacts, security_sandbox, SecurityScanOutputStore(repository),
                                      configuration=security_configuration, max_call_seconds=args.max_call_seconds)
-        handlers = {**tools.handlers(binding.role), **build.handlers(binding.role), **unit.handlers(binding.role),
-                    **browser.handlers(binding.role), **reports.handlers(binding.role), **security.handlers(binding.role)}
+        if binding.role is MCPHostPrincipal.ORCHESTRATOR:
+            handlers = {**build.handlers(binding.role), **reports.handlers(binding.role), **security.handlers(binding.role)}
+        else:
+            handlers = {**tools.handlers(binding.role), **build.handlers(binding.role), **unit.handlers(binding.role),
+                        **browser.handlers(binding.role), **reports.handlers(binding.role), **security.handlers(binding.role)}
         # All ten MCP Tool handlers are connected; default role executors are
         # still separate work and no Tool result creates a product verdict.
         dispatcher = MCPDispatcher(binding, registry, handlers=handlers,

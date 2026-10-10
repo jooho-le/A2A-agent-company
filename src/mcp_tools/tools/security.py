@@ -7,6 +7,8 @@ from pathlib import Path
 from types import MappingProxyType
 
 from mcp_tools.runtime import MCPConfigurationError, MCPExecutionContext, MCPToolExecutionError
+from mcp_tools.runtime import delegate_host_context
+from mcp_tools.core.policy import MCPHostPrincipal
 from mcp_tools.tools.files import _run_file_operation
 from mcp_tools.tools.security_config import SecurityScanConfiguration
 from mcp_tools.tools.security_contract import canonical_json
@@ -50,8 +52,10 @@ class SecurityScanTools:
         return "SecurityScanTools()"
 
     def handlers(self, role):
-        if not isinstance(role, AgentRole):
+        if not isinstance(role, (AgentRole, MCPHostPrincipal)):
             raise MCPConfigurationError()
+        if role is MCPHostPrincipal.ORCHESTRATOR:
+            return MappingProxyType({"read_security_report": self.read_security_report})
         return MappingProxyType({"run_security_scan": self.run_security_scan,
                                  "read_security_report": self.read_security_report}
                                 if role is AgentRole.SECURITY else {})
@@ -130,6 +134,7 @@ class SecurityScanTools:
             raise MCPToolExecutionError("SCANNER_ERROR") from None
 
     async def read_security_report(self, context, arguments):
+        context = delegate_host_context(context, "read_security_report")
         self._context(context)
         try:
             result = await _run_file_operation(self._outputs.read_report, context.binding, arguments["reportRef"])

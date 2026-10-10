@@ -1001,32 +1001,44 @@ class PlannerRunDispatcher:
     def _trace_satisfies_success_contract(
         self, run: WorkflowRun, scenario: ScenarioDefinition
     ) -> bool:
-        events, total = self._repository.list_events(run.run_id, limit=1000, offset=0)
-        if total > len(events):
-            return False
         required = set(scenario.requirement_ids)
-        planner_ok = any(
-            event.event_type == "PLANNER_OUTPUT_VALIDATED"
-            and required.issubset(set(event.requirement_ids))
-            for event in events
-        )
-        developer_ok = any(
-            event.event_type == "DEVELOPER_ARTIFACTS_VALIDATED"
-            and event.code_version == run.code_version
-            and required.issubset(set(event.requirement_ids))
-            for event in events
-        )
-        build_ok = any(
-            event.event_type == "BUILD_PASSED"
-            and event.code_version == run.code_version
-            and required.issubset(set(event.requirement_ids))
-            for event in events
-        )
-        fix_ok = run.fix_attempt == 0 or (
-            any(event.event_type == "ISSUE_CREATED" for event in events)
-            and sum(event.event_type == "FIX_ATTEMPT_STARTED" for event in events)
-            >= run.fix_attempt
-        )
+        planner_ok = developer_ok = build_ok = issue_created = False
+        fix_starts = offset = 0
+        total_at_start = None
+        while True:
+            events, total = self._repository.list_events(
+                run.run_id, limit=1000, offset=offset
+            )
+            if total_at_start is None:
+                # Trace is append-only. Inspect the stable prefix existing when
+                # this check began; concurrent telemetry cannot extend the scan
+                # forever or make a long valid Run fail just by its length.
+                total_at_start = total
+            for event in events[:max(0, total_at_start - offset)]:
+                covers_requirements = required.issubset(set(event.requirement_ids))
+                planner_ok |= (
+                    event.event_type == "PLANNER_OUTPUT_VALIDATED"
+                    and covers_requirements
+                )
+                developer_ok |= (
+                    event.event_type == "DEVELOPER_ARTIFACTS_VALIDATED"
+                    and event.code_version == run.code_version
+                    and covers_requirements
+                )
+                build_ok |= (
+                    event.event_type == "BUILD_PASSED"
+                    and event.code_version == run.code_version
+                    and covers_requirements
+                )
+                issue_created |= event.event_type == "ISSUE_CREATED"
+                fix_starts += event.event_type == "FIX_ATTEMPT_STARTED"
+            offset += len(events)
+            if offset >= total_at_start:
+                break
+            if not events:
+                # A truncated/unavailable prefix is missing evidence, not PASS.
+                return False
+        fix_ok = run.fix_attempt == 0 or (issue_created and fix_starts >= run.fix_attempt)
         return planner_ok and developer_ok and build_ok and fix_ok
 
     def _move_to_human_review(

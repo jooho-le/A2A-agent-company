@@ -8,6 +8,7 @@ from math import isfinite
 from time import monotonic
 from typing import TypeAlias
 from a2a.types import Task, TaskState
+from google.protobuf.json_format import MessageToDict
 
 from orchestrator.a2a import A2AAgentClient, A2AProjectContractError, A2AWorkflowMetadata
 from orchestrator.domain import (
@@ -21,6 +22,7 @@ from orchestrator.domain import (
     WorkflowStepStatus,
 )
 from orchestrator.domain.models import utc_now
+from orchestrator.domain.contract_validation import require_json_integer
 from orchestrator.core.security import redact_data
 
 
@@ -140,6 +142,7 @@ class A2ATaskRunner:
             context,
             task,
             previous_state=None,
+            expected_metadata=metadata,
         )
         received = _make_trace_event(
             run,
@@ -213,6 +216,7 @@ class A2ATaskRunner:
             context,
             task,
             previous_state=None,
+            expected_metadata=_metadata_for_step(run, step),
         )
         received = _make_trace_event(
             run,
@@ -265,6 +269,7 @@ class A2ATaskRunner:
             context,
             task,
             previous_state=previous_state,
+            expected_metadata=_metadata_for_step(run, step),
         )
         events: list[TraceEvent] = []
         await self._record_update(
@@ -387,6 +392,7 @@ class A2ATaskRunner:
             context,
             task,
             previous_state=step.a2a_task_state,
+            expected_metadata=_metadata_for_step(run, continued_step),
         )
         events = [sent]
         await self._record_update(
@@ -521,6 +527,7 @@ class A2ATaskRunner:
                 context,
                 task,
                 previous_state=previous_state,
+                expected_metadata=_metadata_for_step(run, step),
             )
             await self._record_update(
                 run,
@@ -637,7 +644,9 @@ def _apply_task(
     task: Task,
     *,
     previous_state: A2ATaskState | None,
+    expected_metadata: A2AWorkflowMetadata,
 ) -> tuple[WorkflowStep, AgentContext, TaskRunDisposition]:
+    _check_task_metadata(task, expected_metadata)
     if not task.id.strip():
         raise A2ATaskProtocolError("Agent returned a Task without a server Task ID")
     if step.a2a_task_id is not None and step.a2a_task_id != task.id:
@@ -691,6 +700,33 @@ def _apply_task(
     )
     updated_context = AgentContext.model_validate(updated_context_data)
     return updated_step, updated_context, disposition
+
+
+def _check_task_metadata(task: Task, expected: A2AWorkflowMetadata) -> None:
+    """Validate supplied project echoes without requiring optional A2A metadata.
+
+    Official Task metadata may contain unrelated extensions. Only the project
+    fields that a peer actually supplies are schema-checked and compared with
+    the current request; absence is not permission to replace local identity.
+    """
+    values = MessageToDict(task.metadata)
+    aliases = {field.alias or name for name, field in A2AWorkflowMetadata.model_fields.items()}
+    supplied = {name: value for name, value in values.items() if name in aliases}
+    if not supplied:
+        return
+    try:
+        for name in ("requirementIds", "projectArtifactIds"):
+            if name in supplied and type(supplied[name]) is not list:
+                raise ValueError
+        for name in ("attempt", "codeVersion"):
+            if name in supplied:
+                supplied[name] = require_json_integer(supplied[name])
+        echoed = A2AWorkflowMetadata.model_validate({**expected.to_a2a_json(), **supplied})
+        if echoed != expected:
+            raise ValueError
+    except Exception:
+        # Do not include the peer's values or validation exception in logs.
+        raise A2ATaskProtocolError("Task project metadata does not match its WorkflowStep") from None
 
 
 def _get_task_state(task: Task) -> A2ATaskState:
