@@ -238,6 +238,16 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.check_tools --file configs/ow
 
 검사는 설정과 실제 Lock Hash까지만 확인하고 `executionReady=false`, `DockerChecked=false`를 반환합니다. Docker/API/제품 Build/Test를 실행하지 않습니다. `docker/sandbox/Dockerfile`은 사전 준비한 승인 Base·Hash 고정 Wheel·Chromium을 위한 별도 Recipe이며 아직 실제 이미지를 만들지 않았습니다. 자세한 준비 항목·역할별 정책·격리 경계는 [39번 이미지·Tool 설정](docs/39-sandbox-image-tool-profiles.md)을 참고하세요.
 
+### 승인된 시작 Source와 Run Workspace 준비 — 40번
+
+`configs/owned-source.example.json`에 시작 Repository·전체 Commit ID·정규 Snapshot Hash·Lock 경로를 명시하는 Host 설정을 추가했습니다. 미승인 값은 `null`이며 원본 그대로는 실패합니다. 로컬 복사본 `configs/owned-source.local.json`에 승인값을 넣고 39번 Tool 설정과 함께 검사합니다.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m agents.platform.check_source --file configs/owned-source.local.json --tools configs/owned-tools.local.json
+```
+
+이 명령은 실제 Git/Lock을 읽기 전용으로 검증하고 `executionReady=false`, `workspacePrepared=false`를 반환합니다. Host용 `RegisteredSourcePreparer`는 동결한 시작 기준과 일치하는 등록 Run의 빈 Source에만 코드와 최소 Git object를 준비합니다. 기존 파일·불명확한 중간 실패는 덮어쓰거나 자동 재실행하지 않습니다. 실제 Host 연결과 공유 Run deadline 전달은 41번 작업입니다. 사용법·검증·한계는 [40번 시작 Source 준비](docs/40-approved-starting-source.md)를 참고하세요.
+
 ## 테스트
 
 ```bash
