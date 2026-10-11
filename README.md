@@ -2,7 +2,9 @@
 
 Python 3.10+와 FastAPI를 사용하는 Orchestrator 서비스입니다.
 
-## 로컬 실행
+현재 역할 1·2 구현의 사용법·설정·API/Artifact 인계 기준은 [45번 플랫폼 인계 안내](docs/45-owned-platform-handoff.md)에 정리했습니다. **44번은 준비 점검만 완료했고 실제 LLM·Docker 최소 Run 실행은 아직 미수행**입니다. 문서 정리 완료와 실제 시연 성공은 구분합니다.
+
+## 기본 Orchestrator 실행 — Bootstrap
 
 `uv`가 설치되어 있다면 프로젝트 루트에서 다음을 실행합니다.
 
@@ -12,6 +14,8 @@ uv run uvicorn orchestrator.main:app --app-dir src --reload
 ```
 
 기본 주소는 `http://127.0.0.1:8000`입니다.
+
+이 명령은 실제 네 Agent·승인 Tool·공유 예산을 조립하는 Owned Host 실행 명령이 아닙니다. 실제 Host는 [45번 실행 안내](docs/45-owned-platform-handoff.md)에 따라 승인 설정 검사 후 명시적으로 시작합니다.
 
 ```text
 GET /health
@@ -35,7 +39,7 @@ POST /api/v1/runs/{runId}/cancel
 GET /docs
 ```
 
-설정값은 환경변수 또는 프로젝트 루트의 `.env` 파일에서 읽습니다. 시작값은 `.env.example`을 참고하세요.
+기본 Orchestrator 설정은 환경변수 또는 프로젝트 루트의 `.env` 파일에서 읽습니다. 시작값은 `.env.example`을 참고하세요. Owned Host의 승인 설정은 이와 다르며 `.env`를 자동으로 읽거나 해당 환경변수로 덮어쓰지 않습니다.
 
 현재 구현은 SCN-001 고정 기준, Planner → Developer → QA/Security 실행, 최대 3회 수정·새 Snapshot 재검증, 불변 Artifact/Issue/Trace 저장 및 최종 판정입니다. Run 생성 때 workspace ID와 Scenario 정책·실행 설정을 동결하고, Build/QA/Security의 동일 Manifest 및 MCP 실행·재시도 근거가 확인되어야 `SUCCESS` 또는 `UNVERIFIED`를 확정합니다. 비밀정보는 전송·저장·로그 경계에서 마스킹하고 Agent 인증은 HTTP 헤더로만 전달합니다. 최신 변경과 제한은 [14번 정의서 준수 보완](docs/14-orchestrator-contract-compliance.md)을 참고하세요.
 
@@ -50,6 +54,8 @@ Build/Test/Scan의 실제 MCP 호출은 Agent/MCP 담당 범위입니다. Orches
 기본 DB 경로는 `.data/orchestrator.sqlite3`이며 `ORCHESTRATOR_DATABASE_PATH` 환경변수로 바꿀 수 있습니다. `.data/`는 Git에서 제외됩니다.
 
 ## Agent/MCP 개발 기반 — 15~17번
+
+아래 번호별 설명은 해당 단계의 작업 이력입니다. 초기 단계의 미연결 상태와 현재 실행 구성을 혼동하지 않도록 최신 사용법은 [45번](docs/45-owned-platform-handoff.md)을 기준으로 읽으세요.
 
 담당 범위를 1번 Orchestrator와 2번 Agent/MCP로 확장했습니다. `src/agents/`에는 공통 A2A 서버·설정이, `src/mcp_tools/`에는 stdio 서버·Client·역할별 실제 Tool이 있습니다. 공통 LLM 엔진과 Workspace/Artifact/Sandbox를 바탕으로 Planner·Developer·QA·Security의 명시적 실행기와 34번 단일 Host 연결을 추가했습니다. 기본 Agent CLI는 Bootstrap을 유지합니다. 3번 웹 서비스와 4번 평가 모듈은 변경하지 않습니다.
 
@@ -276,7 +282,11 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 ### 자체 실제 실행 준비 점검 — 44번, 실행 미수행
 
-현재 승인된 로컬 Runtime/Tool/Source/가격표와 Host 자격증명이 없고, 점검한 shell PATH에서 Docker CLI를 찾지 못했습니다. 실제 유료 LLM·Docker·작은 Run 실행은 아직 수행하지 않았습니다. 미승인 예시가 검사에서 거절되는 것을 실행 성공으로 취급하지 않습니다. 필요한 사용자 결정/환경 준비와 실행 순서는 [44번 준비 점검](docs/44-owned-live-smoke-readiness.md)을 참고하세요.
+44번 점검 당시 승인된 로컬 Runtime/Tool/Source/가격표와 Host 자격증명이 없었고, 점검한 shell PATH에서 Docker CLI를 찾지 못했습니다. 실제 유료 LLM·Docker·작은 Run 실행은 아직 수행하지 않았습니다. 미승인 예시가 검사에서 거절되는 것을 실행 성공으로 취급하지 않습니다. 필요한 사용자 결정/환경 준비와 실행 순서는 [44번 준비 점검](docs/44-owned-live-smoke-readiness.md)을 참고하세요.
+
+### 역할 1·2 최종 정리 및 인계 — 45번
+
+[45번 플랫폼 인계 안내](docs/45-owned-platform-handoff.md)에 구현 위치·번호별 이력, Bootstrap/Owned Host 차이, 승인 설정·실행 명령, Run 조회·Artifact/Manifest 계약, 팀원 인계 경계와 미검증/보류 항목을 정리했습니다. 사용자 요청에 따라 실제 실행보다 문서를 먼저 정리했으며, **다음은 여전히 44번 실제 실행 준비·확인**입니다. 코드·공식 Schema·의존성·팀원 모듈 변경이나 실제 외부 실행·Git commit/push는 하지 않았습니다.
 
 ## 테스트
 
