@@ -21,6 +21,7 @@ import unicodedata
 from typing import Literal
 
 from orchestrator.artifacts.contracts import ArtifactAccessError, ArtifactErrorCode
+from orchestrator.core.source_credentials import SourceCredentialError, validate_source_bytes
 from orchestrator.workspaces.policy import WorkspaceAccessError, relative_parts
 
 
@@ -252,6 +253,7 @@ class GitSnapshotBuilder:
         with tarfile.open(fileobj=output, mode="w", format=tarfile.PAX_FORMAT) as archive:
             for path, mode, oid in sorted(entries, key=lambda entry: entry[0].encode("utf-8")):
                 value = object_bytes("blob", oid, self.limits.max_file_bytes)
+                _validate_source_content(value)
                 total += len(value)
                 if total > self.limits.max_total_bytes:
                     raise ArtifactAccessError(ArtifactErrorCode.TOO_LARGE)
@@ -371,6 +373,13 @@ def _validate_source_path(path):
             relative_parts("source/" + normalized)
         except WorkspaceAccessError:
             raise ArtifactAccessError(ArtifactErrorCode.PATH_DENIED) from None
+
+
+def _validate_source_content(content):
+    try:
+        validate_source_bytes(content)
+    except SourceCredentialError:
+        raise ArtifactAccessError(ArtifactErrorCode.PATH_DENIED) from None
 
 
 def _object_hash(object_format, kind, value):
@@ -555,6 +564,7 @@ def _validate_git_export(export):
                 or file_bytes > limits.max_total_bytes
             ):
                 raise ArtifactAccessError(ArtifactErrorCode.TOO_LARGE)
+            _validate_source_content(child.content)
             files.append((path, child.content, 0o755 if mode == b"100755" else 0o644))
     # Parents, history, unrelated objects and tag objects cannot piggyback on a
     # trusted starting Source. Only this commit's exact current graph is kept.

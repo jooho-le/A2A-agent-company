@@ -74,6 +74,8 @@ Tool 실행 완료 PASS와 제품 검증 PASS는 다르다. Tool PASS는 검사�
 
 ## 4. 제외한 항목과 남은 제한
 
+아래는 17번 당시의 보류 기록이다. URL Credential 보호와 WAL 초기화 경쟁은 후속 사용자 요청에 따라 [46번 점검 보완](46-platform-audit-hardening.md)에서 수정했으며, 현재 정책/검증 범위는 해당 문서를 따른다.
+
 ### 사용자 요청으로 제외: 점검 2번 비밀번호 보호 정책 보완
 
 RunConfiguration의 `protectedTestSuiteRef`/`scannerProfileRef` URL에 Credential이 포함됐을 때의 저장·조회 보호는 **이번에 수정하지 않았다**. 해당 모델과 Reference 마스킹 정책은 변경하지 않았다. 이 참조에는 실제 비밀번호·Token을 넣지 않아야 하며, 모든 입력 경로의 비밀정보 보호가 완료됐다는 판정은 하지 않는다.

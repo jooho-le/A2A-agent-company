@@ -13,6 +13,7 @@ from uuid import RFC_4122, UUID
 from orchestrator.artifacts.contracts import (
     MAX_CONTENT_BYTES, ArtifactAccessError, ArtifactErrorCode, StoredContent,
 )
+from orchestrator.core.source_credentials import SourceCredentialError, validate_source_archive_credentials
 from orchestrator.domain.developer_artifacts import BuildReportArtifact, ChangeReportArtifact
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
 from orchestrator.domain.planning_artifacts import RequirementArtifact
@@ -105,6 +106,11 @@ class SQLiteArtifactContentStore:
         digest = sha256(content).hexdigest()
         if source and metadata.snapshot_sha256 != digest:
             raise ArtifactAccessError(ArtifactErrorCode.INTEGRITY)
+        if source:
+            try:
+                validate_source_archive_credentials(content)
+            except SourceCredentialError:
+                raise ArtifactAccessError(ArtifactErrorCode.PATH_DENIED) from None
         if not source and content != raw.encode("utf-8"):
             raise ArtifactAccessError(ArtifactErrorCode.INTEGRITY)
         metadata_hash = sha256(raw.encode("utf-8")).hexdigest()
@@ -373,6 +379,8 @@ class SQLiteArtifactContentStore:
                 raise ValueError
             if source and digest != metadata.snapshot_sha256:
                 raise ValueError
+            if source:
+                validate_source_archive_credentials(content)
             if not source and content != raw.encode("utf-8"):
                 raise ValueError
             grants = connection.execute("SELECT role,access FROM snapshot_read_grants WHERE artifact_id=?", (row["artifact_id"],)).fetchall()

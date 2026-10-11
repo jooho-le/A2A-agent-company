@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import time
 from uuid import UUID, uuid4
 
 from a2a.helpers import new_data_part, new_task
@@ -46,6 +47,8 @@ _INTERRUPTED = frozenset({TaskState.TASK_STATE_INPUT_REQUIRED, TaskState.TASK_ST
 _ACTIVE = frozenset({TaskState.TASK_STATE_SUBMITTED, TaskState.TASK_STATE_WORKING})
 _VALID_STATES = _TERMINAL | _INTERRUPTED | _ACTIVE
 _SCHEMA_VERSION = 1
+_WAL_INITIALIZATION_TIMEOUT_SECONDS = 5.0
+_WAL_INITIALIZATION_RETRY_SECONDS = 0.01
 
 
 class AgentTaskStoreError(RuntimeError):
@@ -110,6 +113,14 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
         self._generator = UUIDGenerator()
 
     async def start(self) -> None:
+        try:
+            self._start()
+        except sqlite3.OperationalError:
+            # Startup failures must not expose raw SQLite errors (including
+            # local paths/SQL). Role and lease errors remain distinct.
+            raise AgentTaskStoreError("Agent database startup failed") from None
+
+    def _start(self) -> None:
         if self._lease_token is not None:
             with self._connection() as connection:
                 self._assert_lease(connection)
@@ -467,8 +478,8 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
         raise AgentStoreLeaseError("Agent database already has a live service owner")
 
     @contextmanager
-    def _connection(self):
-        connection = sqlite3.connect(self.path, timeout=5)
+    def _connection(self, *, timeout: float = 5):
+        connection = sqlite3.connect(self.path, timeout=timeout)
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             yield connection
@@ -551,5 +562,40 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
                         f"CREATE TRIGGER IF NOT EXISTS {table}_{operation.lower()}_immutable "
                         f"BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'Append-only Agent audit data'); END"
                     )
-        with self._connection() as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
+        self._enable_wal()
+
+    def _enable_wal(self) -> None:
+        """Enable WAL outside a transaction, tolerating startup lock races.
+
+        The identity transaction above is still the sole role arbitration.
+        Another initializer may acquire its SQLite lock after that transaction
+        commits and before this PRAGMA can upgrade the journal. SQLite does not
+        consistently wait for the connection's busy timeout for this upgrade,
+        so only BUSY/LOCKED failures are retried within a local five-second
+        deadline. This never retries an Agent, a model call, or a Tool.
+        """
+        deadline = time.monotonic() + _WAL_INITIALIZATION_TIMEOUT_SECONDS
+        while True:
+            try:
+                remaining = max(0.0, deadline - time.monotonic())
+                with self._connection(timeout=min(0.1, remaining)) as connection:
+                    row = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+                if row is None or str(row[0]).lower() != "wal":
+                    raise AgentTaskStoreError("Agent database WAL mode could not be verified")
+                return
+            except sqlite3.OperationalError as error:
+                # sqlite_errorcode is unavailable on Python 3.10. Use exact
+                # SQLite lock messages there, not a broad substring match.
+                code = getattr(error, "sqlite_errorcode", None)
+                locked = (
+                    (code & 0xFF) in (5, 6) if isinstance(code, int)
+                    else str(error).lower() in (
+                        "database is locked", "database table is locked", "database schema is locked",
+                    )
+                )
+                if not locked:
+                    raise AgentTaskStoreError("Agent database WAL initialization failed") from None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AgentTaskStoreError("Agent database WAL initialization is busy") from None
+                time.sleep(min(_WAL_INITIALIZATION_RETRY_SECONDS, remaining))

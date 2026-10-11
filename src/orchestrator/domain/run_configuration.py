@@ -6,8 +6,9 @@ import json
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import Field, UUID4, field_validator, model_validator
+from pydantic import ConfigDict, Field, UUID4, field_validator, model_validator
 
+from orchestrator.core.security import contains_credential_reference
 from orchestrator.domain.models import utc_now
 from orchestrator.domain.snapshot_handoff import ImmutableDomainModel
 
@@ -54,6 +55,7 @@ class ExecutionLimits(ImmutableDomainModel):
 class RunConfiguration(ImmutableDomainModel):
     """Experiment metadata must be complete before labeling a Run an experiment."""
 
+    model_config = ConfigDict(hide_input_in_errors=True)
     experiment_id: UUID4 | None = Field(default=None, alias="experimentId")
     architecture: Literal["MULTI_AGENT"] = "MULTI_AGENT"
     starting_commit_hash: str | None = Field(default=None, alias="startingCommitHash", pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -73,6 +75,15 @@ class RunConfiguration(ImmutableDomainModel):
             raise ValueError("declared comparison references and warmup state must not be blank")
         return value.strip() if value is not None else None
 
+    @field_validator("protected_test_suite_ref", "scanner_profile_ref")
+    @classmethod
+    def references_must_not_embed_credentials(cls, value: str | None) -> str | None:
+        if value is not None and contains_credential_reference(value):
+            # Fail before immutable configuration persistence; never rewrite a
+            # frozen artifact or return the submitted reference in this error.
+            raise ValueError("comparison references must not contain credentials")
+        return value
+
     @model_validator(mode="after")
     def validate_experiment_inputs(self) -> "RunConfiguration":
         if self.experiment_id is not None and any(value is None for value in (
@@ -86,6 +97,8 @@ class RunConfiguration(ImmutableDomainModel):
 
 
 class RunConfigurationArtifact(ImmutableDomainModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     artifact_id: UUID4 = Field(default_factory=uuid4, alias="artifactId")
     artifact_type: Literal["RUN_CONFIGURATION"] = Field(default="RUN_CONFIGURATION", alias="artifactType")
     artifact_version: Literal[1] = Field(default=1, alias="artifactVersion")

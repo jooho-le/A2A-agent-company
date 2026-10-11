@@ -28,6 +28,7 @@ from mcp_tools.tools.file_io import _locked_root
 from orchestrator.artifacts.contracts import ArtifactAccessError, ArtifactErrorCode
 from orchestrator.artifacts.git_snapshot import GitSnapshotBuilder, GitSnapshotLimits, _object_hash, _validate_source_path
 from orchestrator.core.security import redact_text
+from orchestrator.core.source_credentials import SourceCredentialError, validate_source_bytes
 from orchestrator.domain.developer_artifacts import ChangeReportFile
 from orchestrator.domain.states import AgentRole
 from orchestrator.sandbox.materialization import _archive_entries, _check_names, _path as _snapshot_path
@@ -213,7 +214,12 @@ class GitDeveloperCheckpoint:
                     total += size
                     if total > self._limits.max_total_bytes:
                         raise DeveloperCheckpointError()
-                    files[path] = (b"".join(chunks), 0o755 if info.st_mode & 0o111 else 0o644)
+                    content = b"".join(chunks)
+                    try:
+                        validate_source_bytes(content)
+                    except SourceCredentialError:
+                        raise DeveloperCheckpointError() from None
+                    files[path] = (content, 0o755 if info.st_mode & 0o111 else 0o644)
                 else:
                     raise DeveloperCheckpointError()
             if _signature(before_directory) != _signature(os.fstat(directory_fd)):

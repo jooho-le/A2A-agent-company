@@ -6,8 +6,10 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from a2a.helpers import new_data_part
@@ -568,24 +570,140 @@ class AgentTaskStoreTests(unittest.IsolatedAsyncioTestCase):
             await self.store.delete("missing", self.context)
 
     async def test_concurrent_initial_roles_cannot_share_a_new_database(self):
-        path = Path(self.directory.name) / "race.sqlite3"
-        stores = [SQLiteAgentTaskStore(path, role) for role in (AgentRole.PLANNER, AgentRole.SECURITY)]
+        for attempt in range(24):
+            with self.subTest(attempt=attempt):
+                path = Path(self.directory.name) / f"race-{attempt}.sqlite3"
+                stores = [SQLiteAgentTaskStore(path, role) for role in (AgentRole.PLANNER, AgentRole.SECURITY)]
+                barrier = threading.Barrier(2)
 
-        def start_store(store):
-            try:
-                asyncio.run(store.start())
-                return True
-            except AgentStoreRoleError:
-                return False
+                def start_store(store):
+                    barrier.wait(timeout=5)
+                    try:
+                        asyncio.run(store.start())
+                        return True
+                    except AgentStoreRoleError:
+                        return False
 
-        results = await asyncio.gather(*(asyncio.to_thread(start_store, store) for store in stores))
-        self.assertEqual(results.count(True), 1)
-        winner = stores[results.index(True)]
-        self.addAsyncCleanup(winner.aclose)
+                results = await asyncio.gather(*(asyncio.to_thread(start_store, store) for store in stores))
+                self.assertEqual(results.count(True), 1)
+                winner = stores[results.index(True)]
+                self.addAsyncCleanup(winner.aclose)
+                with sqlite3.connect(path) as connection:
+                    role, version = connection.execute("SELECT role,schema_version FROM agent_store_identity").fetchone()
+                    lease = connection.execute("SELECT token, owner_pid FROM agent_process_lease").fetchall()
+                    mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+                self.assertEqual(role, winner.role.value)
+                self.assertEqual(version, 1)
+                self.assertEqual(lease, [(winner._lease_token, os.getpid())])
+                self.assertEqual(mode, "wal")
+
+    async def test_concurrent_initial_same_role_has_one_live_lease(self):
+        for attempt in range(12):
+            with self.subTest(attempt=attempt):
+                path = Path(self.directory.name) / f"lease-race-{attempt}.sqlite3"
+                stores = [SQLiteAgentTaskStore(path, AgentRole.QA) for _ in range(2)]
+                barrier = threading.Barrier(2)
+
+                def start_store(store):
+                    barrier.wait(timeout=5)
+                    try:
+                        asyncio.run(store.start())
+                        return True
+                    except AgentStoreLeaseError:
+                        return False
+
+                results = await asyncio.gather(*(asyncio.to_thread(start_store, store) for store in stores))
+                self.assertEqual(results.count(True), 1)
+                winner = stores[results.index(True)]
+                self.addAsyncCleanup(winner.aclose)
+                with sqlite3.connect(path) as connection:
+                    self.assertEqual(connection.execute("SELECT token FROM agent_process_lease").fetchall(), [(winner._lease_token,)])
+                    self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+
+    async def test_wal_upgrade_retries_a_real_sqlite_read_lock(self):
+        path = Path(self.directory.name) / "wal-lock.sqlite3"
         with sqlite3.connect(path) as connection:
-            role, version = connection.execute("SELECT role,schema_version FROM agent_store_identity").fetchone()
-        self.assertEqual(role, winner.role.value)
-        self.assertEqual(version, 1)
+            connection.execute("CREATE TABLE fixture(value TEXT)")
+        store = SQLiteAgentTaskStore(path, AgentRole.PLANNER)
+        reader = sqlite3.connect(path)
+        reader.execute("BEGIN")
+        reader.execute("SELECT * FROM fixture").fetchall()
+        blocked = threading.Event()
+        original_sleep = time.sleep
+
+        def observed_retry(seconds):
+            blocked.set()
+            original_sleep(seconds)
+
+        with patch("agents.api.sqlite_task_store.time.sleep", side_effect=observed_retry):
+            worker = asyncio.create_task(asyncio.to_thread(store._enable_wal))
+            try:
+                self.assertTrue(await asyncio.to_thread(blocked.wait, 2), "WAL upgrade did not encounter the held lock")
+            finally:
+                reader.rollback()
+                reader.close()
+                await worker
+        with sqlite3.connect(path) as connection:
+            self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        self.assertIsNone(store._lease_token)
+
+    async def test_wal_upgrade_retries_only_sqlite_busy_or_locked(self):
+        for code in (None, 5, 6, 261):
+            with self.subTest(code=code):
+                error = sqlite3.OperationalError("database is locked")
+                if code is not None:
+                    error.sqlite_errorcode = code
+                connection = MagicMock()
+                cursor = MagicMock()
+                cursor.fetchone.return_value = ("wal",)
+                connection.execute.side_effect = [error, error, cursor]
+                with patch.object(self.store, "_connection") as connect:
+                    connect.return_value.__enter__.return_value = connection
+                    with patch("agents.api.sqlite_task_store.time.monotonic", return_value=0), patch(
+                        "agents.api.sqlite_task_store.time.sleep",
+                    ) as sleep:
+                        self.store._enable_wal()
+                self.assertEqual(connection.execute.call_count, 3)
+                self.assertEqual(sleep.call_count, 2)
+
+    async def test_wal_upgrade_lock_timeout_is_safe_and_bounded(self):
+        connection = MagicMock()
+        connection.execute.side_effect = sqlite3.OperationalError("database is locked")
+        with patch.object(self.store, "_connection") as connect:
+            connect.return_value.__enter__.return_value = connection
+            with patch("agents.api.sqlite_task_store.time.monotonic", side_effect=[0, 0, 5]), patch(
+                "agents.api.sqlite_task_store.time.sleep",
+            ) as sleep:
+                with self.assertRaisesRegex(AgentTaskStoreError, "WAL initialization is busy"):
+                    self.store._enable_wal()
+        sleep.assert_not_called()
+        self.assertEqual(connection.execute.call_count, 1)
+
+    async def test_wal_upgrade_nonlock_failure_is_not_retried_or_exposed(self):
+        connection = MagicMock()
+        connection.execute.side_effect = sqlite3.OperationalError("unable to open /private/local-database.sqlite3")
+        with patch.object(self.store, "_connection") as connect:
+            connect.return_value.__enter__.return_value = connection
+            with patch("agents.api.sqlite_task_store.time.sleep") as sleep:
+                with self.assertRaisesRegex(AgentTaskStoreError, "^Agent database WAL initialization failed$"):
+                    self.store._enable_wal()
+        sleep.assert_not_called()
+        self.assertEqual(connection.execute.call_count, 1)
+
+    async def test_wal_upgrade_must_confirm_wal_mode(self):
+        connection = MagicMock()
+        connection.execute.return_value.fetchone.return_value = ("delete",)
+        with patch.object(self.store, "_connection") as connect:
+            connect.return_value.__enter__.return_value = connection
+            with self.assertRaisesRegex(AgentTaskStoreError, "WAL mode could not be verified"):
+                self.store._enable_wal()
+
+    async def test_startup_sqlite_failure_is_safe_and_never_acquires_lease(self):
+        store = SQLiteAgentTaskStore(Path(self.directory.name) / "failed.sqlite3", AgentRole.PLANNER)
+        with patch.object(store, "_initialize", side_effect=sqlite3.OperationalError("database is locked")):
+            with self.assertRaisesRegex(AgentTaskStoreError, "^Agent database startup failed$"):
+                await store.start()
+        self.assertIsNone(store._lease_token)
 
 
 if __name__ == "__main__":

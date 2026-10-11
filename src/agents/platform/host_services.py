@@ -6,7 +6,6 @@ The actual transport retains its approved policy while each lifetime shares
 the already admitted Run deadline, including discovery and cleanup.
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -16,6 +15,7 @@ import json
 from pathlib import Path
 from uuid import UUID
 
+from agents.core.deadlines import task_deadline
 from agents.llm.budget import ExecutionBudget
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError
 from agents.platform.composition import PlatformConfigurationError
@@ -153,7 +153,7 @@ class HostRuntimeServices:
             # Do not clamp max_call_seconds: it is immutable evaluation policy,
             # not a fresh allowance on each continuation/revalidation attempt.
             budget.check()
-            deadline = asyncio.timeout(budget.remaining_seconds())
+            deadline = task_deadline(budget.remaining_seconds())
             try:
                 async with deadline:
                     async with factory(configuration) as client:

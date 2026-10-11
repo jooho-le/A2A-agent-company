@@ -79,6 +79,15 @@ class DeveloperWorkspaceTests(unittest.TestCase):
         self.assertEqual(repr(checkpoint), "GitDeveloperCheckpoint()")
         self.assertNotIn(str(self.source), repr(checkpoint))
 
+    def test_credential_candidate_fails_before_creating_git_objects(self):
+        self.checkpoint.prepare()
+        (self.source / "app.py").write_bytes(b'api_key="SYNTHETIC_CHECKPOINT_SECRET_NOT_REAL"\n')
+        before_index = (self.source / ".git/index").read_bytes()
+        with patch.object(self.checkpoint, "_commit", side_effect=AssertionError("no credential objects")):
+            self.assert_code("FAILED", self.checkpoint.checkpoint)
+        self.assertEqual((self.source / ".git/index").read_bytes(), before_index)
+        self.assertEqual(self.git("rev-parse", "HEAD").decode(), self.baseline)
+
     def test_constructor_rejects_untrusted_baseline_references(self):
         for value in ("HEAD", self.baseline[:10], self.baseline.upper(), self.baseline + "^{tree}", "--help", None, True):
             with self.subTest(value=value):

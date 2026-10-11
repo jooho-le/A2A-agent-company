@@ -19,6 +19,7 @@ from types import MappingProxyType
 from urllib.parse import quote
 from uuid import RFC_4122, UUID, uuid4
 
+from agents.core.deadlines import task_deadline
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, parse_json
 from agents.platform.composition import _host_call
@@ -343,7 +344,7 @@ class TrustedSecurityProofVerifier:
         execution.budget.check()
         assessor = self._approval.assess
         try:
-            deadline = asyncio.timeout(execution.budget.remaining_seconds())
+            deadline = task_deadline(execution.budget.remaining_seconds())
             async with deadline:
                 response = await _host_call(assessor, request)
             execution.budget.check()

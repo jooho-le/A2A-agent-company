@@ -42,6 +42,7 @@ from orchestrator.domain.workspaces import WorkspaceRecord
 from orchestrator.domain.trace import TraceEvent
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.infrastructure.sqlite_workflows import _insert_event
+from orchestrator.sandbox.materialization import _archive_entries, _canonical_archive
 from orchestrator.workspaces.policy import (
     WorkspaceAccess, WorkspaceAccessError, authorize_path,
 )
@@ -262,6 +263,22 @@ class SourceConfigurationTests(_SourceFixture, unittest.TestCase):
 
 
 class StartingSourceVerificationTests(_SourceFixture, unittest.TestCase):
+    def test_committed_credential_body_rejects_before_any_workspace_copy(self):
+        for encoding in ("utf-8", "utf-16-le"):
+            with self.subTest(encoding=encoding):
+                content = ('api_key="' + _SECRET + '"').encode(encoding)
+                (self.seed / "config.bin").write_bytes(content)
+                self.git("add", "config.bin")
+                self.git("commit", "-m", "inert synthetic credential fixture")
+                entries = (*_archive_entries(self.snapshot.archive), ("config.bin", content, 0o644))
+                malicious_archive = _canonical_archive(sorted(entries, key=lambda entry: entry[0].encode("utf-8")))
+                data = {**self.data, "commitHash": self.git("rev-parse", "HEAD").strip(),
+                        "snapshotSha256": sha256(malicious_archive).hexdigest()}
+                before = _files(self.seed)
+                self.assert_code("SOURCE_BASELINE_MISMATCH", self.verify, data)
+                self.assertFalse(self.registry.base_path.exists())
+                self.assertEqual(_files(self.seed), before)
+
     def test_verified_export_is_immutable_and_does_not_prepare_workspace(self):
         verified = self.verify()
         self.assertIs(type(verified), VerifiedStartingSource)

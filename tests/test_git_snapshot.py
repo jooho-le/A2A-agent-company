@@ -64,6 +64,18 @@ class GitSnapshotTests(unittest.TestCase):
         self.assertEqual(repr(builder), "GitSnapshotBuilder()")
         self.assertFalse((self.root / "not-created").exists())
 
+    def test_committed_source_credentials_rejected_before_export(self):
+        for filename, content in (
+            ("app.py", b'api_key="SYNTHETIC_SOURCE_SECRET_NOT_REAL"\n'),
+            ("config.bin", '비밀번호="SYNTHETIC_SOURCE_SECRET_NOT_REAL"'.encode("utf-16-le")),
+        ):
+            with self.subTest(filename=filename):
+                (self.source / filename).write_bytes(content)
+                commit = self.commit_files()
+                self.assert_error(ArtifactErrorCode.PATH_DENIED, lambda: self.builder.build(commit, "uv.lock"))
+                self.assert_error(ArtifactErrorCode.PATH_DENIED, lambda: self.builder.export(commit, "uv.lock"))
+                (self.source / filename).write_bytes(b"# no credential\n")
+
     def test_committed_exact_bytes_normalized_archive_and_hashes(self):
         (self.source / "app.py").write_bytes(b"dirty working copy")
         first = self.builder.build(self.commit, "uv.lock")

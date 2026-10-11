@@ -4,6 +4,8 @@ Python 3.10+와 FastAPI를 사용하는 Orchestrator 서비스입니다.
 
 현재 역할 1·2 구현의 사용법·설정·API/Artifact 인계 기준은 [45번 플랫폼 인계 안내](docs/45-owned-platform-handoff.md)에 정리했습니다. **44번은 준비 점검만 완료했고 실제 LLM·Docker 최소 Run 실행은 아직 미수행**입니다. 문서 정리 완료와 실제 시연 성공은 구분합니다.
 
+45번 이후 점검의 Source 비밀정보 반입, Python 3.10 deadline 호환성, RunConfiguration URL Credential, Agent DB WAL 시작 경쟁은 [46번 점검 보완](docs/46-platform-audit-hardening.md)에 기록했습니다. 기존 비밀정보 포함 불변 데이터는 자동 변경하지 않으며 새 검사에서 거부될 수 있습니다.
+
 ## 기본 Orchestrator 실행 — Bootstrap
 
 `uv`가 설치되어 있다면 프로젝트 루트에서 다음을 실행합니다.

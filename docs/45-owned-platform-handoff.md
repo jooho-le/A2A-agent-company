@@ -9,6 +9,7 @@
 | 1~43번 | Orchestrator, 네 Agent 실행기, MCP Tool, 격리 실행, 승인 설정, 의미 검증 연결, 사용량·비용 원장 구현. 실제 운영 검증과는 별개 |
 | 44번 | 준비 점검만 완료. 실제 LLM·Docker 최소 Run 실행은 미수행이며 전체 완료 아님 |
 | 45번 | 사용자의 요청에 따라 실제 실행보다 먼저 문서 정리. 이 문서를 실제 실행 성공 증거로 사용하지 않음 |
+| 46번 | 후속 점검의 Source 비밀정보·Python deadline 호환성·설정 URL Credential·Agent DB WAL 경쟁 보완. 실제 실행 완료와는 별개 |
 | 역할 3·4 | 제품 UI/API/DB, 독립 테스트·보안 기준, Single/Multi 비교 실험은 이 문서의 구현 범위 밖 |
 
 따라서 인계할 수 있는 것은 **플랫폼 코드와 연결 계약**이다. 회원가입 완성 시연, 실제 유료 모델·Docker 동작, 독립 보안 검증, 실제 청구 금액까지 확인했다는 뜻은 아니다. 44번 실제 실행 결과는 확인 후 이 문서에 별도로 추가한다.
@@ -253,7 +254,7 @@ Build/QA/Security가 보존할 Execution Manifest는 `repositoryId`, `codeVersio
 
 전체 Run의 모델/Tool 호출·Token·시간 예산은 네 역할·수정·재개에서 공유한다. 준비·대기·입력 대기도 같은 deadline에 포함되며 재개한다고 초기화하지 않는다. 현재 PID 기반 잠금과 공유 예산은 단일 호스트 MVP 경계다.
 
-기존 명시적 보류 항목인 RunConfiguration URL Credential 보호 정책과 공유 Agent DB WAL 초기화 경쟁은 이 문서 정리로 해결되지 않았다. 역할별 DB 분리를 기존 경쟁의 수정 완료로 설명하지 않는다. 모든 비밀번호·운영 보안 정책이 검증됐다는 주장도 하지 않는다.
+45번 문서 정리 당시 보류됐던 RunConfiguration URL Credential 보호와 Agent DB WAL 초기화 경쟁은 이후 [46번 점검 보완](46-platform-audit-hardening.md)에서 수정했다. Source 비밀정보 반입 검사와 Python 3.10 deadline 대체 경로도 추가했다. 이는 실제 운영/제품 보안 전수 검증 완료가 아니며, 기존 Credential 포함 불변 DB는 자동 변경 없이 새 검사에서 거부될 수 있다. 역할별 DB 분리 원칙은 그대로다.
 
 ## 9. 개발정의서 점검·문서 검증
 
@@ -265,7 +266,7 @@ Build/QA/Security가 보존할 Execution Manifest는 `repositoryId`, `codeVersio
 | §8 | 비밀값·Host 직접 실행 fallback 없이 기존 설정/권한/격리 경계 안내 |
 | §10·§11-A | 실제 근거와 판정·사용량·비용 구분. 문서/준비 검사/모의 검증을 제품 성공이나 비교 결과로 사용하지 않음 |
 
-이번 변경은 문서뿐이다. 로컬 링크 대상 59개, CLI `--help`, 문서 내 Python 예제의 구문·기존 import/함수 시그니처, 기존 변경과 신규 문서의 whitespace 검사를 통과했다. Python 예제를 실제 승인 파일에 연결해 실행한 것은 아니다. 서버·유료 LLM·Docker·Run 제출·팀원 통합·전체 회귀 테스트는 이번 단계에서 실행하지 않았다.
+45번 당시 작업은 문서 정리뿐이었다. 로컬 링크 대상 59개, CLI `--help`, 문서 내 Python 예제의 구문·기존 import/함수 시그니처, 기존 변경과 신규 문서의 whitespace 검사를 통과했다. Python 예제를 실제 승인 파일에 연결해 실행한 것은 아니다. 서버·유료 LLM·Docker·Run 제출·팀원 통합·전체 회귀 테스트는 45번에서 실행하지 않았다. 후속 코드 보완과 회귀 결과는 [46번](46-platform-audit-hardening.md)에 별도로 기록한다.
 
 [43번에 기록된 442개 회귀 통과](43-approved-llm-cost-accounting.md)는 그 단계의 기록이며 이번에 다시 실행한 결과나 실제 운영 검증이 아니다. 이전 단계에 HTTP listener 검증 기록이 있어도 실제 Provider/Docker 검증과는 구분한다.
 

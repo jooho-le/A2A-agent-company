@@ -20,6 +20,7 @@ import unicodedata
 from uuid import UUID
 
 from orchestrator.artifacts.contracts import StoredContent
+from orchestrator.core.source_credentials import SourceCredentialError, validate_source_bytes
 from orchestrator.domain.snapshot_handoff import CodeSnapshotArtifact
 from orchestrator.domain.workspaces import WorkspaceRecord
 from orchestrator.sandbox.contracts import SandboxError, SandboxErrorCode
@@ -136,6 +137,10 @@ def _archive_entries(content):
                 value = stream.read(_MAX_FILE_BYTES + 1)
                 if len(value) != member.size:
                     raise SandboxError(SandboxErrorCode.INTEGRITY)
+                try:
+                    validate_source_bytes(value)
+                except SourceCredentialError:
+                    raise SandboxError(SandboxErrorCode.PATH) from None
                 total += len(value)
                 if total > _MAX_TOTAL_BYTES:
                     raise SandboxError(SandboxErrorCode.INTEGRITY)
@@ -167,6 +172,10 @@ def _inputs_entries(inputs):
         _path(name)
         if not isinstance(value, bytes) or len(value) > _MAX_FILE_BYTES:
             raise SandboxError(SandboxErrorCode.INVALID)
+        try:
+            validate_source_bytes(value)
+        except SourceCredentialError:
+            raise SandboxError(SandboxErrorCode.PATH) from None
         total += len(value)
         if total > _MAX_TOTAL_BYTES:
             raise SandboxError(SandboxErrorCode.INVALID)

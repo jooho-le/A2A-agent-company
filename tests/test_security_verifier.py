@@ -629,6 +629,24 @@ class TrustedSecurityProofVerifierTests(unittest.IsolatedAsyncioTestCase):
             await verifier(self.execution, self.decision(measured), measured)
         self.assertNotIn("inert-private-timeout", str(caught.exception))
 
+    async def test_assessor_without_python_311_timeout_api_retains_budget_classification(self):
+        verifier = self.verifier(assess_until_cancel)
+        services, tracked, measured = await self.measured(verifier)
+        self.execution.budget = ExecutionBudget(runtime_budget_ms=20)
+        with patch.dict(asyncio.__dict__):
+            asyncio.__dict__.pop("timeout", None)
+            with self.assertRaises(LLMRuntimeError) as caught:
+                await verifier(self.execution, self.decision(measured), measured)
+        self.assertEqual(caught.exception.code, LLMErrorCode.BUDGET)
+
+    async def test_assessor_without_timeout_api_keeps_native_timeout_a_verifier_error(self):
+        verifier = self.verifier(assess_native_timeout)
+        services, tracked, measured = await self.measured(verifier)
+        with patch.dict(asyncio.__dict__):
+            asyncio.__dict__.pop("timeout", None)
+            with self.assertRaises(SecurityVerifierError):
+                await verifier(self.execution, self.decision(measured), measured)
+
 
 if __name__ == "__main__":
     unittest.main()

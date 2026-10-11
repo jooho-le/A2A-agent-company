@@ -313,6 +313,38 @@ class HostRuntimeServicesTests(_HostFixture, unittest.TestCase):
 
 
 class HostRuntimeClientDeadlineTests(_HostFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_missing_python_311_timeout_api_preserves_transport_task_and_policy(self):
+        execution = self.execution(AgentRole.DEVELOPER)
+        services = self.host().developer(execution)
+        owner, original_deadline = asyncio.current_task(), execution.budget.deadline_monotonic
+        with patch.dict(asyncio.__dict__):
+            asyncio.__dict__.pop("timeout", None)
+            async with services.client_factory(services.configuration):
+                await asyncio.sleep(0)
+        self.assertTrue(all(item[1] is owner for item in self.transport_events))
+        self.assertEqual(execution.budget.deadline_monotonic, original_deadline)
+        self.assertEqual(services.configuration.max_call_seconds, 60)
+
+    async def test_missing_timeout_api_still_drains_cleanup_on_run_expiration(self):
+        events = []
+        @asynccontextmanager
+        async def draining(_configuration):
+            try:
+                yield object()
+            finally:
+                await asyncio.sleep(.02)
+                events.append(asyncio.current_task())
+        execution = self.execution(AgentRole.DEVELOPER)
+        services = self.host(client_factory=draining).developer(execution)
+        execution.budget._deadline = time.monotonic() + .005
+        with patch.dict(asyncio.__dict__):
+            asyncio.__dict__.pop("timeout", None)
+            with self.assertRaises(LLMRuntimeError) as caught:
+                async with services.client_factory(services.configuration):
+                    await asyncio.sleep(1)
+        self.assertIs(caught.exception.code, LLMErrorCode.BUDGET)
+        self.assertEqual(events, [asyncio.current_task()])
+
     async def test_transport_lifetime_uses_same_task_without_clamping_approved_policy(self):
         execution = self.execution(AgentRole.DEVELOPER)
         services = self.host().developer(execution)

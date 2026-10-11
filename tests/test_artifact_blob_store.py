@@ -152,6 +152,32 @@ class ArtifactBlobStoreTests(unittest.TestCase):
         self.assert_error(ArtifactErrorCode.TOO_LARGE, lambda: self.put(content=b"x" * (MAX_CONTENT_BYTES + 1)))
         self.assertIsNone(self.store.latest_source(self.run.run_id))
 
+    def test_source_credentials_are_rejected_before_blob_or_grant_publication(self):
+        for content in (b'api_key="SYNTHETIC_BLOB_SECRET_NOT_REAL"',
+                        '비밀번호="SYNTHETIC_BLOB_SECRET_NOT_REAL"'.encode("utf-16-le")):
+            source = self.make_source(snapshot_sha256=sha256(content).hexdigest())
+            self.assert_error(ArtifactErrorCode.PATH_DENIED, lambda: self.put(source, content=content))
+        self.assertIsNone(self.store.latest_source(self.run.run_id))
+        with self.repository._connection() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM artifact_contents").fetchone()[0], 0)
+
+    def test_legacy_credential_blob_cannot_be_read_even_with_matching_hashes(self):
+        self.put()
+        content = b'api_key="SYNTHETIC_LEGACY_BLOB_SECRET_NOT_REAL"'
+        digest = sha256(content).hexdigest()
+        with self.repository._transaction() as connection:
+            row = connection.execute("SELECT metadata_json FROM artifact_contents WHERE artifact_id=?",
+                                     (str(self.source.artifact_id),)).fetchone()
+            metadata = json.loads(row["metadata_json"])
+            metadata["snapshotSha256"] = digest
+            raw = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            connection.execute("DROP TRIGGER artifact_contents_no_update")
+            connection.execute("UPDATE artifact_contents SET metadata_json=?,metadata_sha256=?,content=?,content_sha256=?,size_bytes=? WHERE artifact_id=?",
+                               (raw, sha256(raw.encode()).hexdigest(), content, digest, len(content), str(self.source.artifact_id)))
+        self.assert_error(ArtifactErrorCode.INTEGRITY, lambda: self.store.get(self.run.run_id, self.source.artifact_id))
+        self.assert_error(ArtifactErrorCode.INTEGRITY, lambda: self.store.has_grant(self.run.run_id, self.source.artifact_id, AgentRole.QA))
+        self.assert_error(ArtifactErrorCode.INTEGRITY, lambda: self.store.latest_source(self.run.run_id))
+
     def test_snapshot_registration_does_not_mutate_workflow_or_trace(self):
         before_run = self.repository.get_run(self.run.run_id)
         before_steps = self.repository.list_steps(self.run.run_id)
