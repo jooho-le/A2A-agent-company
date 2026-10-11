@@ -3,16 +3,24 @@
 from dataclasses import replace
 import json
 import unittest
+from unittest.mock import patch
+from uuid import uuid4
 
 import httpx
 from pydantic import SecretStr
 
 from agents.llm.contracts import (
-    JsonSchema, LLMErrorCode, LLMRequest, LLMRuntimeError, StructuredOutput,
-    ToolDefinition, parse_json,
+    JsonSchema, LLMErrorCode, LLMRequest, LLMResponse, LLMRuntimeError, StructuredOutput,
+    OPENAI_RESPONSES_GLOBAL_TEXT, REPORTED_SERVICE_TIERS, TokenUsage,
+    ToolDefinition, UsageRecord, parse_json,
 )
+from agents.llm.budget import ExecutionBudget
+from agents.llm.engine import LLMEngine
 from agents.llm.openai_responses import OpenAIResponsesProvider
+from agents.roles.prompts import prepare_role_prompt
+from orchestrator.a2a.requests import A2AWorkflowMetadata
 from orchestrator.domain.run_configuration import ModelConfiguration
+from orchestrator.domain.states import AgentRole
 
 
 KEY = "SYNTHETIC_API_KEY_NOT_REAL"
@@ -109,6 +117,136 @@ class OpenAIResponsesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.total_tokens, 24)
         self.assertEqual(result.usage.cached_input_tokens, 3)
         self.assertEqual(result.usage.reasoning_output_tokens, 2)
+
+    async def test_actual_cache_write_is_input_subset_without_double_counting(self):
+        usage = response_payload()["usage"]
+        usage["input_tokens_details"]["cache_write_tokens"] = 7
+        result, _ = await self.call(response_payload(usage=usage))
+        self.assertEqual(result.usage, TokenUsage(20, 4, 24, 3, 2, 7))
+        self.assertEqual(result.usage.total_tokens, 24)
+
+    async def test_missing_cache_write_stays_unknown_and_explicit_zero_is_known(self):
+        for details, expected in ((None, None), ({}, None), ({"cached_tokens": 3}, None),
+                                  ({"cache_write_tokens": 0}, 0), ({"cache_write_tokens": 20}, 20)):
+            with self.subTest(details=details):
+                usage = response_payload()["usage"]
+                usage["input_tokens_details"] = details
+                result, _ = await self.call(response_payload(usage=usage))
+                self.assertIs(result.usage.cache_write_input_tokens, expected)
+
+    async def test_invalid_cache_write_or_overlapping_input_subsets_fail_closed(self):
+        for details in ({"cache_write_tokens": True}, {"cache_write_tokens": "2"},
+                        {"cache_write_tokens": 2.0}, {"cache_write_tokens": -1},
+                        {"cache_write_tokens": 21}, {"cached_tokens": 14, "cache_write_tokens": 7}):
+            with self.subTest(details=details):
+                usage = response_payload()["usage"]
+                usage["input_tokens_details"] = details
+                with self.assertRaises(LLMRuntimeError) as caught:
+                    await self.call(response_payload(usage=usage))
+                self.assertEqual(caught.exception.code, LLMErrorCode.RESPONSE)
+                self.assertIsNone(caught.exception.usage)
+
+    async def test_reported_service_tier_uses_actual_response_only(self):
+        self.assertEqual(REPORTED_SERVICE_TIERS, {"default", "flex", "priority", "scale", "fast", "ultrafast"})
+        for tier in sorted(REPORTED_SERVICE_TIERS):
+            with self.subTest(tier=tier):
+                result, sent = await self.call(response_payload(service_tier=tier))
+                self.assertEqual(result.reported_service_tier, tier)
+                self.assertNotIn("service_tier", json.loads(sent[0].content))
+
+    async def test_unreported_auto_or_unknown_tier_is_not_inferred_or_logged(self):
+        payloads = [response_payload()]
+        payloads.extend(response_payload(service_tier=tier)
+                        for tier in (None, "auto", "Priority", "future-tier", True, 1, {}, [], SECRET))
+        for payload in payloads:
+            with self.subTest(tier_type=type(payload.get("service_tier")).__name__):
+                result, _ = await self.call(payload)
+                self.assertIsNone(result.reported_service_tier)
+                self.assertNotIn("SYNTHETIC_ERROR_BODY_SECRET", repr(result))
+
+    async def test_direct_global_initial_string_and_text_parts_have_text_context(self):
+        inputs = (
+            [{"role": "user", "content": "Task data"}],
+            [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Task data"}]}],
+            [{"role": "user", "content": "Task data"}, {"type": "message", "id": "msg_previous",
+                "role": "assistant", "status": "completed", "content": [{"type": "output_text",
+                "text": "Previous answer", "annotations": [], "logprobs": []}]}],
+        )
+        for items in inputs:
+            with self.subTest(items=items):
+                result, sent = await self.call(request=make_request(input_items_json=json.dumps(items)))
+                self.assertEqual(result.billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+                self.assertEqual(json.loads(sent[0].content)["input"], items)
+
+    async def test_text_function_and_reasoning_continuations_have_text_context(self):
+        items = [
+            {"role": "user", "content": "Task data"},
+            {"id": "rs_previous", "type": "reasoning", "summary": [{"type": "summary_text", "text": "Summary"}],
+             "encrypted_content": "OPAQUE_SYNTHETIC", "status": "completed"},
+            {"id": "fc_previous", "type": "function_call", "call_id": "call_previous",
+             "name": "read_project_file", "arguments": "{}", "status": "completed"},
+            {"type": "function_call_output", "call_id": "call_previous", "output": "{}"},
+        ]
+        result, sent = await self.call(request=make_request(input_items_json=json.dumps(items)))
+        self.assertEqual(result.billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertEqual(json.loads(sent[0].content)["input"], items)
+
+    async def test_multimodal_or_unknown_input_has_unknown_billing_context_without_wire_rewrite(self):
+        inputs = (
+            [{"role": "user", "content": [{"type": "input_image", "image_url": "https://image.invalid/synthetic"}]}],
+            [{"role": "user", "content": [{"type": "input_file", "file_id": "file_synthetic"}]}],
+            [{"role": "user", "content": [{"type": "input_audio", "data": "synthetic"}]}],
+            [{"role": "user", "content": [{"type": "input_text", "text": "Task", "unknown": "future"}]}],
+            [{"role": "user", "content": "Task", "unknown": True}],
+            [{"role": "future-role", "content": "Task"}],
+            [{"role": {}, "content": "Task"}],
+            [{"role": "user", "content": [{"type": [], "text": "Task"}]}],
+            [{"type": {}, "content": "Task"}],
+            [{"type": None, "role": "user", "content": "Task"}],
+            [{"role": "user", "content": "Task", "status": "unknown"}],
+            [{"role": "user", "content": "Task", "id": {}}],
+            [{"role": "user", "content": [{"type": "input_text", "text": "Task", "annotations": []}]}],
+            [{"role": "assistant", "content": [{"type": "output_text", "text": "Task", "annotations": {}}]}],
+            [{"type": "reasoning", "summary": [{"type": "unknown", "text": "Task"}]}],
+            [{"type": "function_call_output", "call_id": "call_previous", "output": {"future": "value"}}],
+        )
+        for items in inputs:
+            with self.subTest(items=items):
+                result, sent = await self.call(request=make_request(input_items_json=json.dumps(items)))
+                self.assertIsNone(result.billing_context)
+                self.assertEqual(json.loads(sent[0].content)["input"], items)
+
+    async def test_alternate_endpoint_is_not_labelled_original_global_text(self):
+        with patch("agents.llm.openai_responses._ENDPOINT", "https://alternate.invalid/v1/responses"):
+            result, sent = await self.call()
+        self.assertEqual(str(sent[0].url), "https://alternate.invalid/v1/responses")
+        self.assertIsNone(result.billing_context)
+
+    async def test_control_responses_retain_actual_billing_metadata_and_usage(self):
+        usage = response_payload()["usage"]
+        usage["input_tokens_details"]["cache_write_tokens"] = 5
+        payloads = [response_payload(status=status, output=[], service_tier="flex", usage=usage)
+                    for status in ("failed", "incomplete")]
+        payloads.append(response_payload(service_tier="priority", usage=usage, output=[{
+            "id": "msg_refused", "type": "message", "role": "assistant",
+            "content": [{"type": "refusal", "refusal": SECRET}],
+        }]))
+        for payload in payloads:
+            with self.subTest(status=payload["status"]):
+                result, _ = await self.call(payload)
+                self.assertEqual(result.reported_service_tier, payload["service_tier"])
+                self.assertEqual(result.billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+                self.assertEqual(result.usage.cache_write_input_tokens, 5)
+                self.assertNotIn("SYNTHETIC_ERROR_BODY_SECRET", repr(result))
+
+    async def test_parse_error_keeps_cache_write_usage_but_not_untrusted_provenance(self):
+        usage = response_payload()["usage"]
+        usage["input_tokens_details"]["cache_write_tokens"] = 5
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.call(response_payload(model="unrelated-model", service_tier="priority", usage=usage))
+        self.assertEqual(caught.exception.usage.cache_write_input_tokens, 5)
+        self.assertFalse(hasattr(caught.exception, "reported_service_tier"))
+        self.assertFalse(hasattr(caught.exception, "billing_context"))
 
     async def test_missing_usage_stays_unknown(self):
         for usage in (None, "missing"):
@@ -345,6 +483,91 @@ class OpenAIResponsesTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(KEY, repr(provider))
         await provider.aclose()
         self.assertTrue(provider._client.is_closed)
+
+
+class OpenAIEngineUsageTests(unittest.IsolatedAsyncioTestCase):
+    async def run_mock_engine(self, payload, records):
+        provider = OpenAIResponsesProvider(SecretStr(KEY), transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json=payload)))
+        self.addAsyncCleanup(provider.aclose)
+        metadata = A2AWorkflowMetadata(run_id=uuid4(), workflow_step_id=uuid4(), scenario_id=uuid4(), attempt=0)
+        prompt = prepare_role_prompt(AgentRole.PLANNER, task_input={"request": "계획 생성"}, metadata=metadata)
+        budget = ExecutionBudget(runtime_budget_ms=1000)
+        engine = LLMEngine(role=AgentRole.PLANNER, provider=provider)
+        return await engine.run(prompt=prompt, model=make_request().model, output=make_request().output,
+                                budget=budget, usage_sink=records.append)
+
+    async def test_actual_adapter_metadata_reaches_engine_record_without_provider_cost(self):
+        usage = response_payload()["usage"]
+        usage["input_tokens_details"]["cache_write_tokens"] = 5
+        records = []
+        result = await self.run_mock_engine(response_payload(service_tier="priority", usage=usage), records)
+        self.assertEqual(result.data, {"summary": "done"})
+        self.assertEqual(tuple(records), result.records)
+        self.assertEqual(records[0].reported_model_id, "gpt-4.1-2025-04-14")
+        self.assertEqual(records[0].reported_service_tier, "priority")
+        self.assertEqual(records[0].billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertEqual(records[0].usage.cache_write_input_tokens, 5)
+        self.assertIsNone(records[0].cost_usd)
+
+    async def test_actual_adapter_identity_error_records_only_measured_usage(self):
+        usage = response_payload()["usage"]
+        usage["input_tokens_details"]["cache_write_tokens"] = 5
+        records = []
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_mock_engine(response_payload(id=" ", service_tier="priority", usage=usage), records)
+        self.assertEqual(caught.exception.code, LLMErrorCode.RESPONSE)
+        self.assertEqual(tuple(records), caught.exception.records)
+        self.assertEqual(records[0].usage.total_tokens, 24)
+        self.assertEqual(records[0].usage.cache_write_input_tokens, 5)
+        self.assertIsNone(records[0].reported_model_id)
+        self.assertIsNone(records[0].reported_service_tier)
+        self.assertIsNone(records[0].billing_context)
+        self.assertIsNone(records[0].cost_usd)
+
+
+class UsageProvenanceContractTests(unittest.TestCase):
+    def test_token_usage_last_field_preserves_existing_positional_order(self):
+        existing = TokenUsage(20, 4, 24, 3, 2)
+        self.assertIsNone(existing.cache_write_input_tokens)
+        self.assertEqual(TokenUsage(20, 4, 24, 3, 2, 7).cache_write_input_tokens, 7)
+
+    def test_token_usage_subset_validation_applies_to_direct_dataclasses(self):
+        for write in (True, "1", 1.0, -1, 21):
+            with self.subTest(write=write), self.assertRaises(LLMRuntimeError):
+                TokenUsage(20, 4, 24, cache_write_input_tokens=write)
+        with self.assertRaises(LLMRuntimeError):
+            TokenUsage(20, 4, 24, cached_input_tokens=15, cache_write_input_tokens=6)
+        self.assertEqual(TokenUsage(20, 4, 24, cached_input_tokens=None,
+                                   cache_write_input_tokens=20).total_tokens, 24)
+
+    def test_llm_response_metadata_is_optional_and_appended(self):
+        legacy = LLMResponse("completed", "model", TokenUsage(1, 1, 2), "{}", (), "[]", False)
+        self.assertIsNone(legacy.reported_service_tier)
+        self.assertIsNone(legacy.billing_context)
+        extended = replace(legacy, reported_service_tier="default", billing_context=OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertEqual(extended.reported_service_tier, "default")
+
+    def test_usage_record_metadata_is_optional_and_cost_authority_is_unchanged(self):
+        legacy = UsageRecord(1, AgentRole.PLANNER, make_request().model, "gpt-4.1-2025-04-14",
+                             "completed", 0, TokenUsage(1, 1, 2))
+        self.assertIsNone(legacy.cost_usd)
+        self.assertIsNone(legacy.reported_service_tier)
+        self.assertIsNone(legacy.billing_context)
+        # Host Store/Pricing, not these optional metadata checks, owns cost admission.
+        self.assertEqual(replace(legacy, cost_usd=1).cost_usd, 1)
+
+    def test_dataclass_billing_metadata_rejects_coercion_and_unknown_values(self):
+        response = LLMResponse("completed", "model", None)
+        record = UsageRecord(1, AgentRole.PLANNER, make_request().model, "model", "completed", 0, None)
+        for item in (response, record):
+            for field, invalid in (("reported_service_tier", True), ("reported_service_tier", "auto"),
+                                   ("reported_service_tier", SECRET), ("billing_context", True),
+                                   ("billing_context", "openai"), ("billing_context", SECRET)):
+                with self.subTest(type=type(item).__name__, field=field), self.assertRaises(LLMRuntimeError) as caught:
+                    replace(item, **{field: invalid})
+                self.assertEqual(caught.exception.code, LLMErrorCode.RESPONSE)
+                self.assertNotIn("SYNTHETIC_ERROR_BODY_SECRET", str(caught.exception))
 
 
 if __name__ == "__main__":

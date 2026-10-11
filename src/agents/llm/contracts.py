@@ -38,6 +38,19 @@ class LLMRuntimeError(RuntimeError):
         super().__init__(self.code.value)
 
 
+REPORTED_SERVICE_TIERS = frozenset({"default", "flex", "priority", "scale", "fast", "ultrafast"})
+OPENAI_RESPONSES_GLOBAL_TEXT = "OPENAI_RESPONSES_GLOBAL_TEXT"
+
+
+def validate_billing_metadata(reported_service_tier, billing_context) -> None:
+    """Closed factual provenance labels, never provider text or estimates."""
+    if (reported_service_tier is not None and (
+            type(reported_service_tier) is not str or reported_service_tier not in REPORTED_SERVICE_TIERS)
+            or billing_context is not None and (
+                type(billing_context) is not str or billing_context != OPENAI_RESPONSES_GLOBAL_TEXT)):
+        raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+
+
 def _no_constant(_value):
     raise ValueError("Nonfinite JSON")
 
@@ -228,10 +241,11 @@ class TokenUsage:
     total_tokens: int
     cached_input_tokens: int | None = None
     reasoning_output_tokens: int | None = None
+    cache_write_input_tokens: int | None = None
 
     def __post_init__(self):
         values = (self.input_tokens, self.output_tokens, self.total_tokens)
-        optional = (self.cached_input_tokens, self.reasoning_output_tokens)
+        optional = (self.cached_input_tokens, self.reasoning_output_tokens, self.cache_write_input_tokens)
         if any(type(v) is not int or v < 0 for v in values):
             raise LLMRuntimeError(LLMErrorCode.RESPONSE)
         if any(v is not None and (type(v) is not int or v < 0) for v in optional):
@@ -239,6 +253,11 @@ class TokenUsage:
         if self.total_tokens != self.input_tokens + self.output_tokens:
             raise LLMRuntimeError(LLMErrorCode.RESPONSE)
         if self.cached_input_tokens is not None and self.cached_input_tokens > self.input_tokens:
+            raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+        if self.cache_write_input_tokens is not None and self.cache_write_input_tokens > self.input_tokens:
+            raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+        if (self.cached_input_tokens is not None and self.cache_write_input_tokens is not None
+                and self.cached_input_tokens + self.cache_write_input_tokens > self.input_tokens):
             raise LLMRuntimeError(LLMErrorCode.RESPONSE)
         if self.reasoning_output_tokens is not None and self.reasoning_output_tokens > self.output_tokens:
             raise LLMRuntimeError(LLMErrorCode.RESPONSE)
@@ -265,6 +284,11 @@ class LLMResponse:
     # Opaque reasoning/function-call continuation is wire-only, never Trace.
     output_items_json: str = field(default="[]", repr=False)
     refused: bool = False
+    reported_service_tier: str | None = None
+    billing_context: str | None = None
+
+    def __post_init__(self):
+        validate_billing_metadata(self.reported_service_tier, self.billing_context)
 
 
 class LLMProvider(Protocol):
@@ -291,6 +315,12 @@ class UsageRecord:
     usage: TokenUsage | None
     # Price not selected: unknown, never an invented zero-dollar estimate.
     cost_usd: None = None
+    reported_service_tier: str | None = None
+    billing_context: str | None = None
+
+    def __post_init__(self):
+        # Legacy cost authority remains with Host storage/pricing admission.
+        validate_billing_metadata(self.reported_service_tier, self.billing_context)
 
 
 @dataclass(frozen=True)

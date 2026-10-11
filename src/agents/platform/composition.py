@@ -221,7 +221,7 @@ def create_platform(
     agent_settings, providers, developer_services_factory, qa_services_factory,
     security_services_factory, prepare_workspace, limits,
     orchestrator_host="127.0.0.1", orchestrator_port=8000,
-    a2a_client_factory=None,
+    a2a_client_factory=None, price_book=None,
 ) -> OwnedAgentPlatform:
     """Bind actual executors and official HTTP apps to one shared Run budget.
 
@@ -287,7 +287,7 @@ def create_platform(
         raise PlatformConfigurationError() from None
 
     lifecycle = _Lifecycle(providers=tuple({id(value): value for value in provider_map.values()}.values()))
-    telemetry_store = AgentTelemetryStore(repository.database_path)
+    telemetry_store = AgentTelemetryStore(repository.database_path, price_book=price_book)
     budgets = RunBudgetRegistry(repository, limits=limits, telemetry_store=telemetry_store)
     telemetry = RuntimeTelemetry(repository, telemetry_store)
 

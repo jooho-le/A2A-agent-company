@@ -18,7 +18,8 @@ class _Parser(argparse.ArgumentParser):
 
 async def _start(options):
     platform = await create_host(runtime_file=options.runtime, tools_file=options.tools,
-        source_file=options.source, protected_cases_file=options.qa_cases)
+        source_file=options.source, protected_cases_file=options.qa_cases,
+        price_book_file=options.price_book)
     failure = None
     try:
         await run_platform(platform, startup_timeout_seconds=options.startup_timeout,
@@ -44,6 +45,7 @@ def main(argv=None):
     parser.add_argument("--tools", required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--qa-cases")
+    parser.add_argument("--price-book")
     parser.add_argument("--start", action="store_true")
     parser.add_argument("--check-secrets", action="store_true")
     parser.add_argument("--startup-timeout", type=float, default=30)
@@ -57,7 +59,8 @@ def main(argv=None):
             asyncio.run(_start(options))
         else:
             plan = inspect_host_configuration(runtime_file=options.runtime, tools_file=options.tools,
-                source_file=options.source, protected_cases_file=options.qa_cases)
+                source_file=options.source, protected_cases_file=options.qa_cases,
+                price_book_file=options.price_book)
             if options.check_secrets:
                 try:
                     resolve_runtime_configuration(plan.runtime, base_directory=plan.runtime_directory)

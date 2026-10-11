@@ -26,6 +26,7 @@ from agents.platform.configuration import (
 )
 from agents.platform.host_policy_store import HostPolicyStore
 from agents.platform.host_services import HostRuntimeServices, _model_json
+from agents.platform.pricing import load_price_book
 from agents.platform.security_approval import ApprovedSecurityAssessor
 from agents.platform.security_verifier import TrustedSecurityProofVerifier
 from agents.platform.starting_source import (
@@ -154,6 +155,7 @@ class _HostConfiguration:
     protected_cases: tuple = field(repr=False)
     _configuration_json: str = field(repr=False)
     policy_sha256: str
+    price_book: object = field(default=None, repr=False)
 
     def __repr__(self):
         return "HostConfiguration()"
@@ -165,6 +167,8 @@ class _HostConfiguration:
 
     def validate_configuration(self, configuration):
         try:
+            if self.price_book is not None:
+                self.price_book.verify_integrity()
             if type(configuration) is not RunConfiguration:
                 raise ValueError
             copied = RunConfiguration.model_validate(parse_json(_model_json(configuration)))
@@ -184,13 +188,14 @@ class _HostConfiguration:
 
 
 def inspect_host_configuration(*, runtime_file, tools_file, source_file, protected_cases_file=None,
-                               proof_verifier=None):
+                               proof_verifier=None, price_book_file=None):
     """Read-only settings/Git cross-check; never resolve credentials or stores."""
     try:
         if proof_verifier is not None:
             if type(proof_verifier) is not ApprovedSecurityAssessor:
                 raise HostFactoryError()
             proof_verifier.verify_integrity()
+        price_book = None if price_book_file is None else load_price_book(price_book_file)
         runtime_path, tools_path, source_path = (Path(value).absolute() for value in (runtime_file, tools_file, source_file))
         runtime = load_runtime_configuration(runtime_path)
         layout = inspect_runtime_configuration(runtime, base_directory=runtime_path.parent)
@@ -208,6 +213,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             inputs += (Path(protected_cases_file).absolute(),)
         if proof_verifier is not None:
             inputs += (proof_verifier.approval_path, *proof_verifier.implementation_paths)
+        if price_book is not None:
+            inputs += (price_book.approval_path,)
         _layout_guard(layout, source, inputs, lock)
         approved = RunConfiguration(
             model=runtime.model.model_dump(by_alias=True),
@@ -227,10 +234,12 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             "protectedCases": [_case_data(case) for case in cases],
             "semanticProof": "UNVERIFIED" if proof_verifier is None else proof_verifier.descriptor,
         }
+        if price_book is not None:
+            policy["pricing"] = price_book.descriptor
         return _HostConfiguration(runtime=runtime, runtime_directory=runtime_path.parent, layout=layout,
             tools=tools, source=source, protected_cases=cases,
             _configuration_json=approved.model_dump_json(by_alias=True),
-            policy_sha256=hashlib.sha256(_json(policy).encode("utf-8")).hexdigest())
+            policy_sha256=hashlib.sha256(_json(policy).encode("utf-8")).hexdigest(), price_book=price_book)
     except Exception:
         raise HostFactoryError() from None
 
@@ -256,7 +265,8 @@ async def _close_allocated(providers, platform=None):
 
 async def create_host(*, runtime_file, tools_file, source_file, protected_cases_file=None,
                       environ=None, provider_factory=provider_from_settings,
-                      mcp_client_factory=open_mcp_client, a2a_client_factory=None, proof_verifier=None):
+                      mcp_client_factory=open_mcp_client, a2a_client_factory=None, proof_verifier=None,
+                      price_book_file=None):
     """Explicit allocation/composition only; returned platform owns shutdown.
 
     Only trusted Python callers may inject transport/proof factories. JSON,
@@ -267,7 +277,8 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
         raise HostFactoryError()
     plan = await _host_call(lambda _argument: inspect_host_configuration(
         runtime_file=runtime_file, tools_file=tools_file, source_file=source_file,
-        protected_cases_file=protected_cases_file, proof_verifier=proof_verifier), None)
+        protected_cases_file=protected_cases_file, proof_verifier=proof_verifier,
+        price_book_file=price_book_file), None)
     try:
         resolved = resolve_runtime_configuration(plan.runtime,
             base_directory=plan.runtime_directory, environ=environ)
@@ -304,6 +315,7 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
             budget = platform.budgets.resolve(frozen)
             budget.check()
             await _host_call(lambda selected: policies.pin(selected, plan.policy_sha256), run_id)
+            await _host_call(platform.telemetry_store.pin_pricing, run_id)
             await _host_call(lambda selected: preparer.prepare(selected,
                 deadline_monotonic=budget.deadline_monotonic), run_id)
             budget.check()
@@ -321,7 +333,7 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
             qa_services_factory=services.qa, security_services_factory=services.security,
             prepare_workspace=prepare_workspace, limits=resolved.limits,
             orchestrator_host=resolved.orchestrator_host, orchestrator_port=resolved.orchestrator_port,
-            a2a_client_factory=a2a_client_factory)
+            a2a_client_factory=a2a_client_factory, price_book=plan.price_book)
         original_validator = platform.orchestrator_app.state.submission_validator
 
         def validate_submission(configuration):

@@ -7,7 +7,7 @@ import unittest
 
 import test_agent_durable_budgets as budget_fixtures
 import test_llm_runtime as llm_helpers
-from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, StructuredOutput, ToolCall, ToolDefinition, TokenUsage, UsageRecord, json_text
+from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, OPENAI_RESPONSES_GLOBAL_TEXT, StructuredOutput, ToolCall, ToolDefinition, TokenUsage, UsageRecord, json_text
 from agents.llm.engine import LLMEngine
 from agents.platform.budgets import RunBudgetError
 from agents.platform.telemetry_store import TelemetryStoreError
@@ -94,6 +94,136 @@ class LLMRuntimeTelemetryTests(unittest.IsolatedAsyncioTestCase):
         snapshot = self.store.load_budget(self.fixture.run.run_id)
         self.assertEqual(snapshot.accounted_usage[1], llm_helpers.measured_usage())
         self.assertEqual(snapshot.pending_model_sequences, ())
+
+    async def test_actual_provenance_and_cache_write_survive_usage_and_budget_restart(self):
+        measured = TokenUsage(9, 6, 15, 4, 2, 3)
+        response = replace(llm_helpers.text_response(usage=measured), reported_service_tier="priority",
+                           billing_context=OPENAI_RESPONSES_GLOBAL_TEXT)
+        result = await self.run_engine(llm_helpers.FakeProvider(response))
+        record = result.records[0]
+        self.assertEqual(record.usage, measured)
+        self.assertEqual(record.reported_service_tier, "priority")
+        self.assertEqual(record.billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertIsNone(record.cost_usd)
+        row = self.store.list_usage(self.fixture.run.run_id)[0][0]
+        self.assertEqual(row["cacheWriteInputTokens"], 3)
+        self.assertEqual(row["reportedServiceTier"], "priority")
+        self.assertEqual(row["billingContext"], OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertIsNone(row["costUsd"])
+        restored = self.fixture.restart().resolve(self.fixture.configuration)
+        self.assertEqual(restored.snapshot.accounted_usage[1], measured)
+        self.assertEqual(restored.total_tokens, 15)
+
+    async def test_unreported_tier_cache_write_and_cost_remain_unknown(self):
+        result = await self.run_engine(llm_helpers.FakeProvider(llm_helpers.text_response()))
+        self.assertIsNone(result.records[0].reported_service_tier)
+        self.assertIsNone(result.records[0].billing_context)
+        self.assertIsNone(result.records[0].usage.cache_write_input_tokens)
+        row = self.store.list_usage(self.fixture.run.run_id)[0][0]
+        for key in ("reportedServiceTier", "billingContext", "cacheWriteInputTokens", "costUsd"):
+            self.assertIsNone(row.get(key))
+
+    async def test_refusal_keeps_actual_provenance_without_declaring_success(self):
+        response = replace(llm_helpers.text_response(refused=True), reported_service_tier="flex",
+                           billing_context=OPENAI_RESPONSES_GLOBAL_TEXT)
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(llm_helpers.FakeProvider(response))
+        self.assertEqual(caught.exception.code, LLMErrorCode.REFUSAL)
+        record = caught.exception.records[0]
+        self.assertEqual(record.outcome, "refused")
+        self.assertEqual(record.reported_service_tier, "flex")
+        self.assertEqual(record.billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertIsNone(record.cost_usd)
+        self.assertEqual(self.store.list_usage(self.fixture.run.run_id)[0][0]["reportedServiceTier"], "flex")
+
+    async def test_incomplete_response_keeps_actual_provenance(self):
+        response = replace(llm_helpers.text_response(status="incomplete"), reported_service_tier="default",
+                           billing_context=OPENAI_RESPONSES_GLOBAL_TEXT)
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(llm_helpers.FakeProvider(response))
+        self.assertEqual(caught.exception.code, LLMErrorCode.INCOMPLETE)
+        self.assertEqual(caught.exception.records[0].reported_service_tier, "default")
+        self.assertEqual(caught.exception.records[0].billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertIsNone(caught.exception.records[0].cost_usd)
+
+    async def test_failed_response_keeps_actual_provenance(self):
+        response = replace(llm_helpers.text_response(status="failed"), reported_service_tier="fast",
+                           billing_context=OPENAI_RESPONSES_GLOBAL_TEXT)
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(llm_helpers.FakeProvider(response))
+        self.assertEqual(caught.exception.code, LLMErrorCode.PROVIDER)
+        self.assertEqual(caught.exception.records[0].reported_service_tier, "fast")
+        self.assertEqual(caught.exception.records[0].billing_context, OPENAI_RESPONSES_GLOBAL_TEXT)
+        self.assertIsNone(caught.exception.records[0].cost_usd)
+
+    async def test_parser_error_known_usage_does_not_infer_model_or_provenance(self):
+        measured = TokenUsage(9, 6, 15, 4, 2, 3)
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(llm_helpers.FakeProvider(LLMRuntimeError(LLMErrorCode.RESPONSE, usage=measured)))
+        record = caught.exception.records[0]
+        self.assertEqual(record.usage, measured)
+        self.assertIsNone(record.reported_model_id)
+        self.assertIsNone(record.reported_service_tier)
+        self.assertIsNone(record.billing_context)
+        self.assertIsNone(record.cost_usd)
+        row = self.store.list_usage(self.fixture.run.run_id)[0][0]
+        self.assertEqual(row["cacheWriteInputTokens"], 3)
+        for key in ("reportedModelId", "reportedServiceTier", "billingContext", "costUsd"):
+            self.assertIsNone(row.get(key))
+
+    async def test_privileged_raw_response_mutation_revalidated_before_sink(self):
+        response = llm_helpers.text_response()
+        object.__setattr__(response, "reported_service_tier", "password=SYNTHETIC_UNTRUSTED_TIER")
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(llm_helpers.FakeProvider(response))
+        self.assertEqual(caught.exception.code, LLMErrorCode.RESPONSE)
+        self.assertEqual(self.budget.total_tokens, 15)
+        record = caught.exception.records[0]
+        self.assertIsNone(record.reported_model_id)
+        self.assertIsNone(record.reported_service_tier)
+        self.assertIsNone(record.billing_context)
+        self.assertNotIn("SYNTHETIC_UNTRUSTED_TIER", repr(record))
+        self.assertNotIn("SYNTHETIC_UNTRUSTED_TIER", str(caught.exception))
+        self.assertIsNone(self.store.list_usage(self.fixture.run.run_id)[0][0].get("reportedServiceTier"))
+
+    async def test_privileged_raw_usage_mutation_is_not_persisted_as_factual(self):
+        measured = llm_helpers.measured_usage()
+        object.__setattr__(measured, "cache_write_input_tokens", True)
+        response = llm_helpers.text_response(usage=measured)
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(llm_helpers.FakeProvider(response))
+        self.assertEqual(caught.exception.code, LLMErrorCode.RESPONSE)
+        self.assertIsNone(caught.exception.records[0].usage)
+        self.assertIsNone(self.budget.total_tokens)
+        row = self.store.list_usage(self.fixture.run.run_id)[0][0]
+        self.assertFalse(row["usageKnown"])
+        self.assertIsNone(row.get("cacheWriteInputTokens"))
+
+    async def test_privileged_raw_error_usage_is_revalidated_before_accounting(self):
+        measured = llm_helpers.measured_usage()
+        object.__setattr__(measured, "cache_write_input_tokens", -1)
+        provider = llm_helpers.FakeProvider(LLMRuntimeError(LLMErrorCode.RESPONSE, usage=measured))
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(provider)
+        self.assertEqual(caught.exception.code, LLMErrorCode.RESPONSE)
+        self.assertIsNone(caught.exception.records[0].usage)
+        self.assertIsNone(self.budget.total_tokens)
+        self.assertFalse(self.store.list_usage(self.fixture.run.run_id)[0][0]["usageKnown"])
+
+    async def test_privileged_raw_billing_context_is_revalidated_before_sink(self):
+        response = replace(llm_helpers.text_response(), reported_service_tier="priority",
+                           billing_context=OPENAI_RESPONSES_GLOBAL_TEXT)
+        object.__setattr__(response, "billing_context", "password=SYNTHETIC_UNTRUSTED_CONTEXT")
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(llm_helpers.FakeProvider(response))
+        self.assertEqual(caught.exception.code, LLMErrorCode.RESPONSE)
+        self.assertEqual(self.budget.total_tokens, 15)
+        record = caught.exception.records[0]
+        self.assertIsNone(record.reported_model_id)
+        self.assertIsNone(record.reported_service_tier)
+        self.assertIsNone(record.billing_context)
+        self.assertNotIn("SYNTHETIC_UNTRUSTED_CONTEXT", repr(record))
+        self.assertNotIn("SYNTHETIC_UNTRUSTED_CONTEXT", str(caught.exception))
 
     async def test_failed_reservation_never_calls_start_sink_or_provider(self):
         def unavailable(*_):

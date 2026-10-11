@@ -268,6 +268,12 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 `configs/owned-security-approval.example.json`은 미승인 예시이므로 원본은 실패합니다. 실제 승인 기준·검증 함수는 운영자가 별도로 제공해야 하며, 이번 작업은 회원가입 보안 테스트나 제품 PASS 검증을 구현한 것이 아닙니다. 기본 CLI는 검증기 없는 `UNVERIFIED/HUMAN_REVIEW`를 유지합니다. Scanner 경고 0개·모델 설명·QA PASS를 Security PASS로 바꾸지 않습니다. 상세 연결·Receipt 조회·신뢰 경계·개발정의서 점검은 [42번 Security 의미 검증 연결](docs/42-approved-security-semantic-proof.md)을 참고하세요.
 
+### 승인 가격표 기반 LLM 비용 원장 — 43번
+
+실측 토큰·실제 응답 모델/처리 등급과 운영자가 승인한 가격표를 연결합니다. 같은 Run의 가격표/계산 버전을 고정하며, 호출별 불변 영수증을 기존 `/usage`·`/telemetry`에서 조회합니다. 금액은 정확한 USD **소수 문자열**입니다. 캐시/추론 토큰을 중복 계산하지 않고 네 역할·실패/수정/재개 호출을 모두 합산합니다. 가격/Usage/대기 중인 호출이 불명확하면 전체 `costUsd=null`이고 `knownCostUsd`는 확인된 부분 합일 뿐입니다. 비용 확인은 최종 SUCCESS를 의미하지 않습니다.
+
+41번 검사 명령에 `--price-book configs/owned-price-book.local.json`을 선택적으로 추가합니다. 기본 검사는 계속 읽기 전용이며 가격표를 지정하지 않으면 비용은 기존처럼 `null`입니다. `configs/owned-price-book.example.json`은 미승인 형식 예시라 원본은 거절합니다. 운영 모델/가격은 임의로 설정하지 않았고 자동 가격 조회·과거 Run 비용 보충·실제 API/Docker 실행도 하지 않았습니다. 승인 가격표의 global text 토큰 계산과 실제 청구 금액 검증은 구분합니다. 설정 필드·동결/사용량 기록 경계·개발정의서 점검은 [43번 LLM 비용 계산](docs/43-approved-llm-cost-accounting.md)을 참고하세요.
+
 ## 테스트
 
 ```bash

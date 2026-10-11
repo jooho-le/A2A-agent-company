@@ -8,8 +8,8 @@ from agents.llm.budget import ExecutionBudget
 from agents.llm.content import sanitize_content, validate_source_fields
 from agents.llm.contracts import (
     LLMErrorCode, LLMProvider, LLMRequest, LLMResult, LLMRuntimeError,
-    StructuredOutput, ToolContext, ToolDefinition, ToolExecutor, UsageRecord,
-    json_text, parse_json,
+    LLMResponse, StructuredOutput, TokenUsage, ToolContext, ToolDefinition, ToolExecutor, UsageRecord,
+    json_text, parse_json, validate_billing_metadata,
 )
 from agents.roles.contracts import get_role_contract
 from agents.roles.prompts import PreparedRolePrompt, build_system_prompt
@@ -93,6 +93,21 @@ class LLMEngine:
                 started = monotonic()
                 try:
                     response = await asyncio.wait_for(self._provider.complete(request), timeout=timeout)
+                    # Raw frozen dataclasses can still be privilegedly mutated.
+                    # Invalid metadata must not escape into a usage sink; valid
+                    # token accounting survives even if provenance is rejected.
+                    known_usage = None
+                    try:
+                        if type(response) is not LLMResponse:
+                            raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+                        if response.usage is not None:
+                            if type(response.usage) is not TokenUsage:
+                                raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+                            response.usage.__post_init__()
+                            known_usage = response.usage
+                        validate_billing_metadata(response.reported_service_tier, response.billing_context)
+                    except Exception:
+                        raise LLMRuntimeError(LLMErrorCode.RESPONSE, usage=known_usage) from None
                 except asyncio.CancelledError as canceled:
                     budget.account_usage(None, sequence=sequence)
                     record = UsageRecord(sequence, self._role, model, None, "canceled", self._duration(started), None)
@@ -107,6 +122,13 @@ class LLMEngine:
                         LLMErrorCode.TIMEOUT if isinstance(error, asyncio.TimeoutError) else LLMErrorCode.PROVIDER
                     )
                     known_usage = error.usage if isinstance(error, LLMRuntimeError) else None
+                    if known_usage is not None:
+                        try:
+                            if type(known_usage) is not TokenUsage:
+                                raise ValueError()
+                            known_usage.__post_init__()
+                        except Exception:
+                            known_usage = None
                     budget.account_usage(known_usage, sequence=sequence)
                     record = UsageRecord(sequence, self._role, model, None, code.value, self._duration(started), known_usage)
                     records.append(record)
@@ -121,6 +143,8 @@ class LLMEngine:
                 record = UsageRecord(
                     sequence, self._role, model, reported_model, outcome,
                     self._duration(started), response.usage,
+                    reported_service_tier=response.reported_service_tier,
+                    billing_context=response.billing_context,
                 )
                 records.append(record)
                 if usage_sink is not None:

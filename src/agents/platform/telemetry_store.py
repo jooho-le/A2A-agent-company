@@ -1,12 +1,14 @@
 """Single owned Host's append-only accounting beside canonical Run Trace.
 
 No provider body, prompt, source, Tool argument or stdout is accepted. This is
-not a distributed worker lease or a pricing calculator.
+not a distributed worker lease. Optional Host-approved pricing is stored
+separately; raw model usage cannot submit or overwrite a price.
 """
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from decimal import Decimal, Inexact, Rounded, localcontext
 import json
 from pathlib import Path
 import re
@@ -18,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 
 from agents.llm.budget import BudgetSnapshot
 from agents.llm.contracts import UsageRecord
+from agents.platform.pricing import ApprovedPriceBook
+from agents.platform.pricing_store import RunPricingLedger
 from orchestrator.core.security import redact_data, redact_text
 from orchestrator.domain.states import AgentRole
 from orchestrator.domain.trace import TraceEvent
@@ -80,6 +84,9 @@ class UsageDetail(BaseModel):
     total_tokens: int | None = Field(default=None, ge=0, strict=True, alias="totalTokens")
     cached_input_tokens: int | None = Field(default=None, ge=0, strict=True, alias="cachedInputTokens")
     reasoning_output_tokens: int | None = Field(default=None, ge=0, strict=True, alias="reasoningOutputTokens")
+    cache_write_input_tokens: int | None = Field(default=None, ge=0, strict=True, alias="cacheWriteInputTokens")
+    reported_service_tier: str | None = Field(default=None, alias="reportedServiceTier")
+    billing_context: str | None = Field(default=None, alias="billingContext")
     cost_usd: None = Field(default=None, alias="costUsd")
 
 
@@ -138,10 +145,16 @@ def _json(value):
 class AgentTelemetryStore:
     """SQLite append-only accounting, opt-in through the owned Host composition."""
 
-    def __init__(self, database_path: str | Path, *, clock: Callable[[], datetime] | None = None):
+    def __init__(self, database_path: str | Path, *, clock: Callable[[], datetime] | None = None,
+                 price_book=None):
         self._database_path = Path(database_path)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._price_book, self._pricing = price_book, RunPricingLedger()
         try:
+            if price_book is not None:
+                if type(price_book) is not ApprovedPriceBook:
+                    raise ValueError()
+                price_book.verify_integrity()
             with self._connection() as connection:
                 # The existing repository owns WAL setup and the Run/Trace schema.
                 connection.executescript("""
@@ -168,6 +181,12 @@ class AgentTelemetryStore:
                     CREATE TRIGGER IF NOT EXISTS agent_telemetry_no_delete
                         BEFORE DELETE ON agent_runtime_events
                         BEGIN SELECT RAISE(ABORT,'accounting is append-only'); END;
+                    CREATE TRIGGER IF NOT EXISTS agent_telemetry_no_replace
+                        BEFORE INSERT ON agent_runtime_events
+                        WHEN EXISTS(SELECT 1 FROM agent_runtime_events WHERE
+                            trace_event_id=NEW.trace_event_id OR
+                            (run_id=NEW.run_id AND kind=NEW.kind AND idempotency_key=NEW.idempotency_key))
+                        BEGIN SELECT RAISE(ABORT,'accounting is append-only'); END;
                     CREATE TRIGGER IF NOT EXISTS agent_budget_no_delete
                         BEFORE DELETE ON agent_budget_ledger
                         BEGIN SELECT RAISE(ABORT,'budget ledger cannot be reset'); END;
@@ -187,6 +206,31 @@ class AgentTelemetryStore:
         if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
             raise TelemetryStoreError()
         return value.astimezone(timezone.utc)
+
+    def _check_pricing(self, connection, run_id, *, pin=False, finishing=False):
+        if self._price_book is None:
+            if self._pricing.policy(connection, run_id) is not None:
+                raise TelemetryStoreError()
+        elif pin:
+            self._pricing.pin(connection, run_id, self._price_book)
+        elif finishing:
+            # A paid response already occurred. Keep its factual receipt even
+            # if live approval changes while the request is in flight. Its
+            # frozen policy, not today's file, remains the pricing authority.
+            policy = self._pricing.policy(connection, run_id)
+            if policy != {"descriptor": self._price_book.descriptor,
+                          "priceBookSha256": self._price_book.sha256}:
+                raise TelemetryStoreError()
+        else:
+            self._pricing.require(connection, run_id, self._price_book)
+
+    def pin_pricing(self, run_id):
+        """Freeze optional prices before first model work; never backfill."""
+        try:
+            with self._transaction() as connection:
+                self._check_pricing(connection, run_id, pin=True)
+        except Exception:
+            raise TelemetryStoreError() from None
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -294,6 +338,19 @@ class AgentTelemetryStore:
             if type(record) is not UsageRecord or record.role != bound.role or record.cost_usd is not None:
                 raise ValueError()
             usage = record.usage
+            if usage is not None:
+                from agents.llm.contracts import TokenUsage
+                if type(usage) is not TokenUsage:
+                    raise ValueError()
+                usage.__post_init__()
+            from agents.llm.contracts import REPORTED_SERVICE_TIERS
+            if (record.reported_service_tier is not None and (
+                    type(record.reported_service_tier) is not str
+                    or record.reported_service_tier not in REPORTED_SERVICE_TIERS)
+                    or record.billing_context is not None and (
+                        type(record.billing_context) is not str
+                        or record.billing_context != "OPENAI_RESPONSES_GLOBAL_TEXT")):
+                raise ValueError()
             detail = UsageDetail(
                 sequence=record.sequence, role=record.role,
                 requestedModel=_safe_model(record.requested_model),
@@ -307,6 +364,9 @@ class AgentTelemetryStore:
                 totalTokens=usage.total_tokens if usage else None,
                 cachedInputTokens=usage.cached_input_tokens if usage else None,
                 reasoningOutputTokens=usage.reasoning_output_tokens if usage else None,
+                cacheWriteInputTokens=usage.cache_write_input_tokens if usage else None,
+                reportedServiceTier=record.reported_service_tier,
+                billingContext=record.billing_context,
             )
             event = TraceEvent(runId=bound.run_id, workflowStepId=bound.workflow_step_id,
                 a2aTaskId=bound.a2a_task_id, agentContextId=bound.agent_context_id,
@@ -314,8 +374,13 @@ class AgentTelemetryStore:
                 attempt=bound.attempt, requirementIds=list(bound.requirement_ids),
                 inputArtifactIds=list(bound.input_artifact_ids), codeVersion=bound.code_version,
                 snapshotSha256=bound.snapshot_sha256, durationMs=record.duration_ms)
+            data = detail.model_dump(mode="json", by_alias=True)
+            # Preserve canonical legacy payloads when no new metadata exists.
+            for name in ("cacheWriteInputTokens", "reportedServiceTier", "billingContext"):
+                if data[name] is None:
+                    data.pop(name)
             return self._append(event, bound.model_dump(mode="json", by_alias=True),
-                                detail.model_dump(mode="json", by_alias=True), "LLM", "usage:" + str(record.sequence), "USAGE")
+                                data, "LLM", "usage:" + str(record.sequence), "USAGE")
         except Exception:
             raise TelemetryStoreError() from None
 
@@ -351,6 +416,10 @@ class AgentTelemetryStore:
     def _append(self, event, binding, detail, kind, key, record_type):
         payload_json = _json({"binding": binding, "detail": detail, "recordType": record_type})
         with self._transaction() as connection:
+            if kind == "LLM":
+                self._check_pricing(connection, event.run_id,
+                    pin=record_type == "EVENT" and event.event_type == "LLM_MODEL_CALLED",
+                    finishing=record_type == "USAGE")
             existing = connection.execute(
                 "SELECT trace_event_id,payload_json FROM agent_runtime_events WHERE run_id=? AND kind=? AND idempotency_key=?",
                 (str(event.run_id), kind, key)).fetchone()
@@ -368,7 +437,8 @@ class AgentTelemetryStore:
                     identical = existing["payload_json"] == payload_json
                 if not identical:
                     raise TelemetryStoreError()
-                return {"eventId": existing["trace_event_id"], "kind": kind, **previous["detail"]}
+                pricing = self._price_view(connection, event.run_id, detail["sequence"]) if record_type == "USAGE" else {}
+                return {"eventId": existing["trace_event_id"], "kind": kind, **previous["detail"], **pricing}
             self._verify_binding(connection, event, detail, kind, record_type)
             connection.execute(
                 "INSERT INTO trace_events(event_id,run_id,occurred_at,event_type,payload_json) VALUES(?,?,?,?,?)",
@@ -378,7 +448,10 @@ class AgentTelemetryStore:
                 "INSERT INTO agent_runtime_events(trace_event_id,run_id,workflow_step_id,kind,idempotency_key,payload_json) VALUES(?,?,?,?,?,?)",
                 (str(event.event_id), str(event.run_id), str(event.workflow_step_id) if event.workflow_step_id else None,
                  kind, key, payload_json))
-        return {"eventId": str(event.event_id), "kind": kind, **json.loads(payload_json)["detail"]}
+            if record_type == "USAGE" and self._price_book is not None:
+                self._pricing.publish(connection, event.run_id, detail["sequence"])
+            pricing = self._price_view(connection, event.run_id, detail["sequence"]) if record_type == "USAGE" else {}
+        return {"eventId": str(event.event_id), "kind": kind, **json.loads(payload_json)["detail"], **pricing}
 
     def _verify_binding(self, connection, event, detail, kind, record_type):
         from orchestrator.domain.models import WorkflowStep
@@ -406,10 +479,11 @@ class AgentTelemetryStore:
                     raise TelemetryStoreError()
                 expected = snapshot.accounted_usage[sequence]
                 if ((expected is None) != (not detail["usageKnown"])
-                        or (expected is not None and any(detail[key] != value for key, value in (
+                        or (expected is not None and any(detail.get(key) != value for key, value in (
                             ("inputTokens", expected.input_tokens), ("outputTokens", expected.output_tokens),
                             ("totalTokens", expected.total_tokens), ("cachedInputTokens", expected.cached_input_tokens),
-                            ("reasoningOutputTokens", expected.reasoning_output_tokens))))):
+                            ("reasoningOutputTokens", expected.reasoning_output_tokens),
+                            ("cacheWriteInputTokens", expected.cache_write_input_tokens))))):
                     raise TelemetryStoreError()
         if kind == "LLM":
             row = connection.execute("SELECT payload_json FROM run_configurations WHERE run_id=?",
@@ -437,7 +511,8 @@ class AgentTelemetryStore:
                         or usage is not None and (usage.input_tokens != detail.input_tokens
                             or usage.output_tokens != detail.output_tokens or usage.total_tokens != detail.total_tokens
                             or usage.cached_input_tokens != detail.cached_input_tokens
-                            or usage.reasoning_output_tokens != detail.reasoning_output_tokens)):
+                            or usage.reasoning_output_tokens != detail.reasoning_output_tokens
+                            or usage.cache_write_input_tokens != detail.cache_write_input_tokens)):
                     raise ValueError()
         except Exception:
             raise TelemetryStoreError() from None
@@ -448,6 +523,13 @@ class AgentTelemetryStore:
     def list_events(self, run_id: UUID, *, limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
         return self._list(run_id, usage_only=False, limit=limit, offset=offset)
 
+    def _price_view(self, connection, run_id, sequence):
+        return self._pricing.get(connection, run_id, sequence) or {
+            "costUsd": None, "costStatus": "PRICING_UNAPPROVED", "pricingEntryId": None,
+            "priceBookSha256": None, "priceBookId": None, "priceBookVersion": None,
+            "calculationVersion": None,
+        }
+
     def _list(self, run_id, *, usage_only, limit, offset):
         try:
             if type(limit) is not int or not 1 <= limit <= 500 or type(offset) is not int or offset < 0:
@@ -455,36 +537,85 @@ class AgentTelemetryStore:
             clause = "run_id=?" + (" AND json_extract(payload_json,'$.recordType')='USAGE'" if usage_only else "")
             values = (str(run_id),)
             with self._connection() as connection:
+                connection.execute("BEGIN")
                 total = connection.execute(f"SELECT COUNT(*) FROM agent_runtime_events WHERE {clause}", values).fetchone()[0]
                 rows = connection.execute(
                     f"SELECT trace_event_id,kind,payload_json FROM agent_runtime_events WHERE {clause} ORDER BY sequence LIMIT ? OFFSET ?",
                     (*values, limit, offset)).fetchall()
-            return ([{"eventId": row["trace_event_id"], "kind": row["kind"],
-                      **json.loads(row["payload_json"]), **json.loads(row["payload_json"])["detail"]} for row in rows], total)
+                records = []
+                for row in rows:
+                    payload = json.loads(row["payload_json"])
+                    if payload["recordType"] == "USAGE":
+                        payload["detail"].update(self._price_view(connection, run_id, payload["detail"]["sequence"]))
+                    records.append({"eventId": row["trace_event_id"], "kind": row["kind"],
+                                    **payload, **payload["detail"]})
+                return records, total
         except Exception:
             raise TelemetryStoreError() from None
 
     def usage_summary(self, run_id: UUID) -> dict:
         try:
             with self._connection() as connection:
+                connection.execute("BEGIN")
                 rows = connection.execute(
                     "SELECT json_extract(payload_json,'$.detail') FROM agent_runtime_events WHERE run_id=? AND json_extract(payload_json,'$.recordType')='USAGE' ORDER BY sequence",
                     (str(run_id),)).fetchall()
-            details = [UsageDetail.model_validate_json(row[0]) for row in rows]
+                policy = self._pricing.policy(connection, run_id)
+                details = [UsageDetail.model_validate_json(row[0]) for row in rows]
+                prices = [self._price_view(connection, run_id, detail.sequence) for detail in details]
+                budget_row = connection.execute("SELECT revision,payload_json FROM agent_budget_ledger WHERE run_id=?",
+                    (str(run_id),)).fetchone()
+                snapshot = self._snapshot(budget_row, validate_clock=False) if budget_row is not None else None
             known = sum(detail.total_tokens for detail in details if detail.total_tokens is not None)
             complete = all(detail.usage_known for detail in details)
-            snapshot = self.load_budget(run_id, validate_clock=False)
             missing = []
+            sequences = {detail.sequence for detail in details}
+            if len(sequences) != len(details):
+                raise ValueError()
             if snapshot is not None:
                 # Reserved calls with no receipt are not zero-token calls.
                 complete = complete and snapshot.usage_complete and not snapshot.pending_model_sequences
                 known = max(known, snapshot.known_total_tokens)
-                missing = sorted(set(snapshot.accounted_usage) - {detail.sequence for detail in details})
+                missing = sorted(set(snapshot.accounted_usage) - sequences)
+                if sequences - set(snapshot.accounted_usage):
+                    raise ValueError()
+                complete = complete and not missing
+                for detail in details:
+                    usage = snapshot.accounted_usage[detail.sequence]
+                    if ((usage is None) != (not detail.usage_known)
+                            or usage is not None and any(getattr(detail, name) != getattr(usage, name) for name in (
+                                "input_tokens", "output_tokens", "total_tokens", "cached_input_tokens",
+                                "reasoning_output_tokens", "cache_write_input_tokens"))):
+                        raise ValueError()
+            unknown_cost = sorted({detail.sequence for detail, price in zip(details, prices) if price["costUsd"] is None}
+                | set(missing) | set(snapshot.pending_model_sequences if snapshot else ()))
+            cost_complete = policy is not None and snapshot is not None and complete and not unknown_cost
+            known_cost = None
+            if policy is not None:
+                amounts = [price["costUsd"] for price in prices if price["costUsd"] is not None]
+                with localcontext() as context:
+                    # Accommodate the exact integer/fractional spans and carry
+                    # digits of the sum, rather than rounding large receipts.
+                    integer_digits = max((len(value.split(".", 1)[0]) for value in amounts), default=1)
+                    fractional_digits = max((len(value.partition(".")[2]) for value in amounts), default=0)
+                    context.prec = max(128, integer_digits + fractional_digits + len(str(len(amounts))) + 1)
+                    context.traps[Inexact] = context.traps[Rounded] = True
+                    amount = sum((Decimal(value) for value in amounts), Decimal(0))
+                    rendered = format(amount, "f")
+                known_cost = rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+            book = {} if policy is None else policy["descriptor"]["priceBook"]
             return {"runId": str(run_id), "modelCalls": snapshot.model_calls if snapshot else len(details),
                     "toolCalls": snapshot.tool_calls if snapshot else None,
                     "recordedModelCalls": len(details), "usageComplete": complete,
                     "knownTotalTokens": known, "totalTokens": known if complete else None,
-                    "costUsd": None, "pendingModelSequences": list(snapshot.pending_model_sequences) if snapshot else [],
+                    "costUsd": known_cost if cost_complete else None,
+                    "knownCostUsd": known_cost, "costComplete": bool(cost_complete),
+                    "unknownCostSequences": unknown_cost,
+                    "currency": book.get("currency"), "priceBookId": book.get("priceBookId"),
+                    "priceBookVersion": book.get("priceBookVersion"),
+                    "priceBookSha256": None if policy is None else policy["priceBookSha256"],
+                    "calculationVersion": None if policy is None else policy["descriptor"]["calculationVersion"],
+                    "pendingModelSequences": list(snapshot.pending_model_sequences) if snapshot else [],
                     "pendingToolSequences": list(snapshot.pending_tool_sequences) if snapshot else [],
                     "missingUsageSequences": missing,
                     "executionBlocked": bool(snapshot and (snapshot.invalidated or not snapshot.usage_complete

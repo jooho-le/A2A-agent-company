@@ -12,17 +12,74 @@ from pydantic import SecretStr
 
 from agents.llm.contracts import (
     LLMErrorCode, LLMRequest, LLMResponse, LLMRuntimeError, StructuredOutput,
+    OPENAI_RESPONSES_GLOBAL_TEXT, REPORTED_SERVICE_TIERS,
     TokenUsage, ToolCall, json_text, parse_json,
 )
 from orchestrator.domain.run_configuration import ModelConfiguration
 
 
-_ENDPOINT = "https://api.openai.com/v1/responses"
+_GLOBAL_ENDPOINT = "https://api.openai.com/v1/responses"
+_ENDPOINT = _GLOBAL_ENDPOINT
 _FUNCTION_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def _nonblank(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _text_only_items(items) -> bool:
+    """Conservative billing classification; does not change wire admission."""
+    if type(items) is not list or not items:
+        return False
+    for item in items:
+        if type(item) is not dict:
+            return False
+        kind = item.get("type")
+        if ("type" in item and type(kind) is not str
+                or "id" in item and not _nonblank(item["id"])
+                or "status" in item and (type(item["status"]) is not str
+                    or item["status"] not in {"completed", "incomplete", "in_progress"})):
+            return False
+        if kind in (None, "message"):
+            if (set(item) - {"type", "id", "status", "role", "content"}
+                    or type(item.get("role")) is not str
+                    or item["role"] not in {"user", "assistant", "system", "developer"}):
+                return False
+            content = item.get("content")
+            if type(content) is str:
+                continue
+            if type(content) is not list or not content:
+                return False
+            for part in content:
+                if (type(part) is not dict or type(part.get("type")) is not str
+                        or part["type"] not in {"input_text", "output_text"}
+                        or type(part.get("text")) is not str
+                        or set(part) - ({"type", "text"} if part["type"] == "input_text"
+                            else {"type", "text", "annotations", "logprobs"})
+                        or any(name in part and type(part[name]) is not list
+                               for name in ("annotations", "logprobs"))):
+                    return False
+        elif kind == "function_call":
+            if (set(item) - {"type", "id", "status", "call_id", "name", "arguments"}
+                    or not _nonblank(item.get("call_id")) or not _nonblank(item.get("name"))
+                    or type(item.get("arguments")) is not str):
+                return False
+        elif kind == "function_call_output":
+            if (set(item) - {"type", "id", "status", "call_id", "output"}
+                    or not _nonblank(item.get("call_id")) or type(item.get("output")) is not str):
+                return False
+        elif kind == "reasoning":
+            if (set(item) - {"type", "id", "status", "summary", "encrypted_content"}
+                    or type(item.get("summary")) is not list
+                    or item.get("encrypted_content") is not None and type(item["encrypted_content"]) is not str):
+                return False
+            for part in item["summary"]:
+                if (type(part) is not dict or set(part) != {"type", "text"}
+                        or part["type"] != "summary_text" or type(part["text"]) is not str):
+                    return False
+        else:
+            return False
+    return True
 
 
 class OpenAIResponsesProvider:
@@ -137,7 +194,10 @@ class OpenAIResponsesProvider:
                 # Accounting remains factual even if subsequent response
                 # identity or Tool/output validation fails.
                 usage = self._parse_usage(payload.get("usage"))
-            return self._parse_response(payload, request.model, usage=usage)
+            context = OPENAI_RESPONSES_GLOBAL_TEXT if (
+                _ENDPOINT == _GLOBAL_ENDPOINT and str(response.request.url) == _GLOBAL_ENDPOINT
+                and _text_only_items(body["input"])) else None
+            return self._parse_response(payload, request.model, usage=usage, billing_context=context)
         except Exception:
             raise LLMRuntimeError(LLMErrorCode.RESPONSE, usage=usage) from None
 
@@ -161,11 +221,14 @@ class OpenAIResponsesProvider:
             output_tokens=payload["output_tokens"],
             total_tokens=payload["total_tokens"],
             cached_input_tokens=details[0], reasoning_output_tokens=details[1],
+            cache_write_input_tokens=payload.get("input_tokens_details", {}).get("cache_write_tokens")
+                if payload.get("input_tokens_details") is not None else None,
         )
 
     @classmethod
     def _parse_response(
         cls, payload: object, model: ModelConfiguration, *, usage: TokenUsage | None,
+        billing_context: str | None = None,
     ) -> LLMResponse:
         if not isinstance(payload, dict) or not _nonblank(payload.get("id")):
             raise ValueError("Invalid response")
@@ -239,4 +302,7 @@ class OpenAIResponsesProvider:
             output_text="".join(texts) if texts else None,
             tool_calls=tuple(calls), output_items_json=json_text(items),
             refused=refused,
+            reported_service_tier=payload.get("service_tier") if (
+                type(payload.get("service_tier")) is str and payload["service_tier"] in REPORTED_SERVICE_TIERS) else None,
+            billing_context=billing_context,
         )
