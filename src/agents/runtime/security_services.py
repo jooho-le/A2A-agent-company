@@ -86,6 +86,9 @@ class SecuritySemanticProof:
     snapshot_sha256: str = field(repr=False)
     requirement_outcomes: tuple = field(default=(), repr=False)
     finding_dispositions: tuple = field(default=(), repr=False)
+    verification_receipt_id: UUID | None = field(default=None, repr=False)
+    approval_sha256: str | None = field(default=None, repr=False)
+    request_sha256: str | None = field(default=None, repr=False)
 
     def __post_init__(self):
         invalid = False
@@ -106,6 +109,12 @@ class SecuritySemanticProof:
                     raise ValueError
             if (len(dict(self.requirement_outcomes)) != len(self.requirement_outcomes)
                     or len(dict(self.finding_dispositions)) != len(self.finding_dispositions)):
+                raise ValueError
+            receipt_fields = (self.verification_receipt_id, self.approval_sha256, self.request_sha256)
+            if any(value is not None for value in receipt_fields) and (
+                    not _uuid(self.verification_receipt_id)
+                    or any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                           for value in (self.approval_sha256, self.request_sha256))):
                 raise ValueError
         except Exception:
             invalid = True
@@ -533,6 +542,23 @@ class SecurityRuntimeServices:
                 receipt = self._scans.get(execution.metadata.run_id, expected_receipt.execution_manifest_id)
                 if record != expected_record or receipt != expected_receipt or record.to_tool_evidence() != expected_evidence:
                     raise ValueError
+            semantic_details = {}
+            if proof is not None and proof.verification_receipt_id is not None:
+                # An opaque reference is not evidence by itself. The approved
+                # adapter must reread its immutable record and current inputs.
+                check = getattr(self._verifier, "verify_receipt", None)
+                if not callable(check):
+                    raise SecurityServicesError("SECURITY_PROOF_INVALID")
+                checked = check(proof, execution, decision, measured)
+                if inspect.isawaitable(checked):
+                    if inspect.iscoroutine(checked):
+                        checked.close()
+                    raise SecurityServicesError("SECURITY_PROOF_INVALID")
+                semantic_details = {
+                    "semanticProofRef": f"artifact://{proof.verification_receipt_id}/security-semantic-proof.json",
+                    "semanticProofApprovalSha256": proof.approval_sha256,
+                    "semanticProofRequestSha256": proof.request_sha256,
+                }
             evidence = measured.scans[0][2]
             requirements, findings = [], []
             for review in decision.requirement_reviews:
@@ -544,7 +570,7 @@ class SecurityRuntimeServices:
                 requirements.append(SecurityRequirementResult(requirement_id=review.requirement_id,
                     outcome=ValidationOutcome(value), details=json_text({
                         "code": "HOST_SEMANTIC_PROOF" if value != "UNVERIFIED" else "SEMANTIC_PROOF_REQUIRED",
-                        "codeReferences": list(anchors[review.requirement_id])}),
+                        "codeReferences": list(anchors[review.requirement_id]), **semantic_details}),
                     actual_result=value, normalized_location=location,
                     tool_evidence=evidence if value != "UNVERIFIED" else None))
             proposals = {review.finding_id: review for review in decision.finding_reviews}
@@ -560,7 +586,7 @@ class SecurityRuntimeServices:
                 findings.append(SecurityFinding(finding_id=identity, severity=SecuritySeverity(actual.severity),
                     disposition=FindingDisposition(value), title=actual.rule_id + ":" + actual.test_name,
                     description=json_text({"code": "HOST_SEMANTIC_PROOF" if value in {"CONFIRMED", "FALSE_POSITIVE"}
-                        else "SCANNER_CANDIDATE_REQUIRES_VERIFICATION", "codeReferences": list(anchors[identity])}),
+                        else "SCANNER_CANDIDATE_REQUIRES_VERIFICATION", "codeReferences": list(anchors[identity]), **semantic_details}),
                     evidence_ref=receipt.report_ref, rule_id=actual.rule_id,
                     normalized_location=actual.path + ":" + str(actual.line)))
             version = verify_report_predecessor(self._repository, execution, AgentRole.SECURITY, SecurityReportArtifact)

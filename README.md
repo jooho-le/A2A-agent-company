@@ -262,6 +262,12 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.run_host --runtime configs/ow
 
 API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개발정의서 점검은 [41번 Host factory](docs/41-owned-host-factory.md)를 참고하세요. 팀원 제품·독립 평가 연결, 실제 Docker/외부 LLM 실행 검증은 이번 단계에서 수행하지 않았습니다.
 
+### 승인된 Security 의미 검증기·신뢰 증거 — 42번
+
+`load_approved_assessor()`로 Host가 직접 제공한 독립 함수의 기준·버전·Scenario 계약 Hash·실제 구현 파일/로드된 코드 Hash를 검사합니다. `create_host(proof_verifier=approved)`는 이 승인 정보를 같은 Run의 불변 Host 정책에 포함하고, 현재 Source bytes·실제 Scanner/Tool 기록에 연결한 새 요청 ID/Hash와 별도 불변 의미 검증 Receipt를 확인합니다. raw callback은 이 factory에서 거절하며 JSON/CLI/모델의 임의 import는 없습니다.
+
+`configs/owned-security-approval.example.json`은 미승인 예시이므로 원본은 실패합니다. 실제 승인 기준·검증 함수는 운영자가 별도로 제공해야 하며, 이번 작업은 회원가입 보안 테스트나 제품 PASS 검증을 구현한 것이 아닙니다. 기본 CLI는 검증기 없는 `UNVERIFIED/HUMAN_REVIEW`를 유지합니다. Scanner 경고 0개·모델 설명·QA PASS를 Security PASS로 바꾸지 않습니다. 상세 연결·Receipt 조회·신뢰 경계·개발정의서 점검은 [42번 Security 의미 검증 연결](docs/42-approved-security-semantic-proof.md)을 참고하세요.
+
 ## 테스트
 
 ```bash

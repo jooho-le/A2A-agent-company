@@ -125,6 +125,8 @@ factory 실패 전에는 생성한 Provider를 Host가 회수하고, 조립 성�
 
 이번 Hash의 semanticProof 값은 verifier의 **유무만** 나타낸다. 실제 의미 기준·verifier 버전·증거 소속을 고정한 기능이 아니므로 그 완료를 주장하지 않는다. 이를 구현하고 실제 신뢰 증거에 연결하는 것이 42번이다. 역할 4의 독립 테스트/판정 기준 개발은 별도다.
 
+후속 변경: [42번 승인된 의미 검증 연결](42-approved-security-semantic-proof.md)에서 현재 factory는 raw callback 대신 승인된 descriptor만 받고 기준·구현/버전·요청/Receipt 소속까지 확인한다. 위 문단은 41번 시점의 경계이며 기본 `None`/미검증 동작은 유지한다.
+
 ## 8. 개발정의서 준수 점검
 
 | 정의서 기준 | 확인 |

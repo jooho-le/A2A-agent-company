@@ -219,15 +219,14 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
         self.tools, self.runtime, self.source = original_tools, original_runtime, original_source
         self.write()
 
-    def test_protected_case_binding_and_semantic_verifier_presence_are_fingerprinted(self):
+    def test_protected_case_binding_is_fingerprinted_and_unapproved_verifier_is_rejected(self):
         self.protected()
         approved = self.inspect(protected_cases_file=self.cases_file).policy_sha256
         self.cases["cases"][0]["expectedResult"] = "Another approved protected expectation"
         self.write()
         self.assertNotEqual(self.inspect(protected_cases_file=self.cases_file).policy_sha256, approved)
-        without_proof = self.inspect(protected_cases_file=self.cases_file).policy_sha256
-        with_proof = self.inspect(protected_cases_file=self.cases_file, proof_verifier=lambda evidence: False).policy_sha256
-        self.assertNotEqual(without_proof, with_proof)
+        with self.assertRaises(HostFactoryError):
+            self.inspect(protected_cases_file=self.cases_file, proof_verifier=lambda evidence: False)
 
     def test_privileged_model_copy_cannot_use_equal_but_noncanonical_primitives(self):
         plan = self.inspect()

@@ -26,6 +26,8 @@ from agents.platform.configuration import (
 )
 from agents.platform.host_policy_store import HostPolicyStore
 from agents.platform.host_services import HostRuntimeServices, _model_json
+from agents.platform.security_approval import ApprovedSecurityAssessor
+from agents.platform.security_verifier import TrustedSecurityProofVerifier
 from agents.platform.starting_source import (
     RegisteredSourcePreparer, load_source_configuration, verify_starting_source,
 )
@@ -185,8 +187,10 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                proof_verifier=None):
     """Read-only settings/Git cross-check; never resolve credentials or stores."""
     try:
-        if proof_verifier is not None and not callable(proof_verifier):
-            raise HostFactoryError()
+        if proof_verifier is not None:
+            if type(proof_verifier) is not ApprovedSecurityAssessor:
+                raise HostFactoryError()
+            proof_verifier.verify_integrity()
         runtime_path, tools_path, source_path = (Path(value).absolute() for value in (runtime_file, tools_file, source_file))
         runtime = load_runtime_configuration(runtime_path)
         layout = inspect_runtime_configuration(runtime, base_directory=runtime_path.parent)
@@ -202,6 +206,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         inputs = (runtime_path, tools_path, source_path)
         if protected_cases_file is not None:
             inputs += (Path(protected_cases_file).absolute(),)
+        if proof_verifier is not None:
+            inputs += (proof_verifier.approval_path, *proof_verifier.implementation_paths)
         _layout_guard(layout, source, inputs, lock)
         approved = RunConfiguration(
             model=runtime.model.model_dump(by_alias=True),
@@ -219,7 +225,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             "unit": parse_json(tools._unit_json), "browser": parse_json(tools._browser_json),
             "security": parse_json(tools._security_json), "maxCallSeconds": tools.max_call_seconds,
             "protectedCases": [_case_data(case) for case in cases],
-            "semanticProof": "UNVERIFIED" if proof_verifier is None else "HOST_VERIFIER",
+            "semanticProof": "UNVERIFIED" if proof_verifier is None else proof_verifier.descriptor,
         }
         return _HostConfiguration(runtime=runtime, runtime_directory=runtime_path.parent, layout=layout,
             tools=tools, source=source, protected_cases=cases,
@@ -277,17 +283,24 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
         preparer = RegisteredSourcePreparer(repository, workspaces, plan.source)
         policies = HostPolicyStore(repository)
 
+        verifier = None if proof_verifier is None else TrustedSecurityProofVerifier(
+            repository, proof_verifier, artifact_store=artifacts)
+
         def validate_execution(configuration, run_id):
             plan.validate_configuration(configuration)
             policies.require(run_id, plan.policy_sha256)
+            if verifier is not None:
+                verifier.verify_integrity()
 
         services = HostRuntimeServices(repository, workspaces, artifacts, tools=plan.tools,
             source_configuration=plan.source.configuration, validate_configuration=validate_execution,
-            client_factory=mcp_client_factory, protected_cases=plan.protected_cases, proof_verifier=proof_verifier)
+            client_factory=mcp_client_factory, protected_cases=plan.protected_cases, proof_verifier=verifier)
 
         async def prepare_workspace(run_id):
             frozen = await _host_call(repository.get_run_configuration, run_id)
             plan.validate_configuration(frozen.configuration)
+            if verifier is not None:
+                verifier.verify_integrity()
             budget = platform.budgets.resolve(frozen)
             budget.check()
             await _host_call(lambda selected: policies.pin(selected, plan.policy_sha256), run_id)
@@ -313,6 +326,8 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
 
         def validate_submission(configuration):
             plan.validate_configuration(configuration)
+            if verifier is not None:
+                verifier.verify_integrity()
             original_validator(configuration)
 
         original_control = platform.orchestrator_app.state.control_preflight
