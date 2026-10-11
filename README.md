@@ -274,6 +274,10 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 41번 검사 명령에 `--price-book configs/owned-price-book.local.json`을 선택적으로 추가합니다. 기본 검사는 계속 읽기 전용이며 가격표를 지정하지 않으면 비용은 기존처럼 `null`입니다. `configs/owned-price-book.example.json`은 미승인 형식 예시라 원본은 거절합니다. 운영 모델/가격은 임의로 설정하지 않았고 자동 가격 조회·과거 Run 비용 보충·실제 API/Docker 실행도 하지 않았습니다. 승인 가격표의 global text 토큰 계산과 실제 청구 금액 검증은 구분합니다. 설정 필드·동결/사용량 기록 경계·개발정의서 점검은 [43번 LLM 비용 계산](docs/43-approved-llm-cost-accounting.md)을 참고하세요.
 
+### 자체 실제 실행 준비 점검 — 44번, 실행 미수행
+
+현재 승인된 로컬 Runtime/Tool/Source/가격표와 Host 자격증명이 없고, 점검한 shell PATH에서 Docker CLI를 찾지 못했습니다. 실제 유료 LLM·Docker·작은 Run 실행은 아직 수행하지 않았습니다. 미승인 예시가 검사에서 거절되는 것을 실행 성공으로 취급하지 않습니다. 필요한 사용자 결정/환경 준비와 실행 순서는 [44번 준비 점검](docs/44-owned-live-smoke-readiness.md)을 참고하세요.
+
 ## 테스트
 
 ```bash
