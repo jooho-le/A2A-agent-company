@@ -1,5 +1,8 @@
 .env
 configs/*.local.json
+
+# Operator-prepared sandbox packages/browser binaries, not source code.
+docker/sandbox/prepared/
 .data/
 .DS_Store
 .venv/

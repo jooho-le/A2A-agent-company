@@ -228,6 +228,16 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.check_configuration --file co
 
 `--check-secrets`를 추가하면 process environment에 선언된 비밀값이 있는지만 확인합니다. `.env`는 자동으로 읽지 않으며 기존 `AGENT_*`/`ORCHESTRATOR_*`로 구성이 덮어써지지 않습니다. 이 명령은 DB·서버·LLM·MCP·Docker를 시작하지 않고 `executionReady=false`를 유지합니다. Docker/Profile·Workspace·실제 Host factory는 후속 39~41번입니다. 설정 계약·사용법·개발정의서 점검은 [38번 실행 설정](docs/38-owned-runtime-configuration.md)을 참고하세요.
 
+### 공통 Docker 이미지·실행 도구 준비 — 39번
+
+`configs/owned-tools.example.json`은 같은 Image Digest·Dependency Lock·Hardware와 기존 Build/Unit/Browser/Security 설정을 묶는 Host 전용 예시입니다. 이미지·Version·argv·자원 제한은 운영자 승인 전 `null`이며 원본 그대로는 실패합니다. 로컬 복사본 `configs/owned-tools.local.json`에 승인값을 넣고 검사합니다.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m agents.platform.check_tools --file configs/owned-tools.local.json
+```
+
+검사는 설정과 실제 Lock Hash까지만 확인하고 `executionReady=false`, `DockerChecked=false`를 반환합니다. Docker/API/제품 Build/Test를 실행하지 않습니다. `docker/sandbox/Dockerfile`은 사전 준비한 승인 Base·Hash 고정 Wheel·Chromium을 위한 별도 Recipe이며 아직 실제 이미지를 만들지 않았습니다. 자세한 준비 항목·역할별 정책·격리 경계는 [39번 이미지·Tool 설정](docs/39-sandbox-image-tool-profiles.md)을 참고하세요.
+
 ## 테스트
 
 ```bash

@@ -81,6 +81,13 @@ def _environment(values, *, browser=False):
     return result
 
 
+def _runtime_environment(profile):
+    # Fixed Host policy, not an extra model/operator ENV input. The common
+    # image must not embed a browser-only ENV that other Tools would reject.
+    return {**_ENV, **({"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"}
+                     if profile.tool_name == "run_browser_tests" else {})}
+
+
 def _structured_stdout(content, exit_code, decoder, maximum):
     """Host-only pure report decoder before JSON-aware secret checking.
 
@@ -206,7 +213,7 @@ class SandboxRuntime:
         if image.get("Os") != "linux" or not isinstance(config, dict) or config.get("Volumes") or config.get("OnBuild"):
             raise SandboxError(SandboxErrorCode.DENIED)
         env = _environment(config.get("Env") or [], browser=profile.tool_name == "run_browser_tests")
-        env.update(_ENV)
+        env.update(_runtime_environment(profile))
         return image_id, env
 
     @staticmethod
@@ -223,7 +230,7 @@ class SandboxRuntime:
         ]
         for key, value in labels.items():
             args.extend(("--label", f"{key}={value}"))
-        for key, value in _ENV.items():
+        for key, value in _runtime_environment(profile).items():
             args.extend(("--env", f"{key}={value}"))
         for target in ("/work", "/output", "/tmp"):
             args.extend(("--tmpfs", f"{target}:rw,nosuid,nodev,size={limits.tmpfs_bytes},mode=1777"))
