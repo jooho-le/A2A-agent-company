@@ -7,6 +7,7 @@ from pydantic import Field, UUID4, field_validator
 
 from orchestrator.domain.models import utc_now
 from orchestrator.domain.snapshot_handoff import ImmutableDomainModel
+from orchestrator.workspaces.policy import public_permissions
 
 
 class WorkspaceRecord(ImmutableDomainModel):
@@ -27,10 +28,5 @@ class WorkspaceRecord(ImmutableDomainModel):
         return {
             "workspaceId": str(self.workspace_id),
             "runId": str(self.run_id),
-            "permissions": {
-                "PLANNER": {"write": ["planning/"]},
-                "DEVELOPER": {"write": ["source/"], "snapshot": "READ_ONLY"},
-                "QA": {"write": ["outputs/qa/"], "snapshot": "READ_ONLY"},
-                "SECURITY": {"write": ["outputs/security/"], "snapshot": "READ_ONLY"},
-            },
+            "permissions": public_permissions(),
         }

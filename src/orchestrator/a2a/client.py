@@ -132,6 +132,7 @@ class A2AAgentClient:
         httpx_client: httpx.AsyncClient | None = None,
         timeout_seconds: float = 10.0,
         headers: Mapping[str, str] | None = None,
+        trust_env: bool = True,
     ) -> None:
         parsed = urlsplit(agent_base_url)
         if (
@@ -150,10 +151,14 @@ class A2AAgentClient:
             raise ValueError("agent_base_url contains an invalid port") from exc
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if type(trust_env) is not bool:
+            raise ValueError("A2A_CLIENT_CONFIGURATION_INVALID")
 
         self._agent_base_url = agent_base_url.rstrip("/")
         self._owns_httpx_client = httpx_client is None
-        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=timeout_seconds, headers=headers)
+        self._httpx_client = httpx_client or httpx.AsyncClient(
+            timeout=timeout_seconds, headers=headers, trust_env=trust_env,
+        )
         if httpx_client is not None and headers:
             self._httpx_client.headers.update(headers)
         self._httpx_client.headers[VERSION_HEADER] = PROTOCOL_VERSION_1_0

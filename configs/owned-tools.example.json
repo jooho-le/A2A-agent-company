@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "imageReference": null,
+  "dependencyLockFile": "../docker/sandbox/prepared/requirements.lock",
+  "dependencyLockHash": null,
+  "hardwareProfile": null,
+  "dockerEndpoint": "unix:///var/run/docker.sock",
+  "maxCallSeconds": null,
+  "build": {
+    "profile": {
+      "name": "approved-build",
+      "argv": null,
+      "limits": {
+        "cpus": null,
+        "memory_bytes": null,
+        "pids": null,
+        "timeout_seconds": null,
+        "tmpfs_bytes": null,
+        "max_stdout_bytes": null,
+        "max_stderr_bytes": null,
+        "control_timeout_seconds": null
+      }
+    }
+  },
+  "unit": {
+    "scopes": [
+      {"name": "developer-unit", "kind": "SNAPSHOT", "source_directory": "tests", "pattern": "test_*.py"},
+      {"name": "qa-unit", "kind": "QA_TESTS", "source_directory": "tests", "pattern": "test_*.py"}
+    ],
+    "python_executable": "/usr/local/bin/python",
+    "limits": {
+      "cpus": null,
+      "memory_bytes": null,
+      "pids": null,
+      "timeout_seconds": null,
+      "tmpfs_bytes": null,
+      "max_stdout_bytes": null,
+      "max_stderr_bytes": null,
+      "control_timeout_seconds": null
+    }
+  },
+  "browser": {
+    "suites": [{"name": "qa-browser", "kind": "QA_TESTS", "suite_path": "tests/browser/suite.json"}],
+    "service_argv": null,
+    "playwright_version": null,
+    "python_executable": "/usr/local/bin/python",
+    "base_url": "http://127.0.0.1:8765",
+    "ready_path": "/",
+    "startup_timeout_seconds": null,
+    "action_timeout_ms": null,
+    "limits": {
+      "cpus": null,
+      "memory_bytes": null,
+      "pids": null,
+      "timeout_seconds": null,
+      "tmpfs_bytes": null,
+      "max_stdout_bytes": null,
+      "max_stderr_bytes": null,
+      "control_timeout_seconds": null
+    }
+  },
+  "security": {
+    "profiles": [{"name": "approved-bandit", "scanner_version": null, "rule_ids": null, "profile_ref": null}],
+    "python_executable": "/usr/local/bin/python",
+    "limits": {
+      "cpus": null,
+      "memory_bytes": null,
+      "pids": null,
+      "timeout_seconds": null,
+      "tmpfs_bytes": null,
+      "max_stdout_bytes": null,
+      "max_stderr_bytes": null,
+      "control_timeout_seconds": null
+    }
+  }
+}

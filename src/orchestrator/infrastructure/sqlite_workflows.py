@@ -246,11 +246,17 @@ class SQLiteWorkflowRepository:
                           and step.a2a_task_state not in _TERMINAL_TASK_STATES]
             if any(remote_tasks.get(step.workflow_step_id) != A2ATaskState.CANCELED for step in unresolved):
                 raise ActiveAgentTaskError("Every unresolved remote Task requires confirmed cancellation")
-            if any(step.status == WorkflowStepStatus.RUNNING and step.a2a_task_id is None for step in steps):
-                raise ActiveAgentTaskError("An uncertain send without a Task ID cannot be canceled safely")
+            unsent = [step for step in steps if step.a2a_task_id is None]
+            for step in unsent:
+                sent = connection.execute(
+                    "SELECT 1 FROM trace_events WHERE run_id=? AND json_extract(payload_json, '$.workflowStepId')=? AND event_type='A2A_MESSAGE_SENT' LIMIT 1",
+                    (str(run_id), str(step.workflow_step_id)),
+                ).fetchone()
+                if sent is not None:
+                    raise ActiveAgentTaskError("An uncertain send without a Task ID cannot be canceled safely")
             updated = transition_run(run, WorkflowStatus.ABORTED, termination_reason=reason)
             for step in steps:
-                if step in unresolved or step.status in (WorkflowStepStatus.PENDING, WorkflowStepStatus.WAITING_INPUT):
+                if step in unresolved or step in unsent or step.status in (WorkflowStepStatus.PENDING, WorkflowStepStatus.WAITING_INPUT):
                     canceled = WorkflowStep.model_validate({
                         **step.model_dump(), "status": WorkflowStepStatus.CANCELED,
                         "a2a_task_state": A2ATaskState.CANCELED if step in unresolved else step.a2a_task_state,
@@ -314,6 +320,21 @@ class SQLiteWorkflowRepository:
                         (str(run_id), str(step_id), str(evidence.execution_id), attempt.attempt, json.dumps(payload)),
                     )
                     for event_type in ("MCP_TOOL_CALLED", "MCP_TOOL_FINISHED"):
+                        # Actual owned execution already published each physical
+                        # attempt. External/legacy evidence keeps the historical
+                        # fallback, without adding a second synthetic pair.
+                        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_runtime_events'").fetchone() is not None:
+                            recorded = connection.execute(
+                                "SELECT 1 FROM agent_runtime_events runtime JOIN trace_events trace "
+                                "ON trace.event_id=runtime.trace_event_id WHERE runtime.run_id=? "
+                                "AND runtime.workflow_step_id=? AND runtime.kind='MCP' "
+                                "AND json_extract(runtime.payload_json,'$.detail.logicalCallId')=? "
+                                "AND json_extract(runtime.payload_json,'$.detail.toolAttempt')=? "
+                                "AND trace.event_type=? LIMIT 1",
+                                (str(run_id), str(step_id), str(evidence.execution_id), attempt.attempt, event_type),
+                            ).fetchone()
+                            if recorded is not None:
+                                continue
                         _insert_event(connection, TraceEvent(
                             run_id=run_id, workflow_step_id=step_id, event_type=event_type,
                             actor=step.agent_role.value, attempt=attempt.attempt,
@@ -1449,7 +1470,9 @@ class SQLiteWorkflowRepository:
             context: AgentContext,
             event: TraceEvent,
         ) -> None:
-            await asyncio.to_thread(self.save_task_update, run, step, context, event)
+            worker = asyncio.create_task(asyncio.to_thread(self.save_task_update, run, step, context, event))
+            from orchestrator.core.async_control import await_owned
+            return await await_owned(worker)
 
         return observe
 
@@ -1948,12 +1971,15 @@ def _store_detected_issues(
             if report.get("execution_manifest", {}).get("project_artifact_id") != str(source.artifact_id):
                 raise ValueError("Issue Report refers to another Source Snapshot")
             report_step_id = UUID(report["workflow_step_id"])
+        # A report may contain distinct Findings with the same fingerprint.
+        # Only the immediately previous candidate advances the repeat count;
+        # another Issue in this candidate must neither reset nor increment it.
         previous = connection.execute(
-            "SELECT consecutive_repeat_count,code_version FROM issue_records WHERE run_id=? AND fingerprint=? "
-            "ORDER BY code_version DESC,created_at DESC,issue_id DESC LIMIT 1",
-            (str(run.run_id), issue.fingerprint),
-        ).fetchone()
-        repeats = previous[0] + 1 if previous is not None and previous[1] == issue.code_version - 1 else 0
+            "SELECT MAX(consecutive_repeat_count) FROM issue_records "
+            "WHERE run_id=? AND fingerprint=? AND code_version=?",
+            (str(run.run_id), issue.fingerprint, issue.code_version - 1),
+        ).fetchone()[0]
+        repeats = previous + 1 if previous is not None else 0
         stored = IssueRecord.model_validate({
             **_sanitize_storage_value(issue.model_dump(mode="json")),
             "consecutive_repeat_count": repeats,
@@ -2039,33 +2065,54 @@ def _security_finding_revalidation(connection, issue, security_report) -> str:
         # Older reports did not carry scanner rule identities; preserve their exact
         # finding-ID matching instead of pretending to infer a stable identity.
         matching = [finding for finding in security_report.findings if finding.finding_id == issue.reference_id]
-    if any(finding.disposition.value == "CONFIRMED" for finding in matching):
-        return "FAIL"
-    if any(finding.disposition.value == "SUSPECTED" for finding in matching):
-        return "UNVERIFIED"
     results = [result for result in security_report.requirement_results if result.requirement_id in issue.requirement_ids]
     # An unavailable or unproven scan cannot demonstrate that an absent finding
     # disappeared. A different, actually evaluated requirement failure remains a
     # separate Issue rather than turning this resolved finding into a false FAIL.
-    if not results or any(result.outcome.value == "UNVERIFIED" or result.tool_evidence is None
-                          or result.tool_evidence.outcome.value != "PASS" for result in results):
+    if not results or any(
+        result.outcome.value == "UNVERIFIED"
+        or result.tool_evidence is None
+        or result.tool_evidence.tool_name != "run_security_scan"
+        or result.tool_evidence.execution_manifest != security_report.execution_manifest
+        or result.tool_evidence.outcome.value != "PASS"
+        for result in results
+    ):
+        return "UNVERIFIED"
+    if any(finding.disposition.value == "CONFIRMED" for finding in matching):
+        return "FAIL"
+    if any(finding.disposition.value in {"SUSPECTED", "UNVERIFIED"} for finding in matching):
         return "UNVERIFIED"
     return "PASS"
 
 
 def _record_revalidation_results(connection, run, qa_report, security_report) -> None:
+    def proven_outcome(result, report, allowed_tools) -> str:
+        evidence = result.tool_evidence
+        if (
+            result.outcome.value not in {"PASS", "FAIL"}
+            or evidence is None
+            or evidence.tool_name not in allowed_tools
+            or evidence.execution_manifest != report.execution_manifest
+            or evidence.outcome.value != "PASS"
+        ):
+            return "UNVERIFIED"
+        # Tool PASS proves the check executed, not that its assertions passed.
+        return result.outcome.value
+
     for issue in _fixed_issues_for_candidate(connection, run, qa_report.code_version):
         if issue.reporter == AgentRole.DEVELOPER:
             continue  # Already evaluated by the candidate's own Build transaction.
         if issue.reporter == AgentRole.QA:
-            matching = [test.outcome.value for test in qa_report.tests
+            matching = [proven_outcome(test, qa_report, {"run_unit_tests", "run_browser_tests"})
+                        for test in qa_report.tests
                         if test.requirement_id in issue.requirement_ids
                         and test.test_id == issue.reference_id]
             outcome = _combined_outcome(matching)
         elif issue.category.startswith("SECURITY_FINDING"):
             outcome = _security_finding_revalidation(connection, issue, security_report)
         else:
-            matching = [result.outcome.value for result in security_report.requirement_results
+            matching = [proven_outcome(result, security_report, {"run_security_scan"})
+                        for result in security_report.requirement_results
                         if result.requirement_id in issue.requirement_ids]
             outcome = _combined_outcome(matching)
         _insert_issue_event(connection, issue, "REVALIDATION_FINISHED", {"revalidation_result": outcome})

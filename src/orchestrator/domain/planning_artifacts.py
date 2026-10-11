@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import Field, UUID4, field_validator, model_validator
 
+from orchestrator.domain.contract_validation import JSONInteger
 from orchestrator.domain.models import utc_now
 from orchestrator.domain.snapshot_handoff import ImmutableDomainModel, _validate_artifact_uri
 from orchestrator.domain.states import AgentRole
@@ -13,7 +14,7 @@ from orchestrator.domain.states import AgentRole
 class RequirementArtifact(ImmutableDomainModel):
     artifact_id: UUID4 = Field(alias="artifactId")
     artifact_type: Literal["REQUIREMENT"] = Field(default="REQUIREMENT", alias="artifactType")
-    artifact_version: int = Field(default=1, ge=1, alias="artifactVersion")
+    artifact_version: JSONInteger = Field(default=1, ge=1, alias="artifactVersion")
     previous_artifact_id: UUID4 | None = Field(default=None, alias="previousArtifactId")
     run_id: UUID4 = Field(alias="runId")
     workflow_step_id: UUID4 = Field(alias="workflowStepId")

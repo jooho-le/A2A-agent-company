@@ -19,6 +19,7 @@ from orchestrator.api.dependencies import (
     get_run_dispatcher,
     get_workflow_repository,
     get_workflow_controls,
+    get_workspace_registry,
 )
 from orchestrator.api.schemas.runs import (
     CancelRunRequest,
@@ -50,6 +51,8 @@ from orchestrator.infrastructure import (
     RunDispatchConflict,
     SQLiteWorkflowRepository,
 )
+from orchestrator.workspaces.policy import LAYOUT_VERSION, WorkspaceAccessError, WorkspaceErrorCode
+from orchestrator.workspaces.registry import WorkspaceRegistry
 
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -59,6 +62,7 @@ Dispatcher = Annotated[
     Depends(get_run_dispatcher),
 ]
 Controls = Annotated[WorkflowControlService, Depends(get_workflow_controls)]
+Workspaces = Annotated[WorkspaceRegistry, Depends(get_workspace_registry)]
 
 
 @router.post(
@@ -77,6 +81,12 @@ def create_run(
     """Create a durable Run and its initial pending Planner Step."""
     if get_scenario(body.scenario_id) is None:
         raise HTTPException(status_code=422, detail="scenarioId is not registered; see GET /api/v1/scenarios")
+    validator = request.app.state.submission_validator
+    if validator is not None:
+        try:
+            validator(body.configuration)
+        except Exception:
+            raise HTTPException(status_code=422, detail="OWNED_AGENT_CONFIGURATION_INVALID") from None
     run = WorkflowRun(
         scenario_id=body.scenario_id,
         request_text=body.request_text,
@@ -159,6 +169,42 @@ def get_run_events(
     )
 
 
+def _telemetry_or_503(request):
+    store = request.app.state.telemetry_store
+    if store is None:
+        raise HTTPException(status_code=503, detail="RUNTIME_TELEMETRY_NOT_CONFIGURED")
+    return store
+
+
+@router.get("/{run_id}/usage")
+def get_run_usage(run_id: UUID, request: Request, repository: Repository,
+                  limit: int = Query(default=100, ge=1, le=500),
+                  offset: int = Query(default=0, ge=0)):
+    _get_run_or_404(repository, run_id)
+    store = _telemetry_or_503(request)
+    try:
+        records, total = store.list_usage(run_id, limit=limit, offset=offset)
+        summary = store.usage_summary(run_id)
+    except Exception:
+        raise HTTPException(status_code=503, detail="RUNTIME_TELEMETRY_UNAVAILABLE") from None
+    return {"runId": str(run_id), "summary": summary, "records": records,
+            "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/{run_id}/telemetry")
+def get_run_telemetry(run_id: UUID, request: Request, repository: Repository,
+                      limit: int = Query(default=100, ge=1, le=500),
+                      offset: int = Query(default=0, ge=0)):
+    _get_run_or_404(repository, run_id)
+    store = _telemetry_or_503(request)
+    try:
+        events, total = store.list_events(run_id, limit=limit, offset=offset)
+    except Exception:
+        raise HTTPException(status_code=503, detail="RUNTIME_TELEMETRY_UNAVAILABLE") from None
+    return {"runId": str(run_id), "events": events, "total": total,
+            "limit": limit, "offset": offset}
+
+
 @router.post("/{run_id}/cancel", response_model=RunStatusResponse)
 async def cancel_run(
     run_id: UUID,
@@ -235,6 +281,20 @@ def get_run_configuration(run_id: UUID, repository: Repository):
 def get_run_workspace(run_id: UUID, repository: Repository):
     run = _get_run_or_404(repository, run_id)
     return repository.get_workspace(run.workspace_id).public_contract()
+
+
+@router.post("/{run_id}/workspace/provision")
+def provision_run_workspace(run_id: UUID, repository: Repository, registry: Workspaces):
+    """Explicitly prepare known server-issued storage; no role or Host path input."""
+    run = _get_run_or_404(repository, run_id)
+    try:
+        workspace = registry.provision(run.workspace_id, run_id=run.run_id)
+    except WorkspaceAccessError as error:
+        code = 409 if error.code in (
+            WorkspaceErrorCode.CONFLICT, WorkspaceErrorCode.PATH_DENIED,
+        ) else 503
+        raise HTTPException(status_code=code, detail=error.code.value) from None
+    return {**workspace.public_contract(), "provisioned": True, "layoutVersion": LAYOUT_VERSION}
 
 
 @router.get("/{run_id}/tool-attempts")

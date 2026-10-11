@@ -3,6 +3,8 @@
 > 범위: 1번 담당 Orchestrator/A2A Client/상태 DB/Trace.
 > 기준: 사용자가 제공한 개발정의서의 확정 정책. 실제 Agent/MCP 구현, 웹 서비스, 비교 실험 수행과 팀 통합은 제외한다.
 
+이 문서는 14번 당시 구현 이력이다. 17번까지 점검 후 추가로 수정한 재개·Issue 근거·숫자 계약·opaque ID·422 응답과 미해결 설정 URL Credential 문제는 [17번 점검 후 보완](17-contract-audit-fixes.md)을 참고한다.
+
 ## 수정한 내용
 
 | 문제·누락 | 반영한 동작 |
@@ -87,4 +89,6 @@ git diff --check
 
 커밋 메시지 제안: `오케스트레이터 정의서 위반 수정 및 안전 복구 보완`
 
-다음 작업 번호: 15번 — 로컬 Mock Agent 데모 실행·조회 안내 정리. 실제 팀원 통합은 별도 범위다. Git commit/push는 수행하지 않는다.
+당시 다음 작업 계획: 15번 — 로컬 Mock Agent 데모 실행·조회 안내 정리.
+
+이후 담당 범위가 1번+2번으로 확장되어 15번 계획은 [Agent/MCP 패키지 및 설정 기반](15-agent-mcp-bootstrap.md)으로 변경했다. 이 문서의 Orchestrator 구현 이력은 유지하며, 실제 Agent/MCP 구현은 15번부터 별도로 기록한다. 3번 웹 서비스·4번 평가 및 그 연동은 새 로드맵에서도 제외한다. Git commit/push는 수행하지 않는다.

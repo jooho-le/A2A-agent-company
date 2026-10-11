@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, UUID4, field_validator, model_validator
 
+from orchestrator.domain.contract_validation import JSONInteger
 from orchestrator.domain.snapshot_handoff import ExecutionManifest, ImmutableDomainModel, _validate_artifact_uri
 from orchestrator.domain.states import AgentRole
 from orchestrator.domain.tool_evidence import ToolExecutionEvidence, ToolExecutionOutcome
@@ -36,7 +37,7 @@ class ChangeReportArtifact(ImmutableDomainModel):
     artifact_type: Literal["CHANGE_REPORT"] = Field(
         default="CHANGE_REPORT", alias="artifactType"
     )
-    artifact_version: int = Field(ge=1, alias="artifactVersion")
+    artifact_version: JSONInteger = Field(ge=1, alias="artifactVersion")
     previous_artifact_id: UUID4 | None = Field(default=None, alias="previousArtifactId")
     run_id: UUID4 = Field(alias="runId")
     workflow_step_id: UUID4 = Field(alias="workflowStepId")
@@ -44,7 +45,7 @@ class ChangeReportArtifact(ImmutableDomainModel):
     a2a_artifact_id: str = Field(min_length=1, alias="a2aArtifactId")
     created_by: AgentRole = Field(default=AgentRole.DEVELOPER, alias="createdBy")
     requirement_ids: tuple[UUID4, ...] = Field(min_length=1, alias="requirementIds")
-    code_version: int = Field(ge=1, le=4, alias="codeVersion")
+    code_version: JSONInteger = Field(ge=1, le=4, alias="codeVersion")
     summary: str = Field(min_length=1)
     artifact_uri: str = Field(default="", alias="artifactUri")
     changes: tuple[ChangeReportFile, ...] = Field(min_length=1, alias="fileChanges")
@@ -52,7 +53,14 @@ class ChangeReportArtifact(ImmutableDomainModel):
         default_factory=lambda: datetime.now(timezone.utc), alias="createdAt"
     )
 
-    @field_validator("a2a_task_id", "a2a_artifact_id", "summary")
+    @field_validator("a2a_task_id", "a2a_artifact_id")
+    @classmethod
+    def opaque_references_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Change Report references must not be blank")
+        return value
+
+    @field_validator("summary")
     @classmethod
     def text_references_must_not_be_blank(cls, value: str) -> str:
         value = value.strip()
@@ -111,7 +119,7 @@ class BuildReportArtifact(ImmutableDomainModel):
     artifact_type: Literal["BUILD_REPORT"] = Field(
         default="BUILD_REPORT", alias="artifactType"
     )
-    artifact_version: int = Field(ge=1, alias="artifactVersion")
+    artifact_version: JSONInteger = Field(ge=1, alias="artifactVersion")
     previous_artifact_id: UUID4 | None = Field(default=None, alias="previousArtifactId")
     run_id: UUID4 = Field(alias="runId")
     workflow_step_id: UUID4 = Field(alias="workflowStepId")
@@ -119,7 +127,7 @@ class BuildReportArtifact(ImmutableDomainModel):
     a2a_artifact_id: str = Field(min_length=1, alias="a2aArtifactId")
     created_by: AgentRole = Field(default=AgentRole.DEVELOPER, alias="createdBy")
     requirement_ids: tuple[UUID4, ...] = Field(min_length=1, alias="requirementIds")
-    code_version: int = Field(ge=1, le=4, alias="codeVersion")
+    code_version: JSONInteger = Field(ge=1, le=4, alias="codeVersion")
     source_artifact_id: UUID4 = Field(alias="sourceArtifactId")
     exit_code: int = Field(strict=True, alias="exitCode")
     duration_ms: int = Field(ge=0, strict=True, alias="durationMs")
@@ -136,7 +144,14 @@ class BuildReportArtifact(ImmutableDomainModel):
         default_factory=lambda: datetime.now(timezone.utc), alias="createdAt"
     )
 
-    @field_validator("a2a_task_id", "a2a_artifact_id", "stdout_ref", "stderr_ref")
+    @field_validator("a2a_task_id", "a2a_artifact_id")
+    @classmethod
+    def opaque_references_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Build Report references must not be blank")
+        return value
+
+    @field_validator("stdout_ref", "stderr_ref")
     @classmethod
     def references_must_not_be_blank(cls, value: str | None) -> str | None:
         if value is None:

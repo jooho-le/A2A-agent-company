@@ -1,0 +1,27 @@
+# A narrow build context; never upload Source, .env, Git or Host credentials.
+**
+!Dockerfile
+!.dockerignore
+!prepared/
+!prepared/requirements.lock
+!prepared/wheelhouse/
+!prepared/wheelhouse/*.whl
+!prepared/ms-playwright/
+!prepared/ms-playwright/**
+# Exceptions above must not re-include common secret/metadata paths.
+**/.env
+**/.env.*
+**/.ssh
+**/.ssh/**
+**/.aws
+**/.aws/**
+**/.git
+**/.git/**
+**/.codex
+**/.codex/**
+**/.DS_Store
+**/credentials
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx

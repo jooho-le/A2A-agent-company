@@ -1,7 +1,7 @@
 """Validate the project-level JSON contract returned by the Planner Agent."""
 
 from collections.abc import Mapping
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from a2a.types import Task, TaskState
@@ -9,6 +9,7 @@ from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     UUID4,
@@ -16,6 +17,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from orchestrator.domain.contract_validation import require_json_integer
 
 
 class PlannerOutputValidationError(ValueError):
@@ -82,7 +85,7 @@ class ImplementationTask(_StrictModel):
 
 
 class PlannerPlan(_StrictModel):
-    schema_version: Literal[1] = Field(alias="schemaVersion")
+    schema_version: Annotated[Literal[1], BeforeValidator(require_json_integer)] = Field(alias="schemaVersion")
     requirements: list[PlanRequirement] = Field(min_length=1)
     implementation_plan: list[ImplementationTask] = Field(
         alias="implementationPlan", min_length=1

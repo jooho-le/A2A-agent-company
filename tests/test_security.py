@@ -134,6 +134,17 @@ class LoggingRedactionTests(unittest.TestCase):
         self.child.warning("safe", extra={"password": "DUMMY_EXTRA"})
         self.assertEqual(self.stream.getvalue(), "safe [REDACTED]\n")
 
+    def test_url_userinfo_and_encoded_query_credentials_are_masked_in_logs(self) -> None:
+        configure_logging("INFO")
+        self.child.warning("failed reference %s", (
+            "https://user:synthetic_log_uri_secret@host.example/tests"
+            "?%61pi%5fkey=synthetic_log_query_secret"
+        ))
+        output = self.stream.getvalue()
+        self.assertNotIn("synthetic_log_uri_secret", output)
+        self.assertNotIn("synthetic_log_query_secret", output)
+        self.assertIn("[REDACTED]@host.example", output)
+
 
 if __name__ == "__main__":
     unittest.main()
