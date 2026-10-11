@@ -248,6 +248,20 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.check_source --file configs/o
 
 이 명령은 실제 Git/Lock을 읽기 전용으로 검증하고 `executionReady=false`, `workspacePrepared=false`를 반환합니다. Host용 `RegisteredSourcePreparer`는 동결한 시작 기준과 일치하는 등록 Run의 빈 Source에만 코드와 최소 Git object를 준비합니다. 기존 파일·불명확한 중간 실패는 덮어쓰거나 자동 재실행하지 않습니다. 실제 Host 연결과 공유 Run deadline 전달은 41번 작업입니다. 사용법·검증·한계는 [40번 시작 Source 준비](docs/40-approved-starting-source.md)를 참고하세요.
 
+### 실행 설정 기반 Host factory — 41번
+
+38번 Runtime·39번 Tool·40번 Source 설정을 `agents.platform.host.create_host`에서 기존 Orchestrator와 네 실제 Agent 실행기에 연결합니다. 먼저 아래 명령으로 검사합니다. 기본 모드는 읽기 전용이며 DB·서버·LLM·MCP·Docker를 시작하지 않습니다.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m agents.platform.run_host --runtime configs/owned-runtime.local.json --tools configs/owned-tools.local.json --source configs/owned-source.local.json
+```
+
+`--check-secrets`는 선언된 환경변수의 존재만 추가 검사합니다. 승인 설정·시작 코드·이미지·비밀값을 준비한 후 같은 명령에 **`--start`**를 붙여야 다섯 서버가 시작합니다. 시작 자체가 Run 제출이나 제품 성공을 뜻하지 않으며, Run을 제출하면 실제 API 비용과 Docker 실행이 발생할 수 있습니다. 단일 프로세스/이벤트 루프로 실행하고 reload/multi-worker는 사용하지 않습니다.
+
+모델·예산·공통 환경·시작 Snapshot·검사 기준이 승인 설정과 다르면 Run 저장 전에 거절합니다. 같은 Run의 Tool 정책은 불변 Hash로 고정하며, 준비·실행·재개에 같은 시간 예산을 사용합니다. 보호 QA selector가 있으면 `--qa-cases configs/owned-qa-cases.local.json`으로 기존 Requirement ID에 연결한 Host 설정도 필요합니다. Security 의미 증거가 없는 기본 연결은 `UNVERIFIED/HUMAN_REVIEW`를 유지합니다.
+
+API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개발정의서 점검은 [41번 Host factory](docs/41-owned-host-factory.md)를 참고하세요. 팀원 제품·독립 평가 연결, 실제 Docker/외부 LLM 실행 검증은 이번 단계에서 수행하지 않았습니다.
+
 ## 테스트
 
 ```bash
