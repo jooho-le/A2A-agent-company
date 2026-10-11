@@ -1,4 +1,5 @@
 .env
+configs/*.local.json
 .data/
 .DS_Store
 .venv/

@@ -218,6 +218,16 @@ Run 예산 예약을 외부 호출 전에 저장하고 재시작 시 기존 호�
 
 Orchestrator에는 네 LLM 역할과 별개인 Host 전용 MCP 주체를 추가해 `run_build`, `read_test_report`, `read_security_report`만 허용합니다. A2A Task 응답에 프로젝트 metadata가 포함되면 현재 Run/Step과 대조하며 공식 선택적 metadata와 unrelated extension 호환성은 유지합니다. 기존 보류 항목·실제 환경 검증·운영 Host 준비를 완료한 것으로 표시하지 않습니다. 상세 내용은 [개발정의서 보완 내역](docs/contract-compliance-audit-fixes.md)을 참고하세요.
 
+### 실제 실행용 Host 설정 — 38번
+
+기존 1~37번 구현 이후의 실행 준비 단계입니다. `configs/owned-runtime.example.json`에서 네 Agent와 Orchestrator의 주소·서로 다른 DB·공통 모델/한도를 선언하고, API Key/Bearer는 환경변수 이름으로만 참조합니다. 모델 ID·temperature·실행 시간은 미선택 `null`이며 원본 예시는 의도적으로 설정 검증에 실패합니다. 운영자가 값을 정해 `configs/owned-runtime.local.json`에 저장하며 이 파일은 Git에서 제외합니다.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m agents.platform.check_configuration --file configs/owned-runtime.local.json
+```
+
+`--check-secrets`를 추가하면 process environment에 선언된 비밀값이 있는지만 확인합니다. `.env`는 자동으로 읽지 않으며 기존 `AGENT_*`/`ORCHESTRATOR_*`로 구성이 덮어써지지 않습니다. 이 명령은 DB·서버·LLM·MCP·Docker를 시작하지 않고 `executionReady=false`를 유지합니다. Docker/Profile·Workspace·실제 Host factory는 후속 39~41번입니다. 설정 계약·사용법·개발정의서 점검은 [38번 실행 설정](docs/38-owned-runtime-configuration.md)을 참고하세요.
+
 ## 테스트
 
 ```bash

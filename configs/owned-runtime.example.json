@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "host": "127.0.0.1",
+  "environment": "local",
+  "logLevel": "INFO",
+  "orchestrator": {
+    "port": 8000,
+    "databasePath": "../.data/orchestrator.sqlite3"
+  },
+  "workspaceRoot": "../.data/workspaces",
+  "agents": {
+    "PLANNER": {
+      "port": 8101,
+      "databasePath": "../.data/agents/planner.sqlite3",
+      "bearerTokenEnv": "A2A_PLATFORM_PLANNER_TOKEN"
+    },
+    "DEVELOPER": {
+      "port": 8102,
+      "databasePath": "../.data/agents/developer.sqlite3",
+      "bearerTokenEnv": "A2A_PLATFORM_DEVELOPER_TOKEN"
+    },
+    "QA": {
+      "port": 8103,
+      "databasePath": "../.data/agents/qa.sqlite3",
+      "bearerTokenEnv": "A2A_PLATFORM_QA_TOKEN"
+    },
+    "SECURITY": {
+      "port": 8104,
+      "databasePath": "../.data/agents/security.sqlite3",
+      "bearerTokenEnv": "A2A_PLATFORM_SECURITY_TOKEN"
+    }
+  },
+  "model": {
+    "provider": "openai",
+    "modelId": null,
+    "modelRevision": null,
+    "temperature": null,
+    "seed": null
+  },
+  "apiKeyEnv": "A2A_PLATFORM_LLM_API_KEY",
+  "llmLimits": {
+    "max_model_calls": 8,
+    "max_tool_calls": 20,
+    "max_output_tokens": 2048,
+    "max_total_tokens": null,
+    "model_timeout_seconds": 60,
+    "tool_timeout_seconds": 60,
+    "max_json_bytes": 1048576
+  },
+  "runtimeBudgetMs": null
+}
