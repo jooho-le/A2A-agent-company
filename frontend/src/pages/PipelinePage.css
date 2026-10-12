@@ -162,12 +162,24 @@
 }
 
 .pipeline-trace {
-  margin: 0;
+  margin: 16px 0 0;
   padding-left: 20px;
 }
 
 .pipeline-trace li + li {
-  margin-top: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.pipeline-event-type {
+  color: var(--text-h);
+}
+
+.pipeline-event-time {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
 }
 
 .pipeline-page .app-button:focus-visible {

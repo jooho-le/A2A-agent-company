@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import './PipelinePage.css'
 
-// 시나리오와 역할 설명은 고정 예시이며, 오른쪽 실행 정보와 Trace는 Mock Data입니다.
+// 시나리오와 역할 설명은 고정 예시이며, 실행 정보 카드만 Mock Data입니다.
 const mockPipeline = {
   scenario: '회원가입 기능 구현',
   request: '회원가입 기능을 구현해주세요.',
@@ -31,12 +31,6 @@ const mockPipeline = {
   result: 'Planner Agent가 구현 계획을 정리했습니다. Developer Agent가 회원가입 구현을 진행 중입니다.',
   error: '현재 오류가 없습니다.',
   revision: '현재 수정 요청이 없습니다.',
-  trace: [
-    '사용자 → Orchestrator: 회원가입 기능 구현 요청 전달',
-    'Orchestrator → Planner Agent: 요구사항 분석과 계획 작성 요청',
-    'Planner Agent → Developer Agent: 구현 계획 전달 완료',
-    'Developer Agent: 구현 진행 중 · QA / Security Agent: 대기',
-  ],
 }
 
 // API 상태값은 그대로 표시하고, 기존 카드 색상에만 연결합니다.
@@ -56,6 +50,10 @@ function PipelinePage({ onBack }) {
   const [steps, setSteps] = useState(null)
   const [isLoadingSteps, setIsLoadingSteps] = useState(false)
   const [stepsErrorMessage, setStepsErrorMessage] = useState('')
+  const [events, setEvents] = useState(null)
+  const [eventTotal, setEventTotal] = useState(0)
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false)
+  const [eventsErrorMessage, setEventsErrorMessage] = useState('')
 
   // Run 생성 성공 뒤 한 번만 조회하며, 조회 실패는 생성 실패와 구분합니다.
   async function loadSteps(runId) {
@@ -87,15 +85,52 @@ function PipelinePage({ onBack }) {
     }
   }
 
+  // Run 생성 후 또는 수동 새로고침 때만 조회하고 자동 polling은 사용하지 않습니다.
+  async function loadEvents(runId) {
+    if (isLoadingEvents) return
+
+    setIsLoadingEvents(true)
+    setEventsErrorMessage('')
+
+    try {
+      const response = await fetch(`/api/v1/runs/${runId}/events`)
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        setEventsErrorMessage(
+          typeof data?.detail === 'string' && data.detail
+            ? data.detail
+            : `실행 이벤트를 조회하지 못했습니다. (HTTP ${response.status})`,
+        )
+        return
+      }
+
+      if (data?.runId !== runId || !Array.isArray(data?.events) || !Number.isInteger(data?.total) || data.total < 0) {
+        setEventsErrorMessage('서버 응답에서 실행 이벤트 목록을 확인할 수 없습니다.')
+        return
+      }
+
+      setEvents(data.events)
+      setEventTotal(data.total)
+    } catch {
+      setEventsErrorMessage('서버에 연결할 수 없어 실행 이벤트를 조회하지 못했습니다.')
+    } finally {
+      setIsLoadingEvents(false)
+    }
+  }
+
   // 화면 진입 시 자동 실행하지 않고 버튼 클릭으로만 Run을 생성합니다.
   async function handleRun() {
-    if (isSubmitting) return
+    if (isSubmitting || isLoadingEvents) return
 
     setIsSubmitting(true)
     setRunResult(null)
     setErrorMessage('')
     setSteps(null)
     setStepsErrorMessage('')
+    setEvents(null)
+    setEventTotal(0)
+    setEventsErrorMessage('')
 
     try {
       const response = await fetch('/api/v1/runs', {
@@ -128,6 +163,7 @@ function PipelinePage({ onBack }) {
 
       setRunResult(data)
       await loadSteps(data.run.runId)
+      await loadEvents(data.run.runId)
     } catch {
       setErrorMessage('서버에 연결할 수 없습니다.')
     } finally {
@@ -154,7 +190,7 @@ function PipelinePage({ onBack }) {
     <main className="pipeline-page">
       <header className="pipeline-header">
         <div>
-          <span className="pipeline-mock-label">A2A Agent Company · 실제 Run / Step 조회</span>
+          <span className="pipeline-mock-label">A2A Agent Company · 실제 Run / Step / Trace 조회</span>
           <h1>A2A Agent Pipeline</h1>
           <p>시나리오: {mockPipeline.scenario}</p>
         </div>
@@ -170,7 +206,7 @@ function PipelinePage({ onBack }) {
 
       <section className="pipeline-card pipeline-run" aria-labelledby="pipeline-run-title">
         <h2 id="pipeline-run-title">실제 Run 생성</h2>
-        <button type="button" className="app-button" onClick={handleRun} disabled={isSubmitting}>
+        <button type="button" className="app-button" onClick={handleRun} disabled={isSubmitting || isLoadingEvents}>
           {isSubmitting ? '실행 중...' : '실제 시나리오 실행'}
         </button>
         {errorMessage && <p className="pipeline-run-error" role="alert">Run 생성 오류: {errorMessage}</p>}
@@ -194,8 +230,8 @@ function PipelinePage({ onBack }) {
       </section>
 
       <p className="pipeline-description">
-        Agent 진행 상태는 Run 생성 후 실제 Step 목록을 한 번 조회하여 표시합니다.
-        오른쪽 실행 정보와 Trace는 실제 실행 결과와 별개인 고정 Mock Data입니다.
+        Agent 진행 상태와 Trace는 Run 생성 후 실제 API 데이터를 한 번 조회하여 표시합니다.
+        현재 Agent, 실행 결과, 오류, 수정 요청 카드는 고정 Mock Data입니다.
       </p>
 
       <div className="pipeline-layout">
@@ -250,19 +286,67 @@ function PipelinePage({ onBack }) {
         </section>
 
         <section aria-labelledby="pipeline-info-title">
-          <h2 id="pipeline-info-title">실행 정보 (Mock Data)</h2>
+          <h2 id="pipeline-info-title">실행 정보와 Trace</h2>
           <div className="pipeline-info">
             {infoCards.map((card) => (
               <article className="pipeline-card" key={card.title}>
-                <h3>{card.title}</h3>
+                <h3>{card.title} (Mock Data)</h3>
                 <p>{card.value}</p>
               </article>
             ))}
-            <article className="pipeline-card">
-              <h3>Trace</h3>
-              <ol className="pipeline-trace">
-                {mockPipeline.trace.map((entry) => <li key={entry}>{entry}</li>)}
-              </ol>
+            <article className="pipeline-card" aria-labelledby="pipeline-trace-title">
+              <div className="pipeline-agent-heading">
+                <h3 id="pipeline-trace-title">Trace · 실제 이벤트</h3>
+                <button
+                  type="button"
+                  className="app-button"
+                  onClick={() => loadEvents(runResult.run.runId)}
+                  disabled={!runResult || isSubmitting || isLoadingEvents}
+                >
+                  {isLoadingEvents ? '조회 중...' : 'Trace 새로고침'}
+                </button>
+              </div>
+              {isLoadingEvents && <p role="status">실행 이벤트를 조회하고 있습니다.</p>}
+              {eventsErrorMessage && (
+                <p className="pipeline-run-error" role="alert">Trace 조회 오류: {eventsErrorMessage}</p>
+              )}
+              {!isLoadingEvents && !eventsErrorMessage && events === null && (
+                <p>Run 생성 후 실행 이벤트를 조회합니다.</p>
+              )}
+              {!isLoadingEvents && !eventsErrorMessage && events?.length === 0 && (
+                <p>아직 기록된 실행 이벤트가 없습니다.</p>
+              )}
+              {events?.length > 0 && (
+                <>
+                  <p>전체 {eventTotal}건 · 처음 {events.length}건 표시</p>
+                  <ol className="pipeline-trace">
+                    {events.map((event) => (
+                      <li key={event.eventId}>
+                        <strong className="pipeline-event-type">{event.eventType}</strong>
+                        <time className="pipeline-event-time" dateTime={event.occurredAt}>
+                          {new Date(event.occurredAt).toLocaleString('ko-KR')}
+                        </time>
+                        <dl className="pipeline-run-result">
+                          <dt>담당자</dt>
+                          <dd>{event.actor}</dd>
+                          <dt>Run 상태</dt>
+                          <dd>{event.workflowState ?? '-'}</dd>
+                          <dt>A2A Task 상태</dt>
+                          <dd>{event.a2aTaskState ?? '-'}</dd>
+                          <dt>시도 번호</dt>
+                          <dd>{event.attempt}</dd>
+                          {event.workflowStepId && (
+                            <><dt>Step ID</dt><dd>{event.workflowStepId}</dd></>
+                          )}
+                          {event.a2aTaskId && (
+                            <><dt>Task ID</dt><dd>{event.a2aTaskId}</dd></>
+                          )}
+                        </dl>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
             </article>
           </div>
         </section>
