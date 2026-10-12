@@ -3,6 +3,7 @@ import SignupPage from './pages/SignupPage'
 import LoginPage from './pages/LoginPage'
 import PipelinePage from './pages/PipelinePage'
 import DashboardPage from './pages/DashboardPage'
+import DocumentPage from './pages/DocumentPage'
 import './App.css'
 
 function App() {
@@ -10,12 +11,14 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(sessionStorage.getItem('access_token')))
   const [showSignup, setShowSignup] = useState(false)
   const [showPipeline, setShowPipeline] = useState(false)
+  const [showDocuments, setShowDocuments] = useState(false)
   const [loginNotice, setLoginNotice] = useState('')
 
   function handleLoginSuccess() {
     setIsAuthenticated(Boolean(sessionStorage.getItem('access_token')))
     setShowSignup(false)
     setShowPipeline(false)
+    setShowDocuments(false)
     setLoginNotice('')
   }
 
@@ -24,10 +27,11 @@ function App() {
     setIsAuthenticated(false)
     setShowSignup(false)
     setShowPipeline(false)
+    setShowDocuments(false)
     setLoginNotice('')
   }
 
-  // 인증 전에는 Dashboard와 Pipeline 화면을 표시하지 않습니다.
+  // 인증 전에는 Dashboard와 시나리오 화면을 표시하지 않습니다.
   if (!isAuthenticated) {
     if (showSignup) {
       return (
@@ -57,8 +61,16 @@ function App() {
     return <PipelinePage onBack={() => setShowPipeline(false)} />
   }
 
+  if (showDocuments) {
+    return <DocumentPage onBack={() => setShowDocuments(false)} />
+  }
+
   return (
-    <DashboardPage onRunScenario={() => setShowPipeline(true)} onLogout={handleLogout} />
+    <DashboardPage
+      onRunScenario={() => setShowPipeline(true)}
+      onOpenDocuments={() => setShowDocuments(true)}
+      onLogout={handleLogout}
+    />
   )
 }
 

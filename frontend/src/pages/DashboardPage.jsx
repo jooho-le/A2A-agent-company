@@ -1,4 +1,4 @@
-function DashboardPage({ onRunScenario, onLogout }) {
+function DashboardPage({ onRunScenario, onOpenDocuments, onLogout }) {
   return (
     <main className="dashboard-page">
       <header className="dashboard-header">
@@ -40,23 +40,25 @@ function DashboardPage({ onRunScenario, onLogout }) {
             </div>
           </article>
 
-          <article className="scenario-card scenario-card--upcoming">
+          <article className="scenario-card">
             <div className="scenario-card-heading">
               <span className="scenario-number" aria-hidden="true">02</span>
-              <span className="scenario-status">준비 중</span>
+              <span className="scenario-status scenario-status--available">업로드 가능</span>
             </div>
             <p className="eyebrow">시나리오 2</p>
             <h2>전자문서 제출·조회</h2>
             <p className="scenario-description">
-              전자문서 업로드, 목록 조회, 다운로드 및 권한 기능을
-              Agent 협업으로 구현하고 검증하는 시나리오입니다.
+              PDF 문서를 담당자에게 제출할 수 있습니다.
+              문서 목록 조회와 다운로드는 준비 중입니다.
             </p>
-            <div className="scenario-tags" aria-label="예정된 기능">
-              <span>업로드</span><span>조회</span><span>다운로드</span><span>권한 관리</span>
+            <div className="scenario-tags" aria-label="사용 가능한 기능">
+              <span>PDF 업로드</span><span>담당자 지정</span>
             </div>
             <div className="scenario-card-footer">
-              <p>Agent Pipeline 연결을 준비하고 있습니다.</p>
-              <button type="button" className="app-button" disabled>준비 중</button>
+              <p>제출 화면에서 파일과 담당자 ID를 입력해주세요.</p>
+              <button type="button" className="app-button app-button--primary" onClick={onOpenDocuments}>
+                전자문서 제출 <span aria-hidden="true">→</span>
+              </button>
             </div>
           </article>
         </section>

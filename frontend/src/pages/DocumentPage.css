@@ -1,0 +1,97 @@
+.document-content {
+  max-width: 800px;
+}
+
+.document-card {
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.document-form,
+.document-field {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.document-field {
+  gap: 8px;
+}
+
+.document-field label {
+  color: var(--text-h);
+  font-weight: 500;
+}
+
+.document-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-h);
+  background: var(--bg);
+  font: inherit;
+}
+
+.document-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.document-field input::file-selector-button {
+  margin-right: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-h);
+  background: var(--social-bg);
+  font: inherit;
+}
+
+.document-field p {
+  font-size: 12px;
+}
+
+.document-message {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.document-message--error {
+  color: #fca5a5;
+  border-color: #78404d;
+  background: #482b34;
+}
+
+.document-message--success {
+  color: #a4dfbd;
+  border-color: #3e6857;
+  background: #213d32;
+}
+
+.document-message h2 {
+  color: inherit;
+  font-size: 16px;
+}
+
+.document-result {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 16px 0 0;
+}
+
+.document-result dd {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .document-card {
+    padding: 24px 20px;
+  }
+}
