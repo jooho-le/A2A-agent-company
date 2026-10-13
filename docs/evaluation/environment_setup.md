@@ -1,11 +1,13 @@
 # 평가 개발 환경
 
-최종 갱신: 2026-10-06. Python 3.10 이상. dev의 공통 프로젝트 설정을 사용한다.
+최종 갱신: 2026-10-14. Python 3.13 사용(`.python-version`). dev의 공통 프로젝트 설정을 사용한다.
+
+Python 3.10은 dev 테스트(`Task.cancelling`)와 Security 승인 함수(`co_qualname`)가 지원하지 않아 실패하고, 3.14는 dev 보안 승인 테스트 6개가 실패했다. 루트 `pyproject.toml`의 `requires-python = ">=3.10"`은 팀 공유 파일이라 바꾸지 않았다. 팀 Python 버전 통일은 회의 안건이다.
 
 ## 설치 및 PyCharm
 
 1. 저장소 루트를 PyCharm 프로젝트로 연다.
-2. uv를 설치한 환경에서 루트 기준 `uv sync --frozen`을 실행한다.
+2. uv를 설치한 환경에서 루트 기준 `uv sync --frozen`을 실행한다. 루트 `.python-version`이 3.13이라 uv가 3.13 가상환경을 만든다(이미 3.10 `.venv`가 있으면 지우고 다시 만든다).
 3. 인터프리터는 루트 `.venv/bin/python`으로 지정한다.
 4. 테스트는 모듈 `pytest`, 작업 디렉터리는 저장소 루트로 실행한다.
 
@@ -27,7 +29,7 @@ uv run --frozen python scripts/check_dev_reports.py .venv/bin/python
 PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ```
 
-기본 pytest는 `tests/`만 수집한다(2026-10-06 기준 285개: 평가 113, dev 172).
+기본 pytest는 `tests/`만 수집한다(평가 테스트는 2026-10-14 기준 231개. 저장소 전체는 dev 테스트가 많아 13분 정도 걸리고, 같은 날 전체 실행에서 dev 쪽 테스트 1개가 실패했다).
 평가 테스트만 실행하려면 `uv run --frozen python -m pytest tests/evaluation`,
 환경 확인은 `uv run --frozen python -m pytest checks`로 따로 실행한다.
 평가 자체 테스트와 보고서 모델 호환 검사는 실제 A2A/MCP/회원가입 서비스 통합 검증이 아니다.
@@ -39,7 +41,7 @@ PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ## 공통 계약 및 설정
 
 - `schemas/project/`가 공통 스키마 원본이다.
-- `src/evaluation/contracts/`는 dev `2b4fc60`의 고정 사본이며 독립 규격이 아니다.
+- `src/evaluation/contracts/`의 QA·Security 보고서, Manifest, 도구 실행 근거 스키마는 `schemas/project/`의 고정 사본(현재 원본과 동일)이며 독립 규격이 아니다. `independent_evaluation.schema.json`만 평가 모듈 전용이다.
 - 공통 계약 변경 시 사본과 보고서 모델 호환 검사도 함께 갱신한다.
 - Agent URL과 토큰은 루트 `.env.example`을 참고한다.
 - 실행환경 lock은 루트 `uv.lock`이며 실제 검사 대상 서비스의 lock과 구분한다.
@@ -49,5 +51,6 @@ PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 - import 실패: 루트에서 `uv sync --frozen`을 다시 실행하고 PyCharm 인터프리터를 확인한다.
 - 계약 오류: ID 매핑, Manifest, Tool 증거와 필수 검사 계획을 확인한다.
 - 스키마·모델 통과만으로 실제 증거 진위나 서비스 성공이 보장되지는 않는다.
-- 독립 평가 보고서의 `created_at` 오류: 시간대를 붙인 `2026-10-06T12:00:00+09:00` 형식을 사용한다.
-  Python 3.10에서는 소수점 초 등 일부 ISO 표기를 읽지 못한다.
+- Security 판정이 모든 요구사항을 이유 없이 UNVERIFIED로 내면 `evaluation.security.evaluate(request)`를 직접 호출해 예외를 확인한다(`assess`는 오류를 `None`으로만 알린다).
+- 독립 평가 보고서의 `created_at` 오류: 시간대를 붙인 `2026-10-14T12:00:00+09:00` 형식을 사용한다.
+  3.10에서는 소수점 초 등 일부 ISO 표기를 읽지 못해 코드는 3.10 호환을 위해 `Z`를 `+00:00`으로 바꿔 읽는다.
