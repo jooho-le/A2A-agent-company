@@ -84,18 +84,20 @@ Git 해시는 지정한 형식에 따라 40자리 또는 64자리여야 합니�
 
 ## 독립 평가와의 관계
 
-이 스키마들은 `reporting.py`가 생성하는 에이전트 호환 보고서에 적용됩니다.
-`independent.py`의 `INDEPENDENT_EVALUATION` 보고서 전용 스키마는 아닙니다.
-독립 평가 보고서는 해당 모듈에서 입력값과 요구사항 범위 등을 검사합니다.
+위 네 스키마(`execution_manifest`, `qa_report`, `security_report`, `tool_execution_evidence`)는 `reporting.py`가 생성하는
+에이전트 호환 보고서에 적용됩니다. `independent_evaluation.schema.json`은 `independent.py`의 `INDEPENDENT_EVALUATION`
+보고서 전용이며, 팀 공통 규격의 사본이 아니라 평가 모듈이 직접 정의한 것입니다.
+기대·관측 Manifest는 `execution_manifest.schema.json`을 재사용하고, 대상 Run 기록(`sourceRun`)은 상태·판정·코드 버전·수정 횟수·시각·
+소요 시간·`missedDefect`를 가집니다. 입력값과 요구사항 범위 등 스키마로 표현하기 어려운 규칙은 `independent.py`가 먼저 검사합니다.
 
 스키마 검사만으로 실제 회원가입 기능, 증거의 진위, 산출물의 등록 여부를 검증할 수는 없습니다.
 
 ## 원본과 갱신 기준
 
 - 원본 저장소: `jooho-le/A2A-agent-company`
-- 기준 브랜치와 커밋: `dev`, `2b4fc6037e1a7d8296040c01404c56e8a2a0f22e`
+- 기준 브랜치와 커밋: `dev`, `caa414432af52f838ef5b62c993246b48013178c` (2026-10-14에 네 스키마가 원본과 같음을 확인. 처음 복사한 기준은 `2b4fc60`)
 - 원본 위치: 저장소 루트의 `schemas/project/`
 
-이 파일들은 위 커밋에서 수정 없이 복사한 호환성 검사용 사본입니다.
+네 개의 공통 스키마 파일은 수정 없이 복사한 호환성 검사용 사본입니다.
 팀 공통 규격의 별도 원본으로 취급하지 않습니다.
 공통 규격을 갱신할 때는 사본과 보고서 변환 코드, 호환성 테스트를 함께 확인해야 합니다.

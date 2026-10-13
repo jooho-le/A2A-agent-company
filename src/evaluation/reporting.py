@@ -1,16 +1,23 @@
-"""검사 결과를 dev 공통 QA_REPORT / SECURITY_REPORT 형식으로 바꾸는 에이전트 호환용 보조 경로.
+# 검사 결과를 팀 공통 보고서(QA_REPORT / SECURITY_REPORT) 모양으로 바꿔 주는 파일이다.
+# "에이전트 호환 보고서"라고 부르며, 독립 평가 보고서(independent.py)가 기본이고 이쪽은 보조 경로다.
+#
+# 이 보고서는 시스템(Orchestrator)이 실제로 받는 형식이라서 진짜 A2A 작업·산출물 번호가 필요하다.
+# (독립 평가 보고서는 그런 번호 없이 만들 수 있다.)
+# 이 파일은 도구를 실행하거나, A2A로 전송하거나, 증거 파일을 열어 보거나,
+# 비밀 정보를 대신 정리해 주지 않는다. 이미 받은 값을 형식에 맞춰 검사하고 조립하기만 한다.
+#
+# [용어]
+# - 스키마(schema): JSON 보고서가 "어떤 필드가 있어야 하고, 각 필드가 어떤 자료형인지" 적어 둔 약속 문서.
+# - A2A Task / Artifact: 에이전트끼리 일을 주고받을 때 쓰는 "작업"과 "산출물" 단위.
+# - 도구 실행 증거(tool evidence): 테스트·보안 스캔 도구를 실제로 돌렸다는 기록. 몇 번 시도했고 결과가 어땠는지 담는다.
+from copy import deepcopy  # 값을 통째로(안쪽까지) 복사해서 원본이 바뀌지 않게 하는 도구
+from dataclasses import dataclass  # 값을 담는 "데이터 상자" 클래스를 쉽게 만드는 도구
+from importlib.resources import files  # 설치된 패키지 안의 파일(스키마)을 찾는 도구
+import json  # JSON 글자 ↔ 파이썬 사전 변환
+from urllib.parse import urlsplit  # 인터넷 주소를 구성 요소(http, 호스트 등)로 쪼개는 도구
 
-실제 A2A Task·Artifact ID가 필요하다. 독립 평가 보고서는 independent.py를 쓴다.
-도구 실행·A2A 전송·증거 확인·비밀정보 정리(context·findings·toolEvidence)는 하지 않는다.
-"""
-from copy import deepcopy
-from dataclasses import dataclass
-from importlib.resources import files
-import json
-from urllib.parse import urlsplit
-
-from jsonschema import Draft202012Validator, FormatChecker
-from referencing import Registry, Resource
+from jsonschema import Draft202012Validator, FormatChecker  # JSON이 스키마와 맞는지 확인해 주는 라이브러리
+from referencing import Registry, Resource  # 스키마끼리 서로 참조할 수 있게 묶어 주는 라이브러리
 
 from .aggregation import Status, _uuid4, aggregate
 from .manifest import ExecutionManifest
@@ -18,30 +25,41 @@ from .manifest import ExecutionManifest
 
 @dataclass(frozen=True)
 class TestBinding:
-    """내부 검사 UUID → 보고서의 검사 이름(예: QA-SIGNUP-001)·요구사항 UUID·제목.
-
-    pytest가 테스트 클래스로 오해하지 않도록 테스트에서는 다른 이름으로 import한다.
-    """
+    # 내부 검사 번호(UUID)를 보고서에 쓸 이름들과 이어 주는 꼬리표.
+    #   external_test_id : 보고서에 적을 검사 이름(예: QA-SIGNUP-001)
+    #   requirement_id   : 요구사항 번호(UUID)
+    #   title            : 사람이 읽을 제목
+    #
+    # 참고: 이름이 Test로 시작하면 테스트 도구(pytest)가 "테스트 클래스"로 착각할 수 있다.
+    # 그래서 테스트 파일에서는 이 클래스를 다른 이름으로 가져와서(import ... as ...) 쓴다.
     external_test_id: str
     requirement_id: str
     title: str
 
 
 def validate_contract(payload: dict, name: str) -> None:
-    """contracts/의 스키마 사본으로 payload를 검사한다(네트워크 미사용). 실패 시 ValidationError."""
+    # JSON 보고서(payload)가 약속된 모양(스키마)과 맞는지 확인한다.
+    # 스키마 파일은 contracts/ 폴더에 들어 있는 것을 쓰고, 인터넷에서 내려받지 않는다.
+    # name은 ".schema.json"을 뺀 스키마 이름이다. 예) "independent_evaluation"
+    # 보고서가 스키마와 다르면 jsonschema의 ValidationError가 나고,
+    # 그런 이름의 스키마가 없거나 파일을 읽지 못하면 다른 종류의 예외가 난다.
     documents = [json.loads(path.read_text()) for path in
                  files('evaluation').joinpath('contracts').iterdir()
-                 if path.name.endswith('.schema.json')]
+                 if path.name.endswith('.schema.json')]  # contracts 폴더의 모든 스키마 파일을 읽는다.
+    # 스키마들이 서로를 이름($id)으로 가리킬 수 있도록 한 묶음(레지스트리)으로 등록한다.
     registry = Registry().with_resources(
         (doc['$id'], Resource.from_contents(doc)) for doc in documents
     )
+    # 이름이 맞는 스키마 하나를 찾아서 보고서를 검사한다.
     schema = next(doc for doc in documents if doc['$id'].endswith('/' + name + '.schema.json'))
     Draft202012Validator(schema, registry=registry, format_checker=FormatChecker()).validate(payload)
 
 
 def _artifact_uri(value):
-    """공유 가능한 저장소 주소인지 확인한다. 로컬 파일·드라이브 경로·호스트 없는 주소·공백은 거부."""
-    parsed = urlsplit(value)
+    # 산출물 주소가 "팀이 함께 볼 수 있는 저장소 주소"인지 확인한다.
+    # 내 컴퓨터에만 있는 파일 경로(file://, C:\ 같은 드라이브 경로), 호스트(서버 이름)가 빠진 주소,
+    # 공백이 들어간 주소는 다른 사람이 열어 볼 수 없으므로 거부한다.
+    parsed = urlsplit(value)  # 주소를 scheme(http 등), netloc(서버 이름), path(경로)로 쪼갠다.
     if (not parsed.scheme or parsed.scheme.lower() == 'file' or len(parsed.scheme) == 1
             or not (parsed.netloc or parsed.path) or '\\' in value
             or any(c.isspace() for c in value)
@@ -50,15 +68,21 @@ def _artifact_uri(value):
 
 
 def _tool_evidence(evidence, manifest, role, outcome):
-    """도구 실행 근거를 검사하고 복사본을 돌려준다(dev tool_evidence.py와 같은 규칙).
-
-    - PASS·FAIL에는 근거 필수, Manifest 일치, 역할에 맞는 도구, 시도 번호 0부터 연속
-    - 재시도는 안전한 인프라 오류 뒤에만(RESOURCE_BUSY 등, timeout류는 retrySafe=True일 때)
-    - 마지막 시도: 검사가 PASS·FAIL이면 도구 PASS, UNVERIFIED면 도구 UNVERIFIED
-      (도구는 정상 종료했는데 파싱 실패로 UNVERIFIED가 된 경우는 여기서 오류가 난다. OPEN-13)
-    """
+    # 도구 실행 증거를 검사하고, 문제가 없으면 복사본을 돌려준다(팀 코드 dev의 규칙과 같다).
+    #
+    # 확인하는 규칙:
+    #  - PASS·FAIL 결과에는 도구 실행 증거가 반드시 있어야 한다.
+    #  - 증거의 신분증(Manifest)이 보고서의 신분증과 같아야 한다.
+    #  - 역할에 맞는 도구여야 한다. (QA는 테스트 도구, SECURITY는 보안 스캔 도구)
+    #  - 시도 번호는 0부터 빠짐없이 이어져야 한다.
+    #  - 다시 시도(재시도)는 "안전한 인프라 오류" 뒤에만 허용한다.
+    #    (RESOURCE_BUSY 등. 시간 초과 같은 오류는 retrySafe=True라고 표시된 경우에만)
+    #  - 마지막 시도의 결과가 검사 결과와 맞아야 한다.
+    #    검사가 PASS·FAIL이면 도구는 "정상 종료(PASS)", 검사가 UNVERIFIED면 도구도 UNVERIFIED.
+    #    (도구는 정상 종료했는데 결과를 읽다가 실패해서 UNVERIFIED가 된 경우는 여기서 오류가 난다. OPEN-13)
     if evidence is None:
         if outcome != 'UNVERIFIED':
+            # 증거 없이 PASS·FAIL을 말할 수는 없다.
             raise ValueError('PASS/FAIL requires actual Tool execution evidence')
         return None
     validate_contract(evidence, 'tool_execution_evidence')
@@ -68,16 +92,18 @@ def _tool_evidence(evidence, manifest, role, outcome):
     if evidence['toolName'] not in allowed:
         raise ValueError('Tool evidence does not match the report role')
     _artifact_uri(evidence['evidenceRef'])
-    attempts = evidence['attempts']
+    attempts = evidence['attempts']  # 도구를 호출한 시도 기록 목록(최초 호출 + 재시도)
     for item in attempts:
         _artifact_uri(item['evidenceRef'])
+    # 시도 번호가 0, 1, 2 ... 처럼 빠짐없이 이어지는지 확인한다.
     if [item['attempt'] for item in attempts] != list(range(len(attempts))):
         raise ValueError('Tool attempts must start at zero and be contiguous')
-    for item in attempts[:-1]:
+    for item in attempts[:-1]:  # 마지막 시도를 뺀 앞선 시도들 = "다시 시도하게 만든" 시도들
         safe = item.get('errorKind') in {'PROCESS_STARTUP_FAILURE', 'RESOURCE_BUSY'} or (
             item.get('retrySafe') is True and item.get('errorKind') in
             {'TIMEOUT', 'TOOL_TIMEOUT', 'MCP_TRANSPORT_INTERRUPTED'})
         if item['outcome'] != 'UNVERIFIED' or not safe:
+            # 안전하지 않은 실패(예: 코드 오류) 뒤에 재시도하면 안 된다.
             raise ValueError('Retry follows a non-retryable attempt')
     expected = 'UNVERIFIED' if outcome == 'UNVERIFIED' else 'PASS'
     if attempts[-1]['outcome'] != expected:
@@ -87,32 +113,42 @@ def _tool_evidence(evidence, manifest, role, outcome):
 
 def build_report(*, role, context, expected, observed, plan, results,
                  bindings, tool_evidence, findings=None, sensitive_values=()) -> dict:
-    """QA_REPORT 또는 SECURITY_REPORT dict를 만든다.
+    # QA_REPORT 또는 SECURITY_REPORT(사전 dict)를 만들어 돌려준다.
+    #
+    # 입력값 설명:
+    #  - role     : "QA" 또는 "SECURITY". 어느 보고서를 만들지.
+    #  - context  : 보고서에 그대로 들어갈 식별 정보. artifactId, artifactVersion, previousArtifactId, runId,
+    #               workflowStepId, a2aTaskId, a2aArtifactId, createdAt, requirementIds (+ 선택 artifactUri)
+    #  - expected / observed : 기준 신분증과 결과의 신분증. 같아야 한다.
+    #  - plan     : 필수 검사만 담은 계획(공통 보고서에는 필수/선택 구분이 없다).
+    #  - bindings : {검사 번호: TestBinding}. 계획의 모든 검사를 덮어야 하고, 연결된 요구사항 집합이 context와 같아야 한다.
+    #  - tool_evidence : {검사 번호: 도구 실행 증거}
+    #  - findings : SECURITY 보고서의 발견사항 목록. 발견이 없어도 빈 목록([])을 직접 넘겨야 한다.
+    #
+    # 처리 규칙:
+    #  - ERROR와 NOT_RUN은 보고서에서 UNVERIFIED로 바꾼다. 원래 상태·이유·증거 번호는 details 항목에 JSON 글자로 남긴다.
+    #  - SECURITY 보고서는 요구사항 하나당 결과를 하나만 낼 수 있고, NOT_APPLICABLE은 받지 않는다.
+    #  - 최종 판정(finalVerdict)은 만들지 않는다. 그것은 시스템(Orchestrator)이 한다.
 
-    - context: artifactId, artifactVersion, previousArtifactId, runId, workflowStepId,
-      a2aTaskId, a2aArtifactId, createdAt, requirementIds (+ 선택 artifactUri)
-    - plan은 필수 검사만, bindings는 계획 전체를 덮어야 하고 요구사항 집합이 context와 같아야 한다.
-    - ERROR·NOT_RUN은 UNVERIFIED로 바꾸고 원래 상태·사유·증거 ID는 details에 남긴다.
-    - SECURITY는 요구사항당 결과 1개, findings는 빈 목록이라도 명시. NOT_APPLICABLE은 거부.
-    - finalVerdict는 만들지 않는다.
-    """
-    # 1) 입력 검사
+    # 1) 입력 확인
     if role not in ('QA', 'SECURITY'):
         raise ValueError('Unsupported report role')
     if not isinstance(expected, ExecutionManifest) or observed != expected:
+        # 신분증이 없거나 기준과 다르면 보고서를 내보내지 않는다.
         raise ValueError('Cannot publish results from a missing/mismatched Manifest')
     required_context = {'artifactId', 'artifactVersion', 'previousArtifactId', 'runId',
                         'workflowStepId', 'a2aTaskId', 'a2aArtifactId', 'createdAt',
                         'requirementIds'}
+    # context에는 필수 항목이 모두 있어야 하고, 허용된 선택 항목(artifactUri) 말고 모르는 항목이 있으면 안 된다.
     if not isinstance(context, dict) or not required_context <= context.keys() or context.keys() - required_context - {'artifactUri'}:
         raise ValueError('Report context has missing or unknown fields')
     checks, results = tuple(plan), tuple(results)
-    # 공통 보고서에는 필수/선택 구분이 없어 선택 검사가 섞이면 필수처럼 읽힌다.
+    # 공통 보고서에는 필수/선택 구분이 없어서, 선택 검사가 섞여 들어가면 필수처럼 읽히게 된다. 그래서 막는다.
     if any(check.required is not True for check in checks):
         raise ValueError('Only the complete required plan can be exported')
     summary = aggregate(checks, results, sensitive_values=sensitive_values)
 
-    # 2) 대응표 검사
+    # 2) 꼬리표(bindings)와 증거 대응표 확인
     ids = {check.test_id for check in checks}
     if set(bindings) != ids or set(tool_evidence) - ids:
         raise ValueError('Bindings/evidence do not match the fixed plan')
@@ -128,24 +164,26 @@ def build_report(*, role, context, expected, observed, plan, results,
         requirement_ids.append(binding.requirement_id)
     if len(external_ids) != len(set(external_ids)):
         raise ValueError('Duplicate external test ID')
-    # 1번은 단계의 요구사항마다 결과가 있어야 보고서를 받는다.
+    # 검사에 연결된 요구사항 집합이, 이 작업 단계가 맡은 요구사항 집합과 정확히 같은지 확인한다.
     if set(requirement_ids) != set(context['requirementIds']):
         raise ValueError('Bindings do not cover the exact Step requirement set')
     if role == 'SECURITY' and len(requirement_ids) != len(set(requirement_ids)):
+        # SECURITY 보고서는 요구사항 하나당 결과 하나만 받으므로, 검사를 요구사항별로 미리 합쳐서 넘겨야 한다.
         raise ValueError('Security needs one pre-aggregated check per requirement')
     if any(result.status == Status.NOT_APPLICABLE for result in results):
         raise ValueError('NOT_APPLICABLE requires an agreed external contract')
 
-    # 3) 검사별 행
+    # 3) 검사별 한 줄 만들기
     rows = []
-    executions = {}  # executionId별 근거. 같은 실행에 다른 근거가 붙는 모순을 찾는다.
-    received_status = {result.test_id: result.status.value for result in results}
+    executions = {}  # {실행 번호: 증거}. 같은 실행인데 서로 다른 증거가 붙는 모순을 찾기 위한 기록
+    received_status = {result.test_id: result.status.value for result in results}  # 실제로 받은 원래 상태
     for row in summary['results']:
         binding = bindings[row['testId']]
+        # PASS·FAIL만 그대로 두고, 나머지(ERROR·NOT_RUN 등)는 UNVERIFIED로 바꾼다.
         outcome = row['status'] if row['status'] in ('PASS', 'FAIL') else 'UNVERIFIED'
         item = {
             'requirementId': binding.requirement_id, 'outcome': outcome,
-            # 공통 규격에 전용 필드가 없는 정보는 details(JSON 문자열)에 보존한다.
+            # 공통 규격에 따로 칸이 없는 정보(원래 상태, 오류 코드, 이유 등)는 details에 JSON 글자로 담아 보존한다.
             'details': json.dumps({'localTestId': row['testId'], 'localStatus': row['status'],
                                    'reportedStatus': received_status.get(row['testId']),
                                    'errorCode': row['errorCode'], 'reason': row['reason'],
@@ -160,27 +198,29 @@ def build_report(*, role, context, expected, observed, plan, results,
         if evidence is not None:
             execution_id = evidence['executionId']
             if execution_id in executions and executions[execution_id] != evidence:
+                # 같은 실행 번호에 서로 다른 증거가 붙어 있으면 자료가 모순이다.
                 raise ValueError('Contradictory evidence for the same execution ID')
             executions[execution_id] = evidence
         if role == 'QA':
             item.update(testId=binding.external_test_id, title=binding.title)
         rows.append(item)
 
-    # 4) 조립. 입력 context는 복사해서 쓰고 원본은 바꾸지 않는다.
+    # 4) 보고서 조립. 넘겨받은 context는 복사해서 쓰므로 원본은 바뀌지 않는다.
     report = deepcopy(context)
     report.update(artifactType=role + '_REPORT', createdBy=role,
                   codeVersion=expected.code_version, executionManifest=expected.to_payload())
-    report['tests' if role == 'QA' else 'requirementResults'] = rows
+    report['tests' if role == 'QA' else 'requirementResults'] = rows  # QA는 tests, SECURITY는 requirementResults 칸
     if role == 'SECURITY':
-        # "발견사항 없음([])"과 "확인 안 함(None)"을 구분한다.
+        # "발견한 것이 없다(빈 목록 [])"와 "확인하지 않았다(None)"는 다른 뜻이므로 구분한다.
         if findings is None:
             raise ValueError('Security findings must be explicitly supplied, including an empty list')
         report['findings'] = deepcopy(findings)
     elif findings is not None:
         raise ValueError('QA reports cannot carry Security findings')
 
-    # 5) 스키마 검사 후, 스키마로 표현하기 어려운 규칙을 추가 확인한다.
+    # 5) 스키마로 모양을 확인한 뒤, 스키마로 표현하기 어려운 규칙을 추가로 확인한다.
     validate_contract(report, 'qa_report' if role == 'QA' else 'security_report')
+    # 보고서 버전 1(최초)에는 이전 보고서 번호가 없어야 하고, 2 이상에는 반드시 있어야 한다.
     if (report['artifactVersion'] == 1) != (report['previousArtifactId'] is None):
         raise ValueError('Artifact lineage version and predecessor disagree')
     if 'artifactUri' in report:
