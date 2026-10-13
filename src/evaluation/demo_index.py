@@ -1,0 +1,117 @@
+# 시연 때 모은 자료(실행 로그, 생성된 파일, 화면 캡처·영상)의 "목록표"를 만드는 파일이다.
+# 각 파일의 이름·크기·해시(지문)를 적고, 어느 개발 실행(Run)과 코드 버전의 자료인지도 함께 적는다.
+#
+# 자료를 담아 둘 폴더 구조:
+#     <root>/logs/...      실행 로그
+#     <root>/source/...    생성된 소스 파일
+#     <root>/screens/...   화면 캡처, 시연 영상
+#     <root>/reports/...   QA·보안·독립 평가 보고서
+# 이 파일은 각 파일을 읽어서 크기와 SHA-256 해시만 기록하고, 파일 내용을 복사하지는 않는다.
+#
+# 안전 장치:
+#   - 비어 있는 분류(예: 로그가 하나도 없음)는 missingCategories에 따로 적는다. 자료가 없는데 있는 것처럼 보이지 않게 하려는 것이다.
+#   - 미리 알려 준 비밀값(시험용 비밀번호 등)이 글자 파일에서 발견되면, 그 값은 말하지 않고 "어느 파일인지"만 알리며 목록 만들기를 거부한다.
+from hashlib import sha256  # 파일 내용의 지문(해시)을 만드는 도구
+from pathlib import Path  # 파일·폴더 경로를 다루는 도구
+import re  # 글자 모양 검사(정규식)
+from typing import Iterable
+
+from .aggregation import _uuid4
+from .common import aware_time
+
+CATEGORIES = ('logs', 'source', 'screens', 'reports')  # 허용하는 분류 폴더 이름 네 가지
+MAX_FILE_BYTES = 256 * 1024 * 1024  # 파일 하나의 최대 크기: 256MiB
+# 비밀값을 찾는 검사는 16MiB 이하의 "글자 파일"에서만 한다. 그림·영상 같은 바이너리 파일은 건너뛴다.
+MAX_SCAN_BYTES = 16 * 1024 * 1024
+BINARY_SUFFIXES = frozenset({'.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.mov', '.webm', '.pdf', '.zip', '.tar', '.gz'})
+# 확장자로 파일 종류(미디어 타입)를 알려 주는 표. 표에 없는 확장자는 거부하지 않고 "알 수 없는 바이너리"로 적는다.
+MEDIA_TYPES = {'.log': 'text/plain', '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json',
+               '.py': 'text/x-python', '.html': 'text/html', '.png': 'image/png', '.jpg': 'image/jpeg',
+               '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.mp4': 'video/mp4',
+               '.mov': 'video/quicktime', '.webm': 'video/webm', '.pdf': 'application/pdf'}
+
+
+def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | None = None,
+                     snapshot_sha256: str | None = None, sensitive_values: Iterable[str] = ()) -> dict:
+    # root 폴더 아래 분류 폴더들의 파일을 목록(사전)으로 만들어 돌려준다.
+    # 같은 폴더·같은 입력이면 항상 같은 결과가 나온다(경로 순서로 정렬하기 때문).
+    #   run_id          : 이 자료가 어느 개발 실행의 것인지
+    #   created_at      : 목록을 만든 시각(시간대 포함)
+    #   code_version    : (선택) 코드 버전 1~4
+    #   snapshot_sha256 : (선택) 그 코드 묶음의 해시
+    #   sensitive_values: 자료 안에 들어 있으면 안 되는 글자들(시험용 비밀번호 등)
+
+    # 1) 입력 확인
+    _uuid4(run_id)
+    if code_version is not None and (type(code_version) is not int or not 1 <= code_version <= 4):
+        raise ValueError('code_version must be an integer from 1 to 4')
+    if snapshot_sha256 is not None and not re.fullmatch(r'[0-9a-f]{64}', snapshot_sha256):
+        raise ValueError('snapshot_sha256 must be a SHA-256 hex digest')
+    aware_time(created_at, 'created_at')  # 올바른 시각인지만 확인한다.
+    secrets = [value.encode('utf-8') for value in sensitive_values]  # 파일 내용(바이트)과 비교하려고 바이트로 바꾼다.
+    if any(not value for value in secrets):
+        raise ValueError('Sensitive values must be nonempty strings')
+    base = Path(root)
+    # 폴더가 아니거나 바로가기(심볼릭 링크)면 거부한다. 바로가기는 폴더 밖의 파일을 몰래 가리킬 수 있기 때문이다.
+    if not base.is_dir() or base.is_symlink():
+        raise ValueError('root must be an existing directory')
+    base = base.resolve()  # 절대 경로로 바꾼다.
+    # 최상위에는 logs/source/screens/reports 네 폴더만 있어야 한다. 다른 파일이나 폴더가 섞여 있으면 거부한다.
+    unknown = sorted(entry.name for entry in base.iterdir() if entry.name not in CATEGORIES)
+    if unknown:
+        raise ValueError(f'unknown top-level entries: {unknown}')
+
+    # 2) 분류 폴더를 하나씩 돌며 파일 목록 만들기
+    files = []
+    for category in CATEGORIES:
+        folder = base / category  # "/" 연산자로 경로를 이어 붙인다.
+        if not folder.exists():
+            continue  # 이 분류 폴더가 없으면 건너뛴다(나중에 missingCategories에 나타난다).
+        if folder.is_symlink() or not folder.is_dir():
+            raise ValueError(f'{category} must be a directory')
+        for path in sorted(folder.rglob('*')):  # rglob('*') = 하위 폴더까지 모든 항목
+            if path.is_symlink():
+                raise ValueError(f'symbolic links are not allowed: {path.relative_to(base).as_posix()}')
+            if path.is_dir():
+                continue  # 폴더 자체는 목록에 넣지 않는다.
+            relative = path.relative_to(base).as_posix()  # root 기준의 상대 경로(슬래시 / 로 통일)
+            # 실제 위치가 root 밖으로 빠져나가지 않는지 한 번 더 확인한다.
+            if path.resolve().parent != path.parent.resolve() or base not in path.resolve().parents:
+                raise ValueError(f'path escapes the material folder: {relative}')
+            size = path.stat().st_size
+            if size > MAX_FILE_BYTES:
+                raise ValueError(f'file is too large: {relative}')
+            # 비밀값 검사 대상인지 정한다: 알려 준 비밀값이 있고, 글자 파일이며, 크기가 한도 이하일 때만 검사한다.
+            scan = bool(secrets) and path.suffix.lower() not in BINARY_SUFFIXES and size <= MAX_SCAN_BYTES
+            digest, found = _digest_and_scan(path, secrets, scan)
+            if found:
+                # 값 자체는 오류 메시지에 쓰지 않고 파일 경로만 알린다(오류 메시지에서 또 새어 나가지 않게).
+                raise ValueError(f'known sensitive value found in: {relative}')
+            files.append({'category': category, 'path': relative, 'sizeBytes': size,
+                          'sha256': digest,
+                          'mediaType': MEDIA_TYPES.get(path.suffix.lower(), 'application/octet-stream')})
+    # 3) 분류별 파일 개수를 세고, 하나도 없는 분류는 따로 적는다.
+    counts = {category: sum(1 for item in files if item['category'] == category) for category in CATEGORIES}
+    return {'schemaVersion': '1.0', 'reportType': 'DEMO_MATERIAL_INDEX', 'runId': run_id,
+            'codeVersion': code_version, 'snapshotSha256': snapshot_sha256, 'createdAt': created_at,
+            'files': files, 'counts': counts,
+            'missingCategories': [category for category in CATEGORIES if counts[category] == 0]}
+
+
+def _digest_and_scan(path, secrets, scan):
+    # 파일의 해시(지문)를 계산하고, scan이 True면 비밀값이 들어 있는지도 함께 찾는다.
+    # 파일을 1MiB씩 잘라 읽는다. 영상처럼 큰 파일을 통째로 메모리에 올리면 컴퓨터가 느려질 수 있기 때문이다.
+    # 조각(chunk)을 나눠 읽으면 비밀값이 두 조각에 걸쳐 있을 수 있으므로,
+    # 직전 조각의 끝부분(tail)을 다음 조각 앞에 붙여서 검사한다.
+    # 돌려주는 값: (해시 글자, 비밀값을 찾았는가)
+    digest, found, tail = sha256(), False, b''
+    # 가장 긴 비밀값보다 1바이트 짧은 길이만큼만 이어 붙이면 어떤 경계에 걸쳐 있어도 찾을 수 있다.
+    keep = max((len(value) for value in secrets), default=1) - 1
+    with path.open('rb') as handle:  # 'rb' = 바이트로 읽기. with는 다 쓰면 파일을 자동으로 닫아 준다.
+        while chunk := handle.read(1024 * 1024):  # 더 읽을 내용이 없을 때까지 1MiB씩 읽는다.
+            digest.update(chunk)  # 해시 계산에 이 조각을 보탠다.
+            if scan and not found:
+                window = tail + chunk
+                found = any(value in window for value in secrets)
+                tail = window[-keep:] if keep else b''
+    return digest.hexdigest(), found
