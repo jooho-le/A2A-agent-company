@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -49,3 +50,15 @@ class CurrentUserResponse(BaseModel):
     id: int
     email: str
     role: str
+
+
+class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    original_filename: str
+    file_size: int
+    content_type: str
+    submitter_id: int
+    assignee_id: int
+    created_at: datetime
