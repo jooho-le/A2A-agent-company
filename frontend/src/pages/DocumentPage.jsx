@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './DocumentPage.css'
 
 const uploadErrorMessages = {
@@ -9,12 +9,80 @@ const uploadErrorMessages = {
   500: '문서 저장 중 서버 오류가 발생했습니다.',
 }
 
+async function fetchDocumentList(view, signal) {
+  const token = sessionStorage.getItem('access_token')
+  const result = { documents: [], errorMessage: '' }
+  if (!token) {
+    return { ...result, errorMessage: '로그인이 필요합니다.' }
+  }
+
+  try {
+    const response = await fetch(`http://127.0.0.1:8000/api/documents?view=${view}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    })
+    const data = await response.json().catch(() => null)
+
+    if (response.status === 401) {
+      result.errorMessage = '로그인이 필요합니다.'
+    } else if (response.status >= 500) {
+      result.errorMessage = '문서 목록 조회 중 서버 오류가 발생했습니다.'
+    } else if (!response.ok) {
+      result.errorMessage = typeof data?.detail === 'string' && data.detail
+        ? data.detail : `문서 목록을 조회하지 못했습니다. (HTTP ${response.status})`
+    } else if (!Array.isArray(data?.documents)) {
+      result.errorMessage = '서버 응답에서 문서 목록을 확인할 수 없습니다.'
+    } else {
+      result.documents = data.documents
+    }
+  } catch {
+    result.errorMessage = '서버에 연결할 수 없습니다.'
+  }
+
+  return result
+}
+
+function formatFileSize(bytes) {
+  const useMegabytes = bytes >= 1000000
+  const size = bytes / (useMegabytes ? 1000000 : 1000)
+  return `${size.toLocaleString('ko-KR', { maximumFractionDigits: 2 })} ${useMegabytes ? 'MB' : 'KB'}`
+}
+
 function DocumentPage({ onBack }) {
   const [file, setFile] = useState(null)
   const [assigneeId, setAssigneeId] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [uploadResult, setUploadResult] = useState(null)
+  const [selectedView, setSelectedView] = useState('submitted')
+  const [listVersion, setListVersion] = useState(0)
+  const [listResult, setListResult] = useState(null)
+
+  // 이전 탭 또는 갱신 이전의 결과는 현재 목록에 표시하지 않습니다.
+  const isLoadingDocuments = listResult?.view !== selectedView || listResult?.version !== listVersion
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+
+    fetchDocumentList(selectedView, controller.signal).then((result) => {
+      if (active) {
+        setListResult({ ...result, view: selectedView, version: listVersion })
+      }
+    })
+
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [selectedView, listVersion])
+
+  function handleViewChange(view) {
+    if (view === selectedView) return
+    setSelectedView(view)
+    setListVersion((version) => version + 1)
+  }
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -60,6 +128,8 @@ function DocumentPage({ onBack }) {
           return
         }
         setUploadResult(data)
+        // 업로드 중 탭이 바뀌어도 현재 선택된 탭의 목록을 다시 조회합니다.
+        setListVersion((version) => version + 1)
       } else {
         const detail = typeof data?.detail === 'string' ? data.detail : ''
         setErrorMessage(
@@ -143,6 +213,69 @@ function DocumentPage({ onBack }) {
             {isSubmitting ? '제출 중...' : '문서 제출'}
           </button>
         </form>
+
+        <section className="document-card document-history" aria-labelledby="document-history-title">
+          <header className="document-history-heading">
+            <h2 id="document-history-title">문서 내역</h2>
+            <button
+              type="button"
+              className="app-button"
+              disabled={isLoadingDocuments}
+              onClick={() => setListVersion((version) => version + 1)}
+            >
+              목록 새로고침
+            </button>
+          </header>
+          <div className="document-tabs" role="group" aria-label="문서 조회 구분">
+            <button
+              type="button"
+              className="app-button document-tab"
+              aria-pressed={selectedView === 'submitted'}
+              onClick={() => handleViewChange('submitted')}
+            >
+              내가 제출한 문서
+            </button>
+            <button
+              type="button"
+              className="app-button document-tab"
+              aria-pressed={selectedView === 'assigned'}
+              onClick={() => handleViewChange('assigned')}
+            >
+              나에게 배정된 문서
+            </button>
+          </div>
+          <div className="document-list-panel" aria-busy={isLoadingDocuments}>
+            {isLoadingDocuments ? (
+              <p role="status">문서 목록을 조회하고 있습니다.</p>
+            ) : listResult.errorMessage ? (
+              <p className="document-message document-message--error" role="alert">
+                {listResult.errorMessage}
+              </p>
+            ) : listResult.documents.length === 0 ? (
+              <p role="status">
+                {selectedView === 'submitted' ? '제출한 문서가 없습니다.' : '배정된 문서가 없습니다.'}
+              </p>
+            ) : (
+              <ul className="document-list">
+                {listResult.documents.map((document) => (
+                  <li key={document.id}>
+                    <article className="document-list-item">
+                      <h3>{document.original_filename}</h3>
+                      <dl className="document-result">
+                        <dt>문서 ID</dt><dd>{document.id}</dd>
+                        <dt>제출 일시</dt>
+                        <dd><time dateTime={document.created_at}>{document.created_at.replace('T', ' ')}</time></dd>
+                        <dt>파일 크기</dt><dd>{formatFileSize(document.file_size)}</dd>
+                        <dt>제출자 ID</dt><dd>{document.submitter_id}</dd>
+                        <dt>담당자 ID</dt><dd>{document.assignee_id}</dd>
+                      </dl>
+                    </article>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
       </div>
     </main>
   )
