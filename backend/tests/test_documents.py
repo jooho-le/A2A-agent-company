@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID, uuid4
 
 import jwt
@@ -80,11 +81,15 @@ class DocumentAPITests(unittest.TestCase):
         with Session(self.engine) as db:
             submitter = User(email="submitter@example.com", password_hash=self.password_hash)
             assignee = User(email="assignee@example.com", password_hash=self.password_hash)
-            db.add_all([submitter, assignee])
+            unrelated = User(email="unrelated@example.com", password_hash=self.password_hash)
+            db.add_all([submitter, assignee, unrelated])
             db.commit()
             self.submitter_id = submitter.id
             self.assignee_id = assignee.id
+            self.unrelated_id = unrelated.id
         self.token = create_access_token(self.submitter_id, "submitter@example.com")
+        self.assignee_token = create_access_token(self.assignee_id, "assignee@example.com")
+        self.unrelated_token = create_access_token(self.unrelated_id, "unrelated@example.com")
 
     def tearDown(self):
         main.app.dependency_overrides.clear()
@@ -96,6 +101,7 @@ class DocumentAPITests(unittest.TestCase):
     def request(self, method, path, body=b"", headers=None):
         """추가 테스트 패키지나 장시간 서버 실행 없이 실제 ASGI 앱을 호출합니다."""
         response_messages = []
+        url = urlsplit(path)
 
         async def make_request():
             delivered = False
@@ -112,8 +118,8 @@ class DocumentAPITests(unittest.TestCase):
 
             scope = {
                 "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
-                "method": method, "scheme": "http", "path": path,
-                "raw_path": path.encode(), "query_string": b"", "root_path": "",
+                "method": method, "scheme": "http", "path": url.path,
+                "raw_path": url.path.encode(), "query_string": url.query.encode(), "root_path": "",
                 "headers": [
                     (name.lower().encode(), value.encode())
                     for name, value in (headers or {}).items()
@@ -164,6 +170,14 @@ class DocumentAPITests(unittest.TestCase):
     def document_count(self):
         with Session(self.engine) as db:
             return db.scalar(select(func.count()).select_from(Document))
+
+    def list_documents(self, view=None, token=None):
+        path = "/api/documents"
+        if view is not None:
+            path += "?" + urlencode({"view": view})
+        access_token = self.token if token is None else token
+        headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
+        return self.request("GET", path, headers=headers)
 
     def assert_no_upload(self):
         self.assertEqual(self.document_count(), 0)
@@ -316,6 +330,119 @@ class DocumentAPITests(unittest.TestCase):
                 self.assertEqual(self.upload()[0], 500)
         self.assertEqual(existing_path.read_bytes(), b"existing PDF")
         self.assertEqual(self.document_count(), 0)
+
+    def test_submitted_list_filters_current_user_and_defaults_to_submitted(self):
+        code, own_document = self.upload()
+        self.assertEqual(code, 201)
+        self.assertEqual(self.upload(token=self.assignee_token, assignee_id=self.submitter_id)[0], 201)
+        self.assertEqual(self.upload(token=self.unrelated_token)[0], 201)
+
+        for view in (None, "submitted"):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view)
+                self.assertEqual(code, 200)
+                self.assertEqual(body, {"documents": [own_document]})
+
+    def test_assigned_list_filters_current_user(self):
+        code, assigned_document = self.upload()
+        self.assertEqual(code, 201)
+        code, submitted_document = self.upload(token=self.assignee_token, assignee_id=self.unrelated_id)
+        self.assertEqual(code, 201)
+
+        code, body = self.list_documents("assigned", token=self.assignee_token)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, {"documents": [assigned_document]})
+        code, body = self.list_documents("submitted", token=self.assignee_token)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, {"documents": [submitted_document]})
+
+    def test_unrelated_user_cannot_list_documents_even_with_forged_user_ids(self):
+        self.assertEqual(self.upload()[0], 201)
+        self.assertEqual(self.upload(token=self.assignee_token, assignee_id=self.submitter_id)[0], 201)
+        for view in ("submitted", "assigned"):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view, token=self.unrelated_token)
+                self.assertEqual((code, body), (200, {"documents": []}))
+
+                # 다른 사람의 ID를 쿼리에 추가해도 조회 조건에는 사용되지 않습니다.
+                query = urlencode({
+                    "view": view, "submitter_id": self.submitter_id, "assignee_id": self.assignee_id,
+                })
+                code, body = self.request(
+                    "GET", f"/api/documents?{query}",
+                    headers={"Authorization": f"Bearer {self.unrelated_token}"},
+                )
+                self.assertEqual((code, body), (200, {"documents": []}))
+
+    def test_document_list_requires_authentication(self):
+        self.assertEqual(self.upload()[0], 201)
+        for view in (None, "submitted", "assigned"):
+            for token in ("", "invalid-token"):
+                with self.subTest(view=view, token=token):
+                    self.assertEqual(self.list_documents(view, token=token)[0], 401)
+
+    def test_document_list_rejects_expired_tokens_and_absent_users(self):
+        import os
+
+        self.assertEqual(self.upload()[0], 201)
+        expired = jwt.encode(
+            {"sub": str(self.submitter_id), "exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
+            os.environ["JWT_SECRET"], algorithm="HS256",
+        )
+        absent = create_access_token(999999, "absent@example.com")
+        for view in ("submitted", "assigned"):
+            for token in (expired, absent):
+                with self.subTest(view=view, token_type="expired" if token == expired else "absent"):
+                    self.assertEqual(self.list_documents(view, token=token)[0], 401)
+
+    def test_document_list_returns_empty_list(self):
+        for view in (None, "submitted", "assigned"):
+            with self.subTest(view=view):
+                self.assertEqual(self.list_documents(view), (200, {"documents": []}))
+
+    def test_document_list_orders_by_created_at_then_id_desc(self):
+        uploaded = []
+        for _ in range(3):
+            code, document = self.upload()
+            self.assertEqual(code, 201)
+            uploaded.append(document)
+
+        # ID 순서와 시간 순서가 다른 문서, 생성 시각이 같은 문서를 함께 검사합니다.
+        with Session(self.engine) as db:
+            for document, created_at in zip(uploaded, [
+                datetime(2026, 10, 14, 10, 0),
+                datetime(2026, 10, 13, 10, 0),
+                datetime(2026, 10, 14, 10, 0),
+            ]):
+                db.get(Document, document["id"]).created_at = created_at
+            db.commit()
+
+        expected_ids = [uploaded[2]["id"], uploaded[0]["id"], uploaded[1]["id"]]
+        for view, token in (("submitted", self.token), ("assigned", self.assignee_token)):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view, token=token)
+                self.assertEqual(code, 200)
+                self.assertEqual([document["id"] for document in body["documents"]], expected_ids)
+
+    def test_document_list_excludes_internal_storage_fields(self):
+        code, uploaded = self.upload()
+        self.assertEqual(code, 201)
+        for view, token in (("submitted", self.token), ("assigned", self.assignee_token)):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view, token=token)
+                self.assertEqual(code, 200)
+                self.assertEqual(set(body), {"documents"})
+                self.assertEqual(len(body["documents"]), 1)
+                document = body["documents"][0]
+                self.assertEqual(set(document), {
+                    "id", "original_filename", "file_size", "content_type", "submitter_id", "assignee_id", "created_at",
+                })
+                self.assertEqual(document, uploaded)
+
+    def test_document_list_rejects_invalid_view(self):
+        for view in ("all", "", "SUBMITTED"):
+            with self.subTest(view=view):
+                self.assertEqual(self.list_documents(view)[0], 422)
 
     def test_existing_signup_login_and_me_still_work(self):
         payload = {"email": "new@example.com", "password": "Password123"}

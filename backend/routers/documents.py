@@ -1,21 +1,41 @@
 import logging
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from database import get_db
 from models import Document, User
 from routers.auth import read_current_user
-from schemas import DocumentResponse
+from schemas import DocumentListResponse, DocumentResponse
 
 
 router = APIRouter(prefix="/api/documents")
 logger = logging.getLogger(__name__)
 UPLOAD_DIRECTORY = Path(__file__).resolve().parents[1] / "uploads"
 MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+@router.get("", response_model=DocumentListResponse)
+def list_documents(
+    view: Literal["submitted", "assigned"] = Query(
+        default="submitted", description="submitted: 내가 제출한 문서, assigned: 내가 담당자인 문서"
+    ),
+    current_user: User = Depends(read_current_user),
+    db: Session = Depends(get_db),
+):
+    # 조회 기준 ID는 쿼리 입력이 아닌 JWT로 인증된 현재 사용자에게서만 가져옵니다.
+    user_column = Document.submitter_id if view == "submitted" else Document.assignee_id
+    query = (
+        select(Document)
+        .where(user_column == current_user.id)
+        .order_by(Document.created_at.desc(), Document.id.desc())
+    )
+    return {"documents": db.scalars(query).all()}
 
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
