@@ -1,9 +1,13 @@
 import logging
+import os
+import stat
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
+from urllib.parse import quote
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -36,6 +40,69 @@ def list_documents(
         .order_by(Document.created_at.desc(), Document.id.desc())
     )
     return {"documents": db.scalars(query).all()}
+
+
+@router.get("/{document_id}/download", response_class=Response)
+def download_document(
+    document_id: int,
+    current_user: User = Depends(read_current_user),
+    db: Session = Depends(get_db),
+):
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    if current_user.id not in (document.submitter_id, document.assignee_id):
+        raise HTTPException(status_code=403, detail="문서를 다운로드할 권한이 없습니다.")
+
+    try:
+        # 기존 업로드가 생성하는 UUID v4 파일명만 허용합니다.
+        stored_name = document.stored_filename
+        file_uuid = UUID(stored_name.removesuffix(".pdf"))
+        if file_uuid.version != 4 or stored_name != f"{file_uuid}.pdf":
+            raise ValueError("유효하지 않은 저장 파일명")
+        if Path(document.file_path) != UPLOAD_DIRECTORY / stored_name:
+            raise ValueError("유효하지 않은 저장 경로")
+
+        # 디렉터리와 파일 모두 심볼릭 링크를 따라가지 않고 엽니다.
+        directory_fd = os.open(UPLOAD_DIRECTORY, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            file_fd = os.open(
+                stored_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=directory_fd,
+            )
+        finally:
+            os.close(directory_fd)
+
+        # 열린 파일을 그대로 읽어, 검사 뒤 경로 교체로 다른 파일이 열리는 것을 막습니다.
+        try:
+            file_stat = os.fstat(file_fd)
+            if (
+                not stat.S_ISREG(file_stat.st_mode)
+                or file_stat.st_nlink > 1
+                or file_stat.st_size != document.file_size
+            ):
+                raise ValueError("유효하지 않은 저장 파일")
+            with os.fdopen(file_fd, "rb", closefd=False) as saved_file:
+                contents = saved_file.read(MAX_FILE_SIZE + 1)
+            if len(contents) > MAX_FILE_SIZE or len(contents) != document.file_size:
+                raise ValueError("유효하지 않은 파일 크기")
+        finally:
+            os.close(file_fd)
+    except (OSError, ValueError, TypeError):
+        # 누락, 경로 조작, 파일 접근 오류 모두 내부 경로나 예외를 노출하지 않습니다.
+        raise HTTPException(status_code=404, detail="문서 파일을 찾을 수 없습니다.") from None
+
+    # 원본 파일명에서도 경로와 제어 문자를 제거하고 UTF-8로 인코딩합니다.
+    filename = document.original_filename.replace("\\", "/").rsplit("/", 1)[-1]
+    filename = "".join(character for character in filename if character.isprintable()).strip()
+    if filename in ("", ".", ".."):
+        filename = "document.pdf"
+    disposition = f"attachment; filename=\"document.pdf\"; filename*=UTF-8''{quote(filename, safe='')}"
+    return Response(
+        content=contents,
+        media_type="application/pdf",
+        headers={"Content-Disposition": disposition},
+    )
 
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)

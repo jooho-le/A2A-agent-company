@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './DocumentPage.css'
 
 const uploadErrorMessages = {
@@ -7,6 +7,25 @@ const uploadErrorMessages = {
   415: 'PDF 파일만 제출할 수 있습니다.',
   422: '입력값을 확인해주세요.',
   500: '문서 저장 중 서버 오류가 발생했습니다.',
+}
+
+const downloadErrorMessages = {
+  401: '로그인 정보가 만료되었거나 인증이 필요합니다.',
+  403: '해당 문서를 다운로드할 권한이 없습니다.',
+  404: '문서 또는 저장된 파일을 찾을 수 없습니다.',
+}
+
+function safeDownloadFilename(filename) {
+  const basename = filename.replace(/\\/g, '/').split('/').pop()
+  const safeName = basename
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .replace(/[<>:"|?*]/g, '_')
+    .trim()
+    .replace(/[. ]+$/g, '')
+  if (!safeName) return 'document.pdf'
+  // Windows에서도 저장할 수 있도록 예약된 장치 이름은 피합니다.
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safeName)
+    ? `_${safeName}` : safeName
 }
 
 async function fetchDocumentList(view, signal) {
@@ -58,6 +77,17 @@ function DocumentPage({ onBack }) {
   const [selectedView, setSelectedView] = useState('submitted')
   const [listVersion, setListVersion] = useState(0)
   const [listResult, setListResult] = useState(null)
+  const [downloadStates, setDownloadStates] = useState({})
+  const downloadRequests = useRef(new Map())
+
+  useEffect(() => {
+    const requests = downloadRequests.current
+    return () => {
+      // 화면을 떠나면 아직 받는 중인 파일 요청을 취소합니다.
+      requests.forEach((controller) => controller.abort())
+      requests.clear()
+    }
+  }, [])
 
   // 이전 탭 또는 갱신 이전의 결과는 현재 목록에 표시하지 않습니다.
   const isLoadingDocuments = listResult?.view !== selectedView || listResult?.version !== listVersion
@@ -82,6 +112,92 @@ function DocumentPage({ onBack }) {
     if (view === selectedView) return
     setSelectedView(view)
     setListVersion((version) => version + 1)
+  }
+
+  async function handleDownload(documentInfo) {
+    const documentId = documentInfo.id
+    // 화면이 다시 그려지기 전 같은 버튼을 눌러도 요청은 한 번만 보냅니다.
+    if (downloadRequests.current.has(documentId)) return
+
+    const token = sessionStorage.getItem('access_token')
+    if (!token) {
+      setDownloadStates((states) => ({
+        ...states, [documentId]: { isLoading: false, errorMessage: downloadErrorMessages[401] },
+      }))
+      return
+    }
+
+    const controller = new AbortController()
+    downloadRequests.current.set(documentId, controller)
+    setDownloadStates((states) => ({
+      ...states, [documentId]: { isLoading: true, errorMessage: '' },
+    }))
+    let objectUrl
+    let downloadLink
+    let fileReceived = false
+
+    try {
+      const response = await fetch(`http://127.0.0.1:8000/api/documents/${documentId}/download`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted) return
+      // 오류 JSON을 PDF로 저장하지 않도록 성공 여부를 먼저 확인합니다.
+      if (!response.ok) {
+        setDownloadStates((states) => ({
+          ...states,
+          [documentId]: {
+            isLoading: false,
+            errorMessage: downloadErrorMessages[response.status]
+              || (response.status >= 500 ? '파일 다운로드 중 서버 오류가 발생했습니다.'
+                : `파일 다운로드에 실패했습니다. (HTTP ${response.status})`),
+          },
+        }))
+        return
+      }
+      if (response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/pdf') {
+        setDownloadStates((states) => ({
+          ...states, [documentId]: { isLoading: false, errorMessage: '서버에서 PDF 파일을 받지 못했습니다.' },
+        }))
+        return
+      }
+
+      const blob = await response.blob()
+      if (controller.signal.aborted) return
+      fileReceived = true
+      objectUrl = URL.createObjectURL(blob)
+      downloadLink = window.document.createElement('a')
+      downloadLink.href = objectUrl
+      downloadLink.download = safeDownloadFilename(documentInfo.original_filename)
+      window.document.body.appendChild(downloadLink)
+      downloadLink.click()
+    } catch {
+      if (!controller.signal.aborted) {
+        setDownloadStates((states) => ({
+          ...states,
+          [documentId]: {
+            isLoading: false,
+            errorMessage: fileReceived ? '다운로드를 시작하지 못했습니다. 다시 시도해주세요.'
+              : '서버에 연결할 수 없습니다.',
+          },
+        }))
+      }
+    } finally {
+      downloadLink?.remove()
+      if (objectUrl) {
+        // 브라우저가 다운로드를 시작할 시간을 준 뒤 임시 URL을 해제합니다.
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+      }
+      if (downloadRequests.current.get(documentId) === controller) {
+        downloadRequests.current.delete(documentId)
+      }
+      if (!controller.signal.aborted) {
+        setDownloadStates((states) => ({
+          ...states, [documentId]: { ...states[documentId], isLoading: false },
+        }))
+      }
+    }
   }
 
   async function handleSubmit(event) {
@@ -269,6 +385,23 @@ function DocumentPage({ onBack }) {
                         <dt>제출자 ID</dt><dd>{document.submitter_id}</dd>
                         <dt>담당자 ID</dt><dd>{document.assignee_id}</dd>
                       </dl>
+                      <div className="document-download-actions">
+                        <button
+                          type="button"
+                          className="app-button"
+                          aria-label={`${document.original_filename} 다운로드`}
+                          aria-busy={Boolean(downloadStates[document.id]?.isLoading)}
+                          disabled={Boolean(downloadStates[document.id]?.isLoading)}
+                          onClick={() => handleDownload(document)}
+                        >
+                          {downloadStates[document.id]?.isLoading ? '다운로드 중...' : '다운로드'}
+                        </button>
+                      </div>
+                      {downloadStates[document.id]?.errorMessage && (
+                        <p className="document-message document-message--error" role="alert">
+                          {downloadStates[document.id].errorMessage}
+                        </p>
+                      )}
                     </article>
                   </li>
                 ))}
