@@ -1,13 +1,15 @@
 # 평가 개발 환경
 
-최종 갱신: 2026-10-14. Python 3.13 사용(`.python-version`). dev의 공통 프로젝트 설정을 사용한다.
+최종 갱신: 2026-10-15. Python 3.13을 사용한다(설치할 때 `--python 3.13`으로 직접 지정). dev의 공통 프로젝트 설정을 사용한다.
 
-Python 3.10은 dev 테스트(`Task.cancelling`)와 Security 승인 함수(`co_qualname`)가 지원하지 않아 실패하고, 3.14는 dev 보안 승인 테스트 6개가 실패했다. 루트 `pyproject.toml`의 `requires-python = ">=3.10"`은 팀 공유 파일이라 바꾸지 않았다. 팀 Python 버전 통일은 회의 안건이다.
+Python 3.10은 dev 테스트(`Task.cancelling`)와 Security 승인 함수(`co_qualname`)가 지원하지 않아 실패하고, 3.14는 dev 보안 승인 테스트 6개가 실패했다. 루트 `pyproject.toml`의 `requires-python = ">=3.10"`은 팀 공유 파일이라 바꾸지 않았다. 팀 Python 버전 통일은 회의 안건이다(OPEN-15).
+
+내 컴퓨터 루트에는 `.python-version`(내용 3.13) 파일이 있지만 **Git에는 올리지 않았다.** 이 파일은 저장소를 쓰는 모두의 uv가 고르는 Python 버전을 바꾸기 때문이다. 그래서 다른 컴퓨터에서는 아래처럼 `--python 3.13`을 직접 적어야 3.13이 선택된다. 팀이 3.13으로 통일하기로 하면 팀장 승인을 받아 이 파일을 올리거나 `pyproject.toml`을 고친다.
 
 ## 설치 및 PyCharm
 
 1. 저장소 루트를 PyCharm 프로젝트로 연다.
-2. uv를 설치한 환경에서 루트 기준 `uv sync --frozen`을 실행한다. 루트 `.python-version`이 3.13이라 uv가 3.13 가상환경을 만든다(이미 3.10 `.venv`가 있으면 지우고 다시 만든다).
+2. uv를 설치한 환경에서 루트 기준 `uv sync --frozen --python 3.13`을 실행한다. uv가 3.13 가상환경을 만든다(이미 3.10 `.venv`가 있으면 지우고 다시 만든다).
 3. 인터프리터는 루트 `.venv/bin/python`으로 지정한다.
 4. 테스트는 모듈 `pytest`, 작업 디렉터리는 저장소 루트로 실행한다.
 
@@ -19,7 +21,7 @@ Python 3.10은 dev 테스트(`Task.cancelling`)와 Security 승인 함수(`co_qu
 ## 실행과 검증
 
 ```bash
-uv sync --frozen
+uv sync --frozen --python 3.13
 uv run --frozen uvicorn orchestrator.main:app --app-dir src --reload
 uv run --frozen python -m pytest
 uv run --frozen python -m evaluation
@@ -29,7 +31,7 @@ uv run --frozen python scripts/check_dev_reports.py .venv/bin/python
 PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ```
 
-기본 pytest는 `tests/`만 수집한다(평가 테스트는 2026-10-14 기준 231개. 저장소 전체는 dev 테스트가 많아 13분 정도 걸리고, 같은 날 전체 실행에서 dev 쪽 테스트 1개가 실패했다).
+기본 pytest는 `tests/`만 수집한다(평가 테스트는 2026-10-16 기준 494개. 저장소 전체는 dev 테스트가 많아 20분 넘게 걸린다. 마지막 전체 실행은 2026-10-16이고 3802개가 모두 통과했다. dev의 `test_planner_developer_continuation`에는 가끔 실패하는 테스트가 있는데(수정 전 커밋에서도 재현) 이번 실행에서는 통과했다. 평가 코드와는 무관하다).
 평가 테스트만 실행하려면 `uv run --frozen python -m pytest tests/evaluation`,
 환경 확인은 `uv run --frozen python -m pytest checks`로 따로 실행한다.
 평가 자체 테스트와 보고서 모델 호환 검사는 실제 A2A/MCP/회원가입 서비스 통합 검증이 아니다.

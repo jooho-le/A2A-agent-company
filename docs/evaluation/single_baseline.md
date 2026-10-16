@@ -82,8 +82,9 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 | 환경 digest 불일치 | 해당 Run만 별도 표시·재실행 |
 | 모델 API 장애 | UNVERIFIED로 기록, Run 삭제 금지 |
 | 실행 순서·cache 상태 미기록 | 재현성 저하로 표시 |
+| warm-up 상태(WARM/COLD)가 Run마다 다름 | 비교는 가능하되 주의로 표시(처리시간·비용 비교에 캐시·초기화 차이가 섞임). 실행 순서 숫자는 Run마다 달라야 정상이라 조건이 아니다 |
 
-이 검사는 `run_metrics.comparison_validity()`로 구현했다. Run Configuration의 통제 항목과 평가 보고서의 `suite.sha256`·컨테이너 digest를 **모든 Run에 대해**(같은 구조의 반복 Run끼리도) 비교해 `INVALID_COMPARISON`(비교 무효)과 `RERUN_RUN`(해당 Run 재실행)으로 나눈다. 합성 입력으로만 검증했고 실제 Run은 아직 없다.
+이 검사는 `run_metrics.comparison_validity()`로 구현했다. Run Configuration의 통제 항목과 평가 보고서의 `suite.sha256`·컨테이너 digest를 **모든 Run에 대해**(같은 구조의 반복 Run끼리도) 비교해 `INVALID_COMPARISON`(비교 무효)과 `RERUN_RUN`(해당 Run 재실행)으로 나눈다. 평가 보고서의 환경 지문(컨테이너 이미지·의존성 lock)은 보고서끼리뿐 아니라 **그 Run이 동결한 환경과도** 대조하고, 어긋나거나 보고서가 스스로 신분증 불일치를 밝힌 Run은 `RERUN_RUN`으로 표시한다. 구조별 요약(`experiment_summary`)은 평가 보고서가 채점한 코드 버전이 Run의 최종 코드 버전과 같을 때만 받는다(고치기 전 코드를 채점한 보고서는 거부). 문제 해결 수(`issuesFixed`)는 수정을 요청한 수(`issuesFixRequested`)와 따로, 다시 검증해서 PASS로 확인된 것만 센다. 합성 입력으로만 검증했고 실제 Run은 아직 없다.
 
 ## 7. 실행 순서·반복·비용
 
@@ -96,11 +97,11 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 
 | 막힌 것 | 필요한 결정·작업 | 담당 논의 |
 |---|---|---|
-| Single 실행기가 없음. `architecture`가 `MULTI_AGENT`만 허용 | 누가 만들지, 기존 Multi 구현 일부를 단일 구조로 바꾸는 방법을 쓸지(기업 미팅의 제안) | 팀장·주호·석민 |
-| 시작 코드 미정(owned-source 미설정) | 승인 저장소·commit, 최소 실행 샘플 | 주호·세화·석민 |
-| 보호 테스트 위치 | A / B / B′ 선택, held-out 필요 여부 | 팀장 |
+| Single 실행기가 없음. `architecture`가 `MULTI_AGENT`만 허용 | 누가 만들지, 기존 Multi 구현 일부를 단일 구조로 바꾸는 방법을 쓸지(기업 미팅의 제안) | 주호(팀장)·석민 |
+| 시작 코드 미정(owned-source 미설정) | 승인 저장소·commit, 최소 실행 샘플 | 주호(팀장)·세화·석민 |
+| 보호 테스트 위치 | A / B / B′ 선택, held-out 필요 여부 | 주호(팀장) |
 | 실험 예산·모델·가격표 | 모델 lock, 단가, 한도, 반복 횟수 | 전원 |
-| 최종 Snapshot 인계 | 소스 접근·Manifest·권한 | 주호 |
+| 최종 Snapshot 인계 | 소스 접근·Manifest·권한 | 주호(팀장) |
 
 ## 9. 4번이 먼저 해 둘 수 있는 것
 

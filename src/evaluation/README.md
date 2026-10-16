@@ -1,7 +1,7 @@
 # 평가 모듈 (4번 Evaluation)
 
-4번 담당 강석민의 평가 모듈입니다. 첫 대상은 회원가입 MVP(SCN-001)이고, 공통 계약 기준은 dev `2b4fc60`입니다.
-평가 명세는 0.3이며, 이 모듈은 루트 `pyproject.toml`의 공통 패키지에 포함됩니다.
+4번 담당 강석민의 평가 모듈입니다. 첫 대상은 회원가입 MVP(SCN-001)이고, 공통 계약 기준은 dev `caa4144`(스키마 사본 4개는 `schemas/project` 원본과 같음을 확인)입니다.
+평가 명세는 0.4이며, 이 모듈은 루트 `pyproject.toml`의 공통 패키지에 포함됩니다.
 
 ## 이 모듈이 하는 일
 
@@ -37,11 +37,11 @@ scripts/check_dev_reports.py   dev 보고서 모델이 합성 보고서를 받�
 
 ## 실행
 
-저장소 루트에서 공통 환경을 한 번 설치합니다. Python 3.13(`.python-version`)과 uv를 사용하고,
+저장소 루트에서 공통 환경을 한 번 설치합니다. Python 3.13과 uv를 사용하고(`.python-version`은 Git에 올리지 않아서 `--python 3.13`을 직접 적습니다),
 PyCharm 인터프리터는 루트 `.venv/bin/python`입니다.
 
 ```bash
-uv sync --frozen
+uv sync --frozen --python 3.13
 .venv/bin/python -m pytest                     # 전체(평가 + dev)
 .venv/bin/python -m pytest tests/evaluation    # 평가 테스트만
 .venv/bin/python -m pytest checks              # 가상환경·라이브러리 확인
