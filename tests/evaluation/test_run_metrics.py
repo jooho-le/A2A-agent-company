@@ -38,7 +38,9 @@ def bundle(run_id=None, *, verdict='SUCCESS', status='FINISHED', fixes=1, cost='
                 'codeVersion': 1 + fixes, 'fixAttempt': fixes, 'terminationReason': None,
                 'createdAt': '2026-10-14T10:00:00+09:00', 'updatedAt': '2026-10-14T10:00:31+09:00'},
         'events': events, 'eventsTotal': len(events),
-        'issues': [{'runId': run_id, 'reporter': 'SECURITY', 'category': 'SECURITY', 'newCodeVersion': 2},
+        # 첫 문제: 수정을 요청했고(newCodeVersion=2) 다시 검증해서 통과(PASS)함. 둘째 문제: 수정을 요청하지 않음.
+        'issues': [{'runId': run_id, 'reporter': 'SECURITY', 'category': 'SECURITY', 'newCodeVersion': 2,
+                    'revalidationResult': 'PASS'},
                    {'runId': run_id, 'reporter': 'QA', 'category': 'FUNCTIONAL', 'newCodeVersion': None}],
         # 도구를 부른 기록 3건. 그중 attempt 번호가 1인 것이 "다시 시도한" 1건이다.
         'toolAttempts': [{'attempt': {'attempt': 0, 'outcome': 'UNVERIFIED'}}, {'attempt': {'attempt': 1, 'outcome': 'PASS'}},
@@ -72,7 +74,7 @@ def test_metrics_use_event_times_and_keep_unknown_as_none():
     assert (metrics['firstBuildPassMs'], metrics['verdictMs'], metrics['totalMs']) == (10000, 30000, 31000)
     assert metrics['toolRetries'] == 1 and metrics['toolAttemptRecords'] == 3
     assert metrics['modelCalls'] == 12 and metrics['costUsd'] == '0.5' and metrics['costComplete'] is True
-    assert metrics['issues'] == 2 and metrics['issuesFixed'] == 1
+    assert metrics['issues'] == 2 and metrics['issuesFixRequested'] == 1 and metrics['issuesFixed'] == 1
     assert metrics['issuesByReporter'] == {'SECURITY': 1, 'QA': 1}
     assert metrics['humanWaitMs'] is None and metrics['notes'] == []
 
@@ -184,12 +186,13 @@ def test_summary_rejects_more_runs_than_planned_and_duplicates():
 
 
 def evaluation_report(run_id, architecture='MULTI_AGENT', requirement_rate=1.0, verdict='PASS', missed=False,
-                      suite='f' * 64, image='sha256:' + 'c' * 64, lock='sha256:' + 'd' * 64):
-    """독립 평가 보고서의 "요약에 필요한 부분만" 흉내 낸 가짜. suite=시험 묶음 해시, image·lock=환경 지문."""
+                      suite='f' * 64, image='sha256:' + 'c' * 64, lock='sha256:' + 'd' * 64, code_version=2):
+    """독립 평가 보고서의 "요약에 필요한 부분만" 흉내 낸 가짜. suite=시험 묶음 해시, image·lock=환경 지문,
+    code_version=보고서가 채점한 코드 버전(시험용 Run은 수정을 1번 해서 버전 2다)."""
     return {'sourceRunId': run_id, 'architecture': architecture, 'evaluationVerdict': verdict,
             'requiredRequirementPassRate': requirement_rate, 'requiredCheckPassRate': requirement_rate,
             'sourceRun': {'missedDefect': missed}, 'suite': {'sha256': suite},
-            'expectedManifest': {'containerImageDigest': image, 'dependencyLockHash': lock}}
+            'expectedManifest': {'codeVersion': code_version, 'containerImageDigest': image, 'dependencyLockHash': lock}}
 
 
 def test_summary_joins_independent_evaluation_and_keeps_unmeasured_apart():
@@ -240,12 +243,18 @@ def test_different_conditions_invalidate_the_comparison(override, field):
 
 
 def test_environment_digest_difference_marks_run_for_rerun_not_invalid():
-    """환경 지문(컨테이너 이미지 digest)만 다르면 비교 전체가 무효가 아니다. 그 Run만 다시 실행하도록(RERUN_RUN) 표시한다."""
-    environment = configuration(uid(2))['configuration']['environment'] | {'containerImageDigest': 'sha256:' + '9' * 64}
-    result = comparison_validity(entries(environment=environment))
+    """환경 지문(컨테이너 이미지 digest)만 다르면 비교 전체가 무효가 아니다. 그 Run만 다시 실행하도록(RERUN_RUN) 표시한다.
+
+    실제 흐름에서는 평가 보고서의 환경 지문이 그 Run의 동결된 설정에서 나온다. 그래서 Single의 설정을 바꾸면
+    Single의 평가 보고서도 같은 값을 적는다. 그 결과 "설정끼리 다름"과 "보고서끼리 다름" 두 위반이 함께 나온다."""
+    digest = 'sha256:' + '9' * 64
+    environment = configuration(uid(2))['configuration']['environment'] | {'containerImageDigest': digest}
+    data = entries(environment=environment)
+    data[1]['evaluation'] = evaluation_report(uid(2), 'SINGLE_AGENT', image=digest)
+    result = comparison_validity(data)
     assert result['valid'] is True
     assert {(item['field'], item['severity']) for item in result['violations']} == {
-        ('environment.containerImageDigest', 'RERUN_RUN')}
+        ('environment.containerImageDigest', 'RERUN_RUN'), ('evaluation.containerImageDigest', 'RERUN_RUN')}
 
 
 def test_different_test_suite_hash_invalidates_the_comparison():
@@ -293,3 +302,176 @@ def test_repetitions_inside_one_architecture_must_match_too():
     result = comparison_validity(data)
     assert result['valid'] is False
     assert 'startingCommitHash' in {item['field'] for item in result['violations']}
+
+
+# ---------------------------------------------------------------------------------------------
+# 외부 점검(2026-10-14)에서 찾은 "공정한 비교인지 확인하지 못하던" 사례들이다. 다시 놓치지 않도록 정식 시험으로 고정한다.
+# ---------------------------------------------------------------------------------------------
+def test_metrics_must_not_override_the_frozen_architecture():
+    """실행을 시작할 때 동결한 구조(Multi)를 인자로 Single이라고 바꿔 기록하면 안 된다. 거짓 결과가 되기 때문이다."""
+    with pytest.raises(ValueError):
+        run_metrics(bundle(), architecture='SINGLE_AGENT')
+    # 같은 값을 다시 적는 것은 문제없다.
+    assert run_metrics(bundle(), architecture='MULTI_AGENT')['architecture'] == 'MULTI_AGENT'
+
+
+def test_summary_rejects_runs_of_an_unplanned_architecture():
+    """계획에 없는 구조의 Run이 섞여 있으면 거부한다. 그냥 두면 그 Run의 성공·실패·비용이 요약에서 사라진다."""
+    with pytest.raises(ValueError):
+        experiment_summary([run_metrics(bundle(architecture='SINGLE_AGENT'))], {'MULTI_AGENT': 1})
+
+
+def test_comparison_rejects_a_mislabeled_architecture():
+    """이름표는 Single인데 동결한 설정이 Multi이면, 무엇을 비교하는지 알 수 없으므로 비교는 무효다."""
+    data = entries()
+    data[1]['configuration']['configuration']['architecture'] = 'MULTI_AGENT'
+    result = comparison_validity(data)
+    assert result['valid'] is False
+    assert 'architecture' in {item['field'] for item in result['violations']}
+
+
+def test_comparison_rejects_an_evaluation_of_another_run():
+    """다른 Run의 평가 보고서(sourceRunId가 다름)를 붙이면, 점수가 엉뚱한 실행의 것이므로 비교는 무효다."""
+    data = entries()
+    data[1]['evaluation']['sourceRunId'] = '00000000-0000-4000-8000-000000000099'
+    result = comparison_validity(data)
+    assert result['valid'] is False
+    assert 'evaluation.sourceRunId' in {item['field'] for item in result['violations']}
+
+
+def test_comparison_rejects_an_evaluation_of_another_architecture():
+    """평가 보고서의 구조 표시가 Run의 구조와 다르면 비교는 무효다."""
+    data = entries()
+    data[1]['evaluation']['architecture'] = 'MULTI_AGENT'
+    assert comparison_validity(data)['valid'] is False
+
+
+def test_empty_baselines_are_not_comparable():
+    """양쪽 설정이 모두 비어 있다고 "같은 조건"은 아니다. 확인된 조건이 없으므로 비교할 수 없다."""
+    data = [{'architecture': name, 'configuration': {}, 'evaluation': None}
+            for name in ('SINGLE_AGENT', 'MULTI_AGENT')]
+    result = comparison_validity(data)
+    assert result['valid'] is False
+    assert any(item['field'] == 'missing required conditions' for item in result['violations'])
+
+
+def test_optional_conditions_may_be_absent():
+    """모델 버전·seed·허용 주소처럼 원래 없을 수 있는 항목이 비어 있는 것은 비교를 막지 않는다."""
+    data = entries()
+    for item in data:
+        settings = item['configuration']['configuration']
+        settings['model'] = {**settings['model'], 'modelRevision': None, 'seed': None}
+        settings['environment'] = {**settings['environment'], 'allowedHosts': None}
+    assert comparison_validity(data)['valid'] is True
+
+
+def test_missing_frozen_architecture_is_only_a_warning():
+    """동결 설정에 구조가 적혀 있지 않으면(예: Single 실행기) 비교를 막지는 않고 주의로 알린다."""
+    data = entries()
+    del data[1]['configuration']['configuration']['architecture']
+    result = comparison_validity(data)
+    assert result['valid'] is True
+    assert 'ARCHITECTURE_NOT_FROZEN' in {item['detail'] for item in result['warnings']}
+
+
+# ---------------------------------------------------------------------------------------------
+# 외부 점검(2026-10-15)에서 찾은 사례: 평가 보고서의 환경 지문이 그 Run이 동결한 환경과 다른데도 통과하던 문제.
+# 두 구조의 보고서가 "서로 같은 값"을 적으면 보고서끼리 비교하는 기존 검사로는 드러나지 않는다.
+# ---------------------------------------------------------------------------------------------
+def violation_for(result, field):
+    """결과에서 field 이름의 위반을 찾아 돌려준다. 없으면 None."""
+    return next((item for item in result['violations'] if item['field'] == field), None)
+
+
+def test_report_environment_must_match_its_frozen_configuration():
+    """두 보고서가 똑같이 다른 컨테이너 이미지를 적어도(서로는 일치), Run이 동결한 환경과 다르면 RERUN_RUN이다.
+    환경 문제는 비교 전체를 무효로 만들지 않는다(valid는 True). 해당 Run만 다시 평가하면 된다."""
+    data = entries()
+    for item in data:
+        item['evaluation']['expectedManifest']['containerImageDigest'] = 'sha256:' + '9' * 64
+    result = comparison_validity(data)
+    found = violation_for(result, 'evaluation.environment')
+    assert found is not None and found['severity'] == 'RERUN_RUN'
+    assert set(found['values']) == {uid(1), uid(2)}  # 두 Run 모두 표시된다.
+    assert found['values'][uid(1)]['containerImageDigest'] == {
+        'frozen': 'sha256:' + 'c' * 64, 'evaluation': 'sha256:' + '9' * 64}
+    assert result['valid'] is True
+
+
+def test_only_the_run_with_a_different_dependency_lock_is_marked():
+    """의존성 잠금 해시가 다른 보고서가 하나뿐이면 그 Run만 표시한다. 환경이 맞는 Run은 건드리지 않는다."""
+    data = entries()
+    data[1]['evaluation']['expectedManifest']['dependencyLockHash'] = 'sha256:' + '8' * 64
+    found = violation_for(comparison_validity(data), 'evaluation.environment')
+    assert found is not None and set(found['values']) == {uid(2)}
+    assert set(found['values'][uid(2)]) == {'dependencyLockHash'}
+
+
+def test_report_manifest_check_failure_marks_the_run_for_rerun():
+    """보고서가 스스로 "결과가 나온 코드·환경이 기준과 다르다"(metadataMatches가 False)고 밝힌 Run은 다시 평가해야 한다.
+    그 보고서의 모든 검사는 NOT_RUN이라 비교에 쓸 측정값이 없다. 반대로 True이면 아무 문제가 없다."""
+    data = entries()
+    data[0]['evaluation']['manifestCheck'] = {'errorCode': None, 'mismatchedFields': [], 'metadataMatches': True}
+    data[1]['evaluation']['manifestCheck'] = {
+        'errorCode': 'MANIFEST_MISMATCH', 'mismatchedFields': ['snapshot_sha256'], 'metadataMatches': False}
+    result = comparison_validity(data)
+    found = violation_for(result, 'evaluation.manifestCheck')
+    assert found is not None and found['severity'] == 'RERUN_RUN'
+    assert found['values'] == {uid(2): {'errorCode': 'MANIFEST_MISMATCH', 'mismatchedFields': ['snapshot_sha256']}}
+    assert result['valid'] is True
+
+
+def test_report_without_expected_manifest_is_a_violation_not_a_crash():
+    """보고서에 기준 신분증(expectedManifest)이 아예 없어도 프로그램이 멈추지 않고, 환경을 확인할 수 없는 Run으로 표시한다."""
+    data = entries()
+    del data[1]['evaluation']['expectedManifest']
+    found = violation_for(comparison_validity(data), 'evaluation.environment')
+    assert found is not None and set(found['values']) == {uid(2)}
+
+
+# ---------------------------------------------------------------------------------------------
+# 외부 점검(2026-10-16)에서 찾은 사례: 수정 요청을 해결로 셈, 이전 코드의 평가를 최종 평가로 집계, 준비 상태 차이를 놓침.
+# ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize('outcome', [None, 'FAIL', 'UNVERIFIED'])
+def test_requested_fix_is_not_confirmed_fixed(outcome):
+    """수정을 요청한 것(newCodeVersion)만으로는 해결이 아니다. 다시 검증한 결과가 없거나 FAIL·UNVERIFIED이면 해결로 세지 않는다."""
+    data = bundle()
+    data['issues'][0]['revalidationResult'] = outcome
+    metrics = run_metrics(data)
+    assert metrics['issuesFixed'] == 0 and metrics['issuesFixRequested'] == 1
+
+
+def test_old_code_report_is_not_counted_as_final_code_evaluation():
+    """Run의 최종 코드는 버전 2인데 버전 1을 채점한 보고서는 최종 평가가 아니다. 집계에 넣지 않고 거부한다."""
+    runs = [run_metrics(bundle(uid(1)))]
+    assert runs[0]['codeVersion'] == 2
+    with pytest.raises(ValueError):
+        experiment_summary(runs, {'MULTI_AGENT': 1}, [evaluation_report(uid(1), code_version=1)])
+    # 버전이 같으면 받는다.
+    assert experiment_summary(runs, {'MULTI_AGENT': 1}, [evaluation_report(uid(1), code_version=2)])
+
+
+def test_report_without_a_code_version_cannot_be_tied_to_the_final_code():
+    """보고서에 코드 버전이 없거나, Run의 코드 버전을 알 수 없으면 최종 코드의 평가라고 확인할 수 없으므로 거부한다."""
+    runs = [run_metrics(bundle(uid(1)))]
+    report = evaluation_report(uid(1))
+    del report['expectedManifest']['codeVersion']
+    with pytest.raises(ValueError):
+        experiment_summary(runs, {'MULTI_AGENT': 1}, [report])
+    unknown = dict(runs[0], codeVersion=None)
+    with pytest.raises(ValueError):
+        experiment_summary([unknown], {'MULTI_AGENT': 1}, [evaluation_report(uid(1))])
+
+
+def test_warm_and_cold_runs_are_not_silently_equivalent():
+    """한쪽만 WARM이고 다른 쪽은 COLD이면, 처리시간·비용 비교에 캐시·초기화 비용의 차이가 섞인다. 비교는 막지 않지만 주의로 알린다."""
+    result = comparison_validity(entries(warmupState='WARM'))
+    assert result['valid'] is True
+    warning = next(item for item in result['warnings'] if item['detail'] == 'WARMUP_STATE_DIFFERS')
+    assert warning['values'] == {'MULTI_AGENT': ['COLD'], 'SINGLE_AGENT': ['WARM']}
+
+
+def test_same_warmup_state_gives_no_warning_and_execution_order_may_differ():
+    """준비 상태가 모두 같으면 주의가 없다. 실행 순서 숫자는 Run마다 달라야 정상이라 비교 조건이 아니다."""
+    data = entries(executionOrder=1)
+    assert comparison_validity(data) == {'valid': True, 'violations': [], 'warnings': []}

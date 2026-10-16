@@ -4,6 +4,9 @@
 시험용 폴더는 pytest가 임시로 만들어 주는 tmp_path를 쓴다. (시험이 끝나면 자동으로 지워진다.)
 """
 from hashlib import sha256
+import os
+import subprocess
+import sys
 from uuid import UUID
 
 import pytest
@@ -98,3 +101,44 @@ def test_secret_split_across_read_chunks_is_found_and_large_files_are_hashed(tmp
     (root / 'logs' / 'edge.log').write_bytes(big)
     entry = next(item for item in build_demo_index(root, run_id=RUN, created_at=NOW)['files'] if item['path'] == 'logs/edge.log')
     assert entry['sha256'] == sha256(big).hexdigest() and entry['sizeBytes'] == len(big)
+
+
+def test_fifo_is_rejected_instead_of_blocking(tmp_path):
+    """이름 있는 파이프(FIFO)는 열면 쓰는 쪽이 나타날 때까지 무기한 기다린다. 열기 전에 일반 파일이 아니라고 거부해야 한다.
+    멈추는 경우를 확인하려고 별도 프로세스에서 3초 제한을 두고 실행한다."""
+    (tmp_path / 'logs').mkdir()
+    os.mkfifo(tmp_path / 'logs' / 'stream.log')
+    code = (
+        'from evaluation.demo_index import build_demo_index\n'
+        'try:\n'
+        f'    build_demo_index({str(tmp_path)!r}, run_id={RUN!r}, created_at={NOW!r})\n'
+        'except ValueError as error:\n'
+        '    raise SystemExit(0 if "regular" in str(error) else 3)\n'
+        'raise SystemExit(2)\n')
+    try:
+        result = subprocess.run([sys.executable, '-c', code], capture_output=True, timeout=3)
+    except subprocess.TimeoutExpired:
+        pytest.fail('demo index blocked while opening a FIFO')
+    assert result.returncode == 0, result.stderr.decode()
+
+
+def test_socket_files_are_rejected_too():
+    """소켓 같은 특수 파일도 일반 파일이 아니므로 목록에 넣지 않고 거부한다.
+    유닉스 소켓은 경로가 짧아야 만들 수 있어서(약 100자 제한) pytest의 긴 임시 폴더 대신 짧은 임시 폴더를 쓴다."""
+    import shutil
+    import socket
+    import tempfile
+    from pathlib import Path
+    root = Path(tempfile.mkdtemp(prefix='di', dir='/tmp'))
+    server = socket.socket(socket.AF_UNIX)
+    try:
+        (root / 'logs').mkdir()
+        try:
+            server.bind(str(root / 'logs' / 's.sock'))
+        except OSError:
+            pytest.skip('unix sockets cannot be created here')  # 권한이 제한된 실행 환경에서는 소켓 파일을 만들 수 없다.
+        with pytest.raises(ValueError, match='regular'):
+            build_demo_index(root, run_id=RUN, created_at=NOW)
+    finally:
+        server.close()
+        shutil.rmtree(root, ignore_errors=True)

@@ -27,6 +27,8 @@ CONTROLLED_FIELDS = (
     'environment.hardwareProfile', 'environment.networkPolicy', 'environment.allowedHosts',
     'protectedTestSuiteRef', 'scannerProfileRef',
 )
+# 값이 없어도 되는 선택 항목. (모델 버전·seed를 제공하지 않는 모델이 있고, 네트워크를 막은 환경은 허용 주소가 비어 있다.)
+OPTIONAL_FIELDS = frozenset({'model.modelRevision', 'model.seed', 'environment.allowedHosts'})
 # 아래 항목만 다를 때는 "비교 전체"가 무효가 아니라, 그 Run만 따로 표시하고 다시 실행한다
 # (개발정의서 11-A의 "환경 digest 불일치" 규칙).
 ENVIRONMENT_FIELDS = ('environment.containerImageDigest', 'environment.dependencyLockHash')
@@ -88,7 +90,12 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
             raise ValueError('issue belongs to another run')
 
     settings = (configuration or {}).get('configuration') or {}
-    architecture = architecture or settings.get('architecture')
+    # 구조(Single/Multi)는 실행을 시작할 때 동결한 설정이 기준이다. 인자로 다른 구조를 주면 결과가 거짓이 되므로 거부한다.
+    # 인자(architecture)는 동결 설정에 구조 정보가 없을 때만 쓸 수 있다.
+    frozen = settings.get('architecture')
+    if frozen is not None and architecture is not None and architecture != frozen:
+        raise ValueError('architecture differs from the frozen run configuration')
+    architecture = frozen or architecture
     if architecture not in ARCHITECTURES:
         raise ValueError('architecture must be SINGLE_AGENT or MULTI_AGENT')
 
@@ -149,7 +156,11 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
         'humanWaitMs': None,  # 사람을 기다린 시간. 시스템이 따로 기록하지 않아서 모른다(있으면 부르는 쪽이 채운다).
         **spent,  # 사용량·비용 항목들을 여기에 풀어서 넣는다
         'issues': len(issues), 'issuesByReporter': reporters, 'issuesByCategory': categories,
-        'issuesFixed': sum(1 for issue in issues if issue.get('newCodeVersion') is not None),  # 수정으로 해결된 문제 수
+        # newCodeVersion은 Developer에게 "수정을 요청한 시점"에 기록된다. 요청했다고 해결된 것은 아니므로 둘을 나눠 센다.
+        #   issuesFixRequested : 수정을 요청한 문제 수
+        #   issuesFixed        : 수정한 코드를 다시 검증해서 통과(PASS)로 확인된 문제 수 (재검증 결과가 없거나 FAIL·UNVERIFIED이면 세지 않는다)
+        'issuesFixRequested': sum(1 for issue in issues if issue.get('newCodeVersion') is not None),
+        'issuesFixed': sum(1 for issue in issues if issue.get('revalidationResult') == 'PASS'),
         'notes': notes,
     }
 
@@ -176,6 +187,10 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
     runs = list(runs)
     if set(planned_runs) - set(ARCHITECTURES) or any(type(n) is not int or n < 1 for n in planned_runs.values()):
         raise ValueError('planned_runs must map architectures to positive integers')
+    unplanned = {item['architecture'] for item in runs} - set(planned_runs)
+    if unplanned:
+        # 계획에 적지 않은 구조의 Run이 섞여 있으면 요약에서 조용히 빠지게 된다(성공·실패·비용이 사라진다). 그래서 거부한다.
+        raise ValueError(f'runs belong to architectures that are not planned: {sorted(unplanned)}')
     by_run = {}  # {Run 번호: 지표} 사전
     for item in runs:
         if item['runId'] in by_run:
@@ -190,6 +205,11 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
             raise ValueError('more than one evaluation for the same run')
         if report['architecture'] != run['architecture']:
             raise ValueError('evaluation architecture differs from the run')
+        # 같은 Run이라도 코드는 수정할 때마다 버전이 바뀐다. 이전 버전의 코드를 채점한 보고서를 최종 코드의 평가로 집계하면
+        # 고치기 전 결과가 최종 결과처럼 보인다. Run의 최종 코드 버전과 보고서가 채점한 코드 버전이 같고 둘 다 확인될 때만 받는다.
+        evaluated_version = (report.get('expectedManifest') or {}).get('codeVersion')
+        if type(run.get('codeVersion')) is not int or evaluated_version != run['codeVersion']:
+            raise ValueError('evaluation was not made for the final code version of the run')
         by_evaluation[report['sourceRunId']] = report
 
     result = {}
@@ -261,7 +281,8 @@ def comparison_validity(entries) -> dict:
     #
     # 위반의 종류(severity):
     #   INVALID_COMPARISON = 비교 자체가 무효(모델이나 한도가 다르다 등)
-    #   RERUN_RUN          = 환경 digest만 다름. 비교 전체가 아니라 그 Run만 따로 표시하고 다시 실행해야 한다.
+    #   RERUN_RUN          = 환경 digest만 다르거나, 평가 보고서가 그 Run이 동결한 환경이 아닌 곳에서 채점되었다.
+    #                        비교 전체가 아니라 그 Run만 따로 표시하고 다시 실행해야 한다.
     entries = list(entries)
     if len({item['architecture'] for item in entries}) < 2:
         raise ValueError('comparison needs both architectures')
@@ -284,6 +305,68 @@ def comparison_validity(entries) -> dict:
         # Run Configuration 응답 안의 "configuration"(실제 설정 묶음). 없으면 빈 사전.
         return item['configuration'].get('configuration') or {}
 
+    def flag(field, severity, values):
+        violations.append({'field': field, 'severity': severity, 'values': values})
+
+    def reported(item, field):
+        # 평가 보고서의 "기준 신분증(expectedManifest)"에 적힌 환경 지문. 보고서에 그 칸이 없으면 None(모름).
+        return ((item['evaluation'].get('expectedManifest') or {}).get(field))
+
+    # 0) 입력 자체가 서로 맞는지 먼저 확인한다. 이름표(구조)와 실제 자료가 다르면 무엇을 비교하는지 알 수 없다.
+    wrong_environment, failed_manifest = {}, {}  # 평가 환경이 어긋난 Run들 / 신분증 확인에 실패한 Run들 (Run 번호 → 상세)
+    for item in entries:
+        label = item['architecture']
+        if label not in ARCHITECTURES:
+            raise ValueError('entry architecture must be SINGLE_AGENT or MULTI_AGENT')
+        run_id = item['configuration'].get('runId')
+        frozen = settings(item).get('architecture')
+        if frozen is None:
+            warnings.append({'field': 'architecture', 'detail': 'ARCHITECTURE_NOT_FROZEN', 'runId': run_id})
+        elif frozen != label:
+            flag('architecture', 'INVALID_COMPARISON', {str(run_id): {'label': label, 'frozen': frozen}})
+        evaluation = item.get('evaluation')
+        if evaluation is not None:
+            if evaluation.get('architecture') != label:
+                flag('evaluation.architecture', 'INVALID_COMPARISON',
+                     {str(run_id): {'label': label, 'evaluation': evaluation.get('architecture')}})
+            if evaluation.get('sourceRunId') != run_id:
+                # 다른 Run의 평가 보고서를 붙이면 점수가 엉뚱한 실행의 것이 된다.
+                flag('evaluation.sourceRunId', 'INVALID_COMPARISON',
+                     {str(run_id): {'run': run_id, 'evaluation': evaluation.get('sourceRunId')}})
+            # 평가 보고서가 "이 Run이 동결한 환경"을 기준으로 채점되었는지 확인한다.
+            # 두 구조의 보고서가 서로 같은 환경 지문을 적었더라도, Run 설정에 동결된 환경과 다르면 엉뚱한 환경에서 채점된 것이다.
+            # (동결된 값이 아예 없는 경우는 아래 "필수 조건 누락" 검사에서 따로 잡는다.)
+            differing = {}
+            for field in ('containerImageDigest', 'dependencyLockHash'):
+                frozen_value = _lookup(settings(item), f'environment.{field}')
+                if frozen_value is not None and reported(item, field) != frozen_value:
+                    differing[field] = {'frozen': frozen_value, 'evaluation': reported(item, field)}
+            if differing:
+                wrong_environment[str(run_id)] = differing
+            # 보고서 스스로 "결과가 나온 코드·환경이 기준과 다르다"고 밝힌 경우(metadataMatches가 False).
+            # 이때 보고서는 모든 검사를 NOT_RUN으로 처리했으므로 비교에 쓸 측정값이 없다. 그 Run의 평가를 다시 해야 한다.
+            manifest_check = evaluation.get('manifestCheck')
+            if isinstance(manifest_check, dict) and manifest_check.get('metadataMatches') is False:
+                failed_manifest[str(run_id)] = {'errorCode': manifest_check.get('errorCode'),
+                                                'mismatchedFields': manifest_check.get('mismatchedFields')}
+    # 같은 종류의 위반은 Run마다 따로 적지 않고, 해당하는 Run들을 한 항목에 모아 적는다.
+    if wrong_environment:
+        flag('evaluation.environment', 'RERUN_RUN', wrong_environment)
+    if failed_manifest:
+        flag('evaluation.manifestCheck', 'RERUN_RUN', failed_manifest)
+    # 비교에 꼭 필요한 조건이 하나라도 비어 있으면 "같은 조건"인지 알 수 없다.
+    # (양쪽이 모두 비어 있다고 해서 같은 조건은 아니다. 확인된 것이 없을 뿐이다.)
+    for item in entries:
+        run_id = item['configuration'].get('runId')
+        missing = [field for field in CONTROLLED_FIELDS + ENVIRONMENT_FIELDS
+                   if field not in OPTIONAL_FIELDS
+                   and (item['configuration'].get('scenarioId') if field == 'scenarioId'
+                        else _lookup(settings(item), field)) is None]
+        if item['configuration'].get('scenarioContractSha256') is None:
+            missing.append('scenarioContractSha256')
+        if missing:
+            flag('missing required conditions', 'INVALID_COMPARISON', {str(run_id): missing})
+
     for field in CONTROLLED_FIELDS:
         if field == 'scenarioId':
             distinct(field, lambda item: item['configuration'].get('scenarioId'), 'INVALID_COMPARISON')
@@ -302,8 +385,17 @@ def comparison_validity(entries) -> dict:
         warnings.append({'field': 'evaluation', 'detail': 'SOME_RUNS_HAVE_NO_EVALUATION'})
     distinct('suite.sha256', lambda item: item['evaluation']['suite']['sha256'], 'INVALID_COMPARISON', evaluated)
     for field in ('containerImageDigest', 'dependencyLockHash'):
-        distinct(f'evaluation.{field}', lambda item, f=field: item['evaluation']['expectedManifest'][f],
-                 'RERUN_RUN', evaluated)
+        distinct(f'evaluation.{field}', lambda item, f=field: reported(item, f), 'RERUN_RUN', evaluated)
+    # 준비 상태(warm-up)가 Run마다 다르면 처리시간·비용 비교에 캐시·초기화 비용의 차이가 섞인다. 비교를 막지는 않지만 주의로 알린다.
+    # (실행 순서 숫자는 Run마다 달라야 정상이라서 이 검사에 넣지 않는다.)
+    states = {}
+    for item in entries:
+        state = settings(item).get('warmupState')
+        if state is not None:
+            states.setdefault(item['architecture'], set()).add(state)
+    if len(set().union(*states.values()) if states else ()) > 1:
+        warnings.append({'field': 'warmupState', 'detail': 'WARMUP_STATE_DIFFERS',
+                         'values': {architecture: sorted(values) for architecture, values in sorted(states.items())}})
     # 실험으로 선언되지 않았거나, 실행 순서·준비 상태를 기록하지 않은 Run은 재현성이 떨어지므로 주의로 알린다.
     for item in entries:
         if settings(item).get('experimentId') is None:

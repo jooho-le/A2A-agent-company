@@ -12,8 +12,10 @@
 #   - 비어 있는 분류(예: 로그가 하나도 없음)는 missingCategories에 따로 적는다. 자료가 없는데 있는 것처럼 보이지 않게 하려는 것이다.
 #   - 미리 알려 준 비밀값(시험용 비밀번호 등)이 글자 파일에서 발견되면, 그 값은 말하지 않고 "어느 파일인지"만 알리며 목록 만들기를 거부한다.
 from hashlib import sha256  # 파일 내용의 지문(해시)을 만드는 도구
+import os  # 파일을 안전하게 여는 도구
 from pathlib import Path  # 파일·폴더 경로를 다루는 도구
 import re  # 글자 모양 검사(정규식)
+import stat  # 파일의 종류(일반 파일, 폴더, 파이프 등)를 판별하는 도구
 from typing import Iterable
 
 from .aggregation import _uuid4
@@ -75,6 +77,10 @@ def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | 
             if path.is_dir():
                 continue  # 폴더 자체는 목록에 넣지 않는다.
             relative = path.relative_to(base).as_posix()  # root 기준의 상대 경로(슬래시 / 로 통일)
+            # 일반 파일만 받는다. 이름 있는 파이프(FIFO)·소켓·장치 파일을 열면 쓰는 쪽이 나타날 때까지 무기한 기다리게 되어
+            # 목록 만들기가 멈출 수 있다. 그래서 열기 전에 파일 종류부터 확인한다.
+            if not stat.S_ISREG(path.lstat().st_mode):
+                raise ValueError(f'only regular files are allowed: {relative}')
             # 실제 위치가 root 밖으로 빠져나가지 않는지 한 번 더 확인한다.
             if path.resolve().parent != path.parent.resolve() or base not in path.resolve().parents:
                 raise ValueError(f'path escapes the material folder: {relative}')
@@ -83,7 +89,7 @@ def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | 
                 raise ValueError(f'file is too large: {relative}')
             # 비밀값 검사 대상인지 정한다: 알려 준 비밀값이 있고, 글자 파일이며, 크기가 한도 이하일 때만 검사한다.
             scan = bool(secrets) and path.suffix.lower() not in BINARY_SUFFIXES and size <= MAX_SCAN_BYTES
-            digest, found = _digest_and_scan(path, secrets, scan)
+            digest, found = _digest_and_scan(path, secrets, scan, relative)
             if found:
                 # 값 자체는 오류 메시지에 쓰지 않고 파일 경로만 알린다(오류 메시지에서 또 새어 나가지 않게).
                 raise ValueError(f'known sensitive value found in: {relative}')
@@ -98,7 +104,7 @@ def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | 
             'missingCategories': [category for category in CATEGORIES if counts[category] == 0]}
 
 
-def _digest_and_scan(path, secrets, scan):
+def _digest_and_scan(path, secrets, scan, relative):
     # 파일의 해시(지문)를 계산하고, scan이 True면 비밀값이 들어 있는지도 함께 찾는다.
     # 파일을 1MiB씩 잘라 읽는다. 영상처럼 큰 파일을 통째로 메모리에 올리면 컴퓨터가 느려질 수 있기 때문이다.
     # 조각(chunk)을 나눠 읽으면 비밀값이 두 조각에 걸쳐 있을 수 있으므로,
@@ -107,7 +113,13 @@ def _digest_and_scan(path, secrets, scan):
     digest, found, tail = sha256(), False, b''
     # 가장 긴 비밀값보다 1바이트 짧은 길이만큼만 이어 붙이면 어떤 경계에 걸쳐 있어도 찾을 수 있다.
     keep = max((len(value) for value in secrets), default=1) - 1
-    with path.open('rb') as handle:  # 'rb' = 바이트로 읽기. with는 다 쓰면 파일을 자동으로 닫아 준다.
+    # 열기 직전에 파일이 파이프로 바뀌는 경우까지 막으려고, 기다리지 않는 방식(O_NONBLOCK)으로 열고 열린 파일의 종류를 다시 확인한다.
+    # 바로가기(심볼릭 링크)는 따라가지 않는다(O_NOFOLLOW).
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, 'O_NOFOLLOW', 0))
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise ValueError(f'only regular files are allowed: {relative}')
+    with os.fdopen(descriptor, 'rb') as handle:  # 'rb' = 바이트로 읽기. with는 다 쓰면 파일을 자동으로 닫아 준다.
         while chunk := handle.read(1024 * 1024):  # 더 읽을 내용이 없을 때까지 1MiB씩 읽는다.
             digest.update(chunk)  # 해시 계산에 이 조각을 보탠다.
             if scan and not found:
