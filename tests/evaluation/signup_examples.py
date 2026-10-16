@@ -186,7 +186,8 @@ SAFE_VARIANTS = [
      'value = value.lower()', {}, 'strip은 pydantic 설정이 한다(별도 파일 수정으로 구성)'),
     ('safe_unique_index_sql', 'models.py', None,
      'import sqlite3\n\nSCHEMA = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, password_hash TEXT NOT NULL)"\n'
-     'INDEX = "CREATE UNIQUE INDEX ux_users_email ON users(email)"\n', {'REQ-005': 'UNVERIFIED'},
+     'INDEX = "CREATE UNIQUE INDEX ux_users_email ON users(email)"\n'
+     'DB = sqlite3.connect(":memory:")\nDB.execute(SCHEMA)\nDB.execute(INDEX)\n', {'REQ-005': 'UNVERIFIED'},
      'UNIQUE를 CREATE UNIQUE INDEX로 선언(이 예제는 모델 파일을 SQL로 바꿔 REQ-005 저장 경로가 사라짐)'),
 ]
 # 변형마다 필요한 import 같은 "앞부분 보충 코드"를 정해 두는 표. {예제 이름: (파일, 파일 맨 앞에 붙일 글자)}

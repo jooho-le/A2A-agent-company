@@ -26,6 +26,7 @@ PASS, FAIL, UNVERIFIED = 'PASS', 'FAIL', 'UNVERIFIED'  # 판정 결과 세 가�
 MAX_OBSERVATIONS = 20  # 근거 기록을 한 판정에 최대 몇 개까지 남길지(너무 길어지지 않게)
 # 값을 직접 보여 주지 않고 길이·형식만 알려 주는 함수들. 인자로 비밀번호 변수를 넣어도 "노출"로 보지 않는다.
 # 예: len(password)는 비밀번호의 길이만 알려 주고 비밀번호 자체는 드러내지 않는다.
+MIN_SALT_BYTES = 8  # Argon2(RFC 9106)가 허용하는 salt의 최소 길이(바이트). 이보다 짧게 지정하면 salt를 고유하게 만들 수 없다.
 SAFE_CALLS = frozenset({'len', 'bool', 'type', 'isinstance', 'id', 'hasattr'})
 # 객체가 가진 "모든 필드를 한꺼번에" 꺼내는 함수들. 비밀번호 필드가 있는 객체에 쓰면 비밀번호도 함께 나온다.
 DUMP_METHODS = frozenset({'model_dump', 'dict', 'json', 'model_dump_json', 'copy', 'model_copy'})
@@ -67,6 +68,15 @@ class Module:
     path: str         # 파일 경로
     tree: ast.AST     # 그 파일을 AST(나무)로 바꾼 것
     aliases: dict     # import 별칭 표. 예) import numpy as np 면 {"np": "numpy"}
+    bindings: dict    # 이름이 파일 안에서 묶이는 횟수 표(_name_bindings). 여러 검사가 같이 쓰므로 한 번만 계산해 둔다.
+
+
+class ModuleSet(dict):
+    # 분석할 파일들의 사전({파일 경로: Module}). 한 번의 판정 안에서 여러 검사가 똑같이 필요로 하는 계산 결과(cache)를 한 번만
+    # 계산하려고 함께 들고 다닌다. 판정이 끝나면 이 사전과 함께 사라지므로 판정 사이에 남는 전역 상태가 아니다.
+    def __init__(self):
+        super().__init__()
+        self.cache = {}
 
 
 # ---------------------------------------------------------------- 이름 판정
@@ -122,7 +132,7 @@ def load_modules(source_files, criteria):
     # 소스 파일들 중 분석할 .py 파일만 골라 AST(나무)로 바꾼다.
     # 테스트 파일은 제품 코드가 아니므로 제외한다. 문법 오류 등으로 읽지 못한 파일은 따로 모아 둔다.
     # 돌려주는 값: ({파일 경로: Module}, [읽지 못한 파일 경로들])
-    modules, errors = {}, []
+    modules, errors = ModuleSet(), []
     # 제외 규칙은 기준 파일(JSON)에서 읽는다. 값이 없으면 빈 목록으로 본다.
     prefixes = tuple(criteria.get('excludePathPrefixes', ()))
     segments = frozenset(criteria.get('excludePathSegments', ()))
@@ -141,11 +151,41 @@ def load_modules(source_files, criteria):
             # 이 파일 하나만 "분석 불가"로 기록하고 나머지 파일의 판정은 그대로 이어 간다.
             errors.append(path)
             continue
-        modules[path] = Module(path, tree, _aliases(tree))
+        bindings = _name_bindings(tree)
+        modules[path] = Module(path, tree, _aliases(tree, bindings), bindings)
     return modules, errors
 
 
-def _aliases(tree):
+def _name_bindings(tree):
+    # 코드 안에서 어떤 이름에 값이 "묶이는(바인딩)" 모든 곳을 {이름: 횟수}로 센다.
+    # 대입(=, +=, :=), for·with·except·comprehension의 변수, 함수·클래스 정의, 매개변수, import, match의 이름이 모두 해당한다.
+    # 이 횟수가 1이면 "이름이 한 번만 정의되고 그 뒤로 바뀌지 않는다"는 뜻이다.
+    # (이름이 다시 정의되거나 인자로 덮이면, 그 이름이 처음 정의한 값을 가리킨다고 믿을 수 없다.)
+    counts = {}
+
+    def add(name):
+        counts[name] = counts.get(name, 0) + 1
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            add(node.id)
+        elif isinstance(node, ast.arg):
+            add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name)
+        elif isinstance(node, ast.alias):
+            add(node.asname or node.name.split('.')[0])
+        else:
+            # match 문의 패턴(case [x, *rest]: 등)에서 새로 묶이는 이름. 오래된 파이썬에는 없는 노드라서 이름으로 확인한다.
+            for attribute in ('name', 'rest'):
+                if type(node).__name__ in ('MatchAs', 'MatchStar', 'MatchMapping') and getattr(node, attribute, None):
+                    add(getattr(node, attribute))
+    return counts
+
+
+def _aliases(tree, bindings=None):
     # import 별칭 표를 만든다. 코드에서 "np.array"라고 써도 실제로는 "numpy.array"라는 뜻이므로,
     # 별칭을 실제 이름으로 되돌릴 수 있어야 어떤 함수를 부르는지 정확히 알 수 있다.
     # 예) import argon2 as a → {"a": "argon2"},  from argon2 import PasswordHasher → {"PasswordHasher": "argon2.PasswordHasher"}
@@ -159,7 +199,10 @@ def _aliases(tree):
             base = node.module or ''
             for alias in node.names:
                 table[alias.asname or alias.name] = f'{base}.{alias.name}' if base and not node.level else alias.name
-    return table
+    # import한 이름을 같은 파일 안에서 다시 정의했다면(예: from argon2 import PasswordHasher 다음에 class PasswordHasher: ...)
+    # 그 이름이 진짜 라이브러리를 가리킨다고 믿을 수 없다. 그런 별칭은 표에서 뺀다.
+    counts = bindings if bindings is not None else _name_bindings(tree)
+    return {name: target for name, target in table.items() if counts.get(name, 0) == 1}
 
 
 def qualname(node, aliases):
@@ -188,24 +231,71 @@ def terminal_name(node):
     return None
 
 
-def sensitive_refs(node, matcher, sensitive_vars=frozenset()):
+# 받은 값을 글자 그대로 옮기거나 다른 모양으로 바꿔 돌려주는 함수·메서드들. 이런 호출의 결과에는 받은 값이 그대로 들어 있다.
+PASSTHROUGH_FUNCTIONS = frozenset({'str', 'repr', 'format', 'dict', 'list', 'tuple', 'set', 'frozenset', 'bytes',
+                                   'bytearray', 'sorted', 'reversed', 'vars', 'copy', 'deepcopy', 'dumps'})
+PASSTHROUGH_METHODS = frozenset({'format', 'join', 'encode', 'decode', 'strip', 'lstrip', 'rstrip', 'lower', 'upper',
+                                 'replace', 'copy', 'items', 'values', 'keys', 'get', 'dumps', 'getvalue'})
+
+
+def _passes_text_through(func):
+    # 이 함수(또는 메서드)는 받은 값을 그대로 담아 돌려주는 종류인가? 예) str(x), "...".format(x), json.dumps(x)
+    if isinstance(func, ast.Name):
+        return func.id in PASSTHROUGH_FUNCTIONS
+    if isinstance(func, ast.Attribute):
+        return func.attr in PASSTHROUGH_METHODS or func.attr in PASSTHROUGH_FUNCTIONS
+    return False
+
+
+def sensitive_refs(node, matcher, sensitive_vars=frozenset(), strict=False):
     # 어떤 코드 조각(node) 안에서 "비밀번호 값을 사용하는 곳"을 찾아 이름 목록으로 돌려준다. 없으면 빈 목록이다.
     # 아래 세 가지는 비밀번호를 쓴 것으로 세지 않는다.
     #   - 호출하는 함수의 이름 자체  - 따옴표 안의 글자(문자열 상수)  - len() 같이 길이·형식만 알려 주는 함수
     # sensitive_vars: "비밀번호 필드를 가진 객체"를 담은 변수 이름들이다. 이런 객체를 통째로 쓰거나
     #   model_dump()/__dict__로 펼치면 비밀번호도 함께 나가므로 노출로 본다.
     #   (payload.email처럼 다른 필드만 쓰는 것은 괜찮다.)
+    # strict=True는 "이 값 안에 비밀번호 글자가 그대로 들어 있는가"를 볼 때 쓴다(변수에 담긴 값이 비밀번호를 품는지 따라가는 용도).
+    #   모르는 함수의 결과(예: hash_password(...), User(...)), 비교(==, >)와 not의 결과(True/False), 조건식의 조건 부분은
+    #   비밀번호 글자를 담고 있다고 보지 않는다. 그렇게 보면 정상 코드가 불필요하게 FAIL이 되기 때문이다.
+    #   단, and·or는 True/False가 아니라 피연산자 값을 그대로 돌려주므로(payload.password or "") 값을 따라간다.
     found, stack = [], [node]  # stack = 아직 살펴보지 않은 코드 조각들을 쌓아 둔 목록
     while stack:
         item = stack.pop()
+        if strict and (isinstance(item, ast.Compare) or (isinstance(item, ast.UnaryOp) and isinstance(item.op, ast.Not))):
+            continue  # 비교와 not은 True/False만 만든다. (and·or는 피연산자 값이 그대로 나오므로 여기서 건너뛰지 않는다.)
+        if strict and isinstance(item, ast.IfExp):
+            stack.extend([item.body, item.orelse])  # 값이 되는 쪽만 본다(조건 부분은 값이 아니다).
+            continue
+        if isinstance(item, ast.Subscript) and isinstance(item.value, ast.Name) and item.value.id in sensitive_vars:
+            # data["email"]처럼 사전 항목을 꺼내는 경우: 비밀번호 같은 키이거나 키를 알 수 없을 때만 노출로 본다.
+            key = item.slice.value if isinstance(item.slice, ast.Constant) and isinstance(item.slice.value, str) else None
+            if key is None or matcher.search(key):
+                found.append(item.value.id)
+            continue
         if isinstance(item, ast.Call):  # 함수 호출
             func = item.func
             if isinstance(func, ast.Name) and func.id in SAFE_CALLS:
                 continue  # len(password) 같은 호출은 안쪽을 보지 않고 건너뛴다.
+            if isinstance(func, ast.Name) and func.id in sensitive_vars:
+                found.append(func.id)  # getter = lambda: payload.password 처럼 비밀번호를 돌려주는 함수를 담은 변수를 부름
+                continue
+            if isinstance(func, ast.Name) and func.id in ('locals', 'vars') and not item.args and sensitive_vars:
+                found.append(func.id)  # locals()는 지금 함수의 모든 변수(비밀번호를 품은 변수 포함)를 한꺼번에 꺼낸다.
+                continue
             if (isinstance(func, ast.Attribute) and func.attr in DUMP_METHODS
                     and isinstance(func.value, ast.Name) and func.value.id in sensitive_vars):
                 found.append(func.value.id)  # payload.model_dump() → 비밀번호를 포함한 전체 필드를 꺼내는 것
                 continue
+            if (isinstance(func, ast.Attribute) and func.attr == 'get' and isinstance(func.value, ast.Name)
+                    and func.value.id in sensitive_vars and item.args and isinstance(item.args[0], ast.Constant)
+                    and isinstance(item.args[0].value, str)):
+                if matcher.search(item.args[0].value):
+                    found.append(func.value.id)  # data.get("password")
+                continue  # data.get("email")은 비밀번호가 아니다.
+            if isinstance(func, ast.Attribute) and func.attr == 'keys' and not item.args:
+                continue  # data.keys()는 항목 이름 목록일 뿐 값(비밀번호)이 아니다.
+            if strict and not _passes_text_through(func):
+                continue  # 모르는 함수의 결과는 비밀번호 글자 그대로라고 볼 수 없다.
             stack.extend(item.args)  # 호출에 넘긴 값들도 살펴본다.
             stack.extend(keyword.value for keyword in item.keywords)
             if isinstance(func, ast.Attribute):
@@ -221,6 +311,8 @@ def sensitive_refs(node, matcher, sensitive_vars=frozenset()):
             continue
         name = terminal_name(item) if isinstance(item, (ast.Name, ast.Attribute, ast.Subscript)) else None
         if name and matcher.search(name):
+            if strict and name.isupper():
+                continue  # Status.PASS처럼 전부 대문자인 이름은 상수·열거값이다. 사용자가 보낸 비밀번호 값을 담고 있지 않다.
             found.append(name)  # 이름이 비밀번호처럼 보이는 값을 사용
             continue
         if isinstance(item, ast.Constant):
@@ -239,13 +331,17 @@ def _int_value(node, constants):
     return None
 
 
-def _module_constants(tree):
+def _module_constants(tree, bindings=None):
     # 파일 맨 위(함수 밖)에서 "이름 = 정수"로 정해 둔 상수들을 {이름: 값} 사전으로 모은다. 예) MEMORY = 19456
+    # 이름이 파일 안에서 "딱 한 번만" 정의된 상수만 인정한다. 나중에 다시 대입하거나 함수 안에서 같은 이름을 쓰면,
+    # 해시 설정을 읽는 시점의 값이 무엇인지 코드만으로 알 수 없기 때문이다.
     table = {}
+    counts = bindings if bindings is not None else _name_bindings(tree)
     for statement in getattr(tree, 'body', []):  # body = 파일의 최상위 문장들
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)
-                and isinstance(statement.value, ast.Constant) and type(statement.value.value) is int):
+                and isinstance(statement.value, ast.Constant) and type(statement.value.value) is int
+                and counts.get(statement.targets[0].id, 0) == 1):
             table[statement.targets[0].id] = statement.value.value
     return table
 
@@ -267,6 +363,43 @@ def _functions(modules):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 table.setdefault(node.name, []).append((module, node))
     return table
+
+
+def _untrusted_function_names(modules):
+    # "이 이름의 함수를 부르면 소스에 적힌 그 함수가 실행된다"고 믿을 수 없는 함수 이름들을 찾는다.
+    # 변수 이름처럼 함수 이름도 다른 것으로 바뀔 수 있다. 아래 중 하나라도 있으면 그 이름을 믿지 않는다.
+    #   · 같은 이름에 함수 정의가 아닌 값이 묶인다. 예) hash_password = lambda v: v / 같은 이름의 매개변수 / with ... as hash_password
+    #   · 같은 이름을 두 번 이상 가져오거나(import), 가져온 이름을 같은 파일에서 다시 정의한다. (어느 쪽이 쓰이는지 알 수 없다)
+    #   · 함수 위에 데코레이터가 붙어 있다. (staticmethod·classmethod는 함수를 바꾸지 않으므로 제외)
+    #     데코레이터는 정의된 함수를 전혀 다른 것으로 바꿔 놓을 수 있다.
+    #   · 다른 객체의 같은 이름 속성에 값을 넣는다. 예) security.hash_password = ..., setattr(security, "hash_password", ...)
+    defined, untrusted, assigned = set(), set(), set()
+    per_module = []  # (이름별 묶임 횟수, 이름별 함수 정의 수, 이름별 import 수)
+    for module in modules.values():
+        defs, imports = {}, {}
+        for node in ast.walk(module.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs[node.name] = defs.get(node.name, 0) + 1
+                defined.add(node.name)
+                if any(not (isinstance(item, ast.Name) and item.id in ('staticmethod', 'classmethod'))
+                       for item in node.decorator_list):
+                    untrusted.add(node.name)
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.asname in (None, alias.name):  # 이름을 바꾸지 않고 그대로 가져온 것만 센다
+                        imports[alias.name] = imports.get(alias.name, 0) + 1
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                assigned.add(node.attr)
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('setattr', 'delattr')
+                  and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)):
+                assigned.add(node.args[1].value)
+        per_module.append((module.bindings, defs, imports))
+    for counts, defs, imports in per_module:
+        for name in defined:
+            others = counts.get(name, 0) - defs.get(name, 0) - imports.get(name, 0)  # 정의·import가 아닌 다른 묶임
+            if others > 0 or imports.get(name, 0) > 1 or (imports.get(name, 0) and defs.get(name, 0)):
+                untrusted.add(name)
+    return untrusted | (assigned & defined)
 
 
 def _obs(module, node, kind, **detail):
@@ -296,8 +429,13 @@ def check_password_storage(modules, criteria, policy):
     if any(type(value) is not int for value in required.values()):
         return CheckOutcome(UNVERIFIED, 'POLICY_PARAMETERS_MISSING')
     orm_classes = _orm_classes(modules)   # DB 테이블을 나타내는 클래스 이름들(User 등)
-    functions = _functions(modules)       # 프로젝트 안에서 정의된 함수들
-    module_constants = {path: _module_constants(module.tree) for path, module in modules.items()}  # 파일별 상수표
+    # 해시 경로를 판정할 때 쓰는 확인된 사실들: 믿을 수 있는 프로젝트 함수(재대입·데코레이터 등으로 바뀔 수 있는 함수는 뺀다),
+    # 승인한 Argon2 해시 도구를 담은 변수 이름, 진짜 무작위 값을 만드는 호출 등
+    ctx = _hash_context(modules, rules)
+    hashers = ctx.hashers
+    module_constants = {path: _module_constants(module.tree, module.bindings) for path, module in modules.items()}  # 파일별 상수표
+    module_literals = {path: _module_literal_names(module.tree, module.bindings) for path, module in modules.items()}  # 파일별 "고정 글자" 상수표
+    enclosing = {path: _enclosing_functions(module.tree) for path, module in modules.items()}  # 코드 조각 → 그것이 든 함수
     for module, call in _calls(modules):
         name = qualname(call.func, module.aliases) or ''  # 부르는 함수의 전체 이름. 예) "argon2.PasswordHasher"
         constants = module_constants[module.path]
@@ -318,19 +456,78 @@ def check_password_storage(modules, criteria, policy):
         elif name.startswith(tuple(rules['unapprovedHasherPrefixes'])) and sensitive_refs(call, matcher):
             # 승인되지 않은 해시 라이브러리(예: bcrypt, passlib)에 비밀번호를 넣었다 → 위반
             fails.append(_obs(module, call, 'UNAPPROVED_HASHER', function=name))
+        # 승인한 해시 도구의 hash()에 고정된 salt를 넘기면, 같은 비밀번호가 늘 같은 해시가 되어 salt의 의미가 없다 → 위반
+        if isinstance(call.func, ast.Attribute) and call.func.attr == 'hash' and terminal_name(call.func.value) in hashers:
+            salt = _salt_argument(call)
+            if policy.get('uniqueSalt', True) and salt is not None and _is_fixed_value(salt, module_literals[module.path]):
+                fails.append(_obs(module, call, 'FIXED_SALT'))  # 시나리오 정책이 "고유 salt"(uniqueSalt)를 요구한다.
+        # insert(User).values(password_hash=...) / update(User).values(...) 처럼 .values()로 칸 값을 정하는 호출
+        if isinstance(call.func, ast.Attribute) and call.func.attr == 'values':
+            for keyword in call.keywords:
+                if keyword.arg in rules['storageFieldNames']:
+                    _classify_storage(module, keyword.value, keyword.arg, ctx, rules, matcher, fails, stored, unresolved,
+                                      enclosing[module.path].get(id(call)))
+        # db.execute("UPDATE users SET password_hash = ?", (값,)) 처럼 SQL 글자로 저장 칸을 채우는 호출.
+        # SQL에 저장 칸 이름이 있으면, 함께 넘긴 값 중 해시가 아닌 비밀번호가 있는지 본다.
+        if terminal_name(call.func) in ('execute', 'executemany', 'exec_driver_sql') and call.args \
+                and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str) \
+                and any(re.search(r'\b%s\b' % re.escape(column), call.args[0].value.lower()) for column in rules['storageFieldNames']
+                        if column != 'password'):
+            leaves = []
+            for argument in [*call.args[1:], *(keyword.value for keyword in call.keywords)]:
+                if isinstance(argument, (ast.Tuple, ast.List)):
+                    leaves.extend(argument.elts)
+                elif isinstance(argument, ast.Dict):
+                    leaves.extend(argument.values)
+                else:
+                    leaves.append(argument)
+            scope = enclosing[module.path].get(id(call))
+            for leaf in leaves:
+                if isinstance(leaf, ast.Call) and _is_hash_call(leaf, ctx, scope=scope, password_matcher=matcher):
+                    stored.append(_obs(module, leaf, 'STORED_VIA_HASH', field='sql'))
+                elif isinstance(leaf, (ast.Name, ast.Attribute, ast.Subscript)) and matcher.search(terminal_name(leaf) or '') \
+                        and 'hash' not in (terminal_name(leaf) or '').lower():
+                    fails.append(_obs(module, leaf, 'PLAINTEXT_STORAGE', field='sql'))
+        # setattr(user, "password_hash", 값) 으로 칸 값을 정하는 호출
+        if isinstance(call.func, ast.Name) and call.func.id == 'setattr' and len(call.args) >= 3 \
+                and isinstance(call.args[1], ast.Constant) and call.args[1].value in rules['storageFieldNames']:
+            _classify_storage(module, call.args[2], call.args[1].value, ctx, rules, matcher, fails, stored, unresolved,
+                              enclosing[module.path].get(id(call)))
         # DB 테이블 객체를 만드는 호출이면, 비밀번호 칸(password_hash 등)에 무엇을 넣는지 살펴본다. 예) User(password_hash=...)
         if isinstance(call.func, (ast.Name, ast.Attribute)) and terminal_name(call.func) in orm_classes:
             for keyword in call.keywords:
                 if keyword.arg in rules['storageFieldNames']:
-                    _classify_storage(module, keyword.value, keyword.arg, functions, rules, matcher, fails, stored, unresolved)
+                    _classify_storage(module, keyword.value, keyword.arg, ctx, rules, matcher, fails, stored, unresolved,
+                                      enclosing[module.path].get(id(call)))
+                elif keyword.arg and isinstance(keyword.value, (ast.Name, ast.Attribute, ast.Subscript)) \
+                        and matcher.search(terminal_name(keyword.value) or '') and 'hash' not in (terminal_name(keyword.value) or '').lower():
+                    # 칸 이름이 password_hash 같은 알려진 이름이 아니어도(예: User(pw=payload.password)) 비밀번호 원문을 넣으면 평문 저장이다.
+                    fails.append(_obs(module, keyword.value, 'PLAINTEXT_STORAGE', field=keyword.arg))
     # 객체의 칸에 값을 직접 대입하는 코드도 살펴본다. 예) user.password_hash = ...
+    # 사전으로 칸 값을 정하는 코드도 같다. 예) row = {"password_hash": ...} / row["password_hash"] = ...
+    # 사전의 "password"는 요청 본문의 칸일 수도 있어서, 해시·digest가 들어간 이름만 저장 칸으로 본다.
+    # 사전은 응답을 만드는 데도 쓰이므로(예: {"password_hash": user.password_hash}) 위반(원문·상수 저장)과 해시 저장 확인만 기록하고,
+    # 무엇인지 모르는 값은 "확인 못 함"으로 치지 않는다.
+    hash_columns = {name for name in rules['storageFieldNames'] if 'hash' in name or 'digest' in name}
     for module in modules.values():
         for node in ast.walk(module.tree):
+            if isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values):
+                    if isinstance(key, ast.Constant) and key.value in hash_columns:
+                        _classify_storage(module, value, key.value, ctx, rules, matcher, fails, stored, [],
+                                          enclosing[module.path].get(id(node)))
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant) \
+                            and target.slice.value in hash_columns:
+                        _classify_storage(module, node.value, target.slice.value, ctx, rules, matcher, fails, stored,
+                                          [], enclosing[module.path].get(id(node)))
             if isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
                     if isinstance(target, ast.Attribute) and target.attr in rules['storageFieldNames'] and node.value is not None:
-                        _classify_storage(module, node.value, target.attr, functions, rules, matcher, fails, stored, unresolved)
+                        _classify_storage(module, node.value, target.attr, ctx, rules, matcher, fails, stored, unresolved,
+                                          enclosing[module.path].get(id(node)))
     if fails:
         return CheckOutcome(FAIL, 'VIOLATION_FOUND', fails)
     if not configs:
@@ -359,16 +556,60 @@ def check_password_storage(modules, criteria, policy):
     return CheckOutcome(PASS, 'STATIC_ARGON2ID_STORAGE', observations + stored)
 
 
+def _enclosing_functions(tree):
+    # 코드 나무의 모든 조각이 "가장 가까운 바깥 함수"가 무엇인지 {조각의 id: 함수}로 정리한다. 함수 밖의 조각은 표에 없다.
+    result, stack = {}, [(tree, None)]
+    while stack:
+        node, function = stack.pop()
+        if function is not None:
+            result[id(node)] = function
+        inner = node if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else function
+        stack.extend((child, inner) for child in ast.iter_child_nodes(node))
+    return result
+
+
+def _module_literal_names(tree, bindings=None):
+    # 파일 맨 위에서 "이름 = 따옴표 글자/바이트 글자"로 한 번만 정한 상수들의 이름을 모은다. 예) SALT = b"0123456789abcdef"
+    names = set()
+    counts = bindings if bindings is not None else _name_bindings(tree)
+    for statement in getattr(tree, 'body', []):
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name)
+                and _is_literal_expression(statement.value) and counts.get(statement.targets[0].id, 0) == 1):
+            names.add(statement.targets[0].id)
+    return names
+
+
+def _is_literal_expression(node):
+    # 이름·호출·속성 없이 글자나 숫자만으로 이루어진 식인가? 예) b"abc", b"ab" + b"cd", "x" * 16
+    return not any(isinstance(item, (ast.Name, ast.Attribute, ast.Call, ast.Subscript)) for item in ast.walk(node))
+
+
+def _is_fixed_value(node, literal_names):
+    # 이 값이 코드에 고정으로 적힌 글자인가? 글자·바이트를 직접 썼거나, 파일 맨 위에 그렇게 정해 둔 상수 이름이면 True이다.
+    if isinstance(node, ast.Name):
+        return node.id in literal_names
+    return _is_literal_expression(node)
+
+
 def _bind_parameters(call, order, defaults, constants, module, rules):
     # 해시 도구를 만드는 호출(예: PasswordHasher(2, 19456, 1))에서 설정 숫자를 이름별로 읽어 낸다.
     # 위치로 넘긴 값(order 순서)과 이름을 붙여 넘긴 값(time_cost=2)을 모두 처리하고,
     # 쓰지 않은 값은 라이브러리 기본값으로 채운다. 숫자가 아니거나 코드로 알 수 없는 값이면 설정 전체를 None으로 돌려준다.
+    if any(isinstance(arg, ast.Starred) for arg in call.args) or any(keyword.arg is None for keyword in call.keywords):
+        # f(*값들)이나 f(**설정)으로 넘긴 값은 코드만 봐서는 어떤 값인지 알 수 없다.
+        # 이 값을 "안 적었으니 라이브러리 기본값"으로 취급하면, 약한 설정이 안전한 기본값으로 둔갑한다. 그래서 확인 불가로 처리한다.
+        return None, []
     given = dict(zip(order, call.args))  # 위치로 넘긴 값들을 이름과 짝지음
     given.update({keyword.arg: keyword.value for keyword in call.keywords if keyword.arg})  # 이름 붙여 넘긴 값들
     failed, params = [], {}
     if 'type' in given and qualname(given['type'], module.aliases) not in rules['argon2idTypes']:
         # Argon2에는 종류(i, d, id)가 있는데 id가 아닌 것을 지정했다 → 위반
         failed.append(_obs(module, call, 'NOT_ARGON2ID_TYPE'))
+    if 'salt_len' in given:
+        salt_len = _int_value(given['salt_len'], constants)
+        if salt_len is not None and salt_len < MIN_SALT_BYTES:
+            # 너무 짧은 salt는 서로 다른 사용자에게 고유하게 만들어 주지 못한다.
+            failed.append(_obs(module, call, 'SALT_TOO_SHORT', actual=salt_len, required=MIN_SALT_BYTES))
     for key in ('time_cost', 'memory_cost', 'parallelism'):
         if key not in given:
             params[key] = defaults[key]  # 안 적었으면 라이브러리 기본값
@@ -380,11 +621,15 @@ def _bind_parameters(call, order, defaults, constants, module, rules):
     return params, failed
 
 
-def _classify_storage(module, value, field_name, functions, rules, matcher, fails, stored, unresolved):
+def _classify_storage(module, value, field_name, ctx, rules, matcher, fails, stored, unresolved, scope=None):
     # "비밀번호 칸(field_name)에 저장하려는 값(value)"이 무엇인지 분류한다.
     #   원문 비밀번호 / 고정 글자 → fails(위반)
     #   해시 함수의 결과         → stored(안전하게 저장)
     #   판단할 수 없음           → unresolved(확인 못 함)
+    if isinstance(value, ast.Name) and scope is not None and _is_hashed_variable(value.id, scope, ctx, matcher):
+        # hashed = hash_password(payload.password) 다음에 password_hash=hashed 처럼, 해시 결과만 담은 변수를 저장하는 경우
+        stored.append(_obs(module, value, 'STORED_VIA_HASH', field=field_name))
+        return
     if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)):
         # 변수나 항목을 그대로 저장하는 경우. 이름이 비밀번호처럼 보이는데 hash가 들어 있지 않으면 원문 저장이다.
         name = terminal_name(value) or ''
@@ -401,7 +646,7 @@ def _classify_storage(module, value, field_name, functions, rules, matcher, fail
     if isinstance(value, ast.Await):
         value = value.value  # await hash_async(...)는 호출 결과를 저장하는 것과 같으므로 await를 벗겨서 본다.
     if isinstance(value, ast.Call):
-        if _is_hash_call(value, functions):
+        if _is_hash_call(value, ctx, scope=scope, password_matcher=matcher):
             stored.append(_obs(module, value, 'STORED_VIA_HASH', field=field_name))
         else:
             unresolved.append(_obs(module, value, 'STORED_VALUE_UNKNOWN', field=field_name))
@@ -409,41 +654,579 @@ def _classify_storage(module, value, field_name, functions, rules, matcher, fail
     unresolved.append(_obs(module, value, 'STORED_VALUE_UNKNOWN', field=field_name))
 
 
-def _is_hash_call(call, functions, depth=0):
-    # 이 함수 호출의 결과가 "해시된 값"이라고 말할 수 있는가?
-    # 인정하는 경우는 두 가지뿐이다.
-    #   1) hasher.hash(...)처럼 .hash(...)를 직접 부른 경우
-    #   2) 프로젝트 안의 같은 이름 함수가 "모든 반환값이 해시 호출의 결과"인 경우
-    # 함수 안에서 .hash()를 어딘가에서 한 번 부른 것만으로는 인정하지 않는다. (그러고도 원문을 반환할 수 있기 때문이다.)
-    # depth는 함수 안의 함수 안의 함수... 를 따라가는 깊이이다. 너무 깊어지면(2단계 초과) 멈춘다.
-    if isinstance(call.func, ast.Attribute) and call.func.attr == 'hash':
+def _is_hashed_variable(name, scope, ctx, matcher):
+    # 함수(scope) 안의 변수 하나가 "입력 비밀번호를 해시한 결과만" 담고 있는가?
+    # 이 이름에 값이 묶이는 곳이 모두 `이름 = 해시 호출(...)` 형태의 일반 대입이고(매개변수·with·반복문·+= 같은 다른 묶임이 없고),
+    # 그 호출이 모두 입력 비밀번호의 해시로 확인될 때만 True이다. 그러면 저장하는 자리가 어디든 이 변수에는 해시만 들어 있다.
+    values, captured = [], 0
+    for node in ast.walk(scope):
+        for target, value in _assignment_pairs(node):
+            hits = sum(1 for item in ast.walk(target) if isinstance(item, ast.Name) and item.id == name and isinstance(item.ctx, ast.Store))
+            if hits:
+                captured += hits
+                values.append((target, value, node))
+    if not values or _name_bindings(scope).get(name, 0) != captured:
+        return False
+    for target, value, node in values:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or not isinstance(target, ast.Name):
+            return False
+        call = value.value if isinstance(value, ast.Await) else value
+        if not (isinstance(call, ast.Call) and _is_hash_call(call, ctx, scope=scope, password_matcher=matcher)):
+            return False
+    return True
+
+
+def _is_approved_hasher_factory(call, module, rules):
+    # 이 호출이 "승인한 Argon2 해시 도구를 만드는 호출"인가?
+    #   - argon2.PasswordHasher(...), pwdlib의 Argon2Hasher(...) 같은 생성자
+    #   - PasswordHasher.from_parameters(...), PasswordHash.recommended() 같은 기본 설정 도구
+    #   - PasswordHash((Argon2Hasher(),)) 처럼 해시 도구를 감싸는 호출. 감싼 도구 중 "첫 번째"가 승인된 도구일 때만 인정한다.
+    #     (pwdlib은 목록의 첫 번째 도구로 해시를 만들기 때문이다.)
+    name = qualname(call.func, module.aliases) or ''
+    if name in rules['constructors'] or name in rules['defaultFactories']:
         return True
+    if name.endswith('PasswordHasher.from_parameters') and name.startswith('argon2'):
+        return True
+    if name in rules.get('hasherWrappers', ()):
+        first = call.args[0] if call.args else None
+        if isinstance(first, (ast.Tuple, ast.List)) and first.elts and isinstance(first.elts[0], ast.Call):
+            return _is_approved_hasher_factory(first.elts[0], module, rules)
+    return False
+
+
+def _library_patched(modules, rules):
+    # 해시 라이브러리의 클래스·메서드를 소스 안에서 덮어쓰는지 확인한다. 예) PasswordHasher.hash = lambda self, v: v
+    # 덮어썼다면 PasswordHasher(...)로 만든 객체라도 .hash()가 진짜 해시를 만든다고 믿을 수 없다.
+    symbols = {'hash', 'from_parameters'} | {
+        name.rsplit('.', 1)[-1] for name in [*rules['constructors'], *rules['defaultFactories'], *rules.get('hasherWrappers', ())]}
+    for module in modules.values():
+        for node in ast.walk(module.tree):
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store) and node.attr in symbols:
+                return True  # 어떤 객체의 hash 같은 이름에 값을 대입함
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('setattr', 'delattr')
+                    and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and node.args[1].value in symbols):
+                return True  # setattr(객체, "hash", ...)로 같은 일을 함
+    return False
+
+
+def _known_hashers(modules, rules):
+    # 승인한 해시 도구를 담고 있는 변수·속성의 "이름"들을 찾는다. 예) HASHER = PasswordHasher(...) 의 HASHER, self.hasher = ... 의 hasher
+    # 이름에 값이 묶이는(바인딩) 곳을 모두 따져서, "그 이름에 묶인 값이 전부 승인한 해시 도구"일 때만 믿는다.
+    #   - 승인하지 않은 값을 대입하거나, 함수 매개변수로 받거나(def f(HASHER=...)), for·with·import as 등으로 다시 묶으면
+    #     그 이름이 어떤 객체를 가리키는지 알 수 없으므로 믿지 않는다.
+    #   - 라이브러리 자체를 덮어쓴 흔적이 있으면 아무 이름도 믿지 않는다.
+    # (이름만 보는 방식이라 범위(scope)는 구분하지 않는다. 같은 이름이 다른 곳에서 다른 값으로 쓰이면 믿지 않는 쪽으로 기운다.)
+    if _library_patched(modules, rules):
+        return set()
+    flags = {}  # {이름: [묶일 때마다 "승인 해시 도구를 만든 대입인가"]}
+
+    def mark(name, approved):
+        flags.setdefault(name, []).append(approved)
+
+    for module in modules.values():
+        covered = set()  # 승인 여부를 이미 따진 대입 대상 노드
+        for node in ast.walk(module.tree):
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets, value = [node.target], node.value
+            else:
+                continue
+            approved = isinstance(value, ast.Call) and _is_approved_hasher_factory(value, module, rules)
+            for target in targets:
+                if isinstance(target, (ast.Name, ast.Attribute)):
+                    covered.add(id(target))
+                    mark(terminal_name(target), approved)
+        for node in ast.walk(module.tree):
+            # 위에서 따지지 않은 나머지 모든 "이름이 묶이는 곳"은 승인 도구를 만든 것이 아니다.
+            if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Store) and id(node) not in covered:
+                mark(terminal_name(node), False)          # +=, 튜플 풀기, for·with 변수, := 등
+            elif isinstance(node, ast.arg):
+                mark(node.arg, False)                     # 함수·람다의 매개변수
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                mark(node.name, False)                    # 같은 이름의 함수·클래스 정의
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                mark(node.name, False)
+            elif isinstance(node, ast.alias) and node.asname and node.asname != node.name:
+                mark(node.asname, False)                  # import ... as 이름 (같은 이름으로 가져오는 것은 정의한 쪽의 값과 같다)
+    return {name for name, values in flags.items() if all(values)}
+
+
+@dataclass
+class HashContext:
+    # 해시 경로를 판정하는 여러 함수가 함께 쓰는 "코드를 읽어서 확인한 사실"들을 한데 묶은 상자이다.
+    functions: dict          # 이름이 다른 것으로 바뀔 염려가 없는 프로젝트 함수들 {이름: [(파일, 정의), ...]}
+    hashers: set             # 승인한 해시 도구를 담은 변수 이름들
+    random_calls: set        # 진짜 운영체제 무작위 값(os.urandom 등)을 만드는 것으로 확인된 호출 조각의 id
+    preserving_calls: dict   # 입력을 통째로 간직한 채 모양만 바꾸는 것으로 확인된 호출 조각의 id → 값이 들어 있는 인자의 위치
+    defined_names: set       # 프로젝트가 직접 정의한 함수·메서드 이름들 (strip 같은 이름을 직접 만들었다면 그 메서드를 믿지 않는다)
+    mutations: dict = field(default_factory=dict)  # 함수 → 그 함수가 바꾸는 입력 필드 (같은 함수를 반복해서 훑지 않으려고 기록)
+
+
+# 입력의 내용을 그대로 간직한 채 모양만 바꾸는 호출들. 값이 들어 있는 인자의 위치를 함께 적었다.
+# (예: unicodedata.normalize("NFKC", password)는 두 번째 인자에 비밀번호가 있다.)
+PRESERVING_FUNCTIONS = {'unicodedata.normalize': 1, 'base64.b64encode': 0}
+RANDOM_SOURCES = frozenset({'os.urandom', 'secrets.token_bytes'})
+LOSSY_ERROR_HANDLERS = frozenset({'ignore', 'replace', 'xmlcharrefreplace', 'backslashreplace', 'namereplace'})
+
+
+def _hash_context(modules, rules):
+    # 해시 경로 판정에 필요한 사실들을 모아 HashContext로 돌려준다. REQ-005와 REQ-006이 함께 쓰므로 한 번만 계산해 둔다.
+    cache = getattr(modules, 'cache', None)
+    if cache is not None and 'hash_context' in cache:
+        return cache['hash_context']
+    untrusted = _untrusted_function_names(modules)  # 다른 것으로 바뀔 수 있어서 믿을 수 없는 함수 이름들
+    every = _functions(modules)
+    random_calls, preserving = _verified_calls(modules)
+    context = HashContext({name: found for name, found in every.items() if name not in untrusted},
+                          _known_hashers(modules, rules), random_calls, preserving, set(every))
+    if cache is not None:
+        cache['hash_context'] = context
+    return context
+
+
+def _project_names(modules):
+    # 프로젝트 파일·폴더 이름들. 프로젝트에 os.py나 secrets/ 같은 이름이 있으면 `import os`가 표준 라이브러리를 가리킨다고 믿을 수 없다.
+    return {part for path in modules for part in path[:-3].split('/')}
+
+
+def _imported_function(func, module, project_names):
+    # 호출하는 대상이 "import한 라이브러리 함수"라고 확인되면 그 전체 이름(예: "os.urandom")을, 아니면 None을 돌려준다.
+    # import 문으로 가져온 이름이고, 같은 이름이 다시 정의되지 않았으며(module.aliases에 남아 있음), 프로젝트가 같은 이름의
+    # 파일·폴더를 갖고 있지 않을 때만 인정한다. (직접 만든 가짜 객체를 표준 라이브러리로 오인하지 않으려는 것이다.)
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        target = module.aliases.get(func.value.id)
+        if target and target.split('.')[0] not in project_names:
+            return f'{target}.{func.attr}'
+    elif isinstance(func, ast.Name):
+        target = module.aliases.get(func.id)
+        if target and '.' in target and target.split('.')[0] not in project_names:
+            return target
+    return None
+
+
+def _verified_calls(modules):
+    # 코드를 읽어서 "믿을 수 있는 호출"로 확인된 것들을 모은다. 돌려주는 값: (무작위 값을 만드는 호출의 id 집합, {입력을 간직하는 호출의 id: 값 인자 위치})
+    #   · os.urandom(16)·secrets.token_bytes(16): 진짜 라이브러리이고, 크기가 salt로 쓸 만하며(8바이트 이상), 덮어쓴 흔적이 없을 때
+    #   · unicodedata.normalize("NFKC", x)·base64.b64encode(x)·str(x)·bytes(x, "utf-8"): 입력을 통째로 간직하는 호출일 때
+    # 이름이 같다고 믿지 않고, 실제로 import한 라이브러리인지와 덮어쓰기·재정의 여부를 확인한다.
+    names = _project_names(modules)
+    patched = any(
+        (isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.attr in ('urandom', 'token_bytes'))
+        or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('setattr', 'delattr')
+            and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and node.args[1].value in ('urandom', 'token_bytes'))
+        for module in modules.values() for node in ast.walk(module.tree))
+    random_calls, preserving = set(), {}
+    for module in modules.values():
+        star_import = any(isinstance(node, ast.ImportFrom) and any(alias.name == '*' for alias in node.names)
+                          for node in ast.walk(module.tree))
+        for call in (node for node in ast.walk(module.tree) if isinstance(node, ast.Call)):
+            full = _imported_function(call.func, module, names)
+            positional = call.args
+            if full == 'os.urandom' and not patched and not call.keywords and len(positional) == 1 \
+                    and isinstance(positional[0], ast.Constant) and type(positional[0].value) is int \
+                    and positional[0].value >= MIN_SALT_BYTES:
+                random_calls.add(id(call))
+            elif full == 'secrets.token_bytes' and not patched and not call.keywords and (
+                    not positional or (len(positional) == 1 and isinstance(positional[0], ast.Constant)
+                                       and type(positional[0].value) is int and positional[0].value >= MIN_SALT_BYTES)):
+                random_calls.add(id(call))
+            elif full == 'unicodedata.normalize' and not call.keywords and len(positional) == 2 \
+                    and isinstance(positional[0], ast.Constant) and positional[0].value in ('NFC', 'NFD', 'NFKC', 'NFKD'):
+                preserving[id(call)] = 1
+            elif full == 'base64.b64encode' and not call.keywords and len(positional) == 1:
+                preserving[id(call)] = 0
+            elif (isinstance(call.func, ast.Name) and call.func.id in ('str', 'bytes', 'bytearray') and not star_import
+                  and module.bindings.get(call.func.id, 0) == 0 and call.func.id not in module.aliases
+                  and positional and _constant_arguments(positional[1:], call.keywords)):
+                preserving[id(call)] = 0  # str(x), bytes(x, "utf-8"): 내장 함수이고 이 파일에서 다시 정의하지 않았을 때
+    return random_calls, preserving
+
+
+def _constant_arguments(arguments, keywords):
+    # 인코딩 이름처럼 "글자 상수"만 넘겼고, 일부 글자를 버리는 오류 처리 방식(ignore, replace 등)이 아닌가?
+    values = [*arguments, *(keyword.value for keyword in keywords)]
+    return all(isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value not in LOSSY_ERROR_HANDLERS
+               for value in values) and all(keyword.arg in ('encoding', 'errors') for keyword in keywords)
+
+
+def _is_hash_call(call, ctx, depth=0, scope=None, password_matcher=None):
+    # 이 함수 호출의 결과가 "입력 비밀번호를 해시한 값"이라고 말할 수 있는가?
+    # 인정하는 경우는 두 가지뿐이다.
+    #   1) X.hash(값) 호출이면서, X가 "승인한 해시 도구"로 확인되고, 해시하는 값이 입력(함수 매개변수)에서 나온 것이며,
+    #      salt를 직접 정하지 않았거나 진짜 무작위 값으로 만든 경우
+    #      (.hash라는 이름의 메서드면 무엇이든 인정하면, 값을 그대로 돌려주는 가짜 hash()도 통과해 버린다.
+    #       상수나 상수를 담은 변수를 해시하면 안전한 해시처럼 보이지만 비밀번호와 아무 상관이 없다.)
+    #   2) 프로젝트 안의 같은 이름 함수가 "모든 반환값이 해시 호출의 결과"이고, 그 함수가 해시하는 매개변수 자리에 입력에서 나온 값을 넘긴 경우
+    # 확인되지 않으면 False이고, 호출한 쪽에서 UNVERIFIED(확인 못 함)로 처리한다.
+    # scope는 이 호출이 들어 있는 함수이다. 어떤 이름이 입력에서 나왔는지는 그 함수 안에서만 따질 수 있다. 모르면(None) 확인하지 못한다.
+    # password_matcher가 주어지면(= 저장하는 곳에서 확인할 때) 해시하는 값의 "실제 출처"가 비밀번호 필드인지도 본다.
+    #   (이메일 같은 다른 입력을 해시해 저장하는 코드를 거르기 위해서이다. 변수 이름이나 넘긴 인자 이름이 아니라,
+    #    그 값이 실제로 어느 입력의 어느 필드에서 왔는지를 따라가서 본다.)
+    # depth는 함수 안의 함수 안의 함수... 를 따라가는 깊이이다. 너무 깊어지면(2단계 초과) 멈춘다.
+    if any(isinstance(arg, ast.Starred) for arg in call.args) or any(keyword.arg is None for keyword in call.keywords):
+        return False  # f(*값들)·f(**설정)으로 넘긴 값은 무엇인지 알 수 없다.
+
+    def acceptable(origins):
+        # 출처가 하나라도 있고(입력에서 나왔고), 확인을 요구했다면 그중 비밀번호 필드가 있는가?
+        return bool(origins) and (password_matcher is None or any(_is_password_origin(item, password_matcher) for item in origins))
+
+    if isinstance(call.func, ast.Attribute) and call.func.attr == 'hash':
+        hashed_value = call.args[0] if call.args else next(
+            (keyword.value for keyword in call.keywords if keyword.arg == 'password'), None)
+        if hashed_value is None or terminal_name(call.func.value) not in ctx.hashers:
+            return False
+        salt = _salt_argument(call)
+        if salt is not None and id(salt) not in ctx.random_calls:
+            return False  # salt를 직접 정했다. 고정 salt인지는 따로 검사하고, 진짜 무작위 값이라고 확인되지 않으면 해시 경로로 인정하지 않는다.
+        return acceptable(_scope_sources(hashed_value, scope, ctx))
     name = terminal_name(call.func)
     if depth > 2 or not name:
         return False
-    definitions = functions.get(name, [])  # 이 이름으로 정의된 함수들
+    definitions = ctx.functions.get(name, [])  # 이 이름으로 정의된 함수들
     # 정의가 있어야 하고, 같은 이름의 모든 정의가 해시 결과만 반환해야 한다.
-    return bool(definitions) and all(_returns_hash(function, functions, depth) for _owner, function in definitions)
+    if not (definitions and all(_returns_hash(function, ctx, depth) for _owner, function in definitions)):
+        return False
+    # 해시 함수에 상수(hash_password("fixed"))를 넘기면 비밀번호의 해시가 아니다. 그 함수가 "해시하는" 매개변수(와 그 안의 필드) 자리에
+    # 호출한 쪽이 실제로 넘긴 값의 출처를 이어 붙여서 확인한다. (해시와 상관없는 다른 매개변수에만 입력을 넘기는 경우를 거른다.)
+    return all(acceptable(_compose(call, definition, _hashed_origins(definition, ctx),
+                                   lambda argument: _scope_sources(argument, scope, ctx)))
+               for _owner, definition in definitions)
 
 
-def _returns_hash(function, functions, depth):
-    # 이 함수가 "해시 호출의 결과만" 반환하는가? 모든 return이 해시 결과여야 True다.
-    hashed = set()  # 해시 결과를 담아 둔 변수 이름들. 예) h = hasher.hash(pw) 의 h
+def _salt_argument(call):
+    # 해시 호출에서 salt로 넘긴 값을 돌려준다. 이름 붙여 넘긴 salt=... 또는 두 번째 위치 인자.
+    # 없거나 salt=None이면 None(라이브러리가 무작위로 만든다).
+    found = next((keyword.value for keyword in call.keywords if keyword.arg == 'salt'), call.args[1] if len(call.args) >= 2 else None)
+    return None if isinstance(found, ast.Constant) and found.value is None else found
+
+
+def _union(sets):
+    # 입력 출처들을 합친다. 하나라도 None(자기 자신에서 나온 값)이면 결과도 None이다.
+    if any(item is None for item in sets):
+        return None
+    return frozenset().union(*sets)
+
+
+def _intersection(sets):
+    # 어느 갈래가 쓰일지 모르는 값(a or b, 조건식)은 "모든 갈래가 공통으로 나온 출처"만 인정한다. None(자기 자신)은 제약이 없는 값이다.
+    known = [item for item in sets if item is not None]
+    if not known:
+        return None if sets else frozenset()
+    return frozenset.intersection(*known)
+
+
+def _input_sources(expr, scope, ctx, visiting=frozenset(), depth=0):
+    # 이 값이 scope(함수)의 어느 매개변수, 즉 호출한 쪽이 넘긴 입력의 어느 필드에서 나왔는지를 출처의 집합으로 돌려준다.
+    # 출처 하나는 (매개변수 이름, 필드 경로)이다. 예) payload.password → ("payload", ("password",)), 매개변수 password → ("password", ()).
+    # 상수만으로 만든 값이나 함수 밖에서 정의된 이름(전역 상수 등)은 입력이 아니므로 빈 집합이다.
+    # "입력의 내용을 통째로 간직한 채 모양만 바꾸는 것"만 인정한다. 입력을 버리거나 일부만 남길 수 있는 연산은 모두 빈 집합이다.
+    #   인정: p, p.x, data["password"], p.strip(), p.lower(), p.encode(), str(p), "pepper" + p, f"{p}", 입력을 돌려주는 프로젝트 함수
+    #   거부: p * 0, p[:3], p[0], p.replace(...), p.strip("abc"), f"{p:.0s}", 입력을 버리는 프로젝트 함수, 모르는 함수의 결과
+    #   · a or b, a if c else b → 어느 쪽이 쓰일지 모르므로 모든 갈래에 공통인 입력만 인정한다.
+    #   · None은 password = password.strip() 처럼 자기 자신에서 나온 값이라는 표시이다(다른 갈래가 입력인지에 따라 결정된다).
+    def here(part):
+        return _input_sources(part, scope, ctx, visiting, depth)
+
+    if isinstance(expr, ast.Name):
+        return _name_sources(expr.id, scope, ctx, visiting, depth) if scope is not None else frozenset()
+    if isinstance(expr, ast.Attribute):
+        return frozenset() if expr.attr.startswith('__') else _extend(here(expr.value), expr.attr)
+    if isinstance(expr, ast.Subscript):
+        # data["password"]처럼 글자 키로 꺼내는 것은 항목을 고르는 것이다. 숫자 위치·잘라내기(p[0], p[:3])는 일부만 남긴다.
+        key = expr.slice
+        return _extend(here(expr.value), key.value) if isinstance(key, ast.Constant) and isinstance(key.value, str) else frozenset()
+    if isinstance(expr, (ast.Await, ast.Starred, ast.NamedExpr)):
+        return here(expr.value)
+    if isinstance(expr, ast.FormattedValue):
+        return frozenset() if expr.format_spec is not None else here(expr.value)  # {p:.0s}처럼 형식을 지정하면 글자가 잘릴 수 있다.
+    if isinstance(expr, ast.JoinedStr):
+        return _union([here(part) for part in expr.values if isinstance(part, ast.FormattedValue)])
+    if isinstance(expr, ast.BinOp):
+        # 더하기만 인정한다. p * 0, p % ... 같은 연산은 입력을 지울 수 있다.
+        return _union([here(expr.left), here(expr.right)]) if isinstance(expr.op, ast.Add) else frozenset()
+    if isinstance(expr, ast.IfExp):
+        return _intersection([here(expr.body), here(expr.orelse)])
+    if isinstance(expr, ast.BoolOp):
+        return _intersection([here(part) for part in expr.values])
+    if isinstance(expr, ast.Call):
+        return _call_sources(expr, scope, ctx, visiting, depth)
+    return frozenset()
+
+
+def _call_sources(call, scope, ctx, visiting, depth):
+    # 함수·메서드 호출의 결과가 어느 입력에서 나왔는지. 입력을 통째로 간직하는 것으로 확인된 호출만 인정한다.
+    def here(part, extra=0):
+        return _input_sources(part, scope, ctx, visiting, depth + extra)
+
+    if id(call) in ctx.preserving_calls:
+        return here(call.args[ctx.preserving_calls[id(call)]])  # str(x), unicodedata.normalize("NFKC", x) 등
+    func = call.func
+    if isinstance(func, ast.Attribute) and func.attr not in ctx.defined_names:
+        # 프로젝트가 같은 이름의 메서드를 직접 만들었다면(예: 입력을 버리는 strip) 표준 동작이라고 믿지 않는다.
+        no_arguments = not call.args and not call.keywords
+        if func.attr in ('strip', 'lstrip', 'rstrip', 'lower', 'upper', 'casefold', 'get_secret_value') and no_arguments:
+            return here(func.value)  # 공백 제거·대소문자 변환·SecretStr 꺼내기 (인자를 주면 글자를 지울 수 있어 제외)
+        if func.attr in ('encode', 'decode') and _constant_arguments(call.args, call.keywords):
+            return here(func.value)
+    name = terminal_name(func)
+    if name and depth < 3:
+        definitions = ctx.functions.get(name, [])
+        if definitions:
+            # 프로젝트 함수는 "돌려주는 값이 어느 매개변수의 어느 필드에서 나오는지"를 함수 안에서 따져 보고,
+            # 그 자리에 호출한 쪽이 실제로 넘긴 값의 출처를 이어 붙인다. (다른 인자를 넘겼어도 돌려주지 않는 인자는 쓰지 않는다.)
+            return _intersection([_compose(call, helper, _returned_origins(helper, ctx, depth + 1), lambda argument: here(argument, 1))
+                                  for _owner, helper in definitions])
+    return frozenset()  # 모르는 함수의 결과는 입력을 버렸을 수도 있어서 입력에서 나왔다고 말할 수 없다.
+
+
+MUTATING_METHODS = frozenset({'update', 'pop', 'setdefault', 'clear', 'popitem', 'append', 'extend', 'insert', 'remove'})
+
+
+def _field_path(node):
+    # payload.profile["email"] 처럼 속성·글자 키로 이어진 식을 (가장 바깥 이름, 필드 경로)로 바꾼다. 예) ("payload", ("profile", "email"))
+    # p[i] 처럼 어느 항목인지 모르는 단계를 만나면 그 아래 경로는 버리고 바깥 경로까지만 남긴다(그 아래는 통째로 바뀐 것으로 본다).
+    steps = []
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        if isinstance(node, ast.Attribute):
+            steps.append(node.attr)
+        elif isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+            steps.append(node.slice.value)
+        else:
+            steps = []
+        node = node.value
+    return (node.id, tuple(reversed(steps))) if isinstance(node, ast.Name) else (None, ())
+
+
+def _mutated_fields(scope, ctx, depth=0):
+    # 이 함수가 입력 객체의 어느 필드를 바꾸는지 {가장 바깥 이름: {필드 경로, ...}}로 돌려준다. 경로 ()는 객체 전체가 바뀐다는 뜻이다.
+    #   · p.x = ..., p["x"] = ..., del p.x, p.x += ...           → (p, ("x",))
+    #   · p.tags.append(...), p.update(...), vars(p).update(...)  → (p, ("tags",)), (p, ()), (p, ())
+    #   · setattr(p, "x", ...)                                    → (p, ("x",)),  setattr(p, 이름, ...) → (p, ())
+    #   · q = p.profile 처럼 별칭을 만들어 q.x = ... 로 바꾸는 경우 → (p, ("profile", "x"))
+    #   · 입력을 넘겨 받은 프로젝트 함수가 안에서 바꾸는 필드(depth 2단계까지)
+    # 입력의 필드를 덮어쓰면 payload.password가 더 이상 원래 입력이 아니라서, 그 필드에서 온 값은 입력의 해시라고 믿을 수 없다.
+    key = (id(scope), depth)
+    if key in ctx.mutations:
+        return ctx.mutations[key]
+    ctx.mutations[key] = {}  # 같은 함수를 다시 만나는 경우(재귀)를 끊는다.
+    aliases, changed = {}, True  # 별칭 이름 → (가장 바깥 이름, 필드 경로)
+    while changed:
+        changed = False
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Name, ast.Attribute, ast.Subscript)):
+                root, path = _field_path(node.value)
+                if root is None:
+                    continue
+                if root in aliases:  # 별칭의 별칭이면 처음 가리키던 곳까지 거슬러 올라간다.
+                    root, path = aliases[root][0], aliases[root][1] + path
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and aliases.get(target.id) != (root, path):
+                        aliases[target.id] = (root, path)
+                        changed = True
+    found = {}
+
+    def add(node, extra=()):
+        root, path = _field_path(node)
+        if root is None:
+            return
+        if root in aliases:
+            root, path = aliases[root][0], aliases[root][1] + path
+        found.setdefault(root, set()).add(path + extra)
+
+    for node in ast.walk(scope):
+        if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr in MUTATING_METHODS:
+                receiver = func.value
+                if isinstance(receiver, ast.Call) and isinstance(receiver.func, ast.Name) and receiver.func.id == 'vars' and receiver.args:
+                    receiver = receiver.args[0]  # vars(p).update(...) 는 p의 필드를 바꾼다.
+                add(receiver)
+            elif isinstance(func, ast.Name) and func.id in ('setattr', 'delattr') and node.args:
+                name = node.args[1] if len(node.args) > 1 else None
+                add(node.args[0], (name.value,) if isinstance(name, ast.Constant) and isinstance(name.value, str) else ())
+            if depth < 2:
+                for _owner, helper in ctx.functions.get(terminal_name(func) or '', []):
+                    inner = _mutated_fields(helper, ctx, depth + 1)
+                    for parameter, argument in _bound_arguments(node, helper):
+                        for subpath in inner.get(parameter, ()):
+                            add(argument, subpath)
+    ctx.mutations[key] = found
+    return found
+
+
+def _scope_sources(expr, scope, ctx, depth=0):
+    # _input_sources에 더해, 이 함수가 덮어쓰는 입력 필드에서 온 출처는 뺀다. (입력 필드를 바꿨다면 그 필드의 값은 원래 입력이 아니다.)
+    sources = _input_sources(expr, scope, ctx, frozenset(), depth)
+    if not sources:
+        return sources
+    mutated = _mutated_fields(scope, ctx)
+    return frozenset((root, path) for root, path in sources
+                     if not any(path[:len(item)] == item or item[:len(path)] == path for item in mutated.get(root, ())))
+
+
+def _extend(sources, step):
+    # 각 출처의 필드 경로 끝에 step(속성 이름이나 글자 키)을 덧붙인다. 예) ("payload", ()) + "password" → ("payload", ("password",))
+    if sources is None:
+        return None
+    return frozenset((root, path + (step,)) for root, path in sources)
+
+
+def _compose(call, helper, relative, sources_of):
+    # helper(프로젝트 함수) 안에서 "(자기 매개변수, 그 안의 필드 경로)"로 적힌 출처(relative)를,
+    # 호출(call)이 그 매개변수 자리에 실제로 넘긴 값의 출처로 바꿔 쓴다. sources_of(값)은 호출한 쪽에서 그 값의 출처를 구하는 함수이다.
+    # 예) helper가 form.password를 돌려주고 호출이 helper(payload)이면 → ("payload", ("password",))
+    bound = {}
+    for parameter, argument in _bound_arguments(call, helper):
+        bound.setdefault(parameter, []).append(argument)
+    composed = []
+    for parameter, subpath in relative or ():
+        for argument in bound.get(parameter, []):
+            part = sources_of(argument)
+            composed.append(None if part is None else frozenset((root, path + subpath) for root, path in part))
+    return _union(composed)
+
+
+def _returned_origins(function, ctx, depth):
+    # 이 함수가 돌려주는 값의 출처를 이 함수의 매개변수 기준으로 돌려준다 (모든 return에 공통인 것).
+    # return이 없거나 하나라도 모르면 빈 집합이다.
+    returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
+    if depth > 3 or not returns or any(node.value is None for node in returns):
+        return frozenset()
+    sets = [_scope_sources(node.value, function, ctx, depth) for node in returns]
+    return frozenset.intersection(*[item if item is not None else frozenset() for item in sets])
+
+
+def _name_sources(name, scope, ctx, visiting, depth):
+    # 함수(scope) 안의 이름 하나에 담긴 값의 입력 출처. 이름에 값이 묶이는 곳이 매개변수와 일반 대입뿐일 때만 따진다.
+    # with·except·반복문 변수 등 모르는 방식이 섞여 있으면 빈 집합이다. 모든 묶임에 공통인 출처만 인정한다.
+    if name in visiting:
+        return None
+    visiting = visiting | {name}
+    if any(isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names for node in ast.walk(scope)):
+        return frozenset()  # 함수 밖의 이름을 바꿀 수 있어서 이 함수 안에서만 따질 수 없다.
+    if name in ('self', 'cls'):
+        return frozenset()  # 객체의 필드(self.password)는 프로그램이 어디선가 채운 값이라 호출한 쪽이 넘긴 입력이라고 볼 수 없다.
+    arguments = scope.args
+    parameters = {argument.arg for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]}
+    parameters.update(argument.arg for argument in (arguments.vararg, arguments.kwarg) if argument is not None)
+    results, captured = [], 0  # 묶임마다의 출처 / 설명할 수 있는 묶임의 수
+    for node in ast.walk(scope):
+        if isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name) and node.target.id == name:
+                captured += 1
+                if not isinstance(node.op, ast.Add):
+                    results.append(frozenset())  # p *= 0, p -= ... 처럼 값을 지우거나 바꿀 수 있는 연산
+                # p += "x" 는 이전 값에 덧붙이는 것이라 입력이 그대로 남는다.
+            continue
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            hits = sum(1 for item in ast.walk(node.target) if isinstance(item, ast.Name) and item.id == name)
+            if hits:
+                captured += hits
+                results.append(frozenset())  # 반복문 변수는 값의 일부(글자 하나 등)일 수 있다.
+            continue
+        for target, value in _assignment_pairs(node):
+            hits = sum(1 for item in ast.walk(target)
+                       if isinstance(item, ast.Name) and item.id == name and isinstance(item.ctx, ast.Store))
+            if hits:
+                captured += hits
+                # 이름 하나에 값 하나를 대입한 경우만 따진다. a, b = 값 처럼 풀어서 받으면 일부일 수 있다.
+                results.append(_input_sources(value, scope, ctx, visiting, depth) if isinstance(target, ast.Name) else frozenset())
+    own = 1 if name in parameters else 0
+    if _name_bindings(scope).get(name, 0) != captured + own:
+        return frozenset()  # 설명할 수 없는 묶임(with·except·함수 정의·안쪽 함수의 같은 이름 매개변수 등)이 있다.
+    if own:
+        results.append(frozenset({(name, ())}))
+    if not results:
+        return frozenset()  # 이 함수 안에서 묶이지 않는 이름(전역 등)은 입력이라고 볼 수 없다.
+    return _intersection(results)
+
+
+def _is_password_origin(origin, matcher):
+    # 출처 하나((입력 이름, 필드 경로))가 "비밀번호 필드"인가? (password, new_password, pwd 등 비밀번호처럼 보이는 이름)
+    #   · payload.password → 경로의 이름(password)이 비밀번호이다.
+    #   · 매개변수 password → 경로가 없으니 입력 이름 자체가 비밀번호이다.
+    #   · password_form.email → 입력 이름은 비밀번호처럼 보여도 꺼낸 필드가 email이라서 비밀번호가 아니다.
+    # 이메일 같은 다른 입력을 해시해 저장하는 코드를 거르기 위한 확인이다.
+    root, path = origin
+    return any(matcher.search(part) for part in path) if path else bool(matcher.search(root))
+
+
+def _bound_arguments(call, helper):
+    # 함수 호출(call)에서 넘긴 값들이 helper(함수 정의)의 어느 매개변수에 들어가는지 [(매개변수 이름, 넘긴 값)]으로 짝짓는다.
+    arguments = helper.args
+    names = [argument.arg for argument in [*arguments.posonlyargs, *arguments.args]]
+    if names and names[0] in ('self', 'cls') and isinstance(call.func, ast.Attribute):
+        names = names[1:]  # obj.method(x) 에서 self는 호출한 객체가 채운다.
+    every = {argument.arg for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]}
+    return list(zip(names, call.args)) + [(keyword.arg, keyword.value) for keyword in call.keywords if keyword.arg in every]
+
+
+def _hashed_origins(function, ctx, depth=0):
+    # 이 함수 안에서 "실제로 해시되는 값"의 출처를 이 함수의 매개변수 기준으로 모아 돌려준다.
+    # 예) def hash_password(password, pepper): return H.hash(password) → {("password", ())}
+    #     def hash_form(form): return H.hash(form.password)        → {("form", ("password",))}
+    # 해시 도구의 hash()에 넘기는 값의 출처와, 이 함수가 부르는 다른 해시 함수가 해시하는 자리에 넘기는 값의 출처를 모은다.
+    found = set()
     for node in ast.walk(function):
-        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Call, ast.Await)):
-            value = node.value.value if isinstance(node.value, ast.Await) else node.value
-            if isinstance(value, ast.Call) and _is_hash_call(value, functions, depth + 1):
-                hashed.update(target.id for target in node.targets if isinstance(target, ast.Name))
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Attribute) and node.func.attr == 'hash' and terminal_name(node.func.value) in ctx.hashers:
+            value = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == 'password'), None)
+            if value is not None:
+                found |= _scope_sources(value, function, ctx) or frozenset()
+        elif depth < 3:
+            for _owner, helper in ctx.functions.get(terminal_name(node.func) or '', []):
+                found |= _compose(node, helper, _hashed_origins(helper, ctx, depth + 1),
+                                  lambda argument: _scope_sources(argument, function, ctx)) or frozenset()
+    return frozenset(found)
+
+
+def _hash_valued_names(function, ctx, depth):
+    # 함수 안에서 "값이 들어간 모든 순간에 해시 호출의 결과였던" 변수 이름들을 찾는다.
+    # 같은 변수에 나중에 원문을 다시 대입하거나(result = password), 반복문·+= 등으로 값이 바뀌면 해시 변수로 보지 않는다.
+    # 매개변수 이름도 제외한다. 호출한 쪽이 해시하지 않은 값을 넘겼을 수 있기 때문이다.
+    arguments = function.args
+    parameters = {argument.arg for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]}
+    parameters.update(argument.arg for argument in (arguments.vararg, arguments.kwarg) if argument is not None)
+    verdicts = {}   # {이름: [대입마다 "해시 호출의 결과인가"]}
+    covered = set()  # 아래에서 이미 판정한 이름 노드
+    for node in ast.walk(function):
+        if isinstance(node, ast.Assign):
+            pairs = [(target, node.value) for target in node.targets]
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            pairs = [(node.target, node.value)]
+        else:
+            continue
+        for target, value in pairs:
+            if isinstance(target, ast.Name):
+                covered.add(id(target))
+                if isinstance(value, ast.Await):
+                    value = value.value
+                verdicts.setdefault(target.id, []).append(
+                    isinstance(value, ast.Call) and _is_hash_call(value, ctx, depth + 1, scope=function))
+    for node in ast.walk(function):
+        # 위에서 판정하지 않은 다른 모든 대입(+=, for, 튜플 풀기 등)은 해시 결과가 아니라고 본다.
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and id(node) not in covered:
+            verdicts.setdefault(node.id, []).append(False)
+    return {name for name, flags in verdicts.items() if all(flags) and name not in parameters}
+
+
+def _returns_hash(function, ctx, depth):
+    # 이 함수가 "해시 호출의 결과만" 반환하는가? 모든 return이 해시 결과여야 True다.
+    hashed = _hash_valued_names(function, ctx, depth)  # 해시 결과만 담아 온 변수 이름들
     returns = [node.value for node in ast.walk(function) if isinstance(node, ast.Return) and node.value is not None]
     if not returns:
         return False  # 아무것도 반환하지 않는 함수는 해시를 돌려준다고 할 수 없다.
     for value in returns:
         if isinstance(value, ast.Await):
             value = value.value
-        if isinstance(value, ast.Call) and _is_hash_call(value, functions, depth + 1):
+        if isinstance(value, ast.Call) and _is_hash_call(value, ctx, depth + 1, scope=function):
             continue  # 해시 호출의 결과를 바로 반환
         if isinstance(value, ast.Name) and value.id in hashed:
-            continue  # 해시 결과를 담은 변수를 반환
+            continue  # 해시 결과만 담아 온 변수를 반환
         return False  # 그 밖의 값(예: 원문 비밀번호)을 반환하는 경로가 있다.
     return True
 
@@ -467,51 +1250,174 @@ def _orm_classes(modules):
 
 # ---------------------------------------------------------------- REQ-003 이메일 중복
 
+SKIP = object()  # "사용자 표가 아닌 곳의 선언이라 근거로 쓰지 않는다"는 표시
+
+
+class EmailEvidence:
+    # 이메일 UNIQUE 근거를 "어느 표의 것인지"별로 모아 두는 상자이다.
+    # 소유자(owner)는 표를 가리키는 이름표이다: ("class", "User") = ORM 클래스, ("table", "users") = SQL·Table 이름. None = 어느 표인지 모르는 선언.
+    def __init__(self):
+        self.buckets = {}         # {소유자: {"unique": [...], "plain": [...], "uncertain": [...]}}
+        self.user_owners = set()  # 비밀번호 칸이 있는 표(= 사용자 표)들
+        self.targets = set()      # 가입으로 새 사용자를 저장하는 데 쓰이는 표들
+        self.tablenames = {}      # {__tablename__ 값(소문자): 클래스 소유자}. 같은 표를 클래스와 SQL이 따로 가리킬 때 하나로 합친다.
+        self.indexes = []         # (파일, 코드 조각, 표 이름, 칸 목록): CREATE UNIQUE INDEX는 표 이름이 확인된 뒤에 판정한다.
+
+    def bucket(self, owner):
+        return self.buckets.setdefault(owner, {'unique': [], 'plain': [], 'uncertain': []})
+
+    def canonical(self, owner):
+        # ("table", "users") 처럼 SQL 이름으로 적힌 소유자를, 같은 표를 가리키는 ORM 클래스가 있으면 그 클래스로 바꾼다.
+        if owner is not None and owner[0] == 'table':
+            return self.tablenames.get(owner[1], owner)
+        return owner
+
+    def decide(self):
+        # 근거를 표별로 합쳐서 판정한다. 돌려주는 값: (결과 종류, 근거 기록 목록)
+        #   결과 종류: "unique" / "unclear"(표마다 달라 모름) / "undetermined"(칸을 읽을 수 없음) / "plain"(UNIQUE 없음) / "none"(이메일 칸을 못 찾음)
+        # 어느 표가 가입에 쓰이는지 코드에서 확인되면(예: User(email=..., password_hash=...)) 그 표들만 보고,
+        # 확인되지 않으면 비밀번호 칸이 있는 모든 표를 본다. 표마다 결과가 다르면 단정하지 않는다.
+        for module, node, table, columns in self.indexes:
+            owner = self.canonical(('table', table))
+            if owner in {self.canonical(item) for item in self.user_owners}:
+                kind = 'unique' if len(columns) == 1 else 'plain'
+                self.bucket(owner)[kind].append(_obs(module, node, 'SQL_UNIQUE_INDEX' if kind == 'unique' else 'COMPOSITE_UNIQUE_NOT_EMAIL_ONLY'))
+            else:
+                self.bucket(None)['uncertain'].append(_obs(module, node, 'UNIQUE_INDEX_TABLE_UNKNOWN', table=table))
+        merged = {}
+        for owner, bucket in self.buckets.items():
+            into = merged.setdefault(self.canonical(owner), {'unique': [], 'plain': [], 'uncertain': []})
+            for kind, items in bucket.items():
+                into[kind].extend(items)
+        shared = merged.pop(None, {'unique': [], 'plain': [], 'uncertain': []})  # 어느 표인지 모르는 선언은 모든 후보에 적용한다.
+        owners = {self.canonical(owner) for owner in self.user_owners}
+        candidates = ({self.canonical(owner) for owner in self.targets} & owners) or owners
+        pools = [merged.get(owner, {'unique': [], 'plain': [], 'uncertain': []}) for owner in sorted(candidates, key=str)] or [{'unique': [], 'plain': [], 'uncertain': []}]
+        states, collected = [], {'unique': [], 'plain': [], 'uncertain': []}
+        for pool in pools:
+            merged_pool = {kind: pool[kind] + shared[kind] for kind in pool}
+            for kind in collected:
+                collected[kind].extend(merged_pool[kind])
+            states.append('unique' if merged_pool['unique'] else 'undetermined' if merged_pool['uncertain']
+                          else 'plain' if merged_pool['plain'] else 'none')
+        if set(states) == {'unique'}:
+            return 'unique', collected['unique']
+        if 'unique' in states:
+            return 'unclear', collected['plain'] + collected['uncertain']
+        if 'undetermined' in states:
+            return 'undetermined', collected['uncertain']
+        if 'plain' in states:
+            return 'plain', collected['plain']
+        return 'none', []
+
+
 def check_duplicate_email(modules, criteria):
     # REQ-003: 같은 이메일로 두 번 가입할 수 없게 막혀 있는가?
     # 확인하는 것 두 가지:
-    #   ① 이메일 칸에 UNIQUE(중복 금지) 설정이 있는가
+    #   ① 가입으로 사용자를 저장하는 표의 이메일 칸에 UNIQUE(중복 금지) 설정이 있는가
     #   ② 이메일을 비교하기 전에 정리(앞뒤 공백 제거 strip, 소문자로 바꾸기 lower)하는가
-    # ①이 없으면 FAIL, ①은 있는데 ②가 빠졌으면 FAIL, 이메일 칸 자체를 못 찾으면 UNVERIFIED, 모두 있으면 PASS.
+    # ①이 없으면 FAIL, ①은 있는데 ②가 빠졌으면 FAIL, 이메일 칸 자체를 못 찾거나 어느 표의 것인지 확신할 수 없으면 UNVERIFIED, 모두 있으면 PASS.
     rules = criteria['duplicateEmail']
     email = _email_names(criteria)
-    # unique=UNIQUE 설정을 찾은 곳, plain=UNIQUE 없는 이메일 칸을 찾은 곳, normalized=확인한 정리 방법("strip", "lower")
-    unique, plain, normalized = [], [], set()
+    normalized = set()  # 확인한 정리 방법("strip", "lower")
+    # 이메일 UNIQUE는 "사용자 표"(비밀번호를 저장하는 표)에 대한 것일 때만 근거가 된다. 다른 표의 이메일 칸은 가입 중복을 막지 못한다.
+    # 사용자 표인지는 같은 클래스·표 안에 비밀번호 칸(password_hash 등)이 있는지로 판단한다. 표 밖에서 선언한 것은 가리지 못해 모든 후보에 적용한다.
+    matcher = _sensitive(criteria)
+    storage_names = frozenset(criteria['hashPolicy']['storageFieldNames'])
+
+    def is_password(name):
+        return bool(matcher.search(name)) or name in storage_names
+
+    evidence = EmailEvidence()
+    orm_classes = _orm_classes(modules)  # DB 표를 나타내는 클래스들. 비밀번호 칸이 있어도 요청 모델(pydantic)은 DB 표가 아니다.
+    owner_cache = {}  # 클래스·Table 호출 → 비밀번호 칸이 있는지 (같은 클래스를 반복해서 훑지 않으려고 기록)
+    calls = []        # 모든 함수 호출(어느 표를 가입에 쓰는지 찾을 때 다시 훑는다)
     for module in modules.values():
         normalized |= _pydantic_normalization(module.tree, email)  # pydantic 설정으로 정리하는 경우도 인정
+        parents = {child: parent for parent in ast.walk(module.tree) for child in ast.iter_child_nodes(parent)}
+        executed_sql = _executed_sql_strings(module.tree)  # 설명 글(docstring)이나 쓰이지 않는 글자는 SQL 근거로 인정하지 않는다.
         for node in ast.walk(module.tree):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                # "email = Column(...)"처럼 이메일 이름의 변수에 DB 칸 정의를 대입한 경우
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                for target in targets:
-                    if isinstance(target, ast.Name) and email.search(target.id) and isinstance(node.value, ast.Call):
-                        _column_uniqueness(module, node.value, unique, plain)
+            if isinstance(node, ast.ClassDef) and node.name in orm_classes and _stores_password(node, is_password):
+                evidence.user_owners.add(('class', node.name))
+                for item in node.body:  # __tablename__ = "users" 로 이 클래스가 가리키는 표의 이름을 알아 둔다.
+                    if isinstance(item, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '__tablename__' for t in item.targets) \
+                            and isinstance(item.value, ast.Constant) and isinstance(item.value.value, str):
+                        evidence.tablenames[item.value.value.lower()] = ('class', node.name)
             if isinstance(node, ast.Call):
-                name = terminal_name(node.func) or ''
-                # Column("email", ...)처럼 칸 이름을 글자로 준 경우
-                if name in ('Column', 'mapped_column') and node.args and isinstance(node.args[0], ast.Constant) \
-                        and isinstance(node.args[0].value, str) and email.search(node.args[0].value):
-                    _column_uniqueness(module, node, unique, plain)
-                # UniqueConstraint("email") : 이메일 칸에 대한 중복 금지 제약
-                if name == 'UniqueConstraint' and any(
-                        isinstance(arg, ast.Constant) and isinstance(arg.value, str) and email.search(arg.value)
-                        for arg in node.args):
-                    unique.append(_obs(module, node, 'UNIQUE_CONSTRAINT'))
-                # Index("이름", "email", unique=True) : 중복 금지 인덱스
-                if name == 'Index' and _true_keyword(node, 'unique') and any(
-                        isinstance(arg, ast.Constant) and isinstance(arg.value, str) and email.search(arg.value)
-                        for arg in node.args[1:]):
-                    unique.append(_obs(module, node, 'UNIQUE_INDEX'))
-                # something.strip() / .lower() / .casefold() 호출이 이메일 값에 적용되었는지 확인한다.
+                calls.append(node)
+                if (terminal_name(node.func) or '') == 'Table' and _stores_password(node, is_password):
+                    evidence.user_owners.add(('table', _table_call_name(node)))  # Table("users", metadata, Column(...), ...)
+            # 비밀번호 칸이 없는 클래스·표 안의 선언(칸 정의·제약·인덱스)은 사용자 표에 대한 것이 아니므로 근거로 쓰지 않는다.
+            # (strip·lower 같은 정리 방법은 표와 상관없이 이메일 값에 적용된 것이면 인정한다.)
+            owner = (_declaring_owner(node, parents, is_password, owner_cache, orm_classes)
+                     if isinstance(node, (ast.Assign, ast.AnnAssign, ast.Call)) else SKIP)
+            if owner is not SKIP:
+                bucket = evidence.bucket(owner)
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    # "email = Column(...)"처럼 이메일 이름의 변수에 DB 칸 정의를 대입한 경우
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name) and email.search(target.id) and isinstance(node.value, ast.Call):
+                            _column_uniqueness(module, node.value, bucket['unique'], bucket['plain'])
+                if isinstance(node, ast.Call):
+                    name = terminal_name(node.func) or ''
+                    # Column("email", ...)처럼 칸 이름을 글자로 준 경우
+                    if name in ('Column', 'mapped_column') and node.args and isinstance(node.args[0], ast.Constant) \
+                            and isinstance(node.args[0].value, str) and email.search(node.args[0].value):
+                        _column_uniqueness(module, node, bucket['unique'], bucket['plain'])
+                    # UniqueConstraint("email") : 이메일 칸 "하나"에 대한 중복 금지 제약
+                    # UniqueConstraint("email", "tenant_id")나 UniqueConstraint("email", tenant_id)처럼 칸이 둘 이상인 복합 제약은
+                    # tenant_id가 다르면 같은 이메일을 허용하므로 "이메일 중복 금지"의 근거가 되지 못한다.
+                    # (복합이면 plain, 즉 "이메일만의 UNIQUE는 없음"으로 기록한다.) 칸은 글자뿐 아니라 칸 객체(User.email)일 수도 있어서
+                    # 인자를 종류와 상관없이 전부 센다.
+                    if name == 'UniqueConstraint':
+                        hit, count, known = _constraint_columns(node.args, email)
+                        if not known:
+                            bucket['uncertain'].append(_obs(module, node, 'UNIQUE_COLUMNS_UNDETERMINED'))  # 어느 칸인지 모른다 → 단정하지 않는다
+                        elif hit:
+                            if count == 1:
+                                bucket['unique'].append(_obs(module, node, 'UNIQUE_CONSTRAINT'))
+                            else:
+                                bucket['plain'].append(_obs(module, node, 'COMPOSITE_UNIQUE_NOT_EMAIL_ONLY'))
+                    # Index("이름", "email", unique=True) : 이메일 칸 하나에 대한 중복 금지 인덱스 (복합 인덱스는 같은 이유로 제외)
+                    if name == 'Index' and _true_keyword(node, 'unique'):
+                        hit, count, known = _constraint_columns(node.args[1:], email)
+                        if hit and any('where' in (keyword.arg or '') for keyword in node.keywords):
+                            # postgresql_where=... 처럼 조건을 붙인 부분 인덱스는 일부 행에서만 중복을 막는다. 이메일 전체의 중복 금지가 아니다.
+                            bucket['uncertain'].append(_obs(module, node, 'PARTIAL_UNIQUE_INDEX'))
+                        elif not known:
+                            bucket['uncertain'].append(_obs(module, node, 'UNIQUE_COLUMNS_UNDETERMINED'))
+                        elif hit:
+                            if count == 1:
+                                bucket['unique'].append(_obs(module, node, 'UNIQUE_INDEX'))
+                            else:
+                                bucket['plain'].append(_obs(module, node, 'COMPOSITE_UNIQUE_NOT_EMAIL_ONLY'))
+            if isinstance(node, ast.Call):
+                # something.strip() / .lower() / .casefold() 호출이 이메일 값에 적용되었고, 그 결과가 실제로 쓰이는지 확인한다.
                 if isinstance(node.func, ast.Attribute) and node.func.attr in ('strip', 'lower', 'casefold') \
-                        and _touches_email(node, module, email):
+                        and _touches_email(node, module, email) and _result_is_used(node, parents):
                     normalized.add('lower' if node.func.attr == 'casefold' else node.func.attr)
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                _sql_email(module, node, email, unique, plain)  # SQL 글자 안의 이메일 칸 정의도 살펴본다.
-    if not unique:
-        if plain:
-            return CheckOutcome(FAIL, 'EMAIL_UNIQUE_MISSING', plain)  # 이메일 칸은 있는데 UNIQUE가 없다.
-        return CheckOutcome(UNVERIFIED, 'EMAIL_COLUMN_NOT_FOUND')     # 이메일 칸 자체를 찾지 못했다.
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) in executed_sql:
+                # 실제로 실행하는 SQL 글자 안의 이메일 칸 정의도 살펴본다.
+                _sql_email(module, node, email, evidence, is_password)
+    # 가입으로 사용자를 저장하는 표 찾기: 사용자 표 클래스를 이메일·저장 칸 값과 함께 만드는 곳(User(email=..., password_hash=...))
+    class_names = {name for kind, name in evidence.user_owners if kind == 'class'}
+    for call in calls:
+        if terminal_name(call.func) in class_names and any(
+                keyword.arg and (email.search(keyword.arg) or keyword.arg in storage_names) for keyword in call.keywords):
+            evidence.targets.add(('class', terminal_name(call.func)))
+    kind, observations = evidence.decide()
+    if kind == 'unclear':
+        # 비밀번호를 저장하는 표가 둘 이상인데 이메일 UNIQUE가 어떤 표에만 있다. 가입이 어느 표를 쓰는지 확신할 수 없다.
+        return CheckOutcome(UNVERIFIED, 'EMAIL_UNIQUE_TABLE_UNCLEAR', observations)
+    if kind == 'undetermined':
+        # 칸 목록을 코드만으로 알 수 없는 중복 금지 제약이 있다. 그 안에 이메일이 있을 수도 있어서 "UNIQUE가 없다"고 단정할 수 없다.
+        return CheckOutcome(UNVERIFIED, 'EMAIL_UNIQUE_UNDETERMINED', observations)
+    if kind == 'plain':
+        return CheckOutcome(FAIL, 'EMAIL_UNIQUE_MISSING', observations)  # 이메일 칸은 있는데 UNIQUE가 없다.
+    if kind == 'none':
+        return CheckOutcome(UNVERIFIED, 'EMAIL_COLUMN_NOT_FOUND')        # 이메일 칸 자체를 찾지 못했다.
+    unique = observations
     missing = [step for step in rules['requireNormalization'] if step not in normalized]  # 빠진 정리 방법
     if missing:
         return CheckOutcome(FAIL, 'EMAIL_NORMALIZATION_MISSING',
@@ -520,17 +1426,252 @@ def check_duplicate_email(modules, criteria):
     return CheckOutcome(PASS, 'STATIC_DECLARATION', unique)
 
 
-def _sql_email(module, node, email, unique, plain):
-    # SQL 문장이 들어 있는 글자에서 이메일 칸 정의를 찾는다.
-    #   CREATE TABLE ... 안의 이메일 칸 줄에 UNIQUE가 있으면 unique, 없으면 plain으로 기록한다.
-    #   CREATE UNIQUE INDEX ... 문이 이메일 칸에 대한 것이면 unique로 기록한다.
-    text = node.value.lower()
-    if 'create unique index' in text and any(email.search(line) for line in text.splitlines()):
-        unique.append(_obs(module, node, 'SQL_UNIQUE_INDEX'))
-    if 'create table' in text:
-        for line in text.splitlines():
-            if email.search(line):
-                (unique if 'unique' in line else plain).append(_obs(module, node, 'SQL_EMAIL_COLUMN'))
+def _constraint_columns(args, email):
+    # 중복 금지 제약·인덱스에 위치로 넘긴 "칸" 인자들을 살펴본다. 돌려주는 값: (이메일 칸이 들어 있는가, 칸의 개수, 칸을 모두 알 수 있는가)
+    #   칸은 글자("email")일 수도, 칸 객체(User.email, email)일 수도 있다. 종류와 상관없이 모든 위치 인자를 센다.
+    #   (글자 인자만 세면 UniqueConstraint("email", tenant_id)가 "칸 1개"로 잘못 읽힌다.)
+    #   *칸목록이나 func.lower(email)처럼 어떤 칸인지 읽을 수 없는 인자가 하나라도 있으면 세 번째 값이 False(모름)이다.
+    #   이름 붙인 인자(name="uq")는 칸이 아니라서 args에 들어 있지 않다.
+    hit, known = False, True
+    for arg in args:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            hit = hit or bool(email.search(arg.value))
+        elif isinstance(arg, (ast.Name, ast.Attribute)):
+            hit = hit or bool(email.search(terminal_name(arg) or ''))
+        else:
+            known = False
+    return hit, len(args), known
+
+
+def _result_is_used(call, parents):
+    # strip()·lower() 호출의 결과가 어딘가에 쓰이는가? 계산만 하고 버리면 값이 바뀌지 않으므로 정리한 것이 아니다.
+    #   value.strip().lower() 처럼 이어 붙인 호출은 가장 바깥 호출을 기준으로 본다.
+    #   · 문장 하나로만 쓰고 버림(value.lower()) → 쓰이지 않음
+    #   · 변수에 담았는데(cleaned = value.lower()) 그 변수를 한 번도 읽지 않음 → 쓰이지 않음
+    outer = call
+    while True:
+        parent = parents.get(outer)
+        grand = parents.get(parent)
+        if isinstance(parent, ast.Attribute) and parent.value is outer and isinstance(grand, ast.Call) and grand.func is parent:
+            outer = grand  # 호출 결과에 이어서 또 메서드를 부름
+        else:
+            break
+    parent = parents.get(outer)
+    if isinstance(parent, ast.Expr):
+        return False
+    if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is outer:
+        targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+        names = {target.id for target in targets if isinstance(target, ast.Name)}
+        if names and len(names) == len(targets):
+            scope = parents.get(parent)
+            while scope is not None and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+                scope = parents.get(scope)
+            return any(isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load) and item.id in names
+                       for item in ast.walk(scope if scope is not None else parent))
+    return True
+
+
+def _stores_password(owner, is_password):
+    # 이 클래스(또는 Table(...) 호출) 안에 비밀번호 칸이 있는가? 예) password_hash = Column(...) / Column("password_hash", String)
+    for item in ast.walk(owner):
+        if isinstance(item, (ast.Assign, ast.AnnAssign)) and item is not owner:
+            targets = item.targets if isinstance(item, ast.Assign) else [item.target]
+            if any(isinstance(target, ast.Name) and is_password(target.id) for target in targets):
+                return True
+        if isinstance(item, ast.Call) and (terminal_name(item.func) or '') in ('Column', 'mapped_column') and item.args \
+                and isinstance(item.args[0], ast.Constant) and isinstance(item.args[0].value, str) and is_password(item.args[0].value):
+            return True
+    return False
+
+
+def _table_call_name(call):
+    # Table("users", metadata, ...) 호출에서 표 이름(소문자)을 꺼낸다. 이름이 글자가 아니면 "?"이다.
+    first = call.args[0] if call.args else None
+    return first.value.lower() if isinstance(first, ast.Constant) and isinstance(first.value, str) else '?'
+
+
+def _declaring_owner(node, parents, is_password, cache, orm_classes):
+    # 이 선언(칸 정의·제약·인덱스)이 어느 표의 것인지 돌려준다.
+    #   · 가장 가까운 바깥 클래스나 Table(...) 호출에 비밀번호 칸이 있으면 그 표(사용자 표)의 소유자 이름표: ("class", 이름) / ("table", 이름)
+    #   · 비밀번호 칸이 없는 클래스·표이거나, DB 표가 아닌 클래스(요청 모델 등)이면 SKIP (사용자 표가 아니라서 근거로 쓰지 않는다)
+    #   · 바깥에 클래스나 Table이 없으면 어느 표인지 알 수 없으므로 None
+    current = parents.get(node)
+    while current is not None:
+        is_class = isinstance(current, ast.ClassDef)
+        if is_class or (isinstance(current, ast.Call) and (terminal_name(current.func) or '') == 'Table'):
+            if id(current) not in cache:
+                cache[id(current)] = (not is_class or current.name in orm_classes) and _stores_password(current, is_password)
+            if not cache[id(current)]:
+                return SKIP
+            return ('class', current.name) if is_class else ('table', _table_call_name(current))
+        current = parents.get(current)
+    return None
+
+
+def _executed_sql_strings(tree):
+    # 이 파일에서 "실제로 실행하는 SQL"로 쓰이는 글자 상수(조각)의 id 집합을 돌려준다.
+    #   · db.execute("CREATE TABLE ...") / text("...") 처럼 실행 함수의 첫 인자로 직접 넘긴 글자
+    #   · SCHEMA = "CREATE TABLE ..." 로 이름에 담았고, 그 이름을 실행 함수의 첫 인자로 넘기는 경우 (conn.executescript(SCHEMA))
+    # 함수 설명 글(docstring)이나 주석 대신 적어 둔 글, 어디에도 쓰이지 않는 글자는 SQL이 실행된다는 증거가 아니다.
+    # 이런 글자 속의 "CREATE TABLE users (email TEXT UNIQUE ...)"를 UNIQUE 근거로 인정하면 가짜 근거로 PASS를 만들 수 있다.
+    runners = {'execute', 'executemany', 'executescript', 'exec_driver_sql', 'text'}
+    direct, used_names = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and (terminal_name(node.func) or '') in runners and node.args:
+            first = node.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                direct.add(id(first))
+            elif isinstance(first, ast.Name):
+                used_names.add(first.id)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(target, ast.Name) and target.id in used_names for target in targets):
+                direct.add(id(node.value))
+    return direct
+
+
+def _sql_columns(text):
+    # "(email, tenant_id)" 안의 칸 이름들을 쉼표로 나눠 목록으로 돌려준다. 예) "email, tenant_id" → ["email", "tenant_id"]
+    # 이름이 아니라 계산식인 칸(lower(email), substr(email, 1, 3))은 "?"로 돌려준다. 이메일 전체를 보호하는지 알 수 없기 때문이다.
+    columns = []
+    for column in (item.strip() for item in re.split(r',(?![^(]*\))', text)):
+        if not column:
+            continue
+        simple = re.fullmatch(r'[\w."`\[\]]+(?:\s+(?:asc|desc|collate\s+\w+|nulls\s+(?:first|last)))*', column)
+        columns.append(_sql_name(column.split()[0]) if simple else '?')
+    return columns
+
+
+def _sql_name(token):
+    # SQL의 표·칸 이름에서 따옴표와 스키마 이름을 뗀다. 예) "public"."users" → users
+    return token.strip().strip('`"\'[]').rsplit('.', 1)[-1].strip('`"\'[]')
+
+
+def _sql_clean(text):
+    # SQL 글자에서 주석(-- ..., /* ... */)을 지우고 따옴표 글자('...')의 내용을 비운다. 소문자로도 바꾼다.
+    # 이렇게 하지 않으면 DEFAULT 'unique'나 -- unique 같은 주석·문자열 안의 단어를 UNIQUE 제약으로 오인한다.
+    # 큰따옴표·역따옴표·대괄호로 감싼 이름(식별자)은 그대로 둔다.
+    out, index, size = [], 0, len(text)
+    while index < size:
+        char = text[index]
+        if text.startswith('--', index):
+            end = text.find('\n', index)
+            index = size if end < 0 else end
+            out.append(' ')
+        elif text.startswith('/*', index):
+            end = text.find('*/', index + 2)
+            index = size if end < 0 else end + 2
+            out.append(' ')
+        elif text.startswith('$$', index):
+            end = text.find('$$', index + 2)
+            index = size if end < 0 else end + 2
+            out.append("''")
+        elif char == "'":
+            end = index + 1
+            while end < size:
+                if text[end] == "'":
+                    if text.startswith("''", end):
+                        end += 2  # '' 는 따옴표 글자 하나를 뜻하는 표기이다.
+                        continue
+                    break
+                end += 1
+            out.append("''")
+            index = end + 1
+        elif char in '"`[':
+            end = text.find(']' if char == '[' else char, index + 1)
+            end = size - 1 if end < 0 else end
+            out.append(text[index:end + 1])
+            index = end + 1
+        else:
+            out.append(char)
+            index += 1
+    return ''.join(out).lower()
+
+
+def _sql_create_tables(text):
+    # 정리된 SQL 글자에서 CREATE TABLE 문들을 읽어 [(표 이름, [(칸 이름, 칸 정의)], [(제약 종류, 칸 목록)], 끝까지 읽었는가)]로 돌려준다.
+    # 괄호 안을 "맨 바깥 쉼표"로 나눠서 칸 하나하나를 따로 본다. (한 줄에 칸이 여러 개 있어도 칸별로 구분하기 위해서이다.)
+    # 괄호가 맞지 않아 끝까지 읽지 못하면 마지막 값이 False이다. 이런 SQL은 단정하지 않고 확인 못 함으로 둔다.
+    tables = []
+    for match in re.finditer(r'create\s+(?:temp(?:orary)?\s+)?table\s+(?:if\s+not\s+exists\s+)?([^\s(]+)\s*\(', text):
+        depth, index = 1, match.end()
+        while index < len(text) and depth:
+            depth += (text[index] == '(') - (text[index] == ')')
+            index += 1
+        complete = depth == 0
+        body = text[match.end():index - 1 if complete else index]
+        parts, depth, current = [], 0, ''
+        for char in body:
+            depth += (char == '(') - (char == ')')
+            if char == ',' and depth == 0:
+                parts.append(current)
+                current = ''
+            else:
+                current += char
+        parts.append(current)
+        columns, constraints = [], []
+        for part in (' '.join(item.split()) for item in parts):
+            if not part:
+                continue
+            # UNIQUE (칸), UNIQUE KEY 이름 (칸), CONSTRAINT 이름 UNIQUE (칸), PRIMARY KEY (칸)
+            kind = re.match(r'(?:constraint\s+\S+\s+)?(unique|primary\s+key)\b(?:\s+(?:key|index))?(?:\s+[^\s(]+)?\s*\(([^)]*)\)', part)
+            if kind:
+                constraints.append((' '.join(kind.group(1).split()), _sql_columns(kind.group(2))))
+            elif re.match(r'(?:constraint\s+\S+\s+)?(unique|primary\s+key)\b', part):
+                complete = False  # 칸 목록을 읽지 못하는 UNIQUE·PRIMARY KEY 제약: 이메일이 들어 있는지 알 수 없다.
+            elif not re.match(r'(?:constraint\s+\S+\s+)?(foreign\s+key|check)\b', part):
+                name, _, definition = part.partition(' ')
+                columns.append((_sql_name(name), definition))
+        tables.append((_sql_name(match.group(1)), columns, constraints, complete))
+    return tables
+
+
+def _sql_email(module, node, email, evidence, is_password):
+    # SQL 문장이 들어 있는 글자에서 이메일 칸 정의를 찾는다. "사용자 표"(비밀번호 칸이 있는 표)의 이메일 칸 "하나"만 보호하는 UNIQUE만 인정한다.
+    #   CREATE TABLE ... 안의 이메일 칸 정의(그 칸 자신의 정의)에 UNIQUE나 PRIMARY KEY가 있으면 unique, 없으면 plain으로 기록한다.
+    #     다른 칸(예: id INTEGER UNIQUE)의 UNIQUE나 문자열·주석 속 단어(DEFAULT 'unique')는 이메일과 상관없다.
+    #     "UNIQUE (email, tenant_id)"처럼 칸이 둘 이상인 복합 제약은 unique가 아니라 plain이다.
+    #   CREATE UNIQUE INDEX ... ON 표(칸...) 문은 표 이름을 evidence.indexes에 모아 두었다가 나중에 사용자 표인지 확인한다.
+    #   읽을 수 없는 SQL(괄호가 맞지 않음, ALTER TABLE로 칸을 바꿈)에 이메일이 나오면 단정하지 않고 확인 못 함으로 둔다.
+    if not isinstance(node.value, str) or not re.search(r'create|alter|insert', node.value, re.IGNORECASE):
+        return
+    text = _sql_clean(node.value)
+    for match in re.finditer(r'insert\s+(?:or\s+\w+\s+)?into\s+([^\s(]+)', text):
+        evidence.targets.add(('table', _sql_name(match.group(1))))  # 이 표에 새 사용자를 저장한다.
+    for match in re.finditer(r'create\s+unique\s+index[^()]*?\bon\s+(?:only\s+)?(\S+?)\s*(?:using\s+\w+\s*)?\(([^)]*(?:\([^)]*\)[^)]*)*)\)([^;]*)', text):
+        columns = _sql_columns(match.group(2))
+        mentions_email = any(email.search(column) for column in columns) or email.search(match.group(2))
+        if re.search(r'\bwhere\b', match.group(3)) and mentions_email:
+            # WHERE 조건이 붙은 부분 인덱스는 일부 행에서만 중복을 막는다. 이메일 전체의 중복 금지가 아니다.
+            evidence.bucket(None)['uncertain'].append(_obs(module, node, 'PARTIAL_UNIQUE_INDEX', table=_sql_name(match.group(1))))
+        elif '?' in columns and mentions_email:
+            evidence.bucket(None)['uncertain'].append(_obs(module, node, 'UNIQUE_COLUMNS_UNDETERMINED', table=_sql_name(match.group(1))))
+        elif any(email.search(column) for column in columns):
+            evidence.indexes.append((module, node, _sql_name(match.group(1)), columns))
+    for match in re.finditer(r'alter\s+table\s+(\S+)([^;]*)', text):
+        if email.search(match.group(2)):
+            evidence.bucket(None)['uncertain'].append(_obs(module, node, 'SQL_ALTER_NOT_ANALYZED', table=_sql_name(match.group(1))))
+    for table, columns, constraints, complete in _sql_create_tables(text):
+        if not any(is_password(column) for column, _definition in columns):
+            continue  # 비밀번호 칸이 없는 표는 사용자 표가 아니다.
+        owner = ('table', table)
+        evidence.user_owners.add(owner)
+        bucket = evidence.bucket(owner)
+        if not complete:
+            bucket['uncertain'].append(_obs(module, node, 'SQL_NOT_FULLY_READABLE', table=table))
+        for column, definition in columns:
+            if email.search(column):
+                protected = re.search(r'\bunique\b|\bprimary\s+key\b', definition)
+                bucket['unique' if protected else 'plain'].append(_obs(module, node, 'SQL_EMAIL_COLUMN', table=table))
+        for kind, constrained in constraints:
+            if kind in ('unique', 'primary key') and '?' in constrained:
+                bucket['uncertain'].append(_obs(module, node, 'UNIQUE_COLUMNS_UNDETERMINED', table=table))  # 계산식 칸은 알 수 없다.
+            elif kind in ('unique', 'primary key') and any(email.search(column) for column in constrained):
+                if len(constrained) == 1:
+                    bucket['unique'].append(_obs(module, node, 'SQL_UNIQUE_CONSTRAINT', table=table))
+                else:
+                    bucket['plain'].append(_obs(module, node, 'COMPOSITE_UNIQUE_NOT_EMAIL_ONLY', table=table))
 
 
 def _pydantic_normalization(tree, email):
@@ -634,16 +1775,36 @@ def check_exposure(modules, criteria):
     # 새는 길을 찾으면 FAIL, 확신할 수 없는 곳이 있으면 UNVERIFIED, 못 찾았으면 PASS.
     rules = criteria['exposure']
     matcher = _sensitive(criteria)
+    # 검증 오류 응답에 옮겨 담아도 되는 오류 항목의 키(위치, 안내 문구, 종류). input(사용자가 보낸 원래 값)은 포함하지 않는다.
+    safe_keys = frozenset(rules.get('safeValidationErrorKeys', ('loc', 'msg', 'type')))
     fails, unresolved = [], []
     sensitive_models = _models_with_sensitive_fields(modules, matcher)  # 비밀번호 칸이 있는 입력·응답 모델들
     functions = _functions(modules)
+    untrusted_names = _untrusted_function_names(modules)  # 다른 것으로 바뀔 수 있어서 믿을 수 없는 함수 이름들
+    # 해시 함수의 결과를 담은 변수도 "비밀번호를 품은 변수"로 따라가기 위한 도구들(REQ-005와 같은 방법으로 해시 호출을 알아본다)
+    ctx = _hash_context(modules, criteria['hashPolicy'])
     uses_fastapi, handler_found = False, False  # FastAPI를 쓰는가 / 검증 오류 처리기를 찾았는가
+    project_classes = {node.name for module in modules.values() for node in ast.walk(module.tree) if isinstance(node, ast.ClassDef)}
+
+    def check_registered_handler(module, node, handler):
+        # RequestValidationError 처리기로 등록된 값(handler)을 분석한다. 등록 방법은 세 가지다.
+        #   app.add_exception_handler(RequestValidationError, 처리기) / app.exception_handlers[RequestValidationError] = 처리기
+        #   FastAPI(exception_handlers={RequestValidationError: 처리기})
+        # 처리기가 소스에 적힌 함수 이름이면 그 함수들을 분석한다. 람다이거나, 모르는 이름이거나, 다른 것으로 바뀔 수 있는 이름이면
+        # 어떤 코드가 실행되는지 알 수 없으므로 PASS 대신 UNVERIFIED로 남긴다.
+        target = terminal_name(handler) if isinstance(handler, (ast.Name, ast.Attribute)) else None
+        found = functions.get(target or '', [])
+        for owner, function in found:
+            _check_validation_handler(owner, function, fails, unresolved, safe_keys)
+        if not found or target in untrusted_names:
+            unresolved.append(_obs(module, node, 'VALIDATION_HANDLER_UNRESOLVED'))
+
     seen = set()  # 이미 살펴본 코드 조각들(같은 곳을 두 번 판정하지 않으려고 기록)
     for module in modules.values():
         # 함수마다 "비밀번호 필드를 가진 객체를 담은 변수"가 다르다. 그래서 안쪽 함수부터 차례로 살펴보고,
         # 각 코드 조각은 "가장 가까운 함수의 변수 목록"을 기준으로 딱 한 번만 판정한다.
-        scopes = [(node, _sensitive_vars(node, sensitive_models)) for node in ast.walk(module.tree)
-                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        scopes = [(node, _sensitive_vars(node, sensitive_models, matcher, ctx))
+                  for node in ast.walk(module.tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
         scopes.reverse()
         scopes.append((module.tree, frozenset()))  # 마지막으로 함수 밖의 코드(파일 최상위)를 살펴본다.
         for scope, svars in scopes:
@@ -662,9 +1823,31 @@ def check_exposure(modules, criteria):
                     if isinstance(node.func, ast.Attribute) and node.func.attr == 'add_exception_handler' \
                             and node.args and (terminal_name(node.args[0]) or '') == 'RequestValidationError':
                         handler_found = True
-                        target = terminal_name(node.args[1]) if len(node.args) > 1 else None
-                        for owner, function in functions.get(target or '', []):
-                            _check_validation_handler(owner, function, fails, unresolved)
+                        check_registered_handler(module, node, node.args[1] if len(node.args) > 1 else None)
+                    # app.add_api_route("/signup", signup, response_model=...) 처럼 데코레이터 없이 경로 함수를 등록하는 방법.
+                    # 데코레이터가 없어도 같은 기준으로 그 함수의 응답을 확인한다.
+                    if isinstance(node.func, ast.Attribute) and node.func.attr in ('add_api_route', 'add_url_rule'):
+                        endpoints = [*node.args[1:], *(k.value for k in node.keywords if k.arg in ('endpoint', 'view_func'))]
+                        for endpoint in endpoints:
+                            for _owner, route in functions.get(terminal_name(endpoint) or '', []) if isinstance(endpoint, (ast.Name, ast.Attribute)) else []:
+                                _check_route(module, route, node, node.keywords, matcher, sensitive_models, project_classes,
+                                             _sensitive_vars(route, sensitive_models, matcher, ctx), functions, fails, unresolved)
+                    # FastAPI(exception_handlers={RequestValidationError: 처리기}) 로 등록하는 방법
+                    for keyword in node.keywords:
+                        if keyword.arg == 'exception_handlers' and isinstance(keyword.value, ast.Dict):
+                            for key, handler in zip(keyword.value.keys, keyword.value.values):
+                                if key is not None and (terminal_name(key) or '') == 'RequestValidationError':
+                                    handler_found = True
+                                    check_registered_handler(module, node, handler)
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if not (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute)):
+                            continue
+                        if target.value.attr == 'exception_handlers' and (terminal_name(target.slice) or '') == 'RequestValidationError':
+                            handler_found = True  # app.exception_handlers[RequestValidationError] = 처리기
+                            check_registered_handler(module, node, node.value)
+                        elif target.value.attr in ('headers', 'cookies') and sensitive_refs(node.value, matcher, svars):
+                            fails.append(_obs(module, node, 'SENSITIVE_IN_HEADER'))  # response.headers["X"] = 비밀번호
                 # ② raise ... 오류 메시지에 비밀번호를 넣는가
                 elif isinstance(node, ast.Raise) and node.exc is not None and sensitive_refs(node.exc, matcher, svars):
                     fails.append(_obs(module, node, 'SENSITIVE_IN_ERROR'))
@@ -677,10 +1860,17 @@ def check_exposure(modules, criteria):
                         if decorator.func.attr == 'exception_handler' and decorator.args \
                                 and (terminal_name(decorator.args[0]) or '') == 'RequestValidationError':
                             handler_found = True
-                            _check_validation_handler(module, node, fails, unresolved)
+                            _check_validation_handler(module, node, fails, unresolved, safe_keys)
+                            # 다른 데코레이터가 함께 붙어 있으면 실제로 등록되는 함수가 이 함수와 다를 수 있다.
+                            # (exception_handler 데코레이터끼리는 함수를 바꾸지 않으므로 괜찮다.)
+                            if any(not (isinstance(other, ast.Call) and isinstance(other.func, ast.Attribute)
+                                        and other.func.attr == 'exception_handler')
+                                   for other in node.decorator_list):
+                                unresolved.append(_obs(module, node, 'VALIDATION_HANDLER_DECORATED'))
                         # ③ @router.post(...) 같은 API 경로 함수의 응답을 확인한다.
                         if decorator.func.attr in rules['routeMethods']:
-                            _check_route(module, node, decorator, matcher, sensitive_models, svars, fails, unresolved)
+                            _check_route(module, node, decorator, decorator.keywords, matcher, sensitive_models,
+                                         project_classes, svars, functions, fails, unresolved)
     if uses_fastapi and rules['requireValidationErrorFilter'] and sensitive_models and not handler_found:
         # FastAPI는 입력 검증에 실패하면 기본으로 "입력값(비밀번호 포함)"을 오류 응답에 담아 돌려준다.
         # 비밀번호 칸이 있는 모델을 쓰는데 이를 가려 주는 처리기가 없다면 노출 위험이 있다.
@@ -697,6 +1887,8 @@ def _is_output_call(call, name, rules):
     # 이 호출이 "밖으로 글자를 내보내는 호출"(로그, 화면 출력, 표준 오류 출력 등)인가?
     if name in rules.get('outputCalls', ['print']):
         return True  # print(...), sys.stderr.write(...) 같은 직접 출력
+    if isinstance(call.func, ast.Attribute) and call.func.attr in rules.get('writeMethods', ()):
+        return True  # 파일·응답에 쓰는 file.write(...), response.set_cookie(...) 같은 호출
     if isinstance(call.func, ast.Attribute) and call.func.attr in rules['logMethods']:
         # logger.info(...)처럼 로그 함수 이름(info, error 등)으로 부른 경우.
         # 부르는 대상이 logging 모듈이거나, 이름에 log가 들어 있으면(logger, app_log 등) 로그 호출로 본다.
@@ -719,13 +1911,36 @@ def _models_with_sensitive_fields(modules, matcher):
                             and not any(isinstance(part, ast.Name) and part.id == 'SecretStr'
                                         for part in ast.walk(item.annotation)):
                         names.add(node.name)
+    # 비밀번호 칸을 가진 모델을 물려받은 하위 클래스(class SignupIn(SignupRequest))와 별칭(Req = SignupRequest)도 같은 모델이다.
+    # 새로 찾은 이름이 또 다른 하위 클래스·별칭의 바탕이 될 수 있어서, 더 이상 늘어나지 않을 때까지 반복한다.
+    changed = True
+    while changed:
+        changed = False
+        for module in modules.values():
+            for node in ast.walk(module.tree):
+                if isinstance(node, ast.ClassDef) and node.name not in names \
+                        and any((terminal_name(base) or '') in names for base in node.bases):
+                    names.add(node.name)
+                    changed = True
+                elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None \
+                        and (terminal_name(node.value) or '') in names:
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in names:
+                            names.add(target.id)
+                            changed = True
     return names
 
 
-def _sensitive_vars(function, sensitive_models):
-    # 한 함수 안에서 "비밀번호 필드를 가진 모델의 객체"를 담고 있는 변수 이름들을 찾는다.
-    #   1) 매개변수의 형식 표시가 그 모델인 것. 예) def signup(payload: SignupRequest)  → payload
+def _sensitive_vars(function, sensitive_models, matcher=None, ctx=None):
+    # 한 함수 안에서 "비밀번호(또는 그 해시)를 품고 있는 변수"의 이름들을 찾는다.
+    #   1) 매개변수의 형식 표시가 비밀번호 필드를 가진 모델인 것. 예) def signup(payload: SignupRequest)  → payload
     #   2) 그 모델로 직접 만든 것. 예) request = SignupRequest(...)  → request
+    #   3) 요청 본문을 통째로 읽은 것. 예) data = await request.json()  → data
+    #   4) 위 변수의 값을 옮겨 담은 것. 예) copy = payload / data = {"p": payload.password} / text = f"{payload.password}"
+    #      / pw = payload.password. 이름이 password처럼 보이지 않아도 값은 비밀번호이므로 따라가야 한다.
+    #   5) 해시 함수의 결과를 담은 것. 예) hashed = hash_password(...)  (REQ-006은 해시 노출도 금지한다)
+    # 4)·5)는 matcher가 주어졌을 때만 찾는다. 새로 찾은 변수가 또 다른 변수의 값이 될 수 있어서 더 늘어나지 않을 때까지 반복한다.
     names = set()
     arguments = function.args
     for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
@@ -736,10 +1951,88 @@ def _sensitive_vars(function, sensitive_models):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) \
                 and terminal_name(node.value.func) in sensitive_models:
             names.update(target.id for target in node.targets if isinstance(target, ast.Name))
+    if matcher is None:
+        return frozenset(names)
+
+    def carries(value):
+        # 이 값에 비밀번호(또는 해시)가 들어 있는가?
+        inner = value.value if isinstance(value, ast.Await) else value  # await는 호출 결과를 쓰는 것과 같다
+        return (_reads_request_body(inner)
+                or bool(sensitive_refs(inner, matcher, frozenset(names), strict=True))
+                or (ctx is not None and isinstance(inner, ast.Call) and _is_hash_call(inner, ctx, scope=function)))
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(function):
+            for target, value in _assignment_pairs(node):
+                if carries(value):
+                    for name in _target_names(target):
+                        if name not in names:
+                            names.add(name)
+                            changed = True
+            # 안쪽에 만든 함수가 비밀번호를 돌려주면(def get(): return payload.password) 그 함수를 부른 결과도 비밀번호를 품는다.
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node is not function and node.name not in names \
+                    and any(isinstance(item, ast.Return) and item.value is not None and carries(item.value)
+                            for item in ast.walk(node)):
+                names.add(node.name)
+                changed = True
     return frozenset(names)
 
 
-def _check_validation_handler(module, function, fails, unresolved):
+def _assignment_pairs(node):
+    # 값이 어떤 이름(들)에 담기는 문장 하나를 (담기는 곳, 담는 값) 쌍들로 풀어 돌려준다. 해당하지 않는 문장이면 빈 목록이다.
+    #   a = v / a: T = v / a += v / (a := v) / for a in v  →  (a, v)
+    #   a, b = x, y  →  (a, x), (b, y)  (개수가 같은 튜플이면 하나씩 짝짓고, 아니면 모든 이름에 값 전체를 짝짓는다)
+    if isinstance(node, ast.Assign):
+        pairs = [(target, node.value) for target in node.targets]
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        pairs = [(node.target, node.value)]
+    elif isinstance(node, (ast.AugAssign, ast.NamedExpr)):
+        pairs = [(node.target, node.value)]
+    elif isinstance(node, (ast.For, ast.AsyncFor)):
+        method = node.iter.func.attr if isinstance(node.iter, ast.Call) and isinstance(node.iter.func, ast.Attribute) else None
+        if method == 'keys':
+            return []  # 사전의 키(항목 이름)만 꺼내므로 값이 담기지 않는다.
+        if method == 'items' and isinstance(node.target, (ast.Tuple, ast.List)) and len(node.target.elts) == 2:
+            pairs = [(node.target.elts[1], node.iter)]  # for 키, 값 in 사전.items(): 값 쪽에만 내용이 담긴다.
+        else:
+            pairs = [(node.target, node.iter)]
+    else:
+        return []
+    result = []
+    for target, value in pairs:
+        if (isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List))
+                and len(target.elts) == len(value.elts)
+                and not any(isinstance(item, ast.Starred) for item in [*target.elts, *value.elts])):
+            result.extend(zip(target.elts, value.elts))
+        else:
+            result.append((target, value))
+    return result
+
+
+def _target_names(target):
+    # 대입 대상에 들어 있는 변수 이름들. 예) a → [a],  (a, b) → [a, b],  a.x · a[0] → [] (이름이 새로 묶이지 않는다)
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for item in target.elts for name in _target_names(item)]
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return []
+
+
+def _reads_request_body(value):
+    # 요청 본문을 통째로 읽는 코드인가? 예) await request.json() / request.get_json() / request.form / await request.body()
+    # 본문 안에는 비밀번호가 들어 있으므로, 그 결과를 담은 변수는 "비밀번호를 품은 변수"로 본다.
+    target = value.func if isinstance(value, ast.Call) else value
+    if not (isinstance(target, ast.Attribute) and target.attr in ('json', 'get_json', 'form', 'body', 'get_data', 'data', 'values')):
+        return False
+    base = terminal_name(target.value) or ''
+    return 'request' in base.lower() or base.lower() == 'req'
+
+
+def _check_validation_handler(module, function, fails, unresolved, safe_keys=frozenset({'loc', 'msg', 'type'})):
     # "입력 검증 오류 처리기" 함수가 사용자에게 돌려주는 내용에 입력값(비밀번호)이 그대로 실리는지 확인한다.
     # FastAPI에서 exc.errors()가 돌려주는 오류 목록 각 항목에는 사용자가 보낸 원래 값("input")이 들어 있다.
     #   위험: exc.errors()나 exc.body를 가공 없이 그대로 응답에 넣는다.
@@ -777,29 +2070,27 @@ def _check_validation_handler(module, function, fails, unresolved):
                         tainted.add(target.id)
                         changed = True
 
-    def removes_input(loop):
-        # 반복문이 각 항목에서 "input"을 지우는가? (item.pop("input") 또는 del item["input"])
-        names = {item.id for item in ast.walk(loop.target) if isinstance(item, ast.Name)}  # 반복문이 꺼내 쓰는 변수 이름
-        for item in ast.walk(loop):
-            if (isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute) and item.func.attr == 'pop'
-                    and item.args and isinstance(item.args[0], ast.Constant) and item.args[0].value == 'input'
-                    and isinstance(item.func.value, ast.Name) and item.func.value.id in names):
-                return True
-            if isinstance(item, ast.Delete):
-                for target in item.targets:
-                    if (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
-                            and target.value.id in names and isinstance(target.slice, ast.Constant)
-                            and target.slice.value == 'input'):
-                        return True
-        return False
-
-    # "input을 지우는 반복문"으로 정리한 오류 목록(또는 그 변수)은 안전하다고 기록해 둔다.
-    cleaned_loops, cleaned_names = set(), set()
+    # "input을 지우는 반복문"을 찾는다. 일부 항목에서만 지워질 수 있는 모양은 정리로 인정하지 않는다(아래 설명 참고).
+    #   cleaned_at    : 정리가 "확실히" 끝나는 위치. {오류 목록 변수 이름: (줄, 칸)}  (이 위치 뒤에서 쓰는 목록은 안전하다)
+    #   cleaned_loops : 그 반복문들이 훑는 목록 코드 조각의 id (반복문 자체를 "모르는 모양"으로 보지 않으려고 기록)
+    #   attempted     : input을 지우려는 시도는 있지만 모든 항목에서 지워진다고 증명하지 못한 목록 변수 이름
+    #                   (예: if 안에서만 지움, continue로 건너뛸 수 있음) → 이 목록을 응답에 쓰면 "모른다"로 처리한다.
+    # 확실한 정리는 아래 조건을 모두 만족하는 반복문뿐이다.
+    #   · 함수 본문 바로 아래에 있는 문장이다(if·try 안에 들어 있지 않다). 그래야 항상 실행되고, 그 뒤의 코드는 정리가 끝난 다음에 실행된다.
+    #   · 오류 목록을 담은 변수를 훑고, 그 변수는 함수 안에서 딱 한 번만 대입된다(나중에 원본으로 되돌리는 대입이 없다).
+    #   · 본문이 "항목에서 키를 지우는 문장"(item.pop("input", None), del item["input"])만으로 이루어져 있고 그중 하나가 input이다.
+    #     (조건문·continue·break·return·다시 대입이 본문에 있으면 일부 항목에서 지우기를 건너뛸 수 있다.)
+    bindings = _name_bindings(function)
+    cleaned_at, cleaned_loops, attempted = {}, set(), set()
     for node in ast.walk(function):
-        if isinstance(node, ast.For) and raw(node.iter, tainted) and removes_input(node):
+        if not (isinstance(node, ast.For) and isinstance(node.iter, ast.Name) and node.iter.id in tainted):
+            continue
+        if node in function.body and _is_input_cleaning_loop(node, bindings.get(node.iter.id, 0)):
             cleaned_loops.add(id(node.iter))
-            if isinstance(node.iter, ast.Name):
-                cleaned_names.add(node.iter.id)
+            end_position = (node.end_lineno, node.end_col_offset)
+            cleaned_at[node.iter.id] = min(end_position, cleaned_at.get(node.iter.id, end_position))
+        elif _mentions_input_removal(node):
+            attempted.add(node.iter.id)
 
     # 이제 원본 오류 목록을 "사용하는 곳"을 모두 찾아서 안전한 사용인지 판정한다.
     reported = set()  # 이미 판정한 코드 조각
@@ -808,6 +2099,16 @@ def _check_validation_handler(module, function, fails, unresolved):
                 and node.value.id in exc_names):
             # exc.body는 사용자가 보낸 요청 본문 전체(비밀번호 포함)이다. 응답에 쓰면 위험하다.
             fails.append(_obs(module, node, 'VALIDATION_ERROR_ECHOES_INPUT'))
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in exc_names:
+            # 예외 객체(exc) 자체도 오류 목록(input 포함)을 품고 있어서, str(exc)·exc.args·로그 출력·응답 값으로 쓰면 입력값이 나간다.
+            # 허용하는 사용은 exc.errors() 호출(아래에서 따로 판정)과 type(exc)처럼 값을 드러내지 않는 호출뿐이다.
+            parent = parents.get(node)
+            if isinstance(parent, ast.Attribute) and parent.value is node:
+                if parent.attr not in ('errors', 'body'):  # body는 위에서 이미 판정한다.
+                    fails.append(_obs(module, node, 'VALIDATION_ERROR_ECHOES_INPUT'))
+            elif not (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id in SAFE_CALLS):
+                fails.append(_obs(module, node, 'VALIDATION_ERROR_ECHOES_INPUT'))
             continue
         is_use = is_errors_call(node) or (
             isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in tainted)
@@ -836,6 +2137,15 @@ def _check_validation_handler(module, function, fails, unresolved):
                 if any(key is None for key in keys) or any(
                         isinstance(key, ast.Constant) and key.value == 'input' for key in keys):
                     fails.append(_obs(module, use, 'VALIDATION_ERROR_ECHOES_INPUT'))
+                else:
+                    # 키 이름이 안전해 보여도, 값에 사용자가 보낸 입력값(error["input"])을 담으면 똑같이 새어 나간다.
+                    # 그래서 각 값이 오류 항목의 어느 부분에서 왔는지도 확인한다.
+                    loop_names = {item.id for item in ast.walk(parent.target) if isinstance(item, ast.Name)}
+                    verdict = _error_values_verdict(element.values, loop_names, parents, safe_keys)
+                    if verdict == 'FAIL':
+                        fails.append(_obs(module, use, 'VALIDATION_ERROR_ECHOES_INPUT'))
+                    elif verdict == 'UNKNOWN':
+                        unresolved.append(_obs(module, use, 'VALIDATION_ERROR_SHAPE_UNKNOWN'))
             elif isinstance(element, ast.Name) and element.id in {
                     item.id for item in ast.walk(parent.target) if isinstance(item, ast.Name)}:
                 # [e for e in exc.errors()] 처럼 항목을 그대로 복사하면 input도 그대로 들어간다.
@@ -844,26 +2154,134 @@ def _check_validation_handler(module, function, fails, unresolved):
                 unresolved.append(_obs(module, use, 'VALIDATION_ERROR_SHAPE_UNKNOWN'))  # 모르는 모양
             continue
         if isinstance(parent, ast.For) and parent.iter is use:
-            # 일반 반복문으로 오류 목록을 훑는 경우. 위에서 "input을 지운다"고 확인된 반복문이 아니면 모른다고 처리한다.
+            # 일반 반복문으로 오류 목록을 훑는 경우. 위에서 "input을 확실히 지운다"고 확인된 반복문이 아니면 모른다고 처리한다.
             if id(use) not in cleaned_loops:
                 unresolved.append(_obs(module, use, 'VALIDATION_ERROR_SHAPE_UNKNOWN'))
             continue
-        if isinstance(use, ast.Name) and use.id in cleaned_names:
-            continue  # input을 지운 뒤의 목록을 쓰는 것은 안전하다.
+        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id in SAFE_CALLS \
+                and parent.args and parent.args[0] is use:
+            continue  # len(errors) 처럼 개수·종류만 확인하는 호출은 값을 드러내지 않는다.
+        if isinstance(use, ast.Name) and use.id in cleaned_at:
+            # input을 지우는 반복문이 확실히 끝난 "뒤"에서 쓰는 목록은 안전하다. 그 앞에서(예: 정리 전에 먼저 반환) 쓰면 원본이다.
+            if (use.lineno, use.col_offset) > cleaned_at[use.id]:
+                continue
+        elif isinstance(use, ast.Name) and use.id in attempted:
+            # 일부 항목에서만 지워질 수 있다. 모든 항목에서 지워진다고 증명할 수 없으므로 "모른다"로 둔다.
+            unresolved.append(_obs(module, use, 'VALIDATION_ERROR_SHAPE_UNKNOWN'))
+            continue
         fails.append(_obs(module, use, 'VALIDATION_ERROR_ECHOES_INPUT'))  # 그 밖의 사용은 원본을 그대로 쓰는 것
 
 
-def _check_route(module, function, decorator, matcher, sensitive_models, svars, fails, unresolved):
+def _removed_keys(statement, item):
+    # 문장 하나가 "item(오류 항목)에서 글자 키를 지우는 문장"이면 지우는 키 목록을, 아니면 None을 돌려준다.
+    #   item.pop("input")  /  item.pop("input", None)  /  del item["input"]  (del은 여러 개를 한 번에 지울 수도 있다)
+    #   키와 기본값은 글자·상수여야 한다(계산 중에 다른 일이 일어날 수 있는 식은 인정하지 않는다).
+    if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
+        call = statement.value
+        func = call.func
+        if (isinstance(func, ast.Attribute) and func.attr == 'pop' and isinstance(func.value, ast.Name)
+                and func.value.id == item and 1 <= len(call.args) <= 2 and not call.keywords
+                and all(isinstance(arg, ast.Constant) for arg in call.args)
+                and isinstance(call.args[0].value, str)):
+            return [call.args[0].value]
+        return None
+    if isinstance(statement, ast.Delete):
+        keys = []
+        for target in statement.targets:
+            if not (isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) and target.value.id == item
+                    and isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str)):
+                return None
+            keys.append(target.slice.value)
+        return keys
+    return None
+
+
+def _is_input_cleaning_loop(loop, list_bindings):
+    # 이 반복문이 오류 목록의 "모든 항목"에서 input을 반드시 지우는가? (확실한 경우에만 True)
+    #   list_bindings : 훑는 목록 변수가 함수 안에서 대입(바인딩)되는 횟수. 1이어야 한다.
+    if list_bindings != 1 or loop.orelse or not isinstance(loop.target, ast.Name):
+        return False
+    removed = []
+    for statement in loop.body:
+        keys = _removed_keys(statement, loop.target.id)
+        if keys is None:
+            return False  # 삭제문이 아닌 문장(if, continue, 다시 대입 등)이 있으면 지우기를 건너뛸 수 있다.
+        removed.extend(keys)
+    return 'input' in removed
+
+
+def _mentions_input_removal(loop):
+    # 반복문 어딘가에서 input을 지우려는 시도가 있는가? (조건부 삭제처럼 "모든 항목에서 지운다"고 증명은 못 하는 경우를 가려낸다)
+    if not isinstance(loop.target, ast.Name):
+        return False
+    for node in ast.walk(loop):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'pop' \
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == loop.target.id \
+                and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == 'input':
+            return True
+        if isinstance(node, ast.Delete) and any(
+                isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+                and target.value.id == loop.target.id and isinstance(target.slice, ast.Constant)
+                and target.slice.value == 'input' for target in node.targets):
+            return True
+    return False
+
+
+def _error_values_verdict(values, loop_names, parents, safe_keys):
+    # 오류 목록을 새 사전으로 옮겨 담을 때, 사전의 "값"들이 오류 항목의 어느 부분을 가져오는지 판정한다.
+    #   안전(OK)    : error["loc"] 처럼 허용한 키만 꺼내거나, 오류 항목과 상관없는 값
+    #   위험(FAIL)  : error["input"], 또는 error 자체를 통째로 사용(str(error) 등) → 사용자가 보낸 값이 들어간다.
+    #   모름(UNKNOWN): error["ctx"] 처럼 허용 목록에 없는 키. 안에 무엇이 들어 있는지 코드만으로 알 수 없다.
+    # 돌려주는 값은 가장 심각한 하나이다: 'FAIL' > 'UNKNOWN' > 'OK'
+    verdict = 'OK'
+    for value in values:
+        for node in ast.walk(value):
+            if not (isinstance(node, ast.Name) and node.id in loop_names):
+                continue
+            parent = parents.get(node)
+            key = None
+            if isinstance(parent, ast.Subscript) and parent.value is node:
+                if isinstance(parent.slice, ast.Constant) and isinstance(parent.slice.value, str):
+                    key = parent.slice.value                       # error["loc"]
+            elif isinstance(parent, ast.Attribute) and parent.attr == 'get' and parent.value is node:
+                call = parents.get(parent)                         # error.get("loc")
+                if isinstance(call, ast.Call) and call.args and isinstance(call.args[0], ast.Constant) \
+                        and isinstance(call.args[0].value, str):
+                    key = call.args[0].value
+            if key is None:
+                return 'FAIL'  # 오류 항목을 통째로 쓰거나 키를 알 수 없다 → 입력값이 포함될 수 있다.
+            if key == 'input':
+                return 'FAIL'
+            if key not in safe_keys:
+                verdict = 'UNKNOWN'
+    return verdict
+
+
+def _is_response_object(call):
+    # 이 호출이 "응답 객체를 직접 만드는 호출"인가? 예) JSONResponse(...), Response(...), jsonify(...)
+    # 응답 객체를 직접 돌려주면 FastAPI의 response_model 걸러내기가 적용되지 않는다.
+    return isinstance(call, ast.Call) and ((terminal_name(call.func) or '').endswith('Response')
+                                           or (terminal_name(call.func) or '') in ('jsonify', 'make_response'))
+
+
+def _check_route(module, function, anchor, keywords, matcher, sensitive_models, project_classes, svars, helpers, fails, unresolved):
     # API 경로 함수(@router.post 등이 붙은 함수)가 응답으로 비밀번호를 돌려주는지 확인한다.
-    #   decorator = 그 함수 위에 붙은 꼬리표. 응답 모양을 정하는 response_model 같은 인자가 들어 있을 수 있다.
-    for keyword in decorator.keywords:
-        if keyword.arg == 'response_model' and (terminal_name(keyword.value) or '') in sensitive_models:
-            # 응답 모양 자체가 비밀번호 칸이 있는 모델이다.
-            fails.append(_obs(module, decorator, 'SENSITIVE_RESPONSE_MODEL'))
-    has_response_model = any(keyword.arg == 'response_model' for keyword in decorator.keywords)
-    # response_model이 지정되어 있으면 돌려주는 객체는 그 모델에 있는 필드만 응답에 나간다.
-    # 그래서 객체를 통째로 반환해도 노출로 보지 않는다(visible_vars를 비운다).
-    visible_vars = frozenset() if has_response_model else svars
+    #   anchor   = 그 함수를 경로로 등록한 곳(데코레이터나 add_api_route 호출). 결과의 위치로 쓴다.
+    #   keywords = 그 등록 호출에 넘긴 인자들. 응답 모양을 정하는 response_model 같은 인자가 들어 있을 수 있다.
+    declared = next((keyword.value for keyword in keywords if keyword.arg == 'response_model'), None)
+    declared_names = {part.id for part in ast.walk(declared) if isinstance(part, ast.Name)} if declared is not None else set()
+    if declared_names & sensitive_models:
+        fails.append(_obs(module, anchor, 'SENSITIVE_RESPONSE_MODEL'))  # 응답 모양 자체가 비밀번호 칸이 있는 모델이다.
+    # response_model이 실제로 응답을 걸러 준다고 인정하는 경우: 프로젝트 안에 정의된 모델 클래스를 가리킬 때만이다.
+    #   response_model=None 은 걸러내기를 "끄는" 설정이고, 소스에서 찾을 수 없는 모델(외부에서 가져온 것)은 어떤 필드가 있는지 알 수 없다.
+    filters = bool(declared_names & project_classes) and not (isinstance(declared, ast.Constant) and declared.value in (None, False))
+    # 걸러 준다고 인정할 때만, 돌려주는 객체는 그 모델에 있는 필드만 응답에 나간다고 보고 객체를 통째로 반환해도 노출로 보지 않는다.
+    visible_vars = frozenset() if filters else svars
+    # 응답 객체를 직접 만드는 코드(JSONResponse(content=...) 등)는 response_model이 있어도 걸러지지 않는다.
+    # 그래서 어디서 만들든 그 안에 비밀번호가 들어 있는지 항상 전부 확인한다.
+    for node in ast.walk(function):
+        if _is_response_object(node) and sensitive_refs(node, matcher, svars):
+            fails.append(_obs(module, node, 'SENSITIVE_RESPONSE_VALUE'))
     for node in ast.walk(function):
         if not isinstance(node, ast.Return) or node.value is None:
             continue  # return 문만 본다.
@@ -873,12 +2291,20 @@ def _check_route(module, function, decorator, matcher, sensitive_models, svars, 
                 # 응답 사전의 키 이름이 비밀번호처럼 보이면 위험하다. 예) {"password_hash": ...}
                 if isinstance(key, ast.Constant) and isinstance(key.value, str) and matcher.search(key.value):
                     fails.append(_obs(module, node, 'SENSITIVE_RESPONSE_KEY'))
+        if _is_response_object(value):
+            continue  # 응답 객체는 위에서 이미 확인했다.
+        if filters and isinstance(value, ast.Call) and any(
+                _is_response_object(inner) for _owner, helper in helpers.get(terminal_name(value.func) or '', [])
+                for inner in ast.walk(helper)):
+            # response_model이 있어도, 응답 객체를 직접 만들어 돌려줄 수 있는 도우미 함수의 결과는 걸러지지 않을 수 있다.
+            unresolved.append(_obs(module, node, 'RESPONSE_BUILT_BY_HELPER'))
+            continue
         if sensitive_refs(value, matcher, visible_vars):
             fails.append(_obs(module, node, 'SENSITIVE_RESPONSE_VALUE'))  # 응답 값에 비밀번호를 사용
-        elif not has_response_model and _dumps_unknown_object(value):
+        elif not filters and _dumps_unknown_object(value):
             # 객체의 전체 필드를 펼쳐서 응답에 넣었다. 어떤 필드가 들어 있는지 코드만으로는 알 수 없다.
             unresolved.append(_obs(module, node, 'UNFILTERED_OBJECT_RESPONSE'))
-        elif isinstance(value, (ast.Name, ast.Attribute)) and not has_response_model:
+        elif isinstance(value, (ast.Name, ast.Attribute)) and not filters:
             # 객체를 걸러 주는 장치 없이 그대로 반환한다. 어떤 필드가 나가는지 알 수 없다.
             unresolved.append(_obs(module, node, 'UNFILTERED_OBJECT_RESPONSE'))
 
@@ -936,24 +2362,30 @@ def dispose_findings(modules, criteria, findings):
 
 
 def _judge_literal(module, line, matcher, rule):
-    # "코드에 비밀번호가 직접 적혀 있다"는 경고가 정말 맞는지, 그 줄을 보고 판정한다.
-    # 그 줄에서 (대입 대상 이름, 따옴표 글자) 쌍을 찾아 하나씩 살펴본다.
-    #   안내 문구(공백·한글이 들어 있는 문장) → 오탐(FALSE_POSITIVE)
-    #   필드 이름 글자(예: "password")        → 오탐(FALSE_POSITIVE)
-    #   비밀번호처럼 보이는 이름에 자격증명 같은 값을 넣음(예: DB_PASSWORD에 실제 비밀번호처럼 보이는 글자를 대입) → 진짜 문제(CONFIRMED)
-    #   그 외                                  → 판정하지 않음(None)
+    # "코드에 비밀번호가 직접 적혀 있다"는 경고(B105~B107)가 정말 맞는지, 그 줄을 보고 판정한다.
+    # 그 줄에서 (대입 대상 이름, 따옴표 글자) 쌍을 찾아 하나씩 살펴본다. 판단 순서가 중요하다.
+    #   1) 빈 글자("")                                     → 값이 없으니 자격증명이 아니다(오탐)
+    #   2) 대상 이름이 비밀번호처럼 보이고 값이 비어 있지 않음 → 진짜 문제(CONFIRMED)
+    #        예) password = "password", password = "correct horse battery staple", DB_PASSWORD = "..."
+    #        값이 안내 문구처럼 생겼는지(공백·한글이 있는지)는 근거가 아니다. 변수 이름과 용도가 먼저다.
+    #   3) 그 외 이름(이름을 알 수 없는 경우 포함)에서
+    #        안내 문구처럼 보이는 글자(공백·한글)              → 오탐(FALSE_POSITIVE)
+    #        필드 이름 글자(예: label = "password")             → 오탐(FALSE_POSITIVE)
+    #   4) 그 밖에는 근거가 부족하므로 판정하지 않는다(None) → 경고는 SUSPECTED(의심) 그대로 남는다.
     pairs = _literal_pairs(module.tree, line)
     if not pairs:
         return None
     outcomes = []
     for name, literal in pairs:
         text = literal.value
-        if _looks_like_message(text):
+        if text == '':
+            outcomes.append(('FALSE_POSITIVE', _obs(module, literal, 'EMPTY_VALUE_NOT_CREDENTIAL', ruleId=rule)))
+        elif name is not None and matcher.search(name):
+            outcomes.append(('CONFIRMED', _obs(module, literal, 'HARDCODED_CREDENTIAL', ruleId=rule)))
+        elif _looks_like_message(text):
             outcomes.append(('FALSE_POSITIVE', _obs(module, literal, 'MESSAGE_TEXT_NOT_CREDENTIAL', ruleId=rule)))
         elif matcher.search(text):
             outcomes.append(('FALSE_POSITIVE', _obs(module, literal, 'FIELD_NAME_NOT_CREDENTIAL', ruleId=rule)))
-        elif name is not None and matcher.search(name):
-            outcomes.append(('CONFIRMED', _obs(module, literal, 'HARDCODED_CREDENTIAL', ruleId=rule)))
         else:
             return None  # 하나라도 근거가 부족한 글자가 있으면 이 줄은 판정하지 않는다.
     for value, observation in outcomes:
