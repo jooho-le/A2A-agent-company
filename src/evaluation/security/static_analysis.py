@@ -19,6 +19,8 @@
 #    그래서 이름은 "단어 단위"로 보고(예: passed ≠ password), 확실한 근거가 있을 때만 FAIL을 낸다.
 #  - 판정 근거로 남기는 기록(관측값)에는 파일 경로·줄 번호·종류·설정 숫자만 담는다. 소스 글자나 비밀번호 값은 담지 않는다.
 import ast  # 파이썬 코드를 AST(나무)로 바꿔 주는 기본 도구
+import copy  # 코드 조각을 얕게 복사하는 도구(함수 본문 일부를 뺀 사본을 만들 때 쓴다)
+from collections import deque  # 양쪽 끝에서 넣고 뺄 수 있는 목록(할 일을 차례로 처리할 때 쓴다)
 from dataclasses import dataclass, field  # 값을 담는 "데이터 상자" 클래스를 쉽게 만드는 도구
 import re  # 정규식(글자 모양 규칙) 도구
 
@@ -145,7 +147,8 @@ def load_modules(source_files, criteria):
                 or name in file_names or segments.intersection(path.split('/')[:-1])):
             continue
         try:
-            tree = ast.parse(bytes(source_files[path]).decode('utf-8'), filename=path)  # 글자 → AST(나무)
+            # 'utf-8-sig'는 파일 맨 앞의 BOM(일부 편집기가 붙이는 표시)을 떼고 읽는다. 파이썬도 BOM이 붙은 소스를 그대로 실행한다.
+            tree = ast.parse(bytes(source_files[path]).decode('utf-8-sig'), filename=path)  # 글자 → AST(나무)
         except (SyntaxError, UnicodeDecodeError, ValueError, RecursionError, MemoryError):
             # 문법이 틀렸거나, 글자 인코딩이 이상하거나, 너무 깊거나 긴 식이어서 읽지 못한 파일이다.
             # 이 파일 하나만 "분석 불가"로 기록하고 나머지 파일의 판정은 그대로 이어 간다.
@@ -486,7 +489,7 @@ def check_password_storage(modules, criteria, policy):
                 if isinstance(leaf, ast.Call) and _is_hash_call(leaf, ctx, scope=scope, password_matcher=matcher):
                     stored.append(_obs(module, leaf, 'STORED_VIA_HASH', field='sql'))
                 elif isinstance(leaf, (ast.Name, ast.Attribute, ast.Subscript)) and matcher.search(terminal_name(leaf) or '') \
-                        and 'hash' not in (terminal_name(leaf) or '').lower():
+                        and not _hash_like_name(terminal_name(leaf) or ''):
                     fails.append(_obs(module, leaf, 'PLAINTEXT_STORAGE', field='sql'))
         # setattr(user, "password_hash", 값) 으로 칸 값을 정하는 호출
         if isinstance(call.func, ast.Name) and call.func.id == 'setattr' and len(call.args) >= 3 \
@@ -500,7 +503,7 @@ def check_password_storage(modules, criteria, policy):
                     _classify_storage(module, keyword.value, keyword.arg, ctx, rules, matcher, fails, stored, unresolved,
                                       enclosing[module.path].get(id(call)))
                 elif keyword.arg and isinstance(keyword.value, (ast.Name, ast.Attribute, ast.Subscript)) \
-                        and matcher.search(terminal_name(keyword.value) or '') and 'hash' not in (terminal_name(keyword.value) or '').lower():
+                        and matcher.search(terminal_name(keyword.value) or '') and not _hash_like_name(terminal_name(keyword.value) or ''):
                     # 칸 이름이 password_hash 같은 알려진 이름이 아니어도(예: User(pw=payload.password)) 비밀번호 원문을 넣으면 평문 저장이다.
                     fails.append(_obs(module, keyword.value, 'PLAINTEXT_STORAGE', field=keyword.arg))
     # 객체의 칸에 값을 직접 대입하는 코드도 살펴본다. 예) user.password_hash = ...
@@ -633,7 +636,7 @@ def _classify_storage(module, value, field_name, ctx, rules, matcher, fails, sto
     if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)):
         # 변수나 항목을 그대로 저장하는 경우. 이름이 비밀번호처럼 보이는데 hash가 들어 있지 않으면 원문 저장이다.
         name = terminal_name(value) or ''
-        if matcher.search(name) and 'hash' not in name.lower():
+        if matcher.search(name) and not _hash_like_name(name):
             fails.append(_obs(module, value, 'PLAINTEXT_STORAGE', field=field_name))
         else:
             unresolved.append(_obs(module, value, 'STORED_VALUE_UNKNOWN', field=field_name))
@@ -652,6 +655,13 @@ def _classify_storage(module, value, field_name, ctx, rules, matcher, fails, sto
             unresolved.append(_obs(module, value, 'STORED_VALUE_UNKNOWN', field=field_name))
         return
     unresolved.append(_obs(module, value, 'STORED_VALUE_UNKNOWN', field=field_name))
+
+
+def _hash_like_name(name):
+    # 이름이 "해시를 담은 값"을 가리키는가? password_hash, hashed_password, password_digest 처럼 hash나 digest가 들어간 이름이다.
+    # 이런 이름의 값은 원문이라고 단정하지 않는다(무엇인지 확인하지 못하면 UNVERIFIED). 기준의 저장 칸 이름 목록과 같은 기준이다.
+    lowered = name.lower()
+    return 'hash' in lowered or 'digest' in lowered
 
 
 def _is_hashed_variable(name, scope, ctx, matcher):
@@ -694,19 +704,96 @@ def _is_approved_hasher_factory(call, module, rules):
     return False
 
 
+TAMPER_DUNDERS = frozenset({'__class__', '__dict__', '__getattribute__', '__getattr__', '__setattr__', '__bases__'})  # 이 속성에 대입하면 객체의 동작이 통째로 바뀐다
+NAMESPACE_WRITERS = frozenset({'update', 'setdefault', 'pop', 'popitem', 'clear'})
+
+
+def _namespace_view(node):
+    # obj.__dict__ / vars(obj) / globals() / locals() 처럼 이름 공간을 사전처럼 드러내는 식이면 (종류, 그 이름 공간의 주인 식)을 돌려준다. 아니면 None.
+    # 종류: "object"(객체의 이름 공간) 또는 "globals"(모듈 전체의 이름 공간)
+    if isinstance(node, ast.Attribute) and node.attr == '__dict__':
+        return 'object', node.value
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('vars', 'globals', 'locals'):
+        return ('globals', None) if node.func.id != 'vars' else (('object', node.args[0]) if len(node.args) == 1 else ('object', None))
+    return None
+
+
+def _tampering(modules, names):
+    # 소스 안에 names(예: hash, urandom)로 불리는 속성·항목을 덮어쓰는 코드가 있는가? 라이브러리의 함수를 가짜로 바꿔치기하는 방법을 모두 찾는다.
+    #   · 속성 대입: PasswordHasher.hash = ..., 객체의 __class__·__dict__·__getattribute__ 같은 동작을 통째로 바꾸는 속성에 대입
+    #   · setattr(X, "hash", ...), object.__setattr__(X, "hash", ...), X.__setattr__("hash", ...), delattr
+    #   · 이름 공간 쓰기: X.__dict__["hash"] = ..., vars(X).update(hash=...), ns = vars(X); ns["hash"] = ...,
+    #     dict.update(vars(X), ...), operator.setitem(vars(X), "hash", ...), globals()[...] = ...
+    # 이름 공간에 쓰면서 어느 항목인지 알 수 없는 경우(update(다른_사전), 변수 키)도 바꿔치기일 수 있어서 포함한다.
+    # 다만 자기 자신의 이름 공간을 채우는 흔한 관용구(self.__dict__.update(kwargs))는 라이브러리 객체를 바꾸는 것이 아니라서 제외한다.
+    for module in modules.values():
+        views = {}  # 이름 공간을 담은 변수 {이름: (종류, 주인 식)}   예) ns = vars(HASHER)
+        for node in ast.walk(module.tree):
+            if isinstance(node, ast.Assign) and _namespace_view(node.value):
+                views.update({target.id: _namespace_view(node.value) for target in node.targets if isinstance(target, ast.Name)})
+
+        def view_of(expr):
+            return _namespace_view(expr) or (views.get(expr.id) if isinstance(expr, ast.Name) else None)
+
+        def own(view):
+            # 자기 자신(self·cls)의 이름 공간인가?
+            owner = view[1]
+            return isinstance(owner, ast.Name) and owner.id in ('self', 'cls')
+
+        def key_is_named(key):
+            return isinstance(key, ast.Constant) and isinstance(key.value, str) and key.value in names
+
+        def key_is_known(key):
+            return isinstance(key, ast.Constant) and isinstance(key.value, str)
+
+        for node in ast.walk(module.tree):
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)) and (node.attr in names or node.attr in TAMPER_DUNDERS):
+                return True
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                view = view_of(node.value)
+                if view and (view[0] == 'globals' or key_is_named(node.slice) or not (key_is_known(node.slice) or own(view))):
+                    return True
+            if not isinstance(node, ast.Call):
+                continue
+            func, args = node.func, node.args
+            name = func.id if isinstance(func, ast.Name) else (func.attr if isinstance(func, ast.Attribute) else None)
+            if name in ('setattr', 'delattr', '__setattr__', '__delattr__') and any(
+                    isinstance(argument, ast.Constant) and argument.value in names for argument in args[:2]):
+                return True
+            if not (isinstance(func, ast.Attribute) and func.attr in NAMESPACE_WRITERS | {'setitem', 'delitem'}):
+                continue
+            # 이름 공간에 쓰는 호출: 받는 쪽이 이름 공간이면 vars(X).update(...), 클래스·모듈 함수 형태이면 dict.update(vars(X), ...)·operator.setitem(vars(X), ...)
+            if view_of(func.value):
+                view, rest = view_of(func.value), args
+            elif isinstance(func.value, ast.Name) and func.value.id in ('dict', 'operator') and args and view_of(args[0]):
+                view, rest = view_of(args[0]), args[1:]
+            else:
+                continue
+            if view[0] == 'globals':
+                return True
+            if func.attr in ('setdefault', 'pop', 'setitem', 'delitem'):
+                if rest and key_is_named(rest[0]):
+                    return True
+                if not (rest and key_is_known(rest[0])) and not own(view):
+                    return True
+            elif func.attr == 'update':
+                keys = _updated_keys(node, len(args) - len(rest))
+                if keys is None:
+                    if not own(view):
+                        return True
+                elif any(key in names for key in keys):
+                    return True
+            elif not own(view):  # popitem, clear
+                return True
+    return False
+
+
 def _library_patched(modules, rules):
     # 해시 라이브러리의 클래스·메서드를 소스 안에서 덮어쓰는지 확인한다. 예) PasswordHasher.hash = lambda self, v: v
     # 덮어썼다면 PasswordHasher(...)로 만든 객체라도 .hash()가 진짜 해시를 만든다고 믿을 수 없다.
     symbols = {'hash', 'from_parameters'} | {
         name.rsplit('.', 1)[-1] for name in [*rules['constructors'], *rules['defaultFactories'], *rules.get('hasherWrappers', ())]}
-    for module in modules.values():
-        for node in ast.walk(module.tree):
-            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store) and node.attr in symbols:
-                return True  # 어떤 객체의 hash 같은 이름에 값을 대입함
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('setattr', 'delattr')
-                    and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and node.args[1].value in symbols):
-                return True  # setattr(객체, "hash", ...)로 같은 일을 함
-    return False
+    return _tampering(modules, symbols)
 
 
 def _known_hashers(modules, rules):
@@ -761,6 +848,25 @@ class HashContext:
     preserving_calls: dict   # 입력을 통째로 간직한 채 모양만 바꾸는 것으로 확인된 호출 조각의 id → 값이 들어 있는 인자의 위치
     defined_names: set       # 프로젝트가 직접 정의한 함수·메서드 이름들 (strip 같은 이름을 직접 만들었다면 그 메서드를 믿지 않는다)
     mutations: dict = field(default_factory=dict)  # 함수 → 그 함수가 바꾸는 입력 필드 (같은 함수를 반복해서 훑지 않으려고 기록)
+    memo: dict = field(default_factory=dict)       # 이미 계산한 결과 기록. 같은 계산을 되풀이하면 시간이 지수로 늘 수 있어서 한 번만 계산한다.
+    cycle_hits: set = field(default_factory=set)   # 계산 도중 "바깥에서 이미 계산 중인 이름"을 다시 만난 기록(순환 때문에 달라지는 결과는 기록하지 않으려고 쓴다)
+    work: int = 0                                  # 지금까지 한 계산의 횟수(너무 복잡한 코드를 만나면 멈추기 위한 계수기)
+
+
+class AnalysisTooComplex(Exception):
+    # 코드가 너무 복잡해서 정해진 작업량 안에 분석을 끝내지 못했다는 뜻이다. 이때는 확정하지 않고 UNVERIFIED로 답한다.
+    pass
+
+
+WORK_LIMIT = 100_000  # 한 번의 판정에서 허용하는 계산량. 측정값: 정상 예제와 저장소 코드 389묶음은 53 이하(364묶음은 0),
+#                    가장 무거운 인공 입력(같은 이름에 2000번 재대입)도 약 24,000이다. 한도에 닿기까지 걸리는 시간은 몇 초이다.
+
+
+def _tick(ctx, cost=1):
+    # 계산을 센다(큰 식을 훑을 때는 식의 크기만큼 센다). 한도를 넘으면 분석을 멈춘다. 이상한 코드가 평가기를 멈추거나 오래 붙잡지 못하게 하는 안전장치이다.
+    ctx.work += cost
+    if ctx.work > WORK_LIMIT:
+        raise AnalysisTooComplex()
 
 
 # 입력의 내용을 그대로 간직한 채 모양만 바꾸는 호출들. 값이 들어 있는 인자의 위치를 함께 적었다.
@@ -811,11 +917,7 @@ def _verified_calls(modules):
     #   · unicodedata.normalize("NFKC", x)·base64.b64encode(x)·str(x)·bytes(x, "utf-8"): 입력을 통째로 간직하는 호출일 때
     # 이름이 같다고 믿지 않고, 실제로 import한 라이브러리인지와 덮어쓰기·재정의 여부를 확인한다.
     names = _project_names(modules)
-    patched = any(
-        (isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.attr in ('urandom', 'token_bytes'))
-        or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('setattr', 'delattr')
-            and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and node.args[1].value in ('urandom', 'token_bytes'))
-        for module in modules.values() for node in ast.walk(module.tree))
+    patched = _tampering(modules, frozenset({'urandom', 'token_bytes'}))
     random_calls, preserving = set(), {}
     for module in modules.values():
         star_import = any(isinstance(node, ast.ImportFrom) and any(alias.name == '*' for alias in node.names)
@@ -925,6 +1027,8 @@ def _input_sources(expr, scope, ctx, visiting=frozenset(), depth=0):
     #   거부: p * 0, p[:3], p[0], p.replace(...), p.strip("abc"), f"{p:.0s}", 입력을 버리는 프로젝트 함수, 모르는 함수의 결과
     #   · a or b, a if c else b → 어느 쪽이 쓰일지 모르므로 모든 갈래에 공통인 입력만 인정한다.
     #   · None은 password = password.strip() 처럼 자기 자신에서 나온 값이라는 표시이다(다른 갈래가 입력인지에 따라 결정된다).
+    _tick(ctx)
+
     def here(part):
         return _input_sources(part, scope, ctx, visiting, depth)
 
@@ -944,7 +1048,17 @@ def _input_sources(expr, scope, ctx, visiting=frozenset(), depth=0):
         return _union([here(part) for part in expr.values if isinstance(part, ast.FormattedValue)])
     if isinstance(expr, ast.BinOp):
         # 더하기만 인정한다. p * 0, p % ... 같은 연산은 입력을 지울 수 있다.
-        return _union([here(expr.left), here(expr.right)]) if isinstance(expr.op, ast.Add) else frozenset()
+        if not isinstance(expr.op, ast.Add):
+            return frozenset()
+        # a + b + c + ... 처럼 길게 이어진 덧셈은 안쪽부터 되풀이해 들어가면 파이썬의 재귀 한도에 걸린다. 항들을 먼저 펼쳐서 따진다.
+        terms, pending = [], [expr]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                pending.extend((node.right, node.left))
+            else:
+                terms.append(node)
+        return _union([here(term) for term in terms])
     if isinstance(expr, ast.IfExp):
         return _intersection([here(expr.body), here(expr.orelse)])
     if isinstance(expr, ast.BoolOp):
@@ -981,78 +1095,323 @@ def _call_sources(call, scope, ctx, visiting, depth):
 
 
 MUTATING_METHODS = frozenset({'update', 'pop', 'setdefault', 'clear', 'popitem', 'append', 'extend', 'insert', 'remove'})
+OBJECT_WRITERS = frozenset({'__setattr__', '__delattr__', '__setitem__', '__delitem__', '__ior__'})  # obj.__setattr__(...) / object.__setattr__(obj, ...)
+FUNCTION_WRITERS = frozenset({'setattr', 'delattr', 'setitem', 'delitem'})                           # setattr(obj, ...) / operator.setitem(obj, ...)
+KEYED_GETTERS = frozenset({'get', 'pop', 'setdefault'})                                              # d.get("k")는 d["k"]와 같은 항목을 가리킨다
+CONTAINER_BUILTINS = frozenset({'iter', 'reversed', 'sorted', 'list', 'tuple', 'set', 'frozenset', 'dict', 'next'})  # 항목은 그대로 두고 새 컨테이너에 담거나(list(x)) 항목 하나를 꺼내는(next(x)) 내장 함수
+MAX_MUTATION_DEPTH = 5   # 입력을 넘겨받은 도우미 함수 안의 도우미 함수 ... 를 따라가는 단계의 한계
+MAX_ALIAS_PATH = 4       # 별칭이 가리키는 필드 경로의 최대 길이 (더 긴 경로는 앞부분만 남긴다. 앞부분만 남기면 더 넓게 겹치므로 안전한 쪽이다.)
+MAX_ALIAS_PLACES = 40    # 별칭 하나가 가리킬 수 있는 곳의 최대 개수 (넘으면 곳을 세세히 따지지 않고 그 입력 전체를 가리키는 것으로 본다)
+MAX_CONTAINER_LEVEL = 3  # [[p]] 처럼 입력을 담은 컨테이너를 겹쳐 담는 단계의 한계
 
 
-def _field_path(node):
-    # payload.profile["email"] 처럼 속성·글자 키로 이어진 식을 (가장 바깥 이름, 필드 경로)로 바꾼다. 예) ("payload", ("profile", "email"))
-    # p[i] 처럼 어느 항목인지 모르는 단계를 만나면 그 아래 경로는 버리고 바깥 경로까지만 남긴다(그 아래는 통째로 바뀐 것으로 본다).
+def _parameter_names(scope):
+    # 함수(scope)의 매개변수 이름들. 함수가 아니면(모듈 등) 빈 집합이다.
+    arguments = getattr(scope, 'args', None)
+    if arguments is None:
+        return set()
+    names = {argument.arg for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]}
+    names.update(argument.arg for argument in (arguments.vararg, arguments.kwarg) if argument is not None)
+    return names
+
+
+def _chain(node):
+    # payload.profile["email"] 처럼 속성·키로 이어진 식을 (가장 안쪽 식, [단계, ...])로 푼다. 단계는 안쪽에서 바깥쪽 순서이다.
+    #   단계: ("attr", 이름) / ("key", 글자 키) / ("dyn", None) = 어느 항목인지 모르는 접근(p[i], p[1:], p.get(변수))
+    #   · obj.__dict__["x"], vars(obj)["x"], getattr(obj, "x"), obj.get("x") 는 obj.x·obj["x"] 와 같은 곳을 가리킨다. (이름만 바꿔 우회하지 못하게 한다.)
     steps = []
-    while isinstance(node, (ast.Attribute, ast.Subscript)):
+    while True:
         if isinstance(node, ast.Attribute):
-            steps.append(node.attr)
-        elif isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
-            steps.append(node.slice.value)
+            if node.attr != '__dict__':
+                steps.append(('attr', node.attr))
+            node = node.value
+        elif isinstance(node, ast.Subscript):
+            steps.append(('key', node.slice.value) if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str) else ('dyn', None))
+            node = node.value
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'vars' and len(node.args) == 1 and not node.keywords:
+            node = node.args[0]
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'getattr' and len(node.args) >= 2 and not node.keywords:
+            name = node.args[1]
+            steps.append(('attr', name.value) if isinstance(name, ast.Constant) and isinstance(name.value, str) else ('dyn', None))
+            node = node.args[0]
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in KEYED_GETTERS and node.args:
+            key = node.args[0]
+            steps.append(('key', key.value) if isinstance(key, ast.Constant) and isinstance(key.value, str) else ('dyn', None))
+            node = node.func.value
         else:
-            steps = []
-        node = node.value
-    return (node.id, tuple(reversed(steps))) if isinstance(node, ast.Name) else (None, ())
+            return node, steps[::-1]
+
+
+def _step_place(place, step):
+    # 곳 하나에서 한 단계 더 들어간다. 곳은 (입력 이름, 필드 경로, 내용만인가, 컨테이너 단계)이다.
+    #   · 컨테이너 단계가 1 이상이면 그 곳을 항목으로 담은 컨테이너([p], {"k": p})이다. 항목을 꺼내면(어떤 접근이든) 한 단계 내려가 그 곳 자체가 된다.
+    #   · 컨테이너가 아닌 곳에서 속성·글자 키로 들어가면 경로가 한 칸 늘어난다. 어느 항목인지 모르면(내용만) 그 곳 아래 어딘가를 가리킨다.
+    #   · 이미 "그 아래 어딘가"인 곳은 더 따지지 않는다.
+    root, path, opaque, level = place
+    if level:
+        return (root, path, opaque, level - 1)
+    if opaque:
+        return place
+    kind, name = step
+    if kind == 'dyn':
+        return (root, path, True, 0)
+    return (root, (path + (name,))[:MAX_ALIAS_PATH], False, 0)
+
+
+def _alias_places(scope, ctx, depth):
+    # 함수(scope) 안에서 이름이 가리킬 수 있는 "입력의 곳"을 따진다. 돌려주는 값: (places 함수, {이름: 곳들})
+    # 예) form = payload.profile → form은 ("payload", ("profile",), False, 0)을 가리킨다.
+    # 이름에 값이 묶이는 방식은 모두 따진다: 대입(a = p, a, b = p, q, a = p or q, a = [p]), :=, for·with 변수, 컴프리헨션, match.
+    # 입력을 돌려주는 프로젝트 함수의 결과도 같은 입력을 가리킨다.
+    # 따라가지 못하는 것: 알 수 없는 라이브러리 함수가 입력을 감싸 돌려주는 경우(w = Wrapper(p)), 나중에 컨테이너에 담는 경우(h = []; h.append(p)).
+    key = ('alias', id(scope), depth)
+    if key in ctx.memo:
+        return ctx.memo[key]
+    parameters = _parameter_names(scope)
+    aliases = {}
+
+    def places(expr):
+        base, steps = _chain(expr)
+        found = base_places(base)
+        for step in steps:
+            found = {_step_place(place, step) for place in found}
+        return found
+
+    def items_of(found):
+        # 컨테이너를 훑어 꺼낸 항목들의 곳 (for x in c, a, b = c)
+        return {_step_place(place, ('dyn', None)) for place in found}
+
+    def container_of(found):
+        return {(root, path, opaque, min(level + 1, MAX_CONTAINER_LEVEL)) for root, path, opaque, level in found}
+
+    def base_places(node):
+        if isinstance(node, ast.Name):
+            found = set(aliases.get(node.id, ()))
+            if node.id in parameters:
+                found.add((node.id, (), False, 0))
+            return found
+        if isinstance(node, ast.IfExp):
+            return places(node.body) | places(node.orelse)
+        if isinstance(node, ast.BoolOp):
+            return set().union(*[places(part) for part in node.values])
+        if isinstance(node, (ast.NamedExpr, ast.Starred, ast.Await)):
+            return places(node.value)
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return container_of(set().union(*[places(part) for part in node.elts])) if node.elts else set()
+        if isinstance(node, ast.Dict):
+            return container_of(set().union(*[places(part) for part in node.values])) if node.values else set()
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            return container_of(places(node.elt))
+        if isinstance(node, ast.DictComp):
+            return container_of(places(node.value))
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in CONTAINER_BUILTINS and node.args
+                and node.func.id not in ctx.defined_names):  # 프로젝트가 같은 이름을 직접 정의했다면 내장 함수가 아니다
+            if node.func.id == 'next':
+                return items_of(places(node.args[0])) | (places(node.args[1]) if len(node.args) > 1 else set())
+            return container_of(items_of(places(node.args[0])))  # list(x): 새 컨테이너이지만 담긴 항목은 x의 항목과 같은 객체이다.
+        if isinstance(node, ast.Call) and depth < MAX_MUTATION_DEPTH:
+            found = set()
+            for _owner, helper in ctx.functions.get(terminal_name(node.func) or '', []):
+                found |= _compose_places(node, helper, _returned_places(helper, ctx, depth + 1), places)
+            return found
+        return set()
+
+    bindings = []  # [(대상 이름, 값 식, 항목을 꺼내 묶는가)]
+
+    def bind(target, value, item):
+        if isinstance(target, ast.Name):
+            bindings.append((target.id, value, item))
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            paired = (isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts)
+                      and not any(isinstance(part, ast.Starred) for part in [*value.elts, *target.elts]))
+            for index, part in enumerate(target.elts):
+                if paired:
+                    bind(part, value.elts[index], item)
+                else:
+                    bind(part, value, True)  # 풀어서 받은 조각은 값 안의 항목이다.
+        elif isinstance(target, ast.Starred):
+            bind(target.value, value, item)
+
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bind(target, node.value, False)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            bind(node.target, node.value, False)
+        elif isinstance(node, ast.AugAssign):
+            bind(node.target, node.value, False)
+        elif isinstance(node, ast.NamedExpr):
+            bind(node.target, node.value, False)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            bind(node.target, node.iter, True)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for entry in node.items:
+                if entry.optional_vars is not None:
+                    bind(entry.optional_vars, entry.context_expr, False)
+        elif hasattr(ast, 'Match') and isinstance(node, ast.Match):
+            for case in node.cases:
+                for pattern in ast.walk(case.pattern):
+                    for captured in (getattr(pattern, 'name', None), getattr(pattern, 'rest', None)):
+                        if isinstance(captured, str):
+                            bindings.append((captured, node.subject, True))
+
+    frozen = set()  # 곳이 너무 많이 늘어나 "입력 전체"로 뭉뚱그린 이름들
+
+    def merge(name, new):
+        current = aliases.setdefault(name, set())
+        if name in frozen:
+            merged = {(root, (), True, 0) for root, _path, _opaque, _level in current | new}
+        else:
+            merged = current | new
+            if len(merged) > MAX_ALIAS_PLACES:
+                frozen.add(name)
+                merged = {(root, (), True, 0) for root, _path, _opaque, _level in merged}
+        if merged == current:
+            return False
+        aliases[name] = merged
+        return True
+
+    # 한 이름이 가리키는 곳이 바뀌면 그 이름을 쓰는 대입만 다시 따진다. 곳은 늘기만 하고(줄이거나 덮어쓰지 않는다) 크기에 한도가 있어서 반드시 끝난다.
+    # (한 곳으로 덮어쓰는 방식은 unused = payload; unused = db 처럼 두 대입이 서로 값을 바꾸며 영원히 반복할 수 있다.)
+    users, sizes = {}, []  # {이름: 그 이름을 쓰는 대입들}, 대입마다 값 식의 크기
+    for index, (_target, value, _item) in enumerate(bindings):
+        sizes.append(0)
+        for entry in ast.walk(value):
+            sizes[index] += 1
+            if isinstance(entry, ast.Name):
+                users.setdefault(entry.id, set()).add(index)
+    queue, queued = deque(range(len(bindings))), set(range(len(bindings)))
+    while queue:
+        index = queue.popleft()
+        queued.discard(index)
+        _tick(ctx, sizes[index])
+        target, value, item = bindings[index]
+        new = items_of(places(value)) if item else places(value)
+        if new and merge(target, new):
+            for user in users.get(target, ()):
+                if user not in queued:
+                    queue.append(user)
+                    queued.add(user)
+    ctx.memo[key] = (places, aliases)
+    return ctx.memo[key]
+
+
+def _returned_places(function, ctx, depth):
+    # 이 함수가 돌려주는 값이 가리킬 수 있는 입력의 곳을 이 함수의 매개변수 기준으로 돌려준다. 예) def ident(x): return x → {("x", (), False, 0)}
+    key = ('returned places', id(function), depth)
+    if key not in ctx.memo:
+        ctx.memo[key] = frozenset()  # 서로 부르는 함수(재귀)를 끊는다.
+        if depth <= MAX_MUTATION_DEPTH:
+            places, _aliases = _alias_places(function, ctx, depth)
+            found = set()
+            for node in ast.walk(function):
+                if isinstance(node, ast.Return) and node.value is not None:
+                    found |= places(node.value)
+            ctx.memo[key] = frozenset(found)
+    return ctx.memo[key]
+
+
+def _compose_places(call, helper, relative, places_of):
+    # helper 안에서 "(자기 매개변수, 경로, ...)"로 적힌 곳(relative)을, 호출(call)이 그 매개변수 자리에 실제로 넘긴 값이 가리키는 곳으로 바꿔 쓴다.
+    bound = {}
+    for parameter, argument in _bound_arguments(call, helper):
+        bound.setdefault(parameter, []).append(argument)
+    composed = set()
+    for parameter, path, opaque, level in relative:
+        for argument in bound.get(parameter, []):
+            for place in places_of(argument):
+                for name in path:
+                    place = _step_place(place, ('attr', name))
+                if opaque:
+                    place = _step_place(place, ('dyn', None))
+                composed.add((place[0], place[1], place[2], min(place[3] + level, MAX_CONTAINER_LEVEL)))
+    return composed
+
+
+def _updated_keys(call, shift=0):
+    # d.update({"a": 1}, b=2) 에서 바뀌는 항목 이름들 ["a", "b"]를 돌려준다. 하나라도 알 수 없으면(변수 키, **펼침, 다른 사전을 통째로 넘김) None이다.
+    # shift는 앞쪽 인자를 몇 개 건너뛸지이다(dict.update(대상, {...})에서는 1).
+    names = []
+    for argument in call.args[shift:]:
+        if not isinstance(argument, ast.Dict):
+            return None
+        for key in argument.keys:
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                return None
+            names.append(key.value)
+    for keyword in call.keywords:
+        if keyword.arg is None:
+            return None
+        names.append(keyword.arg)
+    return names
 
 
 def _mutated_fields(scope, ctx, depth=0):
-    # 이 함수가 입력 객체의 어느 필드를 바꾸는지 {가장 바깥 이름: {필드 경로, ...}}로 돌려준다. 경로 ()는 객체 전체가 바뀐다는 뜻이다.
+    # 이 함수가 입력 객체의 어느 필드를 바꾸는지 {매개변수 이름: {필드 경로, ...}}로 돌려준다. 경로 ()는 객체 전체가 바뀐다는 뜻이다.
     #   · p.x = ..., p["x"] = ..., del p.x, p.x += ...           → (p, ("x",))
     #   · p.tags.append(...), p.update(...), vars(p).update(...)  → (p, ("tags",)), (p, ()), (p, ())
+    #   · p.__dict__["x"] = ..., p.__dict__.update(...), object.__setattr__(p, "x", ...), p.__setattr__("x", ...) → p.x 를 바꾼 것과 같다
     #   · setattr(p, "x", ...)                                    → (p, ("x",)),  setattr(p, 이름, ...) → (p, ())
-    #   · q = p.profile 처럼 별칭을 만들어 q.x = ... 로 바꾸는 경우 → (p, ("profile", "x"))
-    #   · 입력을 넘겨 받은 프로젝트 함수가 안에서 바꾸는 필드(depth 2단계까지)
+    #   · q = p.profile 처럼 별칭을 만들어 q.x = ... 로 바꾸는 경우 → (p, ("profile", "x")). 별칭을 만드는 방식은 _alias_places 가 따진다.
+    #   · 입력을 넘겨받은 프로젝트 함수가 안에서 바꾸는 필드(MAX_MUTATION_DEPTH 단계까지)
     # 입력의 필드를 덮어쓰면 payload.password가 더 이상 원래 입력이 아니라서, 그 필드에서 온 값은 입력의 해시라고 믿을 수 없다.
+    # 입력을 항목으로 담은 컨테이너 자체를 바꾸는 것(items.append(...), items[0] = ...)은 입력을 바꾸는 것이 아니다.
     key = (id(scope), depth)
     if key in ctx.mutations:
         return ctx.mutations[key]
+    _tick(ctx)
     ctx.mutations[key] = {}  # 같은 함수를 다시 만나는 경우(재귀)를 끊는다.
-    aliases, changed = {}, True  # 별칭 이름 → (가장 바깥 이름, 필드 경로)
-    while changed:
-        changed = False
-        for node in ast.walk(scope):
-            if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Name, ast.Attribute, ast.Subscript)):
-                root, path = _field_path(node.value)
-                if root is None:
-                    continue
-                if root in aliases:  # 별칭의 별칭이면 처음 가리키던 곳까지 거슬러 올라간다.
-                    root, path = aliases[root][0], aliases[root][1] + path
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and aliases.get(target.id) != (root, path):
-                        aliases[target.id] = (root, path)
-                        changed = True
+    places, _aliases = _alias_places(scope, ctx, depth)
     found = {}
 
-    def add(node, extra=()):
-        root, path = _field_path(node)
-        if root is None:
-            return
-        if root in aliases:
-            root, path = aliases[root][0], aliases[root][1] + path
-        found.setdefault(root, set()).add(path + extra)
+    def record(obj, extra=()):
+        # 객체(obj)의 extra 경로 필드가 바뀐다고 기록한다. obj가 가리키는 입력이 하나도 없으면 False이다.
+        hit = False
+        for root, path, opaque, level in places(obj):
+            hit = True
+            if level == 0:
+                found.setdefault(root, set()).add(path if opaque else (path + extra)[:MAX_ALIAS_PATH])
+        return hit
+
+    def written_name(argument):
+        # setattr(p, "x", ...) 의 "x" 처럼 바뀌는 필드 이름을 글자로 적었으면 (이름,), 아니면 ()(어느 필드인지 모름 = 객체 전체)
+        return (argument.value,) if isinstance(argument, ast.Constant) and isinstance(argument.value, str) else ()
 
     for node in ast.walk(scope):
         if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            add(node)
+            if isinstance(node, ast.Attribute):
+                record(node.value, () if node.attr == '__dict__' else (node.attr,))
+            else:
+                record(node.value, written_name(node.slice))
         elif isinstance(node, ast.Call):
             func = node.func
-            if isinstance(func, ast.Attribute) and func.attr in MUTATING_METHODS:
-                receiver = func.value
-                if isinstance(receiver, ast.Call) and isinstance(receiver.func, ast.Name) and receiver.func.id == 'vars' and receiver.args:
-                    receiver = receiver.args[0]  # vars(p).update(...) 는 p의 필드를 바꾼다.
-                add(receiver)
-            elif isinstance(func, ast.Name) and func.id in ('setattr', 'delattr') and node.args:
-                name = node.args[1] if len(node.args) > 1 else None
-                add(node.args[0], (name.value,) if isinstance(name, ast.Constant) and isinstance(name.value, str) else ())
-            if depth < 2:
+            method = func.attr if isinstance(func, ast.Attribute) else None
+            if method in MUTATING_METHODS or method in OBJECT_WRITERS:
+                # 받는 쪽(p.update(...))이 입력이면 그 입력이 바뀐다. 받는 쪽이 입력이 아니면 dict.update(vars(p), ...)·object.__setattr__(p, ...)
+                # 처럼 첫 인자가 바뀌는 쪽이다. (그때는 바뀌는 항목을 가리키는 인자가 하나씩 뒤로 밀린다.)
+                if places(func.value):
+                    target, shift = func.value, 0
+                else:
+                    target, shift = (node.args[0] if node.args else None), 1
+                if target is not None:
+                    # 바뀌는 항목 이름을 알면 그 항목만 기록한다: update({"k": v}, m=1) → k, m / pop("k")·setdefault("k", v)·__setattr__("k", v) → k. 모르면 객체 전체.
+                    if method == 'update':
+                        keys = _updated_keys(node, shift)
+                        changed = [(name,) for name in keys] if keys is not None else [()]
+                    elif method in ('pop', 'setdefault') or method in OBJECT_WRITERS:
+                        changed = [written_name(node.args[shift])] if len(node.args) > shift else [()]
+                    else:
+                        changed = [()]
+                    for extra in changed:
+                        record(target, extra)
+            elif (method or (func.id if isinstance(func, ast.Name) else None)) in FUNCTION_WRITERS and node.args:
+                record(node.args[0], written_name(node.args[1]) if len(node.args) > 1 else ())
+            if depth < MAX_MUTATION_DEPTH:
                 for _owner, helper in ctx.functions.get(terminal_name(func) or '', []):
                     inner = _mutated_fields(helper, ctx, depth + 1)
                     for parameter, argument in _bound_arguments(node, helper):
                         for subpath in inner.get(parameter, ()):
-                            add(argument, subpath)
+                            record(argument, subpath)
     ctx.mutations[key] = found
     return found
 
@@ -1092,50 +1451,91 @@ def _compose(call, helper, relative, sources_of):
 def _returned_origins(function, ctx, depth):
     # 이 함수가 돌려주는 값의 출처를 이 함수의 매개변수 기준으로 돌려준다 (모든 return에 공통인 것).
     # return이 없거나 하나라도 모르면 빈 집합이다.
-    returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
-    if depth > 3 or not returns or any(node.value is None for node in returns):
-        return frozenset()
-    sets = [_scope_sources(node.value, function, ctx, depth) for node in returns]
-    return frozenset.intersection(*[item if item is not None else frozenset() for item in sets])
+    key = ('returned', id(function), depth)
+    if key not in ctx.memo:
+        returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
+        if depth > 3 or not returns or any(node.value is None for node in returns):
+            ctx.memo[key] = frozenset()
+        else:
+            sets = [_scope_sources(node.value, function, ctx, depth) for node in returns]
+            ctx.memo[key] = frozenset.intersection(*[item if item is not None else frozenset() for item in sets])
+    return ctx.memo[key]
+
+
+def _scope_index(scope, ctx):
+    # 함수(scope) 안에서 이름마다 값이 묶이는 곳을 한 번만 훑어 정리해 둔다. (이름마다 함수 전체를 다시 훑지 않으려는 것이다.)
+    # 돌려주는 값: (매개변수 이름들, global·nonlocal로 선언한 이름들, {이름: [묶임, ...]}, {이름: 묶이는 횟수})
+    # 묶임 하나는 ("aug", 연산) / ("for", None) / ("assign", 대입 대상, 대입하는 값) 중 하나이다.
+    key = ('index', id(scope))
+    if key in ctx.memo:
+        return ctx.memo[key]
+    arguments = scope.args
+    parameters = {argument.arg for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]}
+    parameters.update(argument.arg for argument in (arguments.vararg, arguments.kwarg) if argument is not None)
+    declared, entries = set(), {}
+    for node in ast.walk(scope):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name):
+                entries.setdefault(node.target.id, []).append(('aug', node.op))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            for item in ast.walk(node.target):
+                if isinstance(item, ast.Name):
+                    entries.setdefault(item.id, []).append(('for', None))
+        else:
+            for target, value in _assignment_pairs(node):
+                for item in ast.walk(target):
+                    if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store):
+                        entries.setdefault(item.id, []).append(('assign', target, value))
+    index = (parameters, declared, entries, _name_bindings(scope))
+    ctx.memo[key] = index
+    return index
 
 
 def _name_sources(name, scope, ctx, visiting, depth):
     # 함수(scope) 안의 이름 하나에 담긴 값의 입력 출처. 이름에 값이 묶이는 곳이 매개변수와 일반 대입뿐일 때만 따진다.
     # with·except·반복문 변수 등 모르는 방식이 섞여 있으면 빈 집합이다. 모든 묶임에 공통인 출처만 인정한다.
+    # 같은 이름을 여러 식이 거듭 쓰는 코드(a2 = a1 + a1; a3 = a2 + a2; ...)는 그냥 계산하면 시간이 지수로 늘어난다.
+    # 그래서 한 번 계산한 결과는 기억해 둔다. 단, 바깥에서 이미 계산 중인 이름(순환)에 걸려서 달라질 수 있는 결과는 기억하지 않는다.
     if name in visiting:
+        ctx.cycle_hits.add(name)
         return None
-    visiting = visiting | {name}
-    if any(isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names for node in ast.walk(scope)):
+    key = ('name', id(scope), name, depth)
+    if key in ctx.memo:
+        return ctx.memo[key]
+    _tick(ctx)
+    saved, ctx.cycle_hits = ctx.cycle_hits, set()
+    try:
+        result = _compute_name_sources(name, scope, ctx, visiting | {name}, depth)
+    finally:
+        hits, ctx.cycle_hits = ctx.cycle_hits, saved
+    outer_hits = {item for item in hits if item in visiting}
+    ctx.cycle_hits |= outer_hits
+    if not outer_hits:
+        ctx.memo[key] = result
+    return result
+
+
+def _compute_name_sources(name, scope, ctx, visiting, depth):
+    parameters, declared, entries, bindings = _scope_index(scope, ctx)
+    if name in declared:
         return frozenset()  # 함수 밖의 이름을 바꿀 수 있어서 이 함수 안에서만 따질 수 없다.
     if name in ('self', 'cls'):
         return frozenset()  # 객체의 필드(self.password)는 프로그램이 어디선가 채운 값이라 호출한 쪽이 넘긴 입력이라고 볼 수 없다.
-    arguments = scope.args
-    parameters = {argument.arg for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]}
-    parameters.update(argument.arg for argument in (arguments.vararg, arguments.kwarg) if argument is not None)
-    results, captured = [], 0  # 묶임마다의 출처 / 설명할 수 있는 묶임의 수
-    for node in ast.walk(scope):
-        if isinstance(node, ast.AugAssign):
-            if isinstance(node.target, ast.Name) and node.target.id == name:
-                captured += 1
-                if not isinstance(node.op, ast.Add):
-                    results.append(frozenset())  # p *= 0, p -= ... 처럼 값을 지우거나 바꿀 수 있는 연산
-                # p += "x" 는 이전 값에 덧붙이는 것이라 입력이 그대로 남는다.
-            continue
-        if isinstance(node, (ast.For, ast.AsyncFor)):
-            hits = sum(1 for item in ast.walk(node.target) if isinstance(item, ast.Name) and item.id == name)
-            if hits:
-                captured += hits
-                results.append(frozenset())  # 반복문 변수는 값의 일부(글자 하나 등)일 수 있다.
-            continue
-        for target, value in _assignment_pairs(node):
-            hits = sum(1 for item in ast.walk(target)
-                       if isinstance(item, ast.Name) and item.id == name and isinstance(item.ctx, ast.Store))
-            if hits:
-                captured += hits
-                # 이름 하나에 값 하나를 대입한 경우만 따진다. a, b = 값 처럼 풀어서 받으면 일부일 수 있다.
-                results.append(_input_sources(value, scope, ctx, visiting, depth) if isinstance(target, ast.Name) else frozenset())
+    results = []  # 묶임마다의 출처
+    for entry in entries.get(name, ()):
+        if entry[0] == 'aug':
+            if not isinstance(entry[1], ast.Add):
+                results.append(frozenset())  # p *= 0, p -= ... 처럼 값을 지우거나 바꿀 수 있는 연산 (p += "x" 는 이전 값에 덧붙이는 것이라 입력이 그대로 남는다.)
+        elif entry[0] == 'for':
+            results.append(frozenset())  # 반복문 변수는 값의 일부(글자 하나 등)일 수 있다.
+        else:
+            # 이름 하나에 값 하나를 대입한 경우만 따진다. a, b = 값 처럼 풀어서 받으면 일부일 수 있다.
+            _kind, target, value = entry
+            results.append(_input_sources(value, scope, ctx, visiting, depth) if isinstance(target, ast.Name) else frozenset())
     own = 1 if name in parameters else 0
-    if _name_bindings(scope).get(name, 0) != captured + own:
+    if bindings.get(name, 0) != len(entries.get(name, ())) + own:
         return frozenset()  # 설명할 수 없는 묶임(with·except·함수 정의·안쪽 함수의 같은 이름 매개변수 등)이 있다.
     if own:
         results.append(frozenset({(name, ())}))
@@ -1158,30 +1558,52 @@ def _bound_arguments(call, helper):
     # 함수 호출(call)에서 넘긴 값들이 helper(함수 정의)의 어느 매개변수에 들어가는지 [(매개변수 이름, 넘긴 값)]으로 짝짓는다.
     arguments = helper.args
     names = [argument.arg for argument in [*arguments.posonlyargs, *arguments.args]]
+    receiver = []
     if names and names[0] in ('self', 'cls') and isinstance(call.func, ast.Attribute):
-        names = names[1:]  # obj.method(x) 에서 self는 호출한 객체가 채운다.
+        receiver = [(names[0], call.func.value)]  # obj.method(x) 에서 self는 호출한 객체 obj가 채운다. (메서드가 self의 필드를 바꾸면 obj의 필드가 바뀐다.)
+        names = names[1:]
     every = {argument.arg for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]}
-    return list(zip(names, call.args)) + [(keyword.arg, keyword.value) for keyword in call.keywords if keyword.arg in every]
+    return receiver + list(zip(names, call.args)) + [(keyword.arg, keyword.value) for keyword in call.keywords if keyword.arg in every]
 
 
 def _hashed_origins(function, ctx, depth=0):
-    # 이 함수 안에서 "실제로 해시되는 값"의 출처를 이 함수의 매개변수 기준으로 모아 돌려준다.
+    # 이 함수가 "실제로 돌려주는 해시"가 무엇을 해시한 것인지, 그 출처를 이 함수의 매개변수 기준으로 돌려준다 (모든 return에 공통인 것).
     # 예) def hash_password(password, pepper): return H.hash(password) → {("password", ())}
     #     def hash_form(form): return H.hash(form.password)        → {("form", ("password",))}
-    # 해시 도구의 hash()에 넘기는 값의 출처와, 이 함수가 부르는 다른 해시 함수가 해시하는 자리에 넘기는 값의 출처를 모은다.
-    found = set()
-    for node in ast.walk(function):
-        if not isinstance(node, ast.Call):
-            continue
-        if isinstance(node.func, ast.Attribute) and node.func.attr == 'hash' and terminal_name(node.func.value) in ctx.hashers:
-            value = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == 'password'), None)
-            if value is not None:
-                found |= _scope_sources(value, function, ctx) or frozenset()
-        elif depth < 3:
-            for _owner, helper in ctx.functions.get(terminal_name(node.func) or '', []):
-                found |= _compose(node, helper, _hashed_origins(helper, ctx, depth + 1),
-                                  lambda argument: _scope_sources(argument, function, ctx)) or frozenset()
-    return frozenset(found)
+    # 계산만 하고 버리는 해시는 포함하지 않는다. (비밀번호 해시를 계산만 하고 버린 뒤 이메일 해시를 돌려주는 함수를
+    # "비밀번호를 해시하는 함수"로 오인하지 않으려는 것이다.)
+    key = ('hashed', id(function), depth)
+    if key not in ctx.memo:
+        returns = [node.value for node in ast.walk(function) if isinstance(node, ast.Return) and node.value is not None]
+        sets = [_returned_hash_origins(value, function, ctx, depth, frozenset()) for value in returns]
+        ctx.memo[key] = frozenset.intersection(*sets) if sets else frozenset()
+    return ctx.memo[key]
+
+
+def _returned_hash_origins(expr, function, ctx, depth, seen):
+    # 돌려주는 식(expr)이 해시 결과일 때, 그 해시가 해시한 값의 출처. 해시 결과가 아니면 빈 집합이다.
+    #   · 해시 도구의 hash(값) 호출 → 그 값의 출처
+    #   · 다른 해시 함수의 호출 → 그 함수가 해시하는 자리에 넘긴 값의 출처
+    #   · 해시 결과를 담은 변수 → 그 변수에 담긴 모든 해시의 공통 출처
+    _tick(ctx)
+    if isinstance(expr, ast.Await):
+        expr = expr.value
+    if isinstance(expr, ast.Call):
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == 'hash' and terminal_name(expr.func.value) in ctx.hashers:
+            value = expr.args[0] if expr.args else next((k.value for k in expr.keywords if k.arg == 'password'), None)
+            return (_scope_sources(value, function, ctx) or frozenset()) if value is not None else frozenset()
+        if depth < 3:
+            parts = [_compose(expr, helper, _hashed_origins(helper, ctx, depth + 1),
+                              lambda argument: _scope_sources(argument, function, ctx)) or frozenset()
+                     for _owner, helper in ctx.functions.get(terminal_name(expr.func) or '', [])]
+            return frozenset.intersection(*parts) if parts else frozenset()
+        return frozenset()
+    if isinstance(expr, ast.Name) and expr.id not in seen:
+        values = [value for node in ast.walk(function) for target, value in _assignment_pairs(node)
+                  if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(target, ast.Name) and target.id == expr.id]
+        parts = [_returned_hash_origins(value, function, ctx, depth, seen | {expr.id}) for value in values]
+        return frozenset.intersection(*parts) if parts else frozenset()
+    return frozenset()
 
 
 def _hash_valued_names(function, ctx, depth):
@@ -1216,10 +1638,13 @@ def _hash_valued_names(function, ctx, depth):
 
 def _returns_hash(function, ctx, depth):
     # 이 함수가 "해시 호출의 결과만" 반환하는가? 모든 return이 해시 결과여야 True다.
+    key = ('returns', id(function), depth)
+    if key in ctx.memo:
+        return ctx.memo[key]
+    ctx.memo[key] = False  # 서로를 부르는 함수(재귀)를 만나면 일단 "아님"으로 두어 끊는다.
     hashed = _hash_valued_names(function, ctx, depth)  # 해시 결과만 담아 온 변수 이름들
     returns = [node.value for node in ast.walk(function) if isinstance(node, ast.Return) and node.value is not None]
-    if not returns:
-        return False  # 아무것도 반환하지 않는 함수는 해시를 돌려준다고 할 수 없다.
+    answer = bool(returns)  # 아무것도 반환하지 않는 함수는 해시를 돌려준다고 할 수 없다.
     for value in returns:
         if isinstance(value, ast.Await):
             value = value.value
@@ -1227,8 +1652,10 @@ def _returns_hash(function, ctx, depth):
             continue  # 해시 호출의 결과를 바로 반환
         if isinstance(value, ast.Name) and value.id in hashed:
             continue  # 해시 결과만 담아 온 변수를 반환
-        return False  # 그 밖의 값(예: 원문 비밀번호)을 반환하는 경로가 있다.
-    return True
+        answer = False  # 그 밖의 값(예: 원문 비밀번호)을 반환하는 경로가 있다.
+        break
+    ctx.memo[key] = answer
+    return answer
 
 
 def _orm_classes(modules):
@@ -1320,6 +1747,8 @@ def check_duplicate_email(modules, criteria):
     rules = criteria['duplicateEmail']
     email = _email_names(criteria)
     normalized = set()  # 확인한 정리 방법("strip", "lower")
+    normalization_unknown = False
+    validator_found = False
     # 이메일 UNIQUE는 "사용자 표"(비밀번호를 저장하는 표)에 대한 것일 때만 근거가 된다. 다른 표의 이메일 칸은 가입 중복을 막지 못한다.
     # 사용자 표인지는 같은 클래스·표 안에 비밀번호 칸(password_hash 등)이 있는지로 판단한다. 표 밖에서 선언한 것은 가리지 못해 모든 후보에 적용한다.
     matcher = _sensitive(criteria)
@@ -1330,13 +1759,24 @@ def check_duplicate_email(modules, criteria):
 
     evidence = EmailEvidence()
     orm_classes = _orm_classes(modules)  # DB 표를 나타내는 클래스들. 비밀번호 칸이 있어도 요청 모델(pydantic)은 DB 표가 아니다.
+    # 이메일 값을 넘겨받는 프로젝트 함수들(normalize(payload.email) 의 normalize). 이 함수 안에서 매개변수에 strip·lower를 쓰면
+    # 이름에 email이 없어도 이메일을 정리하는 코드로 센다. ("정리 코드가 어디에도 없다"고 잘못 단정해 FAIL로 만들지 않으려는 것이다.)
+    email_helpers = {terminal_name(node.func) for module in modules.values() for node in ast.walk(module.tree)
+                     if isinstance(node, ast.Call) and any(
+                         isinstance(part, (ast.Name, ast.Attribute, ast.Subscript)) and email.search(terminal_name(part) or '')
+                         for argument in [*node.args, *(keyword.value for keyword in node.keywords)] for part in ast.walk(argument))}
     owner_cache = {}  # 클래스·Table 호출 → 비밀번호 칸이 있는지 (같은 클래스를 반복해서 훑지 않으려고 기록)
     calls = []        # 모든 함수 호출(어느 표를 가입에 쓰는지 찾을 때 다시 훑는다)
+    touched = set()   # 프로젝트 어딘가에서 이메일 값에 적용한 정리 종류("strip"/"lower"). 결과를 쓰는지와 상관없이 모은다.
+    email_stores = []  # 이메일 이름의 속성에 값을 넣는 대입(user.email = ...). 사용자 표 객체에 넣는 것인지는 나중에 가린다.
     for module in modules.values():
         normalized |= _pydantic_normalization(module.tree, email)  # pydantic 설정으로 정리하는 경우도 인정
         parents = {child: parent for parent in ast.walk(module.tree) for child in ast.iter_child_nodes(parent)}
+        loads = {}  # 이메일 검증기마다 정리 결과를 한 번만 계산해 두는 기록(_used_normalization이 쓴다).
         executed_sql = _executed_sql_strings(module.tree)  # 설명 글(docstring)이나 쓰이지 않는 글자는 SQL 근거로 인정하지 않는다.
         for node in ast.walk(module.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _email_validator(node, email):
+                validator_found = True
             if isinstance(node, ast.ClassDef) and node.name in orm_classes and _stores_password(node, is_password):
                 evidence.user_owners.add(('class', node.name))
                 for item in node.body:  # __tablename__ = "users" 로 이 클래스가 가리키는 표의 이름을 알아 둔다.
@@ -1344,7 +1784,7 @@ def check_duplicate_email(modules, criteria):
                             and isinstance(item.value, ast.Constant) and isinstance(item.value.value, str):
                         evidence.tablenames[item.value.value.lower()] = ('class', node.name)
             if isinstance(node, ast.Call):
-                calls.append(node)
+                calls.append((module, node))
                 if (terminal_name(node.func) or '') == 'Table' and _stores_password(node, is_password):
                     evidence.user_owners.add(('table', _table_call_name(node)))  # Table("users", metadata, Column(...), ...)
             # 비밀번호 칸이 없는 클래스·표 안의 선언(칸 정의·제약·인덱스)은 사용자 표에 대한 것이 아니므로 근거로 쓰지 않는다.
@@ -1395,14 +1835,24 @@ def check_duplicate_email(modules, criteria):
             if isinstance(node, ast.Call):
                 # something.strip() / .lower() / .casefold() 호출이 이메일 값에 적용되었고, 그 결과가 실제로 쓰이는지 확인한다.
                 if isinstance(node.func, ast.Attribute) and node.func.attr in ('strip', 'lower', 'casefold') \
-                        and _touches_email(node, module, email) and _result_is_used(node, parents):
-                    normalized.add('lower' if node.func.attr == 'casefold' else node.func.attr)
+                        and _touches_email(node, parents, email, email_helpers - {None}):
+                    touched.add('lower' if node.func.attr == 'casefold' else node.func.attr)
+                if isinstance(node.func, ast.Attribute) and node.func.attr in ('strip', 'lower', 'casefold') \
+                        and _touches_email(node, parents, email):
+                    steps = _used_normalization(node, parents, loads, email)
+                    if steps is None:
+                        normalization_unknown = True
+                    else:
+                        normalized |= steps
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute) \
+                    and isinstance(node.targets[0].value, ast.Name) and email.search(node.targets[0].attr):
+                email_stores.append((module, node))
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) in executed_sql:
                 # 실제로 실행하는 SQL 글자 안의 이메일 칸 정의도 살펴본다.
                 _sql_email(module, node, email, evidence, is_password)
     # 가입으로 사용자를 저장하는 표 찾기: 사용자 표 클래스를 이메일·저장 칸 값과 함께 만드는 곳(User(email=..., password_hash=...))
     class_names = {name for kind, name in evidence.user_owners if kind == 'class'}
-    for call in calls:
+    for _module, call in calls:
         if terminal_name(call.func) in class_names and any(
                 keyword.arg and (email.search(keyword.arg) or keyword.arg in storage_names) for keyword in call.keywords):
             evidence.targets.add(('class', terminal_name(call.func)))
@@ -1418,12 +1868,227 @@ def check_duplicate_email(modules, criteria):
     if kind == 'none':
         return CheckOutcome(UNVERIFIED, 'EMAIL_COLUMN_NOT_FOUND')        # 이메일 칸 자체를 찾지 못했다.
     unique = observations
+    required = set(rules['requireNormalization'])
     missing = [step for step in rules['requireNormalization'] if step not in normalized]  # 빠진 정리 방법
-    if missing:
+    if not missing:
+        return CheckOutcome(PASS, 'STATIC_DECLARATION', unique)
+    # 검증기·pydantic 설정만으로 모자라면, 가입으로 사용자를 저장하는 곳(User(email=...), user.email = ...)마다
+    # 그 이메일 값이 실제로 거친 정리 단계를 따라간다. 모든 저장 곳에서 필요한 정리가 확인되면 PASS이다.
+    # 예) email = payload.email.strip().lower(); User(email=email) / User(email=normalize_email(payload.email))
+    sites = _email_storage_sites(class_names, calls, email_stores, email)
+    flow = _email_flow(modules, _hash_context(modules, criteria['hashPolicy']), criteria['exposure']['routeMethods'])
+    if sites:
+        site_steps = [(module, node, flow.steps(module, node, value)) for module, node, value in sites]
+        if all(required <= normalized | steps for _module, _node, steps in site_steps):
+            return CheckOutcome(PASS, 'STATIC_DECLARATION', unique + [
+                _obs(module, node, 'NORMALIZED_BEFORE_STORAGE') for module, node, _steps in site_steps][:MAX_OBSERVATIONS])
+    if normalization_unknown:
+        return CheckOutcome(UNVERIFIED, 'EMAIL_NORMALIZATION_UNDETERMINED', unique)
+    # FAIL로 단정하는 경우는 세 가지뿐이다.
+    #   · 이메일 필드에 등록된 검증기가 정리하지 않은 값을 돌려준다(검증기의 모든 반환 경로를 확인했다).
+    #   · 빠진 정리 방법(strip 또는 lower)이 프로젝트 어디에서도 이메일 값에 쓰이지 않는다. (아무 데서도 하지 않으니 저장 값도 정리되지 않았다.)
+    #   · 가입 경로 함수가 받은 입력을 그대로 저장한다(User(email=payload.email)이고 그 함수 안에서 그 필드를 바꾸는 곳이 없다).
+    #     정리한 값을 계산만 하고 원래 값을 저장하는 코드가 여기에 해당한다.
+    # 그 밖에는 정리 코드가 있지만 저장되는 값과 연결되는지 증명하지 못한 경우라서 UNVERIFIED로 둔다.
+    raw_sites = [_obs(module, node, 'RAW_EMAIL_STORED') for module, node, value in sites if flow.raw(module, node, value)]
+    if validator_found or any(step not in touched for step in missing) or raw_sites:
         return CheckOutcome(FAIL, 'EMAIL_NORMALIZATION_MISSING',
                             unique + [Observation(unique[0].path, unique[0].line, 'NORMALIZATION_MISSING',
-                                                  {'missing': missing})])
-    return CheckOutcome(PASS, 'STATIC_DECLARATION', unique)
+                                                  {'missing': missing})] + raw_sites[:MAX_OBSERVATIONS])
+    return CheckOutcome(UNVERIFIED, 'EMAIL_NORMALIZATION_UNDETERMINED', unique)
+
+
+def _email_storage_sites(class_names, calls, email_stores, email):
+    # 가입으로 사용자를 저장할 수 있는 곳의 "이메일 값"들을 [(파일, 위치 노드, 이메일 값 식)]으로 모은다.
+    #   · 사용자 표 클래스를 만드는 호출의 이메일 인자: User(email=값, password_hash=...)
+    #   · 이메일 이름의 속성에 값을 넣는 대입: user.email = 값. 어느 객체인지 가리지 않고 모두 넣는다
+    #     (저장 곳을 빠뜨리면 정리되지 않은 저장을 놓친 채 PASS할 수 있어서, 넉넉하게 모으는 쪽을 택한다).
+    # 이메일 인자 없이 펼쳐 넘기면(User(**data)) 어떤 값인지 모르므로 None(따라갈 수 없음)으로 넣는다.
+    # 따옴표 글자처럼 사용자가 보낸 값이 아닌 이메일(관리자 계정 시드 등)은 가입 저장이 아니라서 뺀다.
+    sites = []
+    for module, call in calls:
+        if terminal_name(call.func) not in class_names:
+            continue
+        values = [keyword.value for keyword in call.keywords if keyword.arg and email.search(keyword.arg)]
+        if values:
+            sites.extend((module, call, value) for value in values if not isinstance(value, ast.Constant))
+        elif any(keyword.arg is None for keyword in call.keywords):
+            sites.append((module, call, None))
+    sites.extend((module, node, node.value) for module, node in email_stores if not isinstance(node.value, ast.Constant))
+    return sites
+
+
+def _email_flow(modules, ctx, route_methods=()):
+    # 저장하는 이메일 값이 "확실히" 거친 정리 단계({"strip", "lower"})를 따라가는 함수를 돌려준다. PASS 근거로만 쓴다.
+    # 모르면 빈 집합(정리를 증명하지 못함)이다. 그래서 틀리더라도 정리를 덜 인정하는 쪽(UNVERIFIED·FAIL 쪽)으로만 틀린다.
+    #   · value.strip().lower()            → 앞의 값 + strip, lower
+    #   · 이름                              → 그 이름에 값이 묶이는 모든 곳(매개변수 포함)의 공통 단계
+    #   · 매개변수                          → 프로젝트 안의 모든 호출에서 넘긴 값의 공통 단계 (프레임워크가 부르는 함수·값으로 넘겨진 함수는 정리되지 않은 입력)
+    #   · 프로젝트 함수의 결과(normalize(x)) → 그 함수의 모든 반환 경로의 공통 단계(넘긴 값의 단계를 이어 받는다)
+    #   · payload.email                    → 이 함수 본문 바로 아래에서 먼저 payload.email = 값 으로 한 번만 바꿨고 다른 쓰기가 없으면 그 값
+    #   · 조건식·and·or                     → 모든 갈래의 공통 단계
+    enclosing, call_sites, references = {}, {}, {}
+    for module in modules.values():
+        table = _enclosing_functions(module.tree)
+        enclosing[module.path] = table
+        for node in ast.walk(module.tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute)):
+                call_sites.setdefault(terminal_name(node.func), []).append((node, table.get(id(node))))
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                references[node.id] = references.get(node.id, 0) + 1
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                references[node.attr] = references.get(node.attr, 0) + 1
+    memo, keep_alive, parents_of, work = {}, [], {}, [0]
+
+    def tick():
+        work[0] += 1
+        if work[0] > WORK_LIMIT:
+            raise AnalysisTooComplex()
+
+    def steps(expr, scope, depth=0, visiting=frozenset()):
+        tick()
+        if isinstance(expr, ast.Await):
+            return steps(expr.value, scope, depth, visiting)
+        if isinstance(expr, ast.Call):
+            func = expr.func
+            if isinstance(func, ast.Attribute) and func.attr in ('strip', 'lower', 'casefold') and not expr.args \
+                    and not expr.keywords and func.attr not in ctx.defined_names:
+                return steps(func.value, scope, depth, visiting) | {'lower' if func.attr == 'casefold' else func.attr}
+            definitions = ctx.functions.get(terminal_name(func) or '', []) if depth < 4 else []
+            if not definitions:
+                return frozenset()  # 모르는 함수의 결과는 정리되었다고 증명할 수 없다.
+            results = []
+            for _owner, helper in definitions:
+                start = {parameter: steps(argument, scope, depth + 1, visiting)
+                         for parameter, argument in _bound_arguments(expr, helper) if parameter not in ('self', 'cls')}
+                results.append(frozenset(_returned_normalization(helper, start) or ()))
+            return frozenset.intersection(*results)
+        if isinstance(expr, ast.IfExp):
+            return steps(expr.body, scope, depth, visiting) & steps(expr.orelse, scope, depth, visiting)
+        if isinstance(expr, ast.BoolOp):
+            return frozenset.intersection(*[steps(part, scope, depth, visiting) for part in expr.values])
+        if isinstance(expr, ast.Name):
+            return name_steps(expr, scope, depth, visiting)
+        if isinstance(expr, ast.Attribute):
+            return field_steps(expr, scope, depth, visiting)
+        return frozenset()
+
+    def top_index(node, scope):
+        # node가 들어 있는 "함수 본문 바로 아래 문장"의 순서 번호. 함수 본문 밖(안쪽 함수 등)이면 None.
+        if id(scope) not in parents_of:
+            parents_of[id(scope)] = {child: parent for parent in ast.walk(scope) for child in ast.iter_child_nodes(parent)}
+        parents = parents_of[id(scope)]
+        top = node
+        while parents.get(top) is not None and parents.get(top) is not scope:
+            top = parents[top]
+        body = getattr(scope, 'body', [])
+        return next((index for index, statement in enumerate(body) if statement is top), None)
+
+    def name_steps(node, scope, depth, visiting):
+        name = node.id
+        if scope is None:
+            return frozenset()
+        pairs = [(target, value, statement) for statement in ast.walk(scope) for target, value in _assignment_pairs(statement)
+                 if isinstance(target, ast.Name) and target.id == name]
+        simple = [(value, statement) for _target, value, statement in pairs if isinstance(statement, (ast.Assign, ast.AnnAssign))]
+        own = 1 if name in _parameter_names(scope) else 0
+        if len(simple) != len(pairs) or _name_bindings(scope).get(name, 0) != len(simple) + own or not (simple or own):
+            return frozenset()  # for·with·+= 같은 다른 묶임이 있으면 어떤 값이 들어오는지 모두 알 수 없다.
+        body = getattr(scope, 'body', [])
+        position = top_index(node, scope)
+        if position is not None and all(statement in body for _value, statement in simple):
+            # 모든 대입이 함수 본문 바로 아래(조건·반복 밖)에 차례로 있으면, 읽는 곳 바로 앞의 마지막 대입이 그 값이다.
+            # 예) email = payload.email.strip(); email = email.lower() → 두 번째 대입 오른쪽의 email은 첫 번째 대입의 값이다.
+            earlier = [(value, statement) for value, statement in simple if body.index(statement) < position]
+            if earlier:
+                return steps(earlier[-1][0], scope, depth, visiting)
+            return parameter_steps(name, scope, depth, visiting) if own else frozenset()
+        # 그 밖에는 이 이름에 묶이는 모든 값(매개변수 포함)의 공통 단계만 인정한다.
+        key = (id(scope), name)
+        if key in visiting:
+            return frozenset()  # 서로를 거쳐 정해지는 이름(순환)은 정리를 증명하지 못한다.
+        if key in memo:
+            return memo[key]
+        inner = visiting | {key}
+        parts = [steps(value, scope, depth, inner) for value, _statement in simple]
+        if own:
+            parts.append(parameter_steps(name, scope, depth, inner))
+        memo[key] = frozenset.intersection(*parts)
+        return memo[key]
+
+    def parameter_steps(name, scope, depth, visiting):
+        # 매개변수의 값은 이 함수를 부르는 모든 곳에서 넘긴 값이다.
+        if depth >= 4 or scope.decorator_list or not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return frozenset()  # 데코레이터가 붙은 함수(경로 함수 등)는 프레임워크가 정리되지 않은 입력으로 부른다.
+        sites = call_sites.get(scope.name, [])
+        if not sites or references.get(scope.name, 0) != len(sites):
+            return frozenset()  # 부르는 곳이 없거나, 함수를 값으로 넘겨서(콜백·등록) 보이지 않는 곳에서도 불릴 수 있다.
+        parts = []
+        for call, caller in sites:
+            bound = [argument for parameter, argument in _bound_arguments(call, scope) if parameter == name]
+            if len(bound) != 1:
+                return frozenset()  # 기본값을 쓰거나 *값들·**설정으로 넘기면 어떤 값인지 알 수 없다.
+            parts.append(steps(bound[0], caller, depth + 1, visiting))
+        return frozenset.intersection(*parts)
+
+    def field_steps(expr, scope, depth, visiting):
+        # payload.email처럼 매개변수의 필드를 읽는 경우. 이 함수가 그 필드를 먼저 한 번만 바꿔 두었다면 그 값을 따른다.
+        base, chain = _chain(expr)
+        if scope is None or not isinstance(base, ast.Name) or base.id not in _parameter_names(scope) \
+                or any(kind != 'attr' for kind, _name in chain) or _name_bindings(scope).get(base.id, 0) != 1:
+            return frozenset()
+        path = tuple(name for _kind, name in chain)
+        stores = [statement for statement in scope.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                  and _chain(statement.targets[0])[0].__class__ is ast.Name
+                  and _chain(statement.targets[0])[0].id == base.id
+                  and tuple(name for _kind, name in _chain(statement.targets[0])[1]) == path]
+        if len(stores) != 1:
+            return frozenset()
+        store = stores[0]
+        position = top_index(expr, scope)
+        if position is None or scope.body.index(store) >= position:
+            return frozenset()  # 정리한 대입이 읽기보다 먼저 실행된다는 보장이 없다.
+        # 그 대입을 뺀 함수 사본에서 같은 필드를 바꾸는 곳(도우미 함수·별칭·setattr 등)이 있으면 어느 값이 남는지 알 수 없다.
+        rest = copy.copy(scope)
+        rest.body = [statement for statement in scope.body if statement is not store] or [ast.Pass()]
+        keep_alive.append(rest)  # 분석하는 동안 사본의 id가 다른 객체에 다시 쓰이지 않게 붙잡아 둔다.
+        changed = _mutated_fields(rest, ctx).get(base.id, ())
+        if any(path[:len(item)] == item or item[:len(path)] == path for item in changed):
+            return frozenset()
+        return steps(store.value, scope, depth, visiting)
+
+    def flow(module, node, value):
+        if value is None:
+            return frozenset()
+        return steps(value, enclosing[module.path].get(id(node)))
+
+    def raw(module, node, value):
+        # 이 저장 곳이 "가입 경로 함수가 받은 입력을 그대로" 저장하는가? (정리하지 않은 저장이라고 증명할 수 있는 경우만 True)
+        #   · 경로 데코레이터(@router.post 등)가 붙은 함수이고, 저장하는 값이 그 함수 매개변수(또는 그 필드)를 그대로 읽은 것이다.
+        #   · 매개변수를 다른 값으로 다시 묶지 않았고, 그 필드를 바꾸는 곳(대입·도우미·별칭·setattr 등)이 함수 안에 없다.
+        #   · Depends(...)로 받은 매개변수는 다른 함수가 만든 값이라서 제외한다.
+        scope = enclosing[module.path].get(id(node))
+        if value is None or not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)) or not any(
+                isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute) and decorator.func.attr in route_methods
+                for decorator in scope.decorator_list):
+            return False
+        base, chain = _chain(value)
+        if not isinstance(base, ast.Name) or base.id not in _parameter_names(scope) or any(kind != 'attr' for kind, _name in chain) \
+                or _name_bindings(scope).get(base.id, 0) != 1:
+            return False
+        arguments = scope.args
+        positional = [*arguments.posonlyargs, *arguments.args]
+        defaults = dict(zip([argument.arg for argument in reversed(positional)], reversed(arguments.defaults)))
+        defaults.update({argument.arg: default for argument, default in zip(arguments.kwonlyargs, arguments.kw_defaults) if default})
+        default = defaults.get(base.id)
+        if isinstance(default, ast.Call) and terminal_name(default.func) in ('Depends', 'Security'):
+            return False
+        path = tuple(name for _kind, name in chain)
+        changed = _mutated_fields(scope, ctx).get(base.id, ())
+        return not any(path[:len(item)] == item or item[:len(path)] == path for item in changed)
+
+    flow.steps, flow.raw = flow, raw
+    return flow
 
 
 def _constraint_columns(args, email):
@@ -1443,32 +2108,96 @@ def _constraint_columns(args, email):
     return hit, len(args), known
 
 
-def _result_is_used(call, parents):
-    # strip()·lower() 호출의 결과가 어딘가에 쓰이는가? 계산만 하고 버리면 값이 바뀌지 않으므로 정리한 것이 아니다.
-    #   value.strip().lower() 처럼 이어 붙인 호출은 가장 바깥 호출을 기준으로 본다.
-    #   · 문장 하나로만 쓰고 버림(value.lower()) → 쓰이지 않음
-    #   · 변수에 담았는데(cleaned = value.lower()) 그 변수를 한 번도 읽지 않음 → 쓰이지 않음
-    outer = call
-    while True:
-        parent = parents.get(outer)
-        grand = parents.get(parent)
-        if isinstance(parent, ast.Attribute) and parent.value is outer and isinstance(grand, ast.Call) and grand.func is parent:
-            outer = grand  # 호출 결과에 이어서 또 메서드를 부름
-        else:
-            break
-    parent = parents.get(outer)
-    if isinstance(parent, ast.Expr):
-        return False
-    if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is outer:
-        targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
-        names = {target.id for target in targets if isinstance(target, ast.Name)}
-        if names and len(names) == len(targets):
-            scope = parents.get(parent)
-            while scope is not None and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
-                scope = parents.get(scope)
-            return any(isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load) and item.id in names
-                       for item in ast.walk(scope if scope is not None else parent))
-    return True
+def _email_validator(function, email):
+    # 이름이 normalize_email인 일반 함수와 실제 이메일 필드에 등록된 검증기를 구분한다.
+    return any(isinstance(decorator, ast.Call) and terminal_name(decorator.func) in ('validator', 'field_validator')
+               and any(isinstance(arg, ast.Constant) and isinstance(arg.value, str) and email.search(arg.value)
+                       for arg in decorator.args) for decorator in function.decorator_list)
+
+
+def _used_normalization(call, parents, cache, email):
+    # 이메일 정리 함수는 실제 반환값의 모든 경로를 확인한다. 정리한 뒤 원문으로 되돌리거나 검사에만 쓴 값은 근거가 아니다.
+    scope = parents.get(call)
+    while scope is not None and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        scope = parents.get(scope)
+    if scope is not None and _email_validator(scope, email):
+        key = ('normalization', id(scope))
+        if key not in cache:
+            cache[key] = _returned_normalization(scope)
+        return cache[key]
+    # 함수 이름이나 읽힌 변수만으로 가입에 쓰이는 값이라고 증명하지 않는다. 연결되지 않은 helper는 PASS 근거에서 뺀다.
+    return set()
+
+
+def _returned_normalization(function, initial=None):
+    # 변수별 정리 상태를 문장 순서대로 옮긴다. 분기는 교집합으로 합치므로 한 경로라도 원문을 반환하면 정리를 보장하지 않는다.
+    # 반복·예외 처리·숨은 대입은 이 분석의 지원 범위 밖이다. None은 누락 확정이 아니라 UNVERIFIED를 뜻한다.
+    # initial은 {매개변수 이름: 호출한 쪽에서 이미 거친 정리 단계}이다. 없으면 매개변수는 정리되지 않은 값으로 시작한다.
+    work = 0
+
+    def tick():
+        nonlocal work
+        work += 1
+        if work > WORK_LIMIT:
+            raise AnalysisTooComplex()
+
+    def value_steps(value, env):
+        tick()
+        if isinstance(value, ast.Name):
+            return env.get(value.id, frozenset())
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and not value.args and not value.keywords:
+            method = value.func.attr
+            if method in ('strip', 'lower', 'casefold'):
+                return value_steps(value.func.value, env) | {'lower' if method == 'casefold' else method}
+        if isinstance(value, ast.IfExp):
+            return value_steps(value.body, env) & value_steps(value.orelse, env)
+        return frozenset()
+
+    def block(statements, env):
+        returned = []
+        for statement in statements:
+            tick()
+            if isinstance(statement, ast.Return):
+                return None, returned + [value_steps(statement.value, env)]
+            if isinstance(statement, ast.Raise):
+                return None, returned
+            if isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                pairs = _assignment_pairs(statement)
+                values = [(target, value_steps(value, env)) for target, value in pairs]
+                for target, steps in values:
+                    if not isinstance(target, ast.Name):
+                        raise ValueError('unsupported normalization assignment')
+                    env[target.id] = steps
+            elif isinstance(statement, ast.If):
+                if any(isinstance(node, ast.NamedExpr) for node in ast.walk(statement.test)):
+                    raise ValueError('unsupported normalization condition')
+                left, left_returns = block(statement.body, dict(env))
+                right, right_returns = block(statement.orelse, dict(env))
+                returned.extend(left_returns + right_returns)
+                if left is None and right is None:
+                    return None, returned
+                if left is None or right is None:
+                    env = right if left is None else left
+                else:
+                    env = {key: left.get(key, frozenset()) & right.get(key, frozenset()) for key in left.keys() | right.keys()}
+            elif isinstance(statement, ast.AugAssign):
+                if not isinstance(statement.target, ast.Name):
+                    raise ValueError('unsupported normalization mutation')
+                env[statement.target.id] = frozenset()
+            elif isinstance(statement, (ast.Expr, ast.Pass)):
+                if any(isinstance(node, ast.NamedExpr) for node in ast.walk(statement)):
+                    raise ValueError('unsupported normalization expression')
+            else:
+                raise ValueError('unsupported normalization statement')
+        return env, returned
+
+    try:
+        remaining, returned = block(function.body, dict(initial or {}))
+    except ValueError:
+        return None
+    if remaining is not None:
+        returned.append(frozenset())  # 반환 없이 끝나는 경로도 정리된 값을 내놓지 못한다.
+    return set.intersection(*(set(steps) for steps in returned)) if returned else set()
 
 
 def _stores_password(owner, is_password):
@@ -1737,11 +2466,12 @@ def _column_uniqueness(module, call, unique, plain):
         plain.append(_obs(module, call, 'EMAIL_COLUMN_WITHOUT_UNIQUE'))
 
 
-def _touches_email(call, module, email):
+def _touches_email(call, parents, email, helpers=frozenset()):
     # `.strip()`이나 `.lower()` 같은 호출이 "이메일 값"에 적용되었는지 판단한다.
     # 이메일에 쓴 것으로 인정하는 경우:
     #   1) 호출 대상 식에 이메일처럼 보이는 이름이 있다. 예) email.strip(), payload.email.lower()
-    #   2) 이름에 email이 들어간 함수(예: normalize_email) 안에서, 그 함수가 받은 값(매개변수)에 적용했다.
+    #   2) 이름에 email이 들어간 함수(예: normalize_email)나 이메일 필드에 등록된 검증기, 또는 helpers(이메일 값을 넘겨받는 함수) 안에서
+    #      그 함수가 받은 값(매개변수)에 적용했다.
     # 이메일과 무관한 호출(예: "X".lower())은 인정하지 않는다.
     stack = [call.func.value]  # 호출 대상(점 앞부분)에서 시작해 안쪽 가지를 살펴본다.
     while stack:
@@ -1756,12 +2486,16 @@ def _touches_email(call, module, email):
         root = root.func if isinstance(root, ast.Call) else root.value
     if not isinstance(root, ast.Name):
         return False
-    for node in ast.walk(module.tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and email.search(node.name) \
-                and any(child is call for child in ast.walk(node)):
+    node = parents.get(call)  # 이 호출을 감싸고 있는 함수들을 안쪽부터 바깥쪽으로 올라가며 본다. (호출마다 파일 전체를 훑으면 코드가 길수록 시간이 제곱으로 늘어난다.)
+    while node is not None:
+        # 이름에 email이 들어간 함수이거나, 이름과 상관없이 @field_validator("email")처럼 이메일 필드에 등록된 검증기이면
+        # 그 함수가 받은 값은 이메일이다. (def clean(cls, v): return v.strip().lower() 같은 정상 검증기를 놓치지 않으려는 것이다.)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                email.search(node.name) or _email_validator(node, email) or node.name in helpers):
             params = {arg.arg for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]}
             if root.id in params - {'self', 'cls'}:
                 return True
+        node = parents.get(node)
     return False
 
 
@@ -1779,12 +2513,13 @@ def check_exposure(modules, criteria):
     safe_keys = frozenset(rules.get('safeValidationErrorKeys', ('loc', 'msg', 'type')))
     fails, unresolved = [], []
     sensitive_models = _models_with_sensitive_fields(modules, matcher)  # 비밀번호 칸이 있는 입력·응답 모델들
+    input_models = _models_with_sensitive_fields(modules, matcher, include_secret=True)  # 검증 오류 응답에 원문이 실릴 수 있는 모델들
     functions = _functions(modules)
     untrusted_names = _untrusted_function_names(modules)  # 다른 것으로 바뀔 수 있어서 믿을 수 없는 함수 이름들
     # 해시 함수의 결과를 담은 변수도 "비밀번호를 품은 변수"로 따라가기 위한 도구들(REQ-005와 같은 방법으로 해시 호출을 알아본다)
     ctx = _hash_context(modules, criteria['hashPolicy'])
     uses_fastapi, handler_found = False, False  # FastAPI를 쓰는가 / 검증 오류 처리기를 찾았는가
-    project_classes = {node.name for module in modules.values() for node in ast.walk(module.tree) if isinstance(node, ast.ClassDef)}
+    filtering_models = _response_filter_models(modules)  # 추가 필드·직렬화 사용자화까지 확인한 Pydantic 모델만 믿는다.
 
     def check_registered_handler(module, node, handler):
         # RequestValidationError 처리기로 등록된 값(handler)을 분석한다. 등록 방법은 세 가지다.
@@ -1801,6 +2536,7 @@ def check_exposure(modules, criteria):
 
     seen = set()  # 이미 살펴본 코드 조각들(같은 곳을 두 번 판정하지 않으려고 기록)
     for module in modules.values():
+        logger_names, uncertain_loggers = _logger_bindings(module)
         # 함수마다 "비밀번호 필드를 가진 객체를 담은 변수"가 다르다. 그래서 안쪽 함수부터 차례로 살펴보고,
         # 각 코드 조각은 "가장 가까운 함수의 변수 목록"을 기준으로 딱 한 번만 판정한다.
         scopes = [(node, _sensitive_vars(node, sensitive_models, matcher, ctx))
@@ -1817,8 +2553,11 @@ def check_exposure(modules, criteria):
                     if name == 'fastapi.FastAPI':
                         uses_fastapi = True
                     # ① 로그·출력 호출에 비밀번호를 넘기는가
-                    if _is_output_call(node, name, rules) and sensitive_refs(node, matcher, svars):
+                    if _is_output_call(node, name, rules, logger_names) and sensitive_refs(node, matcher, svars):
                         fails.append(_obs(module, node, 'SENSITIVE_LOGGED'))
+                    elif isinstance(node.func, ast.Attribute) and node.func.attr in rules['logMethods'] \
+                            and qualname(node.func.value, {}) in uncertain_loggers and sensitive_refs(node, matcher, svars):
+                        unresolved.append(_obs(module, node, 'LOGGER_BINDING_UNRESOLVED'))
                     # ④ app.add_exception_handler(RequestValidationError, 처리기) 로 등록한 검증 오류 처리기를 찾는다.
                     if isinstance(node.func, ast.Attribute) and node.func.attr == 'add_exception_handler' \
                             and node.args and (terminal_name(node.args[0]) or '') == 'RequestValidationError':
@@ -1830,7 +2569,7 @@ def check_exposure(modules, criteria):
                         endpoints = [*node.args[1:], *(k.value for k in node.keywords if k.arg in ('endpoint', 'view_func'))]
                         for endpoint in endpoints:
                             for _owner, route in functions.get(terminal_name(endpoint) or '', []) if isinstance(endpoint, (ast.Name, ast.Attribute)) else []:
-                                _check_route(module, route, node, node.keywords, matcher, sensitive_models, project_classes,
+                                _check_route(module, route, node, node.keywords, matcher, sensitive_models, filtering_models,
                                              _sensitive_vars(route, sensitive_models, matcher, ctx), functions, fails, unresolved)
                     # FastAPI(exception_handlers={RequestValidationError: 처리기}) 로 등록하는 방법
                     for keyword in node.keywords:
@@ -1870,10 +2609,10 @@ def check_exposure(modules, criteria):
                         # ③ @router.post(...) 같은 API 경로 함수의 응답을 확인한다.
                         if decorator.func.attr in rules['routeMethods']:
                             _check_route(module, node, decorator, decorator.keywords, matcher, sensitive_models,
-                                         project_classes, svars, functions, fails, unresolved)
-    if uses_fastapi and rules['requireValidationErrorFilter'] and sensitive_models and not handler_found:
+                                         filtering_models, svars, functions, fails, unresolved)
+    if uses_fastapi and rules['requireValidationErrorFilter'] and input_models and not handler_found:
         # FastAPI는 입력 검증에 실패하면 기본으로 "입력값(비밀번호 포함)"을 오류 응답에 담아 돌려준다.
-        # 비밀번호 칸이 있는 모델을 쓰는데 이를 가려 주는 처리기가 없다면 노출 위험이 있다.
+        # 비밀번호 칸이 있는 모델을 쓰는데 이를 가려 주는 처리기가 없다면 노출 위험이 있다. 필드가 SecretStr이어도 마찬가지다.
         first = next(iter(modules.values()))
         fails.append(Observation(first.path, 0, 'VALIDATION_ERROR_ECHOES_INPUT'))
     if fails:
@@ -1883,7 +2622,45 @@ def check_exposure(modules, criteria):
     return CheckOutcome(PASS, 'NO_STATIC_EXPOSURE_PATH')
 
 
-def _is_output_call(call, name, rules):
+def _logger_bindings(module):
+    # 이름이 audit·sink여도 logging 팩터리에서 만든 객체와 그 별칭은 로그 출력이다. 재대입·순환 별칭은 확정하지 않는다.
+    bindings, users, seeds = {}, {}, set()
+    for node in ast.walk(module.tree):
+        for target, value in _assignment_pairs(node):
+            name = qualname(target, {})
+            if not name:
+                continue
+            source = qualname(value, {}) if isinstance(value, (ast.Name, ast.Attribute)) else None
+            factory = isinstance(value, ast.Call) and qualname(value.func, module.aliases) in (
+                'logging.getLogger', 'logging.Logger', 'logging.LoggerAdapter')
+            bindings.setdefault(name, []).append((source, factory))
+            if factory:
+                seeds.add(name)
+            elif source:
+                users.setdefault(source, set()).add(name)
+    possible, pending = set(seeds), deque(seeds)
+    work = 0
+    while pending:
+        source = pending.popleft()
+        for target in users.get(source, ()):
+            work += 1
+            if work > WORK_LIMIT:
+                raise AnalysisTooComplex()
+            if target not in possible:
+                possible.add(target)
+                pending.append(target)
+    uncertain = {name for name in possible if any(not factory and source not in possible
+                 for source, factory in bindings[name]) or ('.' not in name and module.bindings.get(name, 0) > len(bindings[name]))}
+    pending = deque(uncertain)
+    while pending:
+        for target in users.get(pending.popleft(), ()):
+            if target not in uncertain:
+                uncertain.add(target)
+                pending.append(target)
+    return frozenset(possible - uncertain), frozenset(uncertain)
+
+
+def _is_output_call(call, name, rules, logger_names=frozenset()):
     # 이 호출이 "밖으로 글자를 내보내는 호출"(로그, 화면 출력, 표준 오류 출력 등)인가?
     if name in rules.get('outputCalls', ['print']):
         return True  # print(...), sys.stderr.write(...) 같은 직접 출력
@@ -1893,13 +2670,15 @@ def _is_output_call(call, name, rules):
         # logger.info(...)처럼 로그 함수 이름(info, error 등)으로 부른 경우.
         # 부르는 대상이 logging 모듈이거나, 이름에 log가 들어 있으면(logger, app_log 등) 로그 호출로 본다.
         base = qualname(call.func.value, {}) or ''
-        return name.startswith('logging.') or 'log' in base.lower()
+        return name.startswith('logging.') or 'log' in base.lower() or base in logger_names
     return False
 
 
-def _models_with_sensitive_fields(modules, matcher):
+def _models_with_sensitive_fields(modules, matcher, include_secret=False):
     # "비밀번호처럼 보이는 필드를 가진 입력·응답 모델"의 클래스 이름들을 찾는다. 예) class SignupRequest: password: str
-    # SecretStr 형식의 필드는 출력해도 값이 가려져서 안전하므로 제외한다.
+    # SecretStr 형식의 필드는 객체를 출력·로그·model_dump()해도 값이 가려지므로 기본으로는 제외한다.
+    # 다만 입력 검증에 실패하면 FastAPI 기본 422 응답의 input에는 SecretStr로 바뀌기 전의 원문이 그대로 실린다
+    # (pydantic의 오류 항목은 검증 전 입력값을 담는다). 그 경로를 볼 때는 include_secret=True로 SecretStr 필드도 포함한다.
     names = set()
     for module in modules.values():
         for node in ast.walk(module.tree):
@@ -1908,8 +2687,8 @@ def _models_with_sensitive_fields(modules, matcher):
                     # "이름: 형식" 모양의 필드 선언(AnnAssign)만 본다.
                     if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
                             and matcher.search(item.target.id) \
-                            and not any(isinstance(part, ast.Name) and part.id == 'SecretStr'
-                                        for part in ast.walk(item.annotation)):
+                            and (include_secret or not any(isinstance(part, ast.Name) and part.id == 'SecretStr'
+                                                           for part in ast.walk(item.annotation))):
                         names.add(node.name)
     # 비밀번호 칸을 가진 모델을 물려받은 하위 클래스(class SignupIn(SignupRequest))와 별칭(Req = SignupRequest)도 같은 모델이다.
     # 새로 찾은 이름이 또 다른 하위 클래스·별칭의 바탕이 될 수 있어서, 더 이상 늘어나지 않을 때까지 반복한다.
@@ -1958,25 +2737,38 @@ def _sensitive_vars(function, sensitive_models, matcher=None, ctx=None):
         # 이 값에 비밀번호(또는 해시)가 들어 있는가?
         inner = value.value if isinstance(value, ast.Await) else value  # await는 호출 결과를 쓰는 것과 같다
         return (_reads_request_body(inner)
-                or bool(sensitive_refs(inner, matcher, frozenset(names), strict=True))
+                or bool(sensitive_refs(inner, matcher, names, strict=True))
                 or (ctx is not None and isinstance(inner, ast.Call) and _is_hash_call(inner, ctx, scope=function)))
 
-    changed = True
-    while changed:
-        changed = False
-        for node in ast.walk(function):
-            for target, value in _assignment_pairs(node):
-                if carries(value):
-                    for name in _target_names(target):
-                        if name not in names:
-                            names.add(name)
-                            changed = True
-            # 안쪽에 만든 함수가 비밀번호를 돌려주면(def get(): return payload.password) 그 함수를 부른 결과도 비밀번호를 품는다.
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node is not function and node.name not in names \
-                    and any(isinstance(item, ast.Return) and item.value is not None and carries(item.value)
-                            for item in ast.walk(node)):
-                names.add(node.name)
-                changed = True
+    # 값을 어떤 이름에 담는 문장들을 (담기는 이름들, 그 값들)로 모아 둔다.
+    # 안쪽에 만든 함수가 비밀번호를 돌려주면(def get(): return payload.password) 그 함수를 부른 결과도 비밀번호를 품는다.
+    entries = []
+    for node in ast.walk(function):
+        for target, value in _assignment_pairs(node):
+            entries.append((_target_names(target), [value]))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node is not function:
+            returned = [item.value for item in ast.walk(node) if isinstance(item, ast.Return) and item.value is not None]
+            if returned:
+                entries.append(([node.name], returned))
+    # 새로 알게 된 이름이 있으면, 그 이름을 쓰는 문장만 다시 본다. (전체를 되풀이해서 훑으면 대입이 거꾸로 길게 이어진 코드에서 시간이 제곱으로 늘어난다.)
+    users = {}
+    for index, (_targets, values) in enumerate(entries):
+        for used in {item.id for value in values for item in ast.walk(value) if isinstance(item, ast.Name)}:
+            users.setdefault(used, []).append(index)
+    pending, queued = deque(range(len(entries))), set(range(len(entries)))
+    while pending:
+        index = pending.popleft()
+        queued.discard(index)
+        targets, values = entries[index]
+        if all(name in names for name in targets) or not any(carries(value) for value in values):
+            continue
+        for name in targets:
+            if name not in names:
+                names.add(name)
+                for other in users.get(name, ()):
+                    if other not in queued:
+                        pending.append(other)
+                        queued.add(other)
     return frozenset(names)
 
 
@@ -2059,16 +2851,27 @@ def _check_validation_handler(module, function, fails, unresolved, safe_keys=fro
         return False
 
     # tainted = "원본 오류 목록을 담고 있는 변수" 이름들. 변수를 다른 변수에 옮겨 담는 경우도 따라가려고
-    # 더 이상 늘어나지 않을 때까지 반복해서 찾는다.
-    tainted, changed = set(), True
-    while changed:
-        changed = False
-        for node in ast.walk(function):
-            if isinstance(node, ast.Assign) and raw(node.value, tainted):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id not in tainted:
-                        tainted.add(target.id)
-                        changed = True
+    # 새로 알게 된 이름을 쓰는 대입만 다시 보면서 더 이상 늘어나지 않을 때까지 찾는다.
+    tainted = set()
+    assignments = [node for node in ast.walk(function) if isinstance(node, ast.Assign)]
+    users = {}
+    for index, node in enumerate(assignments):
+        for used in {item.id for item in ast.walk(node.value) if isinstance(item, ast.Name)}:
+            users.setdefault(used, []).append(index)
+    pending, queued = deque(range(len(assignments))), set(range(len(assignments)))
+    while pending:
+        index = pending.popleft()
+        queued.discard(index)
+        node = assignments[index]
+        if not raw(node.value, tainted):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id not in tainted:
+                tainted.add(target.id)
+                for other in users.get(target.id, ()):
+                    if other not in queued:
+                        pending.append(other)
+                        queued.add(other)
 
     # "input을 지우는 반복문"을 찾는다. 일부 항목에서만 지워질 수 있는 모양은 정리로 인정하지 않는다(아래 설명 참고).
     #   cleaned_at    : 정리가 "확실히" 끝나는 위치. {오류 목록 변수 이름: (줄, 칸)}  (이 위치 뒤에서 쓰는 목록은 안전하다)
@@ -2257,6 +3060,93 @@ def _error_values_verdict(values, loop_names, parents, safe_keys):
     return verdict
 
 
+def _response_filter_models(modules):
+    # 모델의 선언 필드만 내보낸다는 근거가 있는 이름을 찾는다. 사용자 serializer·동적 설정·불명확한 상속은 인정하지 않는다.
+    classes, aliases = {}, {}
+    for module in modules.values():
+        for node in ast.walk(module.tree):
+            if isinstance(node, ast.ClassDef):
+                classes.setdefault(node.name, []).append((module, node))
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Name):
+                for target, value in _assignment_pairs(node):
+                    if isinstance(target, ast.Name) and module.bindings.get(target.id) == 1:
+                        aliases[target.id] = value.id
+    memo, active = {}, set()
+    work = 0
+
+    def safe_config(value, module):
+        if isinstance(value, ast.Dict):
+            pairs = [(key.value, item) for key, item in zip(value.keys, value.values) if isinstance(key, ast.Constant)]
+            if len(pairs) != len(value.keys):
+                return False
+        elif isinstance(value, ast.Call) and qualname(value.func, module.aliases) == 'pydantic.ConfigDict' and not value.args:
+            if any(keyword.arg is None for keyword in value.keywords):
+                return False
+            pairs = [(keyword.arg, keyword.value) for keyword in value.keywords]
+        else:
+            return False
+        return all(key != 'extra' or isinstance(item, ast.Constant) and item.value in ('ignore', 'forbid')
+                   for key, item in pairs)
+
+    def safe(name, depth=0):
+        nonlocal work
+        work += 1
+        if work > WORK_LIMIT:
+            raise AnalysisTooComplex()
+        if name in memo:
+            return memo[name]
+        if depth > 80:  # 지원 범위 밖의 깊은 상속은 필터로 신뢰하지 않는다. 다른 경로 검사까지 재귀 오류로 버리지 않는다.
+            return False
+        if name in active:
+            return False
+        active.add(name)
+        definitions = classes.get(name, [])
+        if not definitions and name in aliases:
+            result = safe(aliases[name], depth + 1)
+        else:
+            result = len(definitions) == 1 and safe_class(*definitions[0], depth)
+        active.remove(name)
+        memo[name] = result
+        return result
+
+    def safe_class(module, node, depth):
+        if not node.bases or node.decorator_list:
+            return False
+        for base in node.bases:
+            full = qualname(base, module.aliases)
+            if full not in ('pydantic.BaseModel', 'pydantic.main.BaseModel') and not safe(terminal_name(base) or '', depth + 1):
+                return False
+        # class Public(BaseModel, extra="allow")도 model_config와 같은 방식으로 추가 필드를 허용한다.
+        if any(k.arg is None for k in node.keywords):
+            return False  # 펼친 설정의 extra를 알 수 없으면 필터로 신뢰하지 않는다.
+        if node.keywords and not safe_config(ast.Dict(keys=[ast.Constant(k.arg) for k in node.keywords],
+                                                       values=[k.value for k in node.keywords]), module):
+            return False
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # 사용자 함수는 기본 직렬화와 검증을 바꿀 수 있다. 안전성을 더 추적할 수 없는 경우에는 필터로 신뢰하지 않는다.
+                return False
+            if isinstance(item, ast.ClassDef):
+                if item.name != 'Config' or item.bases or item.decorator_list:
+                    return False
+                if any(not isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.Pass))
+                       and not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)
+                                and isinstance(stmt.value.value, str)) for stmt in item.body):
+                    return False
+                pairs = [(target.id, value) for stmt in item.body for target, value in _assignment_pairs(stmt)
+                         if isinstance(target, ast.Name)]
+                if not safe_config(ast.Dict(keys=[ast.Constant(key) for key, _ in pairs], values=[value for _, value in pairs]), module):
+                    return False
+            for target, value in _assignment_pairs(item):
+                if isinstance(target, ast.Name) and target.id == 'model_config' and not safe_config(value, module):
+                    return False
+            if isinstance(item, (ast.If, ast.Try, ast.For, ast.While)):
+                return False
+        return True
+
+    return frozenset(name for name in classes.keys() | aliases.keys() if safe(name))
+
+
 def _is_response_object(call):
     # 이 호출이 "응답 객체를 직접 만드는 호출"인가? 예) JSONResponse(...), Response(...), jsonify(...)
     # 응답 객체를 직접 돌려주면 FastAPI의 response_model 걸러내기가 적용되지 않는다.
@@ -2264,7 +3154,7 @@ def _is_response_object(call):
                                            or (terminal_name(call.func) or '') in ('jsonify', 'make_response'))
 
 
-def _check_route(module, function, anchor, keywords, matcher, sensitive_models, project_classes, svars, helpers, fails, unresolved):
+def _check_route(module, function, anchor, keywords, matcher, sensitive_models, filtering_models, svars, helpers, fails, unresolved):
     # API 경로 함수(@router.post 등이 붙은 함수)가 응답으로 비밀번호를 돌려주는지 확인한다.
     #   anchor   = 그 함수를 경로로 등록한 곳(데코레이터나 add_api_route 호출). 결과의 위치로 쓴다.
     #   keywords = 그 등록 호출에 넘긴 인자들. 응답 모양을 정하는 response_model 같은 인자가 들어 있을 수 있다.
@@ -2272,9 +3162,11 @@ def _check_route(module, function, anchor, keywords, matcher, sensitive_models, 
     declared_names = {part.id for part in ast.walk(declared) if isinstance(part, ast.Name)} if declared is not None else set()
     if declared_names & sensitive_models:
         fails.append(_obs(module, anchor, 'SENSITIVE_RESPONSE_MODEL'))  # 응답 모양 자체가 비밀번호 칸이 있는 모델이다.
-    # response_model이 실제로 응답을 걸러 준다고 인정하는 경우: 프로젝트 안에 정의된 모델 클래스를 가리킬 때만이다.
-    #   response_model=None 은 걸러내기를 "끄는" 설정이고, 소스에서 찾을 수 없는 모델(외부에서 가져온 것)은 어떤 필드가 있는지 알 수 없다.
-    filters = bool(declared_names & project_classes) and not (isinstance(declared, ast.Constant) and declared.value in (None, False))
+    # response_model이 실제로 응답을 걸러 준다고 인정하는 경우: 상속·추가 필드·사용자 직렬화를 확인한 모델만이다.
+    #   None·임의 클래스·extra="allow"·모르는 설정·serializer가 있으면 반환 객체가 걸러진다고 단정하지 않는다.
+    model_names = declared_names - {'list', 'tuple', 'set', 'List', 'Tuple', 'Set', 'Optional', 'Union', 'None'}
+    filters = bool(model_names) and model_names <= filtering_models
+    unproven_filter = bool(model_names) and not filters
     # 걸러 준다고 인정할 때만, 돌려주는 객체는 그 모델에 있는 필드만 응답에 나간다고 보고 객체를 통째로 반환해도 노출로 보지 않는다.
     visible_vars = frozenset() if filters else svars
     # 응답 객체를 직접 만드는 코드(JSONResponse(content=...) 등)는 response_model이 있어도 걸러지지 않는다.
@@ -2300,7 +3192,10 @@ def _check_route(module, function, anchor, keywords, matcher, sensitive_models, 
             unresolved.append(_obs(module, node, 'RESPONSE_BUILT_BY_HELPER'))
             continue
         if sensitive_refs(value, matcher, visible_vars):
-            fails.append(_obs(module, node, 'SENSITIVE_RESPONSE_VALUE'))  # 응답 값에 비밀번호를 사용
+            if unproven_filter:
+                unresolved.append(_obs(module, node, 'RESPONSE_FILTER_UNVERIFIED'))
+            else:
+                fails.append(_obs(module, node, 'SENSITIVE_RESPONSE_VALUE'))  # 필터가 없는 응답 값에 비밀번호를 사용
         elif not filters and _dumps_unknown_object(value):
             # 객체의 전체 필드를 펼쳐서 응답에 넣었다. 어떤 필드가 들어 있는지 코드만으로는 알 수 없다.
             unresolved.append(_obs(module, node, 'UNFILTERED_OBJECT_RESPONSE'))

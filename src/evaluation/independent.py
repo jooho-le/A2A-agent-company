@@ -2,7 +2,8 @@
 #
 # 독립 평가란?
 #   에이전트들이 코드를 만들고 고치는 과정(개발 순환)이 끝난 뒤, 그 과정 "밖"에서
-#   최종 코드를 따로 시험(보호 테스트)해 점수를 매기는 것이다. 에이전트는 이 시험 문제와 결과를 볼 수 없다.
+#   최종 코드를 따로 시험(보호 테스트)해 점수를 매기는 것이다.
+#   시험 문제·결과를 개발 순환에 공개할지는 실행 환경의 운영 정책이다. 이 보고서 모듈은 접근을 차단하지 않는다.
 #
 # reporting.py의 "에이전트 호환 보고서"와 다른 점:
 #   - 실제 A2A 작업 번호가 필요 없다.
@@ -57,13 +58,14 @@ class SourceRunSummary:
     final_verdict: str | None    # 시스템이 내린 최종 판정. 아직 없으면 None
     code_version: int | None     # 최종 코드 버전(1~4). 아직 없으면 None
     fix_attempt: int             # 코드를 고친 횟수(0~3)
-    started_at: str              # 실행을 시작한 시각
+    started_at: str              # Run 생성 시각(createdAt). RUN_STARTED 사건 시각과는 다를 수 있음
     finished_at: str | None      # 실행이 끝난 시각. 끝나지 않았으면 None
 
     @classmethod  # 객체를 만들기 전에 SourceRunSummary.from_run_status(...)처럼 부르는 "만들기 도우미" 함수
     def from_run_status(cls, payload: dict) -> "SourceRunSummary":
         # 시스템 API(GET /api/v1/runs/{runId})가 돌려준 JSON(payload)에서 필요한 값만 꺼내 요약 상자를 만든다.
         # "끝난 상태"일 때만 updatedAt을 끝난 시각으로 쓰고, 진행 중이면 None으로 둔다.
+        # createdAt~updatedAt은 API 상태 기록의 구간이다. run_metrics의 RUN_STARTED~종료 사건 시간과 구분한다.
         if not isinstance(payload, dict):
             raise ValueError('Run status must be a JSON object')
         status = payload.get('status')
@@ -104,7 +106,8 @@ class SourceRunSummary:
 
     def to_payload(self, has_confirmed_failure: bool) -> dict:
         # 보고서의 "sourceRun" 항목(JSON으로 쓸 사전)을 만든다.
-        # durationMs = 걸린 시간(밀리초). 시작~끝 시각의 차이이고, 아직 끝나지 않았으면 None이다.
+        # durationMs = Run 생성(createdAt)~최종 상태 갱신(updatedAt)의 밀리초 차이. 사건 기반 실행 시간이 아니다.
+        # 아직 끝나지 않았으면 None이다.
         # missedDefect = "놓친 결함"이 있었는가.
         #   시스템은 SUCCESS(성공)로 끝냈는데 우리 시험에서 필수 검사 FAIL이 하나라도 확인된 경우 True다.
         #   다른 검사가 미검증이라 전체 판정이 UNVERIFIED여도, 이미 확인된 FAIL은 놓친 결함으로 센다.
@@ -249,7 +252,12 @@ def build_evaluation_report(
         selected = [c for c in checks if bindings[c.test_id].perspective == perspective]
         # 그 관점의 검사가 하나도 없으면 "통과"로 꾸미지 않고 None으로 둔다.
         perspectives[perspective] = summarize_subset(selected) if selected else None
-    passed = sum(row['validationVerdict'] == 'PASS' for row in requirements)  # PASS인 요구사항의 수
+    # 한 요구사항의 필수 검사가 전부 승인된 NOT_APPLICABLE일 때만 그 요구사항을 분모에서 뺀다.
+    # 결과 누락·미승인 제외·오류는 집계에서 NOT_RUN 또는 ERROR이므로 적용 대상에 남는다.
+    applicable_requirements = [row for row in requirements
+                               if any(count for status, count in row['summary']['required'].items()
+                                      if status != 'notApplicable')]
+    passed = sum(row['validationVerdict'] == 'PASS' for row in applicable_requirements)
 
     report = {
         'schemaVersion': '1.0',                 # 보고서 형식의 버전
@@ -272,10 +280,11 @@ def build_evaluation_report(
         'optionalUnverifiedTestIds': summary['optionalUnverifiedTestIds'],
         # 검사 통과율 = 통과한 필수 검사 수 ÷ 적용된 필수 검사 수(승인받아 제외한 검사는 분모에서 뺀다).
         'requiredCheckPassRate': summary['requiredPassRate'],
-        # 요구사항 통과율 = PASS인 요구사항 수 ÷ 전체 필수 요구사항 수.
-        # 신분증(Manifest)이 없거나 달라서 아무것도 측정하지 못했다면 0%(전부 실패)가 아니라 None(측정 못 함)이다.
-        'requiredRequirementPassRate': (None if summary['manifestCheck']['errorCode']
-                                        else passed / len(requirements)),
+        # 요구사항 통과율 = PASS인 적용 요구사항 수 ÷ 적용 요구사항 수.
+        # 전부 승인 제외되었거나 Manifest가 확인되지 않으면 0%(전부 실패)가 아니라 None(측정 못 함)이다.
+        'requiredRequirementPassRate': (passed / len(applicable_requirements)
+                                        if applicable_requirements and not summary['manifestCheck']['errorCode']
+                                        else None),
         'requirements': requirements,
         'perspectives': perspectives,
         'checks': summary['results'],

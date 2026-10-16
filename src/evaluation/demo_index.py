@@ -12,6 +12,8 @@
 #   - 비어 있는 분류(예: 로그가 하나도 없음)는 missingCategories에 따로 적는다. 자료가 없는데 있는 것처럼 보이지 않게 하려는 것이다.
 #   - 미리 알려 준 비밀값(시험용 비밀번호 등)이 글자 파일에서 발견되면, 그 값은 말하지 않고 "어느 파일인지"만 알리며 목록 만들기를 거부한다.
 from hashlib import sha256  # 파일 내용의 지문(해시)을 만드는 도구
+from html import escape  # HTML 특수문자를 &amp; 같은 표기로 바꾸는 도구(비밀값이 HTML 안에 바뀐 모양으로 들어 있는지 찾을 때 쓴다)
+import json
 import os  # 파일을 안전하게 여는 도구
 from pathlib import Path  # 파일·폴더 경로를 다루는 도구
 import re  # 글자 모양 검사(정규식)
@@ -22,9 +24,9 @@ from .aggregation import _uuid4
 from .common import aware_time
 
 CATEGORIES = ('logs', 'source', 'screens', 'reports')  # 허용하는 분류 폴더 이름 네 가지
-MAX_FILE_BYTES = 256 * 1024 * 1024  # 파일 하나의 최대 크기: 256MiB
-# 비밀값을 찾는 검사는 16MiB 이하의 "글자 파일"에서만 한다. 그림·영상 같은 바이너리 파일은 건너뛴다.
-MAX_SCAN_BYTES = 16 * 1024 * 1024
+MAX_FILE_BYTES = 256 * 1024 * 1024  # 파일 하나의 최대 크기: 256MiB. 허용 크기 안의 글자 파일은 끝까지 나눠 읽으며 비밀값을 찾는다.
+# 운영체제가 폴더에 저절로 만드는 정보 파일. 시연 자료가 아니므로 목록에서 빼고, 최상위에 있어도 거부하지 않는다.
+IGNORED_NAMES = frozenset({'.DS_Store'})
 BINARY_SUFFIXES = frozenset({'.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.mov', '.webm', '.pdf', '.zip', '.tar', '.gz'})
 # 확장자로 파일 종류(미디어 타입)를 알려 주는 표. 표에 없는 확장자는 거부하지 않고 "알 수 없는 바이너리"로 적는다.
 MEDIA_TYPES = {'.log': 'text/plain', '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json',
@@ -50,16 +52,17 @@ def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | 
     if snapshot_sha256 is not None and not re.fullmatch(r'[0-9a-f]{64}', snapshot_sha256):
         raise ValueError('snapshot_sha256 must be a SHA-256 hex digest')
     aware_time(created_at, 'created_at')  # 올바른 시각인지만 확인한다.
-    secrets = [value.encode('utf-8') for value in sensitive_values]  # 파일 내용(바이트)과 비교하려고 바이트로 바꾼다.
-    if any(not value for value in secrets):
+    values = list(sensitive_values)
+    if any(not isinstance(value, str) or not value for value in values):
         raise ValueError('Sensitive values must be nonempty strings')
+    secrets = _secret_forms(values)  # 파일 내용(바이트)과 비교할 모양들. 원래 글자뿐 아니라 JSON·URL·HTML에 바뀌어 적힌 모양도 찾는다.
     base = Path(root)
     # 폴더가 아니거나 바로가기(심볼릭 링크)면 거부한다. 바로가기는 폴더 밖의 파일을 몰래 가리킬 수 있기 때문이다.
     if not base.is_dir() or base.is_symlink():
         raise ValueError('root must be an existing directory')
     base = base.resolve()  # 절대 경로로 바꾼다.
     # 최상위에는 logs/source/screens/reports 네 폴더만 있어야 한다. 다른 파일이나 폴더가 섞여 있으면 거부한다.
-    unknown = sorted(entry.name for entry in base.iterdir() if entry.name not in CATEGORIES)
+    unknown = sorted(entry.name for entry in base.iterdir() if entry.name not in CATEGORIES and entry.name not in IGNORED_NAMES)
     if unknown:
         raise ValueError(f'unknown top-level entries: {unknown}')
 
@@ -74,8 +77,8 @@ def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | 
         for path in sorted(folder.rglob('*')):  # rglob('*') = 하위 폴더까지 모든 항목
             if path.is_symlink():
                 raise ValueError(f'symbolic links are not allowed: {path.relative_to(base).as_posix()}')
-            if path.is_dir():
-                continue  # 폴더 자체는 목록에 넣지 않는다.
+            if path.is_dir() or (path.name in IGNORED_NAMES and not path.is_symlink()):
+                continue  # 폴더 자체와 운영체제 정보 파일(.DS_Store)은 목록에 넣지 않는다.
             relative = path.relative_to(base).as_posix()  # root 기준의 상대 경로(슬래시 / 로 통일)
             # 일반 파일만 받는다. 이름 있는 파이프(FIFO)·소켓·장치 파일을 열면 쓰는 쪽이 나타날 때까지 무기한 기다리게 되어
             # 목록 만들기가 멈출 수 있다. 그래서 열기 전에 파일 종류부터 확인한다.
@@ -87,14 +90,17 @@ def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | 
             size = path.stat().st_size
             if size > MAX_FILE_BYTES:
                 raise ValueError(f'file is too large: {relative}')
-            # 비밀값 검사 대상인지 정한다: 알려 준 비밀값이 있고, 글자 파일이며, 크기가 한도 이하일 때만 검사한다.
-            scan = bool(secrets) and path.suffix.lower() not in BINARY_SUFFIXES and size <= MAX_SCAN_BYTES
+            # 텍스트 크기로 검색을 생략하지 않는다. 바이너리·비밀값 목록 없음은 출력에 생략 이유를 남긴다.
+            binary = path.suffix.lower() in BINARY_SUFFIXES
+            scan = bool(secrets) and not binary
+            skipped = 'BINARY_FORMAT' if binary else 'NO_SENSITIVE_VALUES' if not secrets else None
             digest, found = _digest_and_scan(path, secrets, scan, relative)
             if found:
                 # 값 자체는 오류 메시지에 쓰지 않고 파일 경로만 알린다(오류 메시지에서 또 새어 나가지 않게).
                 raise ValueError(f'known sensitive value found in: {relative}')
             files.append({'category': category, 'path': relative, 'sizeBytes': size,
                           'sha256': digest,
+                          'sensitiveScan': {'status': 'CHECKED' if scan else 'SKIPPED', 'reason': skipped},
                           'mediaType': MEDIA_TYPES.get(path.suffix.lower(), 'application/octet-stream')})
     # 3) 분류별 파일 개수를 세고, 하나도 없는 분류는 따로 적는다.
     counts = {category: sum(1 for item in files if item['category'] == category) for category in CATEGORIES}
@@ -102,6 +108,19 @@ def build_demo_index(root, *, run_id: str, created_at: str, code_version: int | 
             'codeVersion': code_version, 'snapshotSha256': snapshot_sha256, 'createdAt': created_at,
             'files': files, 'counts': counts,
             'missingCategories': [category for category in CATEGORIES if counts[category] == 0]}
+
+
+def _secret_forms(values):
+    # 비밀값 하나가 파일 안에 적힐 수 있는 모양들을 바이트로 돌려준다. 같은 값이라도 저장 형식에 따라 글자가 바뀌어 적힌다.
+    #   원래 글자(UTF-8) / JSON 안("\\"·\\uXXXX로 바뀐 글자, 한글을 그대로 둔 경우와 바꾼 경우) / URL 인코딩(%XX, 공백은 + 또는 %20) / HTML(&amp; 등)
+    # 이 밖의 변환(base64, 압축, 다른 인코딩)은 찾지 못한다(문서에 적은 한계).
+    from urllib.parse import quote, quote_plus
+    forms = set()
+    for value in values:
+        for text in (value, json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1],
+                     quote(value, safe=''), quote_plus(value, safe=''), escape(value)):
+            forms.add(text.encode('utf-8'))
+    return sorted(forms)
 
 
 def _digest_and_scan(path, secrets, scan, relative):

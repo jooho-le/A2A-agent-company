@@ -1,6 +1,6 @@
 # Single-Agent 비교 기준선 (D6, 팀 공유·논의용)
 
-작성: 2026-10-14 · 4번(강석민) · 상태: **설계 초안. 실행기가 없어 실제 비교는 아직 불가**
+작성: 2026-10-14 · 갱신: 2026-10-17 · 4번(강석민) · 상태: **설계 초안. 실행기가 없어 실제 비교는 아직 불가**
 근거: 개발정의서 11-A, 기업질의응답(Q75~80), 2차 기업미팅 11~12절, dev `run_configuration.py`·`telemetry_store.py`, [evaluation_spec.md](evaluation_spec.md) 13절.
 
 ## 1. 우선순위와 범위
@@ -68,7 +68,9 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 | Regression | 수정으로 새로 실패한 공통 테스트 수 | 수정 전후 독립 평가 보고서 비교(버전별 평가는 기록만 하고 순환에 전달하지 않음) |
 | 협업 오버헤드 | Multi의 Agent 간 전달·대기 시간 | `/telemetry`(Single에는 해당 없음, 비교는 총시간으로) |
 
-`/usage.summary`는 Run 전체 요약이므로 페이지의 record를 다시 더하지 않는다. `costUsd=null`을 0으로 쓰지 않는다. `HUMAN_REVIEW`는 재개될 수 있어 영구 종료로 일괄 처리하지 않는다. `sourceRun.missedDefect`(Orchestrator SUCCESS인데 보호 테스트 FAIL)는 두 구조의 "자체 성공" 신뢰도를 비교하는 보조 지표로 쓸 수 있다.
+`/usage.summary`는 Run 전체 요약이므로 페이지의 record를 다시 더하지 않는다. `costUsd=null`과 미측정 모델 호출 수를 0으로 쓰지 않는다. 구조별 모델 호출 합계 `modelCalls`는 모든 대상 Run의 측정이 있을 때만 표시하고, 확인된 부분 합은 `knownModelCalls`, 완전성은 `modelCallsComplete`로 구분한다. `HUMAN_REVIEW`는 재개될 수 있어 영구 종료로 일괄 처리하지 않는다. Orchestrator SUCCESS인데 독립 평가의 필수 실패가 확인된 Run 수는 두 구조의 "자체 성공" 신뢰도를 비교하는 보조 지표다. 이 값은 실제 연결한 Run과 평가 결과로 계산하며 선택 항목 `sourceRun` 생략에 영향받지 않는다.
+
+위 표는 측정 계획을 포함한다. 현재 `/telemetry` 수집·협업 전달 및 대기 시간·사람 대기 시간·Regression 계산은 미구현이다. 보고서의 `sourceRun.durationMs`는 Run 생성~종료 시간이고, `run_metrics()`의 시간은 RUN_STARTED 사건부터 계산한다. 사건 수가 누락되거나 불일치하면 사건 기반 시간은 None으로 남긴다.
 
 ## 6. 비교가 무효가 되는 경우 (개발정의서 11-A)
 

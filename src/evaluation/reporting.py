@@ -43,7 +43,7 @@ def validate_contract(payload: dict, name: str) -> None:
     # name은 ".schema.json"을 뺀 스키마 이름이다. 예) "independent_evaluation"
     # 보고서가 스키마와 다르면 jsonschema의 ValidationError가 나고,
     # 그런 이름의 스키마가 없거나 파일을 읽지 못하면 다른 종류의 예외가 난다.
-    documents = [json.loads(path.read_text()) for path in
+    documents = [json.loads(path.read_text(encoding='utf-8')) for path in
                  files('evaluation').joinpath('contracts').iterdir()
                  if path.name.endswith('.schema.json')]  # contracts 폴더의 모든 스키마 파일을 읽는다.
     # 스키마들이 서로를 이름($id)으로 가리킬 수 있도록 한 묶음(레지스트리)으로 등록한다.

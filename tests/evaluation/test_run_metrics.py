@@ -475,3 +475,115 @@ def test_same_warmup_state_gives_no_warning_and_execution_order_may_differ():
     """준비 상태가 모두 같으면 주의가 없다. 실행 순서 숫자는 Run마다 달라야 정상이라 비교 조건이 아니다."""
     data = entries(executionOrder=1)
     assert comparison_validity(data) == {'valid': True, 'violations': [], 'warnings': []}
+
+
+@pytest.mark.parametrize('source_summary', [None, {'missedDefect': False, 'finalVerdict': 'FAIL'}])
+def test_missed_defects_use_actual_run_even_without_a_matching_optional_summary(source_summary):
+    # 선택 요약을 생략하거나 그 요약의 판정이 오래되어도 실제 Run의 SUCCESS와 확인된 실패가 기준이다.
+    metric = run_metrics(bundle())
+    report = evaluation_report(metric['runId'], verdict='UNVERIFIED', requirement_rate=0.0)
+    report['sourceRun'] = source_summary
+    report['confirmedFailureIds'] = [uid(100)]
+    result = experiment_summary([metric], {'MULTI_AGENT': 1}, [report])['MULTI_AGENT']['evaluation']
+    assert result['missedDefects'] == 1
+
+
+@pytest.mark.parametrize('verdict, failures', [('FAIL', [uid(100)]), ('SUCCESS', [])])
+def test_claimed_missed_defect_cannot_override_actual_run_and_confirmed_failures(verdict, failures):
+    # 실제 성공이 없거나 필수 실패가 확인되지 않았다면 선택 요약에 True라고 적혀 있어도 놓친 결함이 아니다.
+    metric = run_metrics(bundle(verdict=verdict))
+    report = evaluation_report(metric['runId'], verdict='FAIL', missed=True)
+    report['sourceRun']['finalVerdict'] = 'SUCCESS'
+    report['confirmedFailureIds'] = failures
+    result = experiment_summary([metric], {'MULTI_AGENT': 1}, [report])['MULTI_AGENT']['evaluation']
+    assert result['missedDefects'] == 0
+
+
+@pytest.mark.parametrize('measured, planned, total, known, complete', [
+    ([None], 1, None, None, False),
+    ([12, None], 2, None, 12, False),
+    ([12], 2, None, 12, False),
+    ([12, 8], 2, 20, 20, True),
+    ([0], 1, 0, 0, True),
+    ([], 1, None, None, False),
+])
+def test_model_calls_distinguish_complete_partial_unknown_and_zero(measured, planned, total, known, complete):
+    # 확인한 부분 합과 전체 합계를 분리하고, 기록이 전혀 없는 상태를 실제 0회와 구분한다.
+    runs = []
+    for index, calls in enumerate(measured):
+        data = bundle(uid(index + 1), with_usage=calls is not None)
+        if calls is not None:
+            data['usage']['summary']['modelCalls'] = calls
+        runs.append(run_metrics(data))
+    result = experiment_summary(runs, {'MULTI_AGENT': planned})['MULTI_AGENT']
+    assert result['modelCalls'] == total
+    assert result['knownModelCalls'] == known
+    assert result['modelCallsComplete'] is complete
+    assert result['runsWithoutUsage'] == measured.count(None)
+
+
+@pytest.mark.parametrize('measured, planned, total, known', [
+    ([None, None], 2, None, None),
+    ([1000, None], 2, None, 1000),
+    ([1000, 500], 2, 1500, 1500),
+    ([0], 1, 0, 0),
+])
+def test_tokens_keep_unknown_as_none_instead_of_zero(measured, planned, total, known):
+    # 토큰도 모델 호출 수·비용과 같은 기준이다. 한 Run도 사용량을 모르면 확인된 합계는 0이 아니라 None이다(원칙 1).
+    runs = []
+    for index, tokens in enumerate(measured):
+        data = bundle(uid(index + 1), with_usage=tokens is not None)
+        if tokens is not None:
+            data['usage']['summary']['knownTotalTokens'] = data['usage']['summary']['totalTokens'] = tokens
+        runs.append(run_metrics(data))
+    result = experiment_summary(runs, {'MULTI_AGENT': planned})['MULTI_AGENT']
+    assert result['totalTokens'] == total
+    assert result['knownTotalTokens'] == known
+
+
+def test_unknown_event_total_does_not_claim_complete_timing():
+    # 시작·끝이 목록에 있어도 전체 개수를 모르면 더 이른 시작이나 마지막 판정이 빠졌을 수 있다.
+    data = bundle()
+    del data['eventsTotal']
+    metrics = run_metrics(data)
+    assert metrics['firstBuildPassMs'] is None
+    assert metrics['verdictMs'] is None and metrics['totalMs'] is None
+    assert {'EVENTS_COMPLETENESS_UNKNOWN', 'RUN_START_UNKNOWN'} <= set(metrics['notes'])
+
+
+def test_fetch_empty_page_keeps_partial_records_and_marks_timings_unknown():
+    # API가 total보다 일찍 빈 페이지를 주면 받은 자료는 보존하되 완전한 기록이라고 주장하지 않는다.
+    data = bundle()
+
+    def get(path, query):
+        if path.endswith('/events'):
+            return {'events': data['events'][:1] if query['offset'] == 0 else [],
+                    'total': len(data['events'])}
+        if path.endswith('/issues'):
+            return {'issues': data['issues']}
+        if path.endswith('/tool-attempts'):
+            return {'attempts': data['toolAttempts']}
+        if path.endswith('/usage'):
+            return data['usage']
+        if path.endswith('/configuration'):
+            return data['configuration']
+        return data['run']
+
+    fetched = fetch_run_bundle(get, data['run']['runId'])
+    assert fetched['events'] == data['events'][:1]
+    metrics = run_metrics(fetched)
+    assert 'EVENTS_INCOMPLETE' in metrics['notes']
+    assert metrics['firstBuildPassMs'] is None and metrics['totalMs'] is None
+
+
+def test_fetch_page_error_is_propagated_instead_of_returning_partial_bundle():
+    # get의 실패는 빈 페이지와 다르다. 호출자는 실패를 확인하고 재수집해야 한다.
+    data = bundle()
+
+    def get(path, query):
+        if query['offset'] == 0:
+            return {'events': data['events'][:1], 'total': len(data['events'])}
+        raise RuntimeError('page request failed')
+
+    with pytest.raises(RuntimeError, match='page request failed'):
+        fetch_run_bundle(get, data['run']['runId'])

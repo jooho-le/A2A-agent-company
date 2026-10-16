@@ -272,3 +272,53 @@ def test_invalid_source_run_rejected(change):
     """시스템의 상태 규칙에 맞지 않는 실행 정보는 만드는 순간 거부한다."""
     with pytest.raises(ValueError):
         SourceRunSummary.from_run_status(run_status(**change))
+
+
+@pytest.mark.parametrize('excluded', [(0,), (0, 1, 2)])
+def test_approved_not_applicable_requirements_leave_the_denominator(excluded):
+    # 모든 필수 검사가 승인 제외된 요구사항은 충족률 분모에서 빼고, 전부 제외되면 측정값이 없다.
+    args = inputs()
+    for index in excluded:
+        args['plan'][index] = replace(args['plan'][index], exclusion_approval_ref='artifact://approval',
+                                      exclusion_reason='승인된 제외')
+        args['results'][index] = CheckResult(args['plan'][index].test_id, Status.NOT_APPLICABLE)
+    report = build_evaluation_report(**args)
+    assert report['requiredRequirementPassRate'] == (None if len(excluded) == 3 else 1.0)
+    assert report['requiredCheckPassRate'] == (None if len(excluded) == 3 else 1.0)
+    assert report['evaluationVerdict'] == ('UNVERIFIED' if len(excluded) == 3 else 'PASS')
+
+
+def test_partly_excluded_requirement_keeps_its_applicable_check():
+    # 같은 요구사항 안의 한 검사만 제외되어도 나머지 실패는 요구사항 충족률에 남아야 한다.
+    args = inputs()
+    args['plan'][1] = replace(args['plan'][1], exclusion_approval_ref='artifact://approval',
+                              exclusion_reason='승인된 제외')
+    args['results'][1] = CheckResult(uid(21), Status.NOT_APPLICABLE)
+    args['results'][2] = CheckResult(uid(22), Status.FAIL, (uid(122),))
+    report = build_evaluation_report(**args)
+    assert report['requiredRequirementPassRate'] == 0.5
+    assert report['requirements'][1]['validationVerdict'] == 'FAIL'
+
+
+@pytest.mark.parametrize('status', [Status.NOT_APPLICABLE, Status.NOT_RUN, Status.ERROR])
+def test_unapproved_or_missing_requirement_results_stay_in_denominator(status):
+    # 승인 없는 제외·결과 누락·오류는 측정하지 못한 요구사항이며 분모를 줄이는 근거가 아니다.
+    args = inputs()
+    args['results'][0] = CheckResult(uid(20), status)
+    report = build_evaluation_report(**args)
+    assert report['requiredRequirementPassRate'] == 0.5
+    assert report['evaluationVerdict'] == 'UNVERIFIED'
+
+
+def test_optional_pass_does_not_restore_an_excluded_required_requirement():
+    # 참고용 검사가 통과해도 모든 필수 검사가 승인 제외된 요구사항을 통과로 세지 않는다.
+    args = inputs()
+    args['plan'][0] = replace(args['plan'][0], exclusion_approval_ref='artifact://approval',
+                              exclusion_reason='승인된 제외')
+    args['results'][0] = CheckResult(uid(20), Status.NOT_APPLICABLE)
+    args['plan'].append(CheckPlan(uid(23), required=False))
+    args['results'].append(CheckResult(uid(23), Status.PASS, (uid(123),)))
+    args['bindings'][uid(23)] = EvaluationBinding(uid(10), 'QA', '선택 검사')
+    report = build_evaluation_report(**args)
+    assert report['requiredRequirementPassRate'] == 1.0
+    assert report['requirements'][0]['validationVerdict'] == 'UNVERIFIED'

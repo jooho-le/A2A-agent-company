@@ -1,6 +1,6 @@
 # 평가 개발 환경
 
-최종 갱신: 2026-10-15. Python 3.13을 사용한다(설치할 때 `--python 3.13`으로 직접 지정). dev의 공통 프로젝트 설정을 사용한다.
+최종 갱신: 2026-10-17. Python 3.13을 사용한다(설치할 때 `--python 3.13`으로 직접 지정). dev의 공통 프로젝트 설정을 사용한다.
 
 Python 3.10은 dev 테스트(`Task.cancelling`)와 Security 승인 함수(`co_qualname`)가 지원하지 않아 실패하고, 3.14는 dev 보안 승인 테스트 6개가 실패했다. 루트 `pyproject.toml`의 `requires-python = ">=3.10"`은 팀 공유 파일이라 바꾸지 않았다. 팀 Python 버전 통일은 회의 안건이다(OPEN-15).
 
@@ -31,7 +31,7 @@ uv run --frozen python scripts/check_dev_reports.py .venv/bin/python
 PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ```
 
-기본 pytest는 `tests/`만 수집한다(평가 테스트는 2026-10-16 기준 494개. 저장소 전체는 dev 테스트가 많아 20분 넘게 걸린다. 마지막 전체 실행은 2026-10-16이고 3802개가 모두 통과했다. dev의 `test_planner_developer_continuation`에는 가끔 실패하는 테스트가 있는데(수정 전 커밋에서도 재현) 이번 실행에서는 통과했다. 평가 코드와는 무관하다).
+기본 pytest는 `tests/`만 수집한다. 테스트 수와 결과는 수정 시점에 따라 달라지므로 [개발진행사항 7절](development_progress.md#7-검증-기록)에서 날짜·검증 대상과 함께 확인한다. 2026-10-16 5차 수정 시점의 기록은 평가 494개, 저장소 전체 3802개 통과이며 현재 코드의 전체 통과를 뜻하지 않는다. 저장소 전체는 dev 테스트가 많아 20분 넘게 걸린다. dev의 `test_planner_developer_continuation`에는 과거 수정 전 커밋에서도 재현된 간헐 실패가 있으므로 새 실패는 실제 원인과 변경 범위를 다시 확인한다.
 평가 테스트만 실행하려면 `uv run --frozen python -m pytest tests/evaluation`,
 환경 확인은 `uv run --frozen python -m pytest checks`로 따로 실행한다.
 평가 자체 테스트와 보고서 모델 호환 검사는 실제 A2A/MCP/회원가입 서비스 통합 검증이 아니다.
@@ -47,6 +47,7 @@ PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 - 공통 계약 변경 시 사본과 보고서 모델 호환 검사도 함께 갱신한다.
 - Agent URL과 토큰은 루트 `.env.example`을 참고한다.
 - 실행환경 lock은 루트 `uv.lock`이며 실제 검사 대상 서비스의 lock과 구분한다.
+- 평가 공통 스키마는 package-data로 wheel에 포함한다. `security/scn001_security_criteria.json`은 아직 wheel에 들어가지 않는다(루트 `pyproject.toml`은 팀 공유 파일이라 주호 님 승인 후 반영). 보안 판정 구현을 변경하면 코드 동결 후 승인 해시를 다시 생성해야 한다.
 
 ## 문제 확인
 

@@ -22,10 +22,11 @@ CHECKERS = {
     'REQ-006': lambda modules, criteria, contract: sa.check_exposure(modules, criteria),
 }
 MAX_REFS = 256  # 한 번에 돌려줄 수 있는 증거 주소의 최대 개수(시스템이 정한 한도)
+MAX_EVIDENCE_BYTES = 65536  # Host는 증거 JSON을 UTF-8로 인코딩한 바이트 수로 제한한다.
 
 
 def evaluate(request):
-    # 시스템의 보안 확인 절차 없이도 쓸 수 있는 "순수 판정 함수"이다. 오류가 나면 그대로 예외를 낸다(디버깅에 편함).
+    # 시스템의 보안 확인 절차 없이도 쓰는 판정 함수이다. 분석 한도 초과는 UNVERIFIED, 그 밖의 오류는 예외로 알린다.
     # 돌려주는 값은 SecurityAssessment를 만들 때 쓰는 인자들을 담은 사전(dict)이다.
     criteria, contract = request.criteria, request.scenario_contract
     # {요구사항 UUID: 표시 이름(REQ-005 등)} 표를 만든다.
@@ -41,7 +42,11 @@ def evaluate(request):
         key = keys.get(str(requirement_id))
         if key not in CHECKERS:
             continue  # 이 검증기가 다루지 않는 요구사항(예: 기능 검사)은 건너뛴다.
-        result = CHECKERS[key](modules, criteria, contract)
+        try:
+            result = CHECKERS[key](modules, criteria, contract)
+        except (sa.AnalysisTooComplex, RecursionError):
+            # 코드가 너무 복잡하거나 식이 너무 깊게 중첩되어 정해진 한도 안에 분석을 끝내지 못했다. 확정하지 않고 UNVERIFIED로 답한다.
+            result = sa.CheckOutcome(sa.UNVERIFIED, 'ANALYSIS_TOO_COMPLEX')
         if parse_errors and result.outcome == sa.PASS:
             # 분석하지 못한 파일이 있었다면 "문제 없음"이라고 단정할 수 없으므로 PASS를 UNVERIFIED로 낮춘다.
             result = sa.CheckOutcome(sa.UNVERIFIED, 'SOURCE_PARSE_ERROR', result.observations)
@@ -77,11 +82,12 @@ def _result(request, outcomes, dispositions, observations, analyzed_paths):
     #       붙일 수 있는 증거가 없으면 확정하지 않고 UNVERIFIED로 낮춘다.
     permitted = list(request.permitted_evidence_refs)  # 시스템이 허용한 증거 주소 목록
     requirement_outcomes, refs = [], []
-    for requirement_id, _key, result in outcomes:
+    for requirement_id, key, result in outcomes:
         # 관찰 기록에 나온 파일들의 증거 주소를 찾는다. 관찰된 파일이 없으면 분석한 모든 파일을 증거로 삼는다.
         cited = _refs_for(permitted, [item.path for item in result.observations] or analyzed_paths)
         if result.outcome != sa.UNVERIFIED and not cited:
             requirement_outcomes.append((requirement_id, sa.UNVERIFIED))
+            observations['requirements'][key].update(outcome=sa.UNVERIFIED, basis='EVIDENCE_REFERENCE_MISSING')
             continue
         requirement_outcomes.append((requirement_id, result.outcome))
         refs.extend(cited)
@@ -93,12 +99,55 @@ def _result(request, outcomes, dispositions, observations, analyzed_paths):
             refs.extend(cited)
     # dict.fromkeys(...)로 중복을 없애고(순서는 유지), 한도(MAX_REFS)까지만 남긴다.
     unique_refs = tuple(dict.fromkeys(refs))[:MAX_REFS]
+    for index, (_requirement_id, key, result) in enumerate(outcomes):
+        cited = _refs_for(unique_refs, [item.path for item in result.observations] or analyzed_paths)
+        if requirement_outcomes[index][1] != sa.UNVERIFIED and not cited:
+            requirement_outcomes[index] = (requirement_outcomes[index][0], sa.UNVERIFIED)
+            observations['requirements'][key].update(outcome=sa.UNVERIFIED, basis='EVIDENCE_REFERENCE_LIMIT')
+    # 주소 한도 밖의 파일만 근거로 갖는 경고는 확정하지 않는다. JSON 근거와 판정을 항상 함께 남긴다.
+    supported = {finding_id for finding_id, _value, observation in dispositions
+                 if _refs_for(unique_refs, [observation.path])}
+    finding_dispositions = [pair for pair in finding_dispositions if pair[0] in supported]
+    requirement_outcomes, finding_dispositions, unique_refs, evidence_json = _bounded_evidence(
+        requirement_outcomes, finding_dispositions, unique_refs, observations)
     return {'request_id': request.request_id, 'request_sha256': request.request_sha256,
             'approval_sha256': request.approval_sha256,
             'requirement_outcomes': tuple(requirement_outcomes),
             'finding_dispositions': tuple(finding_dispositions),
             'evidence_refs': unique_refs,
-            'evidence_json': json.dumps(observations, ensure_ascii=False, sort_keys=True)}
+            'evidence_json': evidence_json}
+
+
+def _evidence_json(document):
+    # Host가 다시 직렬화하는 형식과 같게 만들어 공백·한글 때문에 바이트 한도가 달라지지 않도록 한다.
+    return json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def _bounded_evidence(requirements, dispositions, refs, observations):
+    # 요구사항 근거를 먼저 보존하고, 남은 바이트 안에서 경고 판정과 해당 관찰 기록을 함께 넣는다.
+    # 제외된 경고는 확정 판정을 보내지 않으므로 Host에서 미확인 상태로 남는다.
+    candidates = dict(dispositions)
+    rows = observations.get('findings', [])
+    evidence = {**observations, 'findings': [], 'omittedFindings': len(rows)}
+    used = len(_evidence_json(evidence).encode('utf-8'))
+    if used > MAX_EVIDENCE_BYTES:
+        # 경고를 모두 빼도 요구사항 근거 자체가 너무 크면, 근거 없는 PASS/FAIL 대신 명시적인 미검증을 반환한다.
+        minimal = {'error': 'EVIDENCE_LIMIT_EXCEEDED', 'omittedFindings': len(rows)}
+        return ([(key, sa.UNVERIFIED) for key, _value in requirements], [], (), _evidence_json(minimal))
+    selected = []
+    for row in rows:
+        finding_id = row['findingId']
+        if finding_id not in candidates:
+            continue
+        extra = len(_evidence_json(row).encode('utf-8')) + bool(selected)
+        if used + extra > MAX_EVIDENCE_BYTES:
+            continue
+        used += extra
+        evidence['findings'].append(row)
+        selected.append((finding_id, candidates[finding_id]))
+    # 처음에 전체 개수를 예약했으므로 이 수를 줄여도 직렬화 크기가 커지지 않는다.
+    evidence['omittedFindings'] -= len(selected)
+    return requirements, selected, refs, _evidence_json(evidence)
 
 
 def _refs_for(permitted, paths):

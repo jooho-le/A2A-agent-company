@@ -38,7 +38,8 @@ def fetch_run_bundle(get, run_id: str) -> dict:
     # 한 Run에 대한 자료를 시스템 API에서 모아 하나의 묶음(사전)으로 만든다.
     # get은 "get(경로, 쿼리 사전 또는 None) → 응답 JSON" 모양의 함수이다. (호출하는 쪽이 실제 HTTP 요청을 담당한다.)
     # /events는 한 번에 최대 500건만 주므로, 전체 개수(total)에 닿을 때까지 이어서 받는다.
-    # 가져오다 실패하면 그 오류를 그대로 위로 올려 보낸다(일부만 받은 채 계속하지 않는다).
+    # get이 예외를 내면 그대로 위로 올려 보낸다. total에 닿기 전에 빈 페이지가 오면 더 진행할 수 없어
+    # 받은 목록과 total을 반환한다. run_metrics가 이를 EVENTS_INCOMPLETE로 표시하고 시간 계산을 막는다.
     _uuid4(run_id)
     base = f'/api/v1/runs/{run_id}'
 
@@ -114,8 +115,8 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
 
     started = times('RUN_STARTED')          # 실행 시작 사건
     start = started[0] if started else None
-    if 'EVENTS_INCOMPLETE' in notes:
-        start = None  # 사건이 일부만 왔다면 시작 시각도 믿지 않는다.
+    if total is None or total != len(events):
+        start = None  # 사건이 일부만 왔거나 전체 개수를 모르면 시작·끝 사건이 모두 왔다고 확정하지 않는다.
     builds, verdicts = times('BUILD_PASSED'), times('VERDICT_CREATED')   # 첫 빌드 성공 / 판정이 만들어진 사건들
     ends = sorted(times('RUN_FINISHED') + times('RUN_ABORTED'))          # 끝남 또는 중단 사건 (시간순 정렬)
     if start is None:
@@ -222,12 +223,18 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
         aborted = sum(1 for item in mine if item['workflowStatus'] == 'ABORTED')                      # 중단된 Run
         in_progress = sum(1 for item in mine if item['verdict'] is None and item['workflowStatus'] != 'ABORTED')  # 판정 전(진행 중·일시정지)
         success, failed = count('SUCCESS'), count('FAIL')
-        # 비용·토큰은 "계획한 Run 전부가 확인되었을 때만" 전체 합계를 낸다. 아니면 확인된 부분의 합만 따로 낸다.
+        # 비용·토큰·모델 호출 수는 계획한 Run 전부가 확인되었을 때만 전체 합계를 낸다.
+        # 모델 호출 수는 확인된 부분 합을 knownModelCalls로 구분하며, 한 건도 측정하지 못했으면 None이다.
         known_cost = [Decimal(item['knownCostUsd']) for item in mine if item['knownCostUsd'] is not None]
         cost_complete = len(mine) == planned and all(item['costComplete'] for item in mine)
         total_cost = sum(known_cost, Decimal(0)) if known_cost else None
         tokens_complete = len(mine) == planned and all(item['totalTokens'] is not None for item in mine)
-        known_tokens = sum(item['knownTotalTokens'] or 0 for item in mine)
+        # 확인된 토큰 수의 합. 한 Run도 사용량을 모르면 0이 아니라 None이다(원칙 1). 모델 호출 수·비용과 같은 기준이다.
+        measured_tokens = [item['knownTotalTokens'] for item in mine if item['knownTotalTokens'] is not None]
+        known_tokens = sum(measured_tokens) if measured_tokens else None
+        measured_calls = [item['modelCalls'] for item in mine if item['modelCalls'] is not None]
+        known_calls = sum(measured_calls) if measured_calls else None
+        calls_complete = len(mine) == planned and len(measured_calls) == len(mine)
         reports = [by_evaluation[item['runId']] for item in mine if item['runId'] in by_evaluation]
         # 통과율이 None(측정 못 함)인 보고서는 평균에서 뺀다. 0%로 취급하면 평균이 낮아지기 때문이다.
         requirement_rates = [r['requiredRequirementPassRate'] for r in reports if r['requiredRequirementPassRate'] is not None]
@@ -244,7 +251,8 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
                                                if item['verdict'] == 'SUCCESS' and item['verdictMs'] is not None]),
             'meanFixAttempts': _mean([item['fixAttempts'] for item in mine]),
             'meanToolRetries': _mean([item['toolRetries'] for item in mine]),
-            'modelCalls': sum(item['modelCalls'] or 0 for item in mine),
+            'modelCalls': known_calls if calls_complete else None,
+            'knownModelCalls': known_calls, 'modelCallsComplete': calls_complete,
             'runsWithoutUsage': sum(1 for item in mine if item['modelCalls'] is None),  # 사용량을 모르는 Run 수
             'totalTokens': known_tokens if tokens_complete else None, 'knownTotalTokens': known_tokens,
             'costUsd': format(total_cost, 'f') if cost_complete and total_cost is not None else None,
@@ -256,7 +264,11 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
                 'unmeasuredRuns': len(reports) - len(requirement_rates),  # 통과율을 측정하지 못한 보고서 수
                 'evaluationVerdicts': {verdict: sum(1 for r in reports if r['evaluationVerdict'] == verdict)
                                        for verdict in ('PASS', 'FAIL', 'UNVERIFIED')},
-                'missedDefects': sum(1 for r in reports if (r.get('sourceRun') or {}).get('missedDefect')),
+                # sourceRun은 선택 참고 정보이므로 실제 연결된 Run의 판정과 확인된 필수 FAIL로 계산한다.
+                # sourceRun이 없거나 그 안의 missedDefect·finalVerdict가 오래된 값이어도 집계 결과를 바꾸지 않는다.
+                'missedDefects': sum(1 for r in reports
+                                     if by_run[r['sourceRunId']]['verdict'] == 'SUCCESS'
+                                     and r.get('confirmedFailureIds')),
             },
         }
     return result

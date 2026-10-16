@@ -142,3 +142,46 @@ def test_socket_files_are_rejected_too():
     finally:
         server.close()
         shutil.rmtree(root, ignore_errors=True)
+
+
+
+def test_large_text_is_scanned_past_the_old_limit(tmp_path):
+    # 16MiB 뒤의 비밀값도 검사한다. 허용 크기의 텍스트를 검색하지 않고 통과시키면 안 된다.
+    root = make(tmp_path)
+    marker = 'generated-marker-for-review'
+    (root / 'logs' / 'large.log').write_bytes(b'x' * (17 * 1024 * 1024) + marker.encode())
+    with pytest.raises(ValueError, match='known sensitive value'):
+        build_demo_index(root, run_id=RUN, created_at=NOW, sensitive_values=[marker])
+
+
+def test_scan_status_separates_checked_binary_and_missing_secret_list(tmp_path):
+    root = make(tmp_path)
+    entries = {row['path']: row for row in build_demo_index(
+        root, run_id=RUN, created_at=NOW, sensitive_values=['review-marker'])['files']}
+    assert entries['logs/run.log']['sensitiveScan'] == {'status': 'CHECKED', 'reason': None}
+    assert entries['screens/result.png']['sensitiveScan'] == {'status': 'SKIPPED', 'reason': 'BINARY_FORMAT'}
+    entries = {row['path']: row for row in build_demo_index(root, run_id=RUN, created_at=NOW)['files']}
+    assert entries['logs/run.log']['sensitiveScan'] == {'status': 'SKIPPED', 'reason': 'NO_SENSITIVE_VALUES'}
+
+
+def test_macos_folder_metadata_is_ignored(tmp_path):
+    # macOS가 폴더마다 만드는 .DS_Store는 시연 자료가 아니다. 최상위에 있어도 거부하지 않고, 분류 폴더 안의 것도 목록에서 뺀다.
+    root = make(tmp_path)
+    (root / '.DS_Store').write_bytes(b'\0\0')
+    (root / 'logs' / '.DS_Store').write_bytes(b'\0\0')
+    paths = [row['path'] for row in build_demo_index(root, run_id=RUN, created_at=NOW)['files']]
+    assert not any(path.endswith('.DS_Store') for path in paths)
+
+
+@pytest.mark.parametrize('written', [
+    '{"password": "pa\\"ss&word 비밀"}',                       # JSON에서 "를 \"로 적음, 한글은 그대로
+    '{"password": "pa\\"ss&word \\ube44\\ubc00"}',             # JSON에서 한글을 \uXXXX로 적음
+    'POST /signup password=pa%22ss%26word+%EB%B9%84%EB%B0%80',  # URL 인코딩(공백은 +)
+    '<p>pa&quot;ss&amp;word 비밀</p>',                          # HTML 표기
+])
+def test_secret_is_found_in_escaped_forms(tmp_path, written):
+    # 비밀값은 저장 형식에 따라 바뀐 글자로 적힌다. 원래 글자만 찾으면 JSON·URL·HTML에 들어간 비밀번호를 놓친다.
+    root = make(tmp_path)
+    (root / 'logs' / 'escaped.log').write_text(written, encoding='utf-8')
+    with pytest.raises(ValueError, match='known sensitive value'):
+        build_demo_index(root, run_id=RUN, created_at=NOW, sensitive_values=['pa"ss&word 비밀'])

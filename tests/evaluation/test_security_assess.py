@@ -937,7 +937,8 @@ FOURTH_REVIEW_CASES = [
         'from schemas import Public\n'), {}),
     ('list of a project response model filters too', _route_response('list[Public]', '[payload]', PUBLIC_MODEL,
         'from schemas import Public\n'), {}),
-    ('response model that cannot be found is not trusted', _route_response('ExternalModel', 'payload'), {'REQ-006': 'FAIL'}),
+    # 외부 모델은 필터 효과도 노출도 확인하지 못하므로 FAIL을 단정하지 않는다.
+    ('response model that cannot be found is not trusted', _route_response('ExternalModel', 'payload'), {'REQ-006': 'UNVERIFIED'}),
     ('helper that builds a response object is not trusted', lambda f: _append('routers.py',
         '\n\ndef build(payload):\n    return JSONResponse(content={"ok": 1})\n')(_route_response(
         'Public', 'build(payload)', PUBLIC_MODEL, 'from fastapi.responses import JSONResponse\nfrom schemas import Public\n')(f)),
@@ -1097,3 +1098,504 @@ def test_fifth_review_cases(label, change, changed):
     # 위 사례를 하나씩 판정해서 기대한 결과(GOOD의 판정에서 바뀌는 부분만 적음)와 같은지 확인한다.
     result, _assessment = outcomes(change(dict(GOOD)))
     assert result == {**GOOD_EXPECTED, **changed}
+
+
+# ---------------------------------------------------------------------------------------------
+# 6차 외부 점검(2026-10-16)에서 찾은 사례와 같은 종류의 변형들이다.
+#   ① 비밀번호의 해시를 계산만 하고 버린 뒤 이메일의 해시를 돌려주거나 저장해도 REQ-005가 통과하던 문제
+#      → "함수 안에서 해시를 계산했다"가 아니라 "실제로 돌려주는(저장하는) 해시가 무엇을 해시한 것인가"를 본다.
+#   ② 입력 객체의 필드를 덮어쓰는 방법이 더 있다는 점 (별칭을 만드는 방식, __dict__·vars·object.__setattr__ 같은 쓰기 방식).
+#      같은 변수에 여러 객체를 번갈아 대입해서 판정기가 끝나지 않던 문제는 test_security_limits.py에서 시간 제한을 두고 시험한다.
+# ---------------------------------------------------------------------------------------------
+TWO_VALUE_HASH = 'def hash_password(password: str, email: str = "") -> str:\n'  # 값을 두 개 받는 해시 함수의 선언 줄
+PASS_BOTH_VALUES = _replace('routers.py', 'hash_password(payload.password)', 'hash_password(payload.password, payload.email)')
+
+
+def _hash_function_with_email(body, tail=''):
+    # hash_password가 (password, email) 두 값을 받고 본문이 body인 소스 묶음을 만든다. 가입 경로도 두 값을 모두 넘기고, tail은 security.py 맨 뒤에 붙는다.
+    return _both(_replace('security.py', HASH_FUNCTION, TWO_VALUE_HASH + body + tail), PASS_BOTH_VALUES)
+
+
+FAKE_HASH = '\ndef _fake_hash(self, value, *args, **kwargs):\n    return value\n\n'  # 받은 값을 그대로 돌려주는 가짜 hash 함수 정의
+
+SIXTH_REVIEW_CASES = [
+    # --- ① 실제로 돌려주는 해시만 본다 ---
+    ('password hash computed and thrown away, email hash returned', _hash_function_with_email(
+        '    HASHER.hash(password)\n    return HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('password hash kept in an unused variable', _hash_function_with_email(
+        '    unused = HASHER.hash(password)\n    return HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('password hash kept in a variable and returned is fine', _hash_function_with_email(
+        '    digest = HASHER.hash(password)\n    return digest\n'), {}),
+    ('email hash returned through a variable', _hash_function_with_email(
+        '    digest = HASHER.hash(password)\n    other = HASHER.hash(email)\n    return other\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('variable names that lie about what was hashed', _hash_function_with_email(
+        '    pw_hash = HASHER.hash(email)\n    email_hash = HASHER.hash(password)\n    return pw_hash\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('password hashed on one branch and email on the other', _hash_function_with_email(
+        '    if email:\n        return HASHER.hash(password)\n    return HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('password hashed on every branch is fine', _hash_function_with_email(
+        '    if email:\n        return HASHER.hash(password)\n    return HASHER.hash(password)\n'), {}),
+    ('password hash only used as a condition', _hash_function_with_email(
+        '    return HASHER.hash(email) if HASHER.hash(password) else ""\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('ternary choosing between the two hashes', _hash_function_with_email(
+        '    return HASHER.hash(password) if email else HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('inner helper hashes the password but returns the email hash', _both(
+        _replace('security.py', HASH_FUNCTION, '''def _digest(password, email):
+    HASHER.hash(password)
+    return HASHER.hash(email)
+
+
+''' + TWO_VALUE_HASH + '    return _digest(password, email)\n'), PASS_BOTH_VALUES), {'REQ-005': 'UNVERIFIED'}),
+    ('inner helper returns the password hash is fine', _both(
+        _replace('security.py', HASH_FUNCTION, '''def _digest(password, email):
+    HASHER.hash(email)
+    return HASHER.hash(password)
+
+
+''' + TWO_VALUE_HASH + '    return _digest(password, email)\n'), PASS_BOTH_VALUES), {}),
+    ('both hashes returned as a tuple', _hash_function_with_email(
+        '    return HASHER.hash(password), HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('both hashes joined into one text', _hash_function_with_email(
+        '    return HASHER.hash(password) + HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('email hash returned from a finally block', _hash_function_with_email(
+        '    try:\n        HASHER.hash(password)\n    finally:\n        return HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('email hash returned inside a with block', _hash_function_with_email(
+        '    with open("/dev/null") as handle:\n        HASHER.hash(password)\n        return HASHER.hash(email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('hash variable overwritten by the email hash', _hash_function_with_email(
+        '    digest = HASHER.hash(password)\n    digest = HASHER.hash(email)\n    return digest\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('hash variable overwritten by the password hash is not trusted either', _hash_function_with_email(
+        '    digest = HASHER.hash(email)\n    digest = HASHER.hash(password)\n    return digest\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('signup route throws the password hash away and stores the email hash', _signup_user(
+        'hash_password(payload.password)\n    user = User(email=payload.email, password_hash=hash_password(payload.email))'),
+        {'REQ-005': 'UNVERIFIED'}),
+    ('signup route variable named pw_hash holds the email hash', _signup_user(
+        'pw_hash = hash_password(payload.email)\n    email_hash = hash_password(payload.password)\n'
+        '    user = User(email=payload.email, password_hash=pw_hash)'), {'REQ-005': 'UNVERIFIED'}),
+    ('signup route stores the password hash through a variable is fine', _signup_user(
+        'pw_hash = hash_password(payload.password)\n    user = User(email=payload.email, password_hash=pw_hash)'), {}),
+    ('signup route also hashes the email but stores the password hash is fine', _signup_user(
+        'email_hash = hash_password(payload.email)\n    user = User(email=payload.email, password_hash=hash_password(payload.password))'), {}),
+    ('signup route hashes the email directly with the hasher', _signup_user(
+        'hash_password(payload.password)\n    user = User(email=payload.email, password_hash=HASHER.hash(payload.email))'),
+        {'REQ-005': 'UNVERIFIED'}),
+    ('route helper calls hash_password twice and returns the email hash', _both(
+        _router_helper('def both(password, email):\n    hash_password(password)\n    return hash_password(email)\n'),
+        _signup_user('user = User(email=payload.email, password_hash=both(payload.password, payload.email))')), {'REQ-005': 'UNVERIFIED'}),
+    ('route helper calls hash_password twice and returns the password hash is fine', _both(
+        _router_helper('def both(password, email):\n    hash_password(email)\n    return hash_password(password)\n'),
+        _signup_user('user = User(email=payload.email, password_hash=both(payload.password, payload.email))')), {}),
+    # --- ② 입력 객체의 필드를 덮어쓰는 방법들. 아래 사례는 필드 이름을 passwd로 해서(저장 칸 이름 password와 달라서) "덮어썼는가"만 판정하게 한다. ---
+    ('form copied by a tuple assignment then overwritten', _form_route('    a, b = form, db\n    a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form chosen by a conditional expression then overwritten', _form_route(
+        '    a = form if form.email else db\n    a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form chosen by or then overwritten', _form_route('    a = form or db\n    a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form taken out of a list then overwritten', _form_route('    a = [form][0]\n    a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form taken out of a list in place', _form_route('    holder = [form]\n    holder[0].passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form taken out of a dict in place', _form_route('    holder = {"f": form}\n    holder["f"].passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form taken out of a dict with get', _form_route('    a = {"f": form}.get("f")\n    a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten in a loop over a list', _form_route('    for a in [form]:\n        a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through a with block', _form_route('    with form as a:\n        a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through an annotated alias', _form_route('    a: object = form\n    a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through a walrus alias', _form_route('    (a := form).passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through starred unpacking', _form_route('    a, *rest = [form, db]\n    a.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through a chained assignment', _form_route('    a = b = form\n    b.passwd = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through setattr on an unpacked alias', _form_route('    a, b = form, db\n    setattr(a, "passwd", form.email)\n'),
+        {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through an alias returned by a helper', _both(
+        _router_helper('def ident(item):\n    return item\n'), _form_route('    a = ident(form)\n    a.passwd = form.email\n')),
+        {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten through an alias returned by a nested helper', _both(
+        _router_helper('def inner(item):\n    return item\n\n\ndef outer(item):\n    return inner(item)\n'),
+        _form_route('    a = outer(form)\n    a.passwd = form.email\n')), {'REQ-005': 'UNVERIFIED'}),
+    ('form overwritten by a helper three calls deep', _both(
+        _router_helper('def one(item):\n    two(item)\n\n\ndef two(item):\n    three(item)\n\n\ndef three(item):\n    item.passwd = item.email\n'),
+        _form_route('    one(form)\n')), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through __dict__', _form_route('    form.__dict__["passwd"] = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through an alias of __dict__', _form_route('    a = form.__dict__\n    a["passwd"] = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through an alias of vars()', _form_route('    a = vars(form)\n    a["passwd"] = form.email\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through __dict__.update', _form_route('    form.__dict__.update({"passwd": form.email})\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through __dict__ setdefault', _form_route('    form.__dict__.setdefault("passwd", form.email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through a dict union on __dict__', _form_route('    form.__dict__ |= {"passwd": form.email}\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through object.__setattr__', _form_route('    object.__setattr__(form, "passwd", form.email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through the __setattr__ method', _form_route('    form.__setattr__("passwd", form.email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through dict.update on vars()', _form_route('    dict.update(vars(form), {"passwd": form.email})\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field written through operator.setitem on vars()', _form_route(
+        '    import operator\n    operator.setitem(vars(form), "passwd", form.email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field removed with pop', _form_route('    form.pop("passwd")\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('field replaced with setdefault', _form_route('    form.setdefault("passwd", form.email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('unknown field written with setattr', _form_route('    setattr(form, key, form.email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('unknown fields written with update', _form_route('    form.update(extra)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('password field written with update', _form_route('    form.update({"passwd": form.email})\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('password field written with update keyword', _form_route('    form.update(passwd=form.email)\n'), {'REQ-005': 'UNVERIFIED'}),
+    ('another field written with update is fine', _form_route('    form.update({"nickname": "n"})\n'), {}),
+    ('another field written with update keyword is fine', _form_route('    form.update(nickname="n")\n'), {}),
+    # --- 입력의 다른 곳만 바꾸거나 입력과 상관없는 객체를 바꾸는 정상 코드는 그대로 통과해야 한다 ---
+    ('another field written through an alias', _form_route('    a = form\n    a.nickname = "n"\n'), {}),
+    ('sub-object of the form written', _form_route('    form.profile.bio = "x"\n'), {}),
+    ('sub-object of the form written through getattr', _form_route('    a = getattr(form, "profile")\n    a.passwd = "x"\n'), {}),
+    ('items of the form written in a loop', _form_route('    for item in form.items:\n        item.processed = True\n'), {}),
+    ('another key removed with pop', _form_route('    form.pop("confirm_password", None)\n'), {}),
+    ('another field written with setattr', _form_route('    setattr(form, "nickname", "n")\n'), {}),
+    ('copy of the form is not the form', _form_route('    data = form.model_dump()\n    data["passwd"] = "x"\n'), {}),
+    ('dict copy of vars() is not the form', _form_route('    fields = dict(vars(form))\n    fields["passwd"] = "x"\n'), {}),
+    ('list holding the form is changed, not the form', _form_route('    holder = [form]\n    holder.append(db)\n    holder[0] = db\n'), {}),
+    ('list holding the email is changed', _form_route('    parts = [form.email]\n    parts[0] = parts[0].strip()\n    parts.append("x")\n'), {}),
+    ('dict holding the form is changed, not the form', _form_route('    ctx = {"form": form}\n    ctx["user"] = 1\n'), {}),
+    ('sub-dict of a dict form written with get', _form_route('    profile = form.get("profile", {})\n    profile["name"] = "x"\n'), {}),
+    ('new user object written', _form_route(
+        '    made = User(email=form.email, password_hash=hash_password(form.passwd))\n    made.is_active = True\n'), {}),
+    ('response header written', _form_route('    response.headers["X-Foo"] = "bar"\n'), {}),
+    ('helper that returns a new object, then written', _both(
+        _router_helper('def build(item):\n    return {"email": item.email}\n'), _form_route('    made = build(form)\n    made.passwd = "x"\n')), {}),
+    ('helper that returns the form, then another field written', _both(
+        _router_helper('def ident(item):\n    return item\n'), _form_route('    same = ident(form)\n    same.nickname = "n"\n')), {}),
+    ('helper that changes another field', _both(
+        _router_helper('def tweak(item):\n    item.nickname = item.nickname.strip()\n'), _form_route('    tweak(form)\n')), {}),
+    # --- ③ 승인한 해시 도구(PasswordHasher)나 무작위 함수(os.urandom)를 가짜로 바꿔치기하는 방법들 ---
+    ('hash replaced through __dict__ item', _append('security.py', FAKE_HASH + 'HASHER.__dict__["hash"] = _fake_hash\n'), UNVERIFIED_STORAGE),
+    ('hash replaced through vars() item', _append('security.py', FAKE_HASH + 'vars(HASHER)["hash"] = _fake_hash\n'), UNVERIFIED_STORAGE),
+    ('hash replaced through __dict__.update', _append('security.py', FAKE_HASH + 'HASHER.__dict__.update({"hash": _fake_hash})\n'), UNVERIFIED_STORAGE),
+    ('hash replaced through vars().update keyword', _append('security.py', FAKE_HASH + 'vars(HASHER).update(hash=_fake_hash)\n'), UNVERIFIED_STORAGE),
+    ('hash replaced through update with an unknown dict', _append('security.py', FAKE_HASH + 'vars(HASHER).update(load_overrides())\n'),
+        UNVERIFIED_STORAGE),
+    ('hash replaced through an alias of vars()', _append('security.py', FAKE_HASH + 'namespace = vars(HASHER)\nnamespace["hash"] = _fake_hash\n'),
+        UNVERIFIED_STORAGE),
+    ('hash replaced through object.__setattr__', _append('security.py', FAKE_HASH + 'object.__setattr__(HASHER, "hash", _fake_hash)\n'),
+        UNVERIFIED_STORAGE),
+    ('hash replaced through the __setattr__ method', _append('security.py', FAKE_HASH + 'HASHER.__setattr__("hash", _fake_hash)\n'),
+        UNVERIFIED_STORAGE),
+    ('hash replaced through dict.update on vars()', _append('security.py', FAKE_HASH + 'dict.update(vars(HASHER), {"hash": _fake_hash})\n'),
+        UNVERIFIED_STORAGE),
+    ('hash replaced through operator.setitem', _append('security.py', FAKE_HASH + 'import operator\noperator.setitem(vars(HASHER), "hash", _fake_hash)\n'),
+        UNVERIFIED_STORAGE),
+    ('hasher object turned into another class', _append('security.py', '\nclass Fake:\n    def hash(self, value):\n        return value\n\n\nHASHER.__class__ = Fake\n'),
+        UNVERIFIED_STORAGE),
+    ('hasher name rebound through globals()', _append('security.py', '\nclass Fake:\n    def hash(self, value):\n        return value\n\n\nglobals()["HASHER"] = Fake()\n'),
+        UNVERIFIED_STORAGE),
+    ('library function replaced through the module __dict__', _security_with(
+        '    return HASHER.hash(password, salt=os.urandom(16))\n', head='import os\n',
+        tail='\nos.__dict__["urandom"] = lambda size: b"0123456789abcdef"\n'), UNVERIFIED_STORAGE),
+    ('library function replaced through object.__setattr__', _security_with(
+        '    return HASHER.hash(password, salt=os.urandom(16))\n', head='import os\n',
+        tail='\nobject.__setattr__(os, "urandom", lambda size: b"0123456789abcdef")\n'), UNVERIFIED_STORAGE),
+    ('writing another key into a namespace is not tampering', _append('security.py', '\nnamespace = vars(HASHER)\nnamespace["note"] = "x"\n'), {}),
+    ('vars() of an unrelated object is not tampering', _append('security.py', '\ndef describe(item):\n    vars(item)["seen"] = True\n'), {}),
+    ('filling its own namespace is not tampering', _append('security.py',
+        '\nclass Options:\n    def __init__(self, **values):\n        self.__dict__.update(values)\n        vars(self).update(values)\n'), {}),
+    ('writing an unknown key into another namespace may replace the hasher', _append('security.py',
+        '\ndef configure(target, key):\n    vars(target)[key] = 1\n'), UNVERIFIED_STORAGE),
+    ('updating another namespace from an unknown dict may replace the hasher', _append('security.py',
+        '\ndef configure(target, values):\n    vars(target).update(values)\n'), UNVERIFIED_STORAGE),
+    ('setattr with an unrelated name is not tampering', _append('security.py', '\ndef rename(item):\n    setattr(item, "label", "x")\n'), {}),
+]
+
+
+@pytest.mark.parametrize('label,change,changed', SIXTH_REVIEW_CASES, ids=[item[0] for item in SIXTH_REVIEW_CASES])
+def test_sixth_review_cases(label, change, changed):
+    # 위 사례를 하나씩 판정해서 기대한 결과(GOOD의 판정에서 바뀌는 부분만 적음)와 같은지 확인한다.
+    result, _assessment = outcomes(change(dict(GOOD)))
+    assert result == {**GOOD_EXPECTED, **changed}
+
+
+# ---------------------------------------------------------------------------------------------
+# 자연스러운 회원가입 구현이 새 규칙(별칭·필드 쓰기 추적, 해시 바꿔치기 검사)에서도 그대로 통과하는지 확인한다. (오탐 방지)
+# 입력 객체를 읽거나, 다른 필드를 바꾸거나, 새로 만든 사용자 객체를 고치는 흔한 코드가 UNVERIFIED가 되면 쓸모없는 수정 순환이 생긴다.
+# ---------------------------------------------------------------------------------------------
+ROUTER_HEAD = '''from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
+
+from database import get_db
+from models import User
+from schemas import SignupRequest
+from security import hash_password
+
+router = APIRouter()
+
+
+'''
+
+
+def _router_file(body):
+    # routers.py를 ROUTER_HEAD(import 문) + body(경로 함수들)로 통째로 바꾼 소스 묶음 함수를 만든다.
+    return lambda files: dict(files, **{'routers.py': ROUTER_HEAD + body})
+
+
+NATURAL_STYLE_CASES = [
+    ('service class creates the user', _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    service = UserService(db)
+    service.create_user(payload)
+    return {"success": True}
+
+
+class UserService:
+    def __init__(self, db):
+        self.db = db
+
+    def create_user(self, payload):
+        email = payload.email.strip().lower()
+        existing = self.db.query(User).filter(User.email == email).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="dup")
+        user = User(email=email, password_hash=hash_password(payload.password))
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+'''), {}),
+    # 아래 사례는 schemas.py 검증기의 정리를 빼서, 경로 함수에서 입력 객체에 되써 정리한 것만 근거가 되게 한다.
+    ('email normalized by writing back into the payload', _both(_replace('schemas.py', '        value = value.strip().lower()\n', ''),
+                                                                 _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    payload.email = payload.email.strip().lower()
+    user = User(email=payload.email, password_hash=hash_password(payload.password))
+    db.add(user)
+    db.commit()
+    return {"success": True}
+''')), {}),
+    ('fields copied onto a new user with setattr', _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    user = User()
+    for key, value in payload.model_dump(exclude={"password"}).items():
+        setattr(user, key, value)
+    user.password_hash = hash_password(payload.password)
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+    ('user fields assigned one by one', _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    user = User()
+    user.email = payload.email.strip().lower()
+    user.password_hash = hash_password(payload.password)
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+    ('form fields as separate parameters', _router_file('''from fastapi import Form
+
+
+@router.post("/api/signup", status_code=201)
+def signup(email: str = Form(...), password: str = Form(...), db=Depends(get_db)):
+    user = User(email=email.strip().lower(), password_hash=hash_password(password))
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+    ('new user object changed after creation', _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    user = User(email=payload.email, password_hash=hash_password(payload.password))
+    user.is_active = True
+    user.__dict__.update({"note": "x"})
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id}
+'''), {}),
+    ('hash kept in a variable first', _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    hashed = hash_password(payload.password)
+    user = User(email=payload.email, password_hash=hashed)
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+    ('payload dumped into a dict that is edited', _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    data = payload.model_dump()
+    data["email"] = data["email"].strip().lower()
+    hashed = hash_password(payload.password)
+    user = User(email=data["email"], password_hash=hashed)
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+    ('hashing wrapped in try and except', _router_file('''@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    try:
+        hashed = hash_password(payload.password)
+    except Exception:
+        raise HTTPException(status_code=500, detail="hash failed")
+    user = User(email=payload.email, password_hash=hashed)
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+    ('async route function', _router_file('''@router.post("/api/signup", status_code=201)
+async def signup(payload: SignupRequest, db=Depends(get_db)):
+    user = User(email=payload.email, password_hash=hash_password(payload.password))
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+    ('helper class filling its own namespace', _router_file('''class Options:
+    def __init__(self, **values):
+        self.__dict__.update(values)
+        vars(self).update(values)
+
+
+@router.post("/api/signup", status_code=201)
+def signup(payload: SignupRequest, db=Depends(get_db)):
+    options = Options(flag=True)
+    user = User(email=payload.email, password_hash=hash_password(payload.password))
+    db.add(user)
+    db.commit()
+    return {"success": True}
+'''), {}),
+]
+
+
+@pytest.mark.parametrize('label,change,changed', NATURAL_STYLE_CASES, ids=[item[0] for item in NATURAL_STYLE_CASES])
+def test_natural_signup_styles_still_pass(label, change, changed):
+    # 위 구현을 하나씩 판정해서 세 요구사항 모두 통과하는지 확인한다.
+    result, _assessment = outcomes(change(dict(GOOD)))
+    assert result == {**GOOD_EXPECTED, **changed}
+
+
+# ---------------------------------------------------------------------------------------------
+# 전체 점검(2026-10-17)에서 찾은 판정 오류. 모두 실제 FastAPI·pydantic 동작이나 기준 파일의 이름 목록과 어긋나던 것이다.
+#   ① 비밀번호 필드가 SecretStr이어도 FastAPI 기본 422 응답의 input에는 원문이 실린다(실제 FastAPI로 확인). 처리기가 없으면 FAIL이어야 한다.
+#   ② @field_validator("email")로 등록한 검증기는 함수 이름에 email이 없어도(def clean(cls, v)) 이메일 정리 근거이다.
+#   ③ password_digest는 기준의 저장 칸 이름이다. 그 이름의 값을 저장했다고 원문 저장(FAIL)으로 단정하지 않는다.
+# ---------------------------------------------------------------------------------------------
+EMAIL_VALIDATOR = ('    @field_validator("email")\n    @classmethod\n    def normalize_email(cls, value: str) -> str:\n'
+                   '        value = value.strip().lower()\n        if EMAIL_PATTERN.fullmatch(value) is None:\n'
+                   '            raise ValueError("올바른 이메일 형식이 아닙니다.")\n        return value\n')
+
+
+def _email_validator_as(text):
+    # schemas.py의 이메일 검증기를 text로 바꾼 소스 묶음 함수를 만든다.
+    return _replace('schemas.py', EMAIL_VALIDATOR, text)
+
+
+def _secret_password(files):
+    # 요청 모델의 비밀번호 필드를 SecretStr로 바꾸고, 해시할 때 원문을 꺼내도록 고친다.
+    files = dict(files)
+    files['schemas.py'] = files['schemas.py'].replace('from pydantic import BaseModel, field_validator',
+                                                      'from pydantic import BaseModel, SecretStr, field_validator') \
+        .replace('    password: str\n', '    password: SecretStr\n').replace('if len(value) < 8:', 'if len(value.get_secret_value()) < 8:')
+    files['routers.py'] = files['routers.py'].replace('hash_password(payload.password)', 'hash_password(payload.password.get_secret_value())')
+    return files
+
+
+FULL_REVIEW_CASES = [
+    ('SecretStr password without a validation error handler', _both(_replace('main.py', HANDLER, ''), _secret_password),
+        {'REQ-006': 'FAIL'}),
+    ('SecretStr password with the filtering handler is fine', _secret_password, {}),
+    ('plain password without a validation error handler', _replace('main.py', HANDLER, ''), {'REQ-006': 'FAIL'}),
+    ('email validator named clean', _email_validator_as(
+        '    @field_validator("email")\n    @classmethod\n    def clean(cls, v: str) -> str:\n        return v.strip().lower()\n'), {}),
+    ('email validator registered with mode before', _email_validator_as(
+        '    @field_validator("email", mode="before")\n    @classmethod\n    def check(cls, value):\n        return value.strip().lower()\n'), {}),
+    ('pydantic v1 email validator with any name', _email_validator_as(
+        '    @validator("email")\n    def lower_it(cls, v):\n        return v.strip().lower()\n'), {}),
+    ('email validator named clean that returns the raw value', _email_validator_as(
+        '    @field_validator("email")\n    @classmethod\n    def clean(cls, v: str) -> str:\n        v.strip().lower()\n        return v\n'),
+        {'REQ-003': 'FAIL'}),
+    ('function named clean that is not registered as a validator', _email_validator_as(
+        '    @field_validator("email")\n    @classmethod\n    def keep(cls, v: str) -> str:\n        return v\n\n'
+        '    @classmethod\n    def clean(cls, v: str) -> str:\n        return v.strip().lower()\n'), {'REQ-003': 'FAIL'}),
+    ('helper stores a parameter named password_digest', _router_helper(
+        'def save(db, email, password_digest):\n    user = User(email=email, password_hash=password_digest)\n    db.add(user)\n'),
+        {'REQ-005': 'UNVERIFIED'}),
+    ('helper stores a parameter named password', _router_helper(
+        'def save(db, email, password):\n    user = User(email=email, password_hash=password)\n    db.add(user)\n'),
+        {'REQ-005': 'FAIL'}),
+]
+
+
+@pytest.mark.parametrize('label,change,changed', FULL_REVIEW_CASES, ids=[item[0] for item in FULL_REVIEW_CASES])
+def test_full_review_cases(label, change, changed):
+    result, _assessment = outcomes(change(dict(GOOD)))
+    assert result == {**GOOD_EXPECTED, **changed}
+
+
+# ---------------------------------------------------------------------------------------------
+# REQ-003 이메일 정리: 검증기·pydantic 설정이 없어도, 저장되는 이메일 값이 실제로 정리를 거쳤으면 인정한다(2026-10-17 결정 A).
+# 반대로 strip이나 lower가 프로젝트 어디에서도 이메일에 쓰이지 않으면 FAIL이다. 정리 코드는 있지만 저장 값과 연결되는지
+# 증명하지 못하면 UNVERIFIED이다. 아래 사례는 모두 schemas.py의 이메일 검증기를 지운 상태에서 시작한다.
+# ---------------------------------------------------------------------------------------------
+def _without_email_validator(*changes):
+    return _both(_email_validator_as(''), *changes)
+
+
+def _signup_body(body):
+    # 가입 경로 함수의 본문을 body로 통째로 바꾼다(사용자 저장·커밋 줄도 body가 직접 쓴다).
+    return _router_file('@router.post("/api/signup", status_code=201)\ndef signup(payload: SignupRequest, db=Depends(get_db)):\n'
+                        + body + '    db.add(user)\n    db.commit()\n    return {"success": True}\n')
+
+
+STORE = '    user = User(email={email}, password_hash=hash_password(payload.password))\n'
+EMAIL_FLOW_CASES = [
+    ('normalized into a variable before storing', _without_email_validator(_signup_body(
+        '    email = payload.email.strip().lower()\n' + STORE.format(email='email'))), {}),
+    ('normalized inline in the user constructor', _without_email_validator(_signup_body(
+        STORE.format(email='payload.email.strip().lower()'))), {}),
+    ('normalized in two steps', _without_email_validator(_signup_body(
+        '    email = payload.email.strip()\n    email = email.lower()\n' + STORE.format(email='email'))), {}),
+    ('normalized by a helper function', _without_email_validator(_signup_body(STORE.format(email='normalize(payload.email)')),
+        _router_helper('def normalize(value):\n    value = value.strip()\n    return value.lower()\n')), {}),
+    ('normalized in the route and stored by a helper', _without_email_validator(
+        _signup_body('    user = create(db, payload.email.strip().lower(), payload.password)\n'),
+        _router_helper('def create(db, email, password):\n    return User(email=email, password_hash=hash_password(password))\n')), {}),
+    ('normalized and written back into the payload', _without_email_validator(_signup_body(
+        '    payload.email = payload.email.strip().lower()\n' + STORE.format(email='payload.email'))), {}),
+    ('nothing normalizes the email anywhere', _without_email_validator(), {'REQ-003': 'FAIL'}),
+    ('only strip is ever applied', _without_email_validator(_signup_body(STORE.format(email='payload.email.strip()'))),
+        {'REQ-003': 'FAIL'}),
+    ('normalized value computed but the raw one stored', _without_email_validator(_signup_body(
+        '    email = payload.email.strip().lower()\n' + STORE.format(email='payload.email'))), {'REQ-003': 'FAIL'}),
+    ('normalized only on one branch', _without_email_validator(_signup_body(
+        '    email = payload.email\n    if db:\n        email = email.strip().lower()\n' + STORE.format(email='email'))),
+        {'REQ-003': 'UNVERIFIED'}),
+    ('normalized then overwritten with the raw value', _without_email_validator(_signup_body(
+        '    email = payload.email.strip().lower()\n    email = payload.email\n' + STORE.format(email='email'))),
+        {'REQ-003': 'UNVERIFIED'}),
+    ('written back after the user is stored', _without_email_validator(_signup_body(
+        STORE.format(email='payload.email') + '    payload.email = payload.email.strip().lower()\n')), {'REQ-003': 'UNVERIFIED'}),
+    ('written back only inside a condition', _without_email_validator(_signup_body(
+        '    if db:\n        payload.email = payload.email.strip().lower()\n' + STORE.format(email='payload.email'))),
+        {'REQ-003': 'UNVERIFIED'}),
+    ('written back but a helper resets the field', _without_email_validator(_signup_body(
+        '    payload.email = payload.email.strip().lower()\n    reset(payload)\n' + STORE.format(email='payload.email')),
+        _router_helper('def reset(item):\n    item.email = item.raw_email\n')), {'REQ-003': 'UNVERIFIED'}),
+    ('helper that returns the raw value on one path', _without_email_validator(_signup_body(STORE.format(email='normalize(payload.email)')),
+        _router_helper('def normalize(value):\n    if value:\n        return value\n    return value.strip().lower()\n')),
+        {'REQ-003': 'UNVERIFIED'}),
+    ('helper handed out as a value can also be called with raw input', _without_email_validator(
+        _signup_body('    user = create(db, payload.email.strip().lower(), payload.password)\n'),
+        _router_helper('def create(db, email, password):\n    return User(email=email, password_hash=hash_password(password))\n\n\n'
+                       'HANDLERS = [create]\n')), {'REQ-003': 'UNVERIFIED'}),
+    ('payload from a dependency is not raw route input', _both(_without_email_validator(_router_file(
+        '@router.post("/api/signup", status_code=201)\ndef signup(payload: SignupRequest = Depends(clean_payload), db=Depends(get_db)):\n'
+        + STORE.format(email='payload.email') + '    db.add(user)\n    db.commit()\n    return {"success": True}\n')),
+        _router_helper('def clean_payload(payload: SignupRequest):\n    payload.email = payload.email.strip().lower()\n    return payload\n')),
+        {'REQ-003': 'UNVERIFIED'}),
+    ('raw route input stored while another route normalizes', _without_email_validator(_signup_body(
+        '    email = payload.email.strip().lower()\n' + STORE.format(email='email')),
+        _router_helper('@router.post("/api/invite")\ndef invite(address: str, password: str, db=Depends(get_db)):\n'
+                       '    db.add(User(email=address, password_hash=hash_password(password)))\n    return {}\n')), {'REQ-003': 'FAIL'}),
+    ('a second place stores the raw email', _without_email_validator(
+        _signup_body('    email = payload.email.strip().lower()\n' + STORE.format(email='email')),
+        _router_helper('def invite(db, address, password):\n    db.add(User(email=address, password_hash=hash_password(password)))\n\n\n'
+                       'def resend(db, raw, password):\n    invite(db, raw, password)\n')), {'REQ-003': 'UNVERIFIED'}),
+    ('project redefines lower', _without_email_validator(_signup_body(
+        '    email = payload.email.strip().lower()\n' + STORE.format(email='email')),
+        _router_helper('class Text:\n    def lower(self):\n        return self\n')), {'REQ-003': 'UNVERIFIED'}),
+    ('seeded admin email constant does not count as signup storage', _both(_without_email_validator(_signup_body(
+        '    email = payload.email.strip().lower()\n' + STORE.format(email='email'))),
+        _router_helper('def seed(db, password):\n    db.add(User(email="admin@example.com", password_hash=hash_password(password)))\n')),
+        {}),
+]
+
+
+@pytest.mark.parametrize('label,change,changed', EMAIL_FLOW_CASES, ids=[item[0] for item in EMAIL_FLOW_CASES])
+def test_email_normalization_follows_the_stored_value(label, change, changed):
+    result, _assessment = outcomes(change(dict(GOOD)))
+    assert result == {**GOOD_EXPECTED, **changed}
+
+
+def test_source_file_with_a_byte_order_mark_is_analyzed():
+    # 일부 편집기는 파일 맨 앞에 BOM을 붙인다. 파이썬은 그대로 실행하므로 분석 불가(UNVERIFIED)로 두지 않는다.
+    files = dict(GOOD)
+    files['security.py'] = '\ufeff' + files['security.py']
+    assert outcomes(files)[0] == GOOD_EXPECTED

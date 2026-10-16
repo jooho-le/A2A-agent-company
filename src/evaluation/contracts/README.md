@@ -21,7 +21,8 @@
 이러한 주석을 넣으면 스키마를 읽는 `json.loads()`에서 오류가 발생합니다.
 
 JSON Schema에는 설명용 `description`이나 `$comment` 속성을 넣을 수 있지만,
-이 폴더의 파일은 팀 공통 규격의 사본이므로 원본과 동일하게 유지합니다.
+이 폴더의 공통 스키마 4개(`execution_manifest`, `qa_report`, `security_report`, `tool_execution_evidence`)는 원본의 사본이므로 동일하게 유지합니다.
+`independent_evaluation.schema.json` 1개는 평가 모듈 자체 정의이며 공통 사본 규칙의 대상이 아닙니다.
 파일 안에 설명 속성을 추가하는 대신 이 문서에서 필드와 검사 조건을 설명합니다.
 원본에 이미 있는 영문 제목·설명 속성도 사본의 일치 여부를 유지하기 위해 그대로 둡니다.
 
@@ -88,7 +89,7 @@ Git 해시는 지정한 형식에 따라 40자리 또는 64자리여야 합니�
 에이전트 호환 보고서에 적용됩니다. `independent_evaluation.schema.json`은 `independent.py`의 `INDEPENDENT_EVALUATION`
 보고서 전용이며, 팀 공통 규격의 사본이 아니라 평가 모듈이 직접 정의한 것입니다.
 기대·관측 Manifest는 `execution_manifest.schema.json`을 재사용하고, 대상 Run 기록(`sourceRun`)은 상태·판정·코드 버전·수정 횟수·시각·
-소요 시간·`missedDefect`를 가집니다. 입력값과 요구사항 범위 등 스키마로 표현하기 어려운 규칙은 `independent.py`가 먼저 검사합니다.
+소요 시간·`missedDefect`를 가집니다. `sourceRun.startedAt`은 Run의 `createdAt`에서 가져오므로 소요 시간은 생성~종료 기준이며, `run_metrics()`의 RUN_STARTED 사건 기준 시간과 구분합니다. 입력값과 요구사항 범위 등 스키마로 표현하기 어려운 규칙은 `independent.py`가 먼저 검사합니다.
 
 스키마 검사만으로 실제 회원가입 기능, 증거의 진위, 산출물의 등록 여부를 검증할 수는 없습니다.
 
