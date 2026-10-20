@@ -90,6 +90,64 @@
   margin: 0;
 }
 
+.document-history {
+  margin-top: 28px;
+}
+
+.document-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.document-history-heading h2 {
+  font-size: 20px;
+}
+
+.document-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.document-tab[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--primary);
+  background: #293c60;
+}
+
+.document-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.document-list-item {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+
+.document-list-item h3 {
+  font-size: 16px;
+}
+
+.document-download-actions {
+  margin-top: 16px;
+}
+
+.document-list-item > .document-message {
+  margin-top: 12px;
+}
+
 @media (max-width: 480px) {
   .document-card {
     padding: 24px 20px;

@@ -62,3 +62,7 @@ class DocumentResponse(BaseModel):
     submitter_id: int
     assignee_id: int
     created_at: datetime
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentResponse]

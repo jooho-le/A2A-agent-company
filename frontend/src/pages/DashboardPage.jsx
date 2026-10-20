@@ -49,7 +49,7 @@ function DashboardPage({ onRunScenario, onOpenDocuments, onLogout }) {
             <h2>전자문서 제출·조회</h2>
             <p className="scenario-description">
               PDF 문서를 담당자에게 제출할 수 있습니다.
-              문서 목록 조회와 다운로드는 준비 중입니다.
+              제출·배정 내역을 조회할 수 있으며, 다운로드는 준비 중입니다.
             </p>
             <div className="scenario-tags" aria-label="사용 가능한 기능">
               <span>PDF 업로드</span><span>담당자 지정</span>

@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import json
+import os
 import secrets
 import sys
 import tempfile
@@ -7,6 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import unquote, urlencode, urlsplit
 from uuid import UUID, uuid4
 
 import jwt
@@ -80,11 +83,15 @@ class DocumentAPITests(unittest.TestCase):
         with Session(self.engine) as db:
             submitter = User(email="submitter@example.com", password_hash=self.password_hash)
             assignee = User(email="assignee@example.com", password_hash=self.password_hash)
-            db.add_all([submitter, assignee])
+            unrelated = User(email="unrelated@example.com", password_hash=self.password_hash)
+            db.add_all([submitter, assignee, unrelated])
             db.commit()
             self.submitter_id = submitter.id
             self.assignee_id = assignee.id
+            self.unrelated_id = unrelated.id
         self.token = create_access_token(self.submitter_id, "submitter@example.com")
+        self.assignee_token = create_access_token(self.assignee_id, "assignee@example.com")
+        self.unrelated_token = create_access_token(self.unrelated_id, "unrelated@example.com")
 
     def tearDown(self):
         main.app.dependency_overrides.clear()
@@ -93,9 +100,10 @@ class DocumentAPITests(unittest.TestCase):
         self.engine.dispose()
         self.temp_directory.cleanup()
 
-    def request(self, method, path, body=b"", headers=None):
+    def request(self, method, path, body=b"", headers=None, raw=False):
         """추가 테스트 패키지나 장시간 서버 실행 없이 실제 ASGI 앱을 호출합니다."""
         response_messages = []
+        url = urlsplit(path)
 
         async def make_request():
             delivered = False
@@ -112,8 +120,8 @@ class DocumentAPITests(unittest.TestCase):
 
             scope = {
                 "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
-                "method": method, "scheme": "http", "path": path,
-                "raw_path": path.encode(), "query_string": b"", "root_path": "",
+                "method": method, "scheme": "http", "path": url.path,
+                "raw_path": url.path.encode(), "query_string": url.query.encode(), "root_path": "",
                 "headers": [
                     (name.lower().encode(), value.encode())
                     for name, value in (headers or {}).items()
@@ -123,14 +131,21 @@ class DocumentAPITests(unittest.TestCase):
             await main.app(scope, receive, send)
 
         asyncio.run(make_request())
-        response_status = next(
-            message["status"] for message in response_messages
+        response_start = next(
+            message for message in response_messages
             if message["type"] == "http.response.start"
         )
+        response_status = response_start["status"]
         response_body = b"".join(
             message.get("body", b"") for message in response_messages
             if message["type"] == "http.response.body"
         )
+        if raw:
+            response_headers = {
+                name.decode("latin-1"): value.decode("latin-1")
+                for name, value in response_start["headers"]
+            }
+            return response_status, response_headers, response_body
         return response_status, json.loads(response_body)
 
     def json_request(self, path, payload):
@@ -164,6 +179,47 @@ class DocumentAPITests(unittest.TestCase):
     def document_count(self):
         with Session(self.engine) as db:
             return db.scalar(select(func.count()).select_from(Document))
+
+    def list_documents(self, view=None, token=None):
+        path = "/api/documents"
+        if view is not None:
+            path += "?" + urlencode({"view": view})
+        access_token = self.token if token is None else token
+        headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
+        return self.request("GET", path, headers=headers)
+
+    def download(self, document_id, token=None, query=None):
+        access_token = self.token if token is None else token
+        headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
+        path = f"/api/documents/{document_id}/download"
+        if query:
+            path += "?" + urlencode(query)
+        return self.request("GET", path, headers=headers, raw=True)
+
+    def uploaded_document(self, **kwargs):
+        code, body = self.upload(**kwargs)
+        self.assertEqual(code, 201)
+        return body["id"]
+
+    def stored_path(self, document_id):
+        with Session(self.engine) as db:
+            return Path(db.get(Document, document_id).file_path)
+
+    def change_document(self, document_id, **changes):
+        with Session(self.engine) as db:
+            document = db.get(Document, document_id)
+            for name, value in changes.items():
+                setattr(document, name, value)
+            db.commit()
+
+    def assert_download_error(self, response, expected_status):
+        code, headers, body = response
+        self.assertEqual(code, expected_status)
+        self.assertEqual(headers["content-type"], "application/json")
+        self.assertEqual(set(json.loads(body)), {"detail"})
+        self.assertNotIn(str(self.temp_directory.name), body.decode())
+        self.assertNotIn("Traceback", body.decode())
+        self.assertNotIn("content-disposition", headers)
 
     def assert_no_upload(self):
         self.assertEqual(self.document_count(), 0)
@@ -316,6 +372,337 @@ class DocumentAPITests(unittest.TestCase):
                 self.assertEqual(self.upload()[0], 500)
         self.assertEqual(existing_path.read_bytes(), b"existing PDF")
         self.assertEqual(self.document_count(), 0)
+
+    def test_submitted_list_filters_current_user_and_defaults_to_submitted(self):
+        code, own_document = self.upload()
+        self.assertEqual(code, 201)
+        self.assertEqual(self.upload(token=self.assignee_token, assignee_id=self.submitter_id)[0], 201)
+        self.assertEqual(self.upload(token=self.unrelated_token)[0], 201)
+
+        for view in (None, "submitted"):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view)
+                self.assertEqual(code, 200)
+                self.assertEqual(body, {"documents": [own_document]})
+
+    def test_assigned_list_filters_current_user(self):
+        code, assigned_document = self.upload()
+        self.assertEqual(code, 201)
+        code, submitted_document = self.upload(token=self.assignee_token, assignee_id=self.unrelated_id)
+        self.assertEqual(code, 201)
+
+        code, body = self.list_documents("assigned", token=self.assignee_token)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, {"documents": [assigned_document]})
+        code, body = self.list_documents("submitted", token=self.assignee_token)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, {"documents": [submitted_document]})
+
+    def test_unrelated_user_cannot_list_documents_even_with_forged_user_ids(self):
+        self.assertEqual(self.upload()[0], 201)
+        self.assertEqual(self.upload(token=self.assignee_token, assignee_id=self.submitter_id)[0], 201)
+        for view in ("submitted", "assigned"):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view, token=self.unrelated_token)
+                self.assertEqual((code, body), (200, {"documents": []}))
+
+                # 다른 사람의 ID를 쿼리에 추가해도 조회 조건에는 사용되지 않습니다.
+                query = urlencode({
+                    "view": view, "submitter_id": self.submitter_id, "assignee_id": self.assignee_id,
+                })
+                code, body = self.request(
+                    "GET", f"/api/documents?{query}",
+                    headers={"Authorization": f"Bearer {self.unrelated_token}"},
+                )
+                self.assertEqual((code, body), (200, {"documents": []}))
+
+    def test_document_list_requires_authentication(self):
+        self.assertEqual(self.upload()[0], 201)
+        for view in (None, "submitted", "assigned"):
+            for token in ("", "invalid-token"):
+                with self.subTest(view=view, token=token):
+                    self.assertEqual(self.list_documents(view, token=token)[0], 401)
+
+    def test_document_list_rejects_expired_tokens_and_absent_users(self):
+        import os
+
+        self.assertEqual(self.upload()[0], 201)
+        expired = jwt.encode(
+            {"sub": str(self.submitter_id), "exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
+            os.environ["JWT_SECRET"], algorithm="HS256",
+        )
+        absent = create_access_token(999999, "absent@example.com")
+        for view in ("submitted", "assigned"):
+            for token in (expired, absent):
+                with self.subTest(view=view, token_type="expired" if token == expired else "absent"):
+                    self.assertEqual(self.list_documents(view, token=token)[0], 401)
+
+    def test_document_list_returns_empty_list(self):
+        for view in (None, "submitted", "assigned"):
+            with self.subTest(view=view):
+                self.assertEqual(self.list_documents(view), (200, {"documents": []}))
+
+    def test_document_list_orders_by_created_at_then_id_desc(self):
+        uploaded = []
+        for _ in range(3):
+            code, document = self.upload()
+            self.assertEqual(code, 201)
+            uploaded.append(document)
+
+        # ID 순서와 시간 순서가 다른 문서, 생성 시각이 같은 문서를 함께 검사합니다.
+        with Session(self.engine) as db:
+            for document, created_at in zip(uploaded, [
+                datetime(2026, 10, 14, 10, 0),
+                datetime(2026, 10, 13, 10, 0),
+                datetime(2026, 10, 14, 10, 0),
+            ]):
+                db.get(Document, document["id"]).created_at = created_at
+            db.commit()
+
+        expected_ids = [uploaded[2]["id"], uploaded[0]["id"], uploaded[1]["id"]]
+        for view, token in (("submitted", self.token), ("assigned", self.assignee_token)):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view, token=token)
+                self.assertEqual(code, 200)
+                self.assertEqual([document["id"] for document in body["documents"]], expected_ids)
+
+    def test_document_list_excludes_internal_storage_fields(self):
+        code, uploaded = self.upload()
+        self.assertEqual(code, 201)
+        for view, token in (("submitted", self.token), ("assigned", self.assignee_token)):
+            with self.subTest(view=view):
+                code, body = self.list_documents(view, token=token)
+                self.assertEqual(code, 200)
+                self.assertEqual(set(body), {"documents"})
+                self.assertEqual(len(body["documents"]), 1)
+                document = body["documents"][0]
+                self.assertEqual(set(document), {
+                    "id", "original_filename", "file_size", "content_type", "submitter_id", "assignee_id", "created_at",
+                })
+                self.assertEqual(document, uploaded)
+
+    def test_document_list_rejects_invalid_view(self):
+        for view in ("all", "", "SUBMITTED"):
+            with self.subTest(view=view):
+                self.assertEqual(self.list_documents(view)[0], 422)
+
+    def test_submitter_downloads_exact_original_bytes(self):
+        # NUL 및 UTF-8이 아닌 바이트도 응답에서 변형되지 않아야 합니다.
+        original = self.pdf + bytes(range(256))
+        document_id = self.uploaded_document(contents=original)
+        code, headers, body = self.download(document_id)
+        self.assertEqual(code, 200)
+        self.assertEqual(headers["content-type"], "application/pdf")
+        self.assertEqual(int(headers["content-length"]), len(original))
+        self.assertEqual(body, original)
+        self.assertEqual(hashlib.sha256(body).digest(), hashlib.sha256(original).digest())
+
+    def test_assignee_downloads_exact_original_bytes(self):
+        document_id = self.uploaded_document()
+        code, _, body = self.download(document_id, token=self.assignee_token)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, self.pdf)
+
+    def test_unrelated_user_cannot_download_or_forge_user_ids(self):
+        document_id = self.uploaded_document()
+        self.assert_download_error(self.download(document_id, token=self.unrelated_token), 403)
+        self.assert_download_error(self.download(
+            document_id, token=self.unrelated_token,
+            query={"submitter_id": self.submitter_id, "assignee_id": self.assignee_id},
+        ), 403)
+        # 권한 검사 전에 파일에 접근하지 않아 파일 유무에 따라 응답이 달라지지 않습니다.
+        self.stored_path(document_id).unlink()
+        self.assert_download_error(self.download(document_id, token=self.unrelated_token), 403)
+
+    def test_download_requires_authentication(self):
+        document_id = self.uploaded_document()
+        for token in ("", "invalid-token"):
+            with self.subTest(token=token):
+                self.assert_download_error(self.download(document_id, token=token), 401)
+                self.assert_download_error(self.download(999999, token=token), 401)
+
+    def test_download_rejects_expired_token_and_absent_user(self):
+        document_id = self.uploaded_document()
+        expired = jwt.encode(
+            {"sub": str(self.submitter_id), "exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
+            os.environ["JWT_SECRET"], algorithm="HS256",
+        )
+        absent = create_access_token(999999, "absent@example.com")
+        for token in (expired, absent):
+            self.assert_download_error(self.download(document_id, token=token), 401)
+
+    def test_download_nonexistent_document(self):
+        self.assert_download_error(self.download(999999), 404)
+
+    def test_download_when_submitter_and_assignee_are_same_user(self):
+        document_id = self.uploaded_document(assignee_id=self.submitter_id)
+        code, _, body = self.download(document_id)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, self.pdf)
+
+    def test_download_korean_original_filename(self):
+        filename = "증빙 자료.pdf"
+        document_id = self.uploaded_document(filename=filename)
+        code, headers, body = self.download(document_id)
+        self.assertEqual(code, 200)
+        disposition = headers["content-disposition"]
+        self.assertTrue(disposition.startswith('attachment; filename="document.pdf"; filename*=UTF-8\'\''))
+        self.assertEqual(unquote(disposition.split("UTF-8''", 1)[1]), filename)
+        self.assertTrue(disposition.isascii())
+        self.assertEqual(body, self.pdf)
+
+    def test_download_sanitizes_filename_paths_and_header_injection(self):
+        document_id = self.uploaded_document()
+        for original, expected in (
+            ("../../증빙.pdf", "증빙.pdf"),
+            ("C:\\private\\증빙.pdf", "증빙.pdf"),
+            ('증빙"\r\nX-Injected: yes\x00.pdf', '증빙"X-Injected: yes.pdf'),
+            ("..", "document.pdf"),
+        ):
+            with self.subTest(filename=original):
+                self.change_document(document_id, original_filename=original)
+                code, headers, body = self.download(document_id)
+                self.assertEqual(code, 200)
+                self.assertEqual(body, self.pdf)
+                disposition = headers["content-disposition"]
+                self.assertEqual(unquote(disposition.split("UTF-8''", 1)[1]), expected)
+                self.assertNotIn("\r", disposition)
+                self.assertNotIn("\n", disposition)
+                self.assertNotIn("x-injected", headers)
+
+    def test_download_ignores_client_supplied_paths(self):
+        document_id = self.uploaded_document()
+        outside = Path(self.temp_directory.name) / "private.pdf"
+        outside.write_bytes(b"private file outside uploads")
+        code, _, body = self.download(document_id, query={
+            "file_path": str(outside), "stored_filename": "../private.pdf",
+        })
+        self.assertEqual(code, 200)
+        self.assertEqual(body, self.pdf)
+
+    def test_download_rejects_tampered_metadata_paths(self):
+        document_id = self.uploaded_document()
+        original_path = self.stored_path(document_id)
+        outside = Path(self.temp_directory.name) / original_path.name
+        outside.write_bytes(b"private file outside uploads")
+        for path in (
+            str(outside),
+            str(self.storage / ".." / outside.name),
+            f"uploads/{original_path.name}",
+            str(self.storage / f"{uuid4()}.pdf"),
+            str(original_path) + "\x00",
+        ):
+            with self.subTest(path=path):
+                self.change_document(document_id, file_path=path)
+                self.assert_download_error(self.download(document_id), 404)
+        self.assertEqual(outside.read_bytes(), b"private file outside uploads")
+
+    def test_download_rejects_tampered_stored_filenames(self):
+        document_id = self.uploaded_document()
+        for filename in ("../private.pdf", "..\\private.pdf", "/private.pdf", "notes.pdf", f"{uuid4()}.pdf/../private.pdf"):
+            with self.subTest(filename=filename):
+                self.change_document(
+                    document_id, stored_filename=filename, file_path=str(self.storage / filename),
+                )
+                self.assert_download_error(self.download(document_id), 404)
+
+    def test_download_rejects_symlink_to_external_file(self):
+        document_id = self.uploaded_document()
+        path = self.stored_path(document_id)
+        outside = Path(self.temp_directory.name) / "private.pdf"
+        outside.write_bytes(b"private file outside uploads")
+        path.unlink()
+        path.symlink_to(outside)
+        self.assert_download_error(self.download(document_id), 404)
+        self.assertEqual(outside.read_bytes(), b"private file outside uploads")
+
+    def test_download_rejects_symlink_to_another_uploaded_file(self):
+        document_id = self.uploaded_document()
+        another_id = self.uploaded_document()
+        path = self.stored_path(document_id)
+        path.unlink()
+        path.symlink_to(self.stored_path(another_id))
+        self.assert_download_error(self.download(document_id), 404)
+
+    def test_download_rejects_symlinked_upload_directory(self):
+        document_id = self.uploaded_document()
+        moved_storage = Path(self.temp_directory.name) / "outside-uploads"
+        self.storage.rename(moved_storage)
+        self.storage.symlink_to(moved_storage, target_is_directory=True)
+        self.assert_download_error(self.download(document_id), 404)
+
+    def test_download_rejects_hard_link_to_external_file(self):
+        document_id = self.uploaded_document()
+        path = self.stored_path(document_id)
+        outside = Path(self.temp_directory.name) / "private.pdf"
+        outside.write_bytes(self.pdf)
+        path.unlink()
+        os.link(outside, path)
+        self.assert_download_error(self.download(document_id), 404)
+        self.assertEqual(outside.read_bytes(), self.pdf)
+
+    def test_download_handles_missing_file_without_internal_path(self):
+        document_id = self.uploaded_document()
+        self.stored_path(document_id).unlink()
+        result = self.download(document_id)
+        self.assert_download_error(result, 404)
+        self.assertEqual(json.loads(result[2])["detail"], "문서 파일을 찾을 수 없습니다.")
+
+    def test_download_handles_missing_upload_directory(self):
+        document_id = self.uploaded_document()
+        self.stored_path(document_id).unlink()
+        self.storage.rmdir()
+        self.assert_download_error(self.download(document_id), 404)
+
+    def test_download_rejects_non_regular_files(self):
+        document_id = self.uploaded_document()
+        path = self.stored_path(document_id)
+        path.unlink()
+        path.mkdir()
+        self.assert_download_error(self.download(document_id), 404)
+        path.rmdir()
+        os.mkfifo(path)
+        self.assert_download_error(self.download(document_id), 404)
+
+    def test_download_uses_open_file_even_if_path_is_replaced(self):
+        document_id = self.uploaded_document()
+        path = self.stored_path(document_id)
+        outside = Path(self.temp_directory.name) / "private.pdf"
+        outside.write_bytes(b"private file outside uploads")
+        real_open = os.open
+
+        def replace_after_open(name, flags, **kwargs):
+            descriptor = real_open(name, flags, **kwargs)
+            if name == path.name and kwargs.get("dir_fd") is not None:
+                path.unlink()
+                path.symlink_to(outside)
+            return descriptor
+
+        with patch.object(documents.os, "open", side_effect=replace_after_open):
+            code, _, body = self.download(document_id)
+        self.assertEqual(code, 200)
+        self.assertEqual(body, self.pdf)
+
+    def test_download_file_access_error_does_not_expose_exception(self):
+        document_id = self.uploaded_document()
+        with patch.object(documents.os, "open", side_effect=PermissionError("private server exception")):
+            result = self.download(document_id)
+        self.assert_download_error(result, 404)
+        self.assertNotIn(b"private server exception", result[2])
+
+    def test_download_exactly_ten_mib(self):
+        original = self.pdf + b" " * (documents.MAX_FILE_SIZE - len(self.pdf))
+        document_id = self.uploaded_document(contents=original)
+        code, headers, body = self.download(document_id)
+        self.assertEqual(code, 200)
+        self.assertEqual(len(body), 10485760)
+        self.assertEqual(int(headers["content-length"]), 10485760)
+        self.assertEqual(body, original)
+
+    def test_download_rejects_file_size_mismatch(self):
+        document_id = self.uploaded_document()
+        self.stored_path(document_id).write_bytes(b"incomplete file")
+        self.assert_download_error(self.download(document_id), 404)
 
     def test_existing_signup_login_and_me_still_work(self):
         payload = {"email": "new@example.com", "password": "Password123"}
