@@ -5,7 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion", "reportType", "evaluationId", "sourceRunId", "architecture", "createdAt",
+    "schemaVersion", "reportType", "evaluationId", "sourceRunId", "sourceRun", "architecture", "createdAt",
     "suite", "expectedManifest", "observedManifest", "evaluationVerdict", "manifestCheck",
     "summary", "confirmedFailureIds", "unverifiedTestIds", "optionalConfirmedFailureIds",
     "optionalUnverifiedTestIds", "requiredCheckPassRate", "requiredRequirementPassRate",
@@ -16,6 +16,29 @@
     "reportType": {"const": "INDEPENDENT_EVALUATION"},
     "evaluationId": {"$ref": "#/$defs/uuid"},
     "sourceRunId": {"$ref": "#/$defs/uuid"},
+    "sourceRun": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["workflowStatus", "finalVerdict", "codeVersion", "fixAttempt",
+                       "startedAt", "finishedAt", "durationMs", "missedDefect"],
+          "properties": {
+            "workflowStatus": {"enum": ["RECEIVED", "PLANNING", "WAITING_INPUT", "IMPLEMENTING",
+                                        "SNAPSHOT_READY", "VALIDATING", "FIX_REQUIRED", "FIXING",
+                                        "REVALIDATING", "HUMAN_REVIEW", "FINISHED", "ABORTED"]},
+            "finalVerdict": {"enum": [null, "SUCCESS", "FAIL", "UNVERIFIED", "HUMAN_REVIEW"]},
+            "codeVersion": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 4}, {"type": "null"}]},
+            "fixAttempt": {"type": "integer", "minimum": 0, "maximum": 3},
+            "startedAt": {"type": "string", "format": "date-time"},
+            "finishedAt": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+            "durationMs": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+            "missedDefect": {"type": "boolean"}
+          }
+        }
+      ]
+    },
     "architecture": {"enum": ["SINGLE_AGENT", "MULTI_AGENT"]},
     "createdAt": {"type": "string", "format": "date-time"},
     "suite": {
