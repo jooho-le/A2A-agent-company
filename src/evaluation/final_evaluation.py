@@ -26,7 +26,6 @@ import io        # 메모리 안의 바이트를 파일처럼 다루는 도구(�
 import json      # JSON 읽기·쓰기
 import os        # 폴더 권한 바꾸기
 import re        # 이미지 참조 모양 검사
-import shutil    # 지금은 쓰지 않는 import(정리 대상)
 import subprocess  # 다른 프로그램(파이썬·docker)을 따로 실행하는 도구
 import sys       # 지금 쓰는 파이썬 실행 파일 위치
 import tarfile   # tar 압축 파일 읽기
@@ -35,7 +34,7 @@ import uuid      # 겹치지 않는 번호(UUID) 만들기
 from dataclasses import dataclass, replace  # 데이터 상자, 상자의 일부 값만 바꾼 복사본 만들기
 from datetime import datetime, timezone     # 보고서 시각
 from pathlib import Path, PurePosixPath     # 파일 경로 다루기(PurePosixPath는 "/"로 나뉜 tar 안 경로용)
-from typing import Mapping, Optional        # 자료형 이름표(실행에는 영향 없음)
+from typing import Iterable, Mapping, Optional  # 자료형 이름표(실행에는 영향 없음)
 from urllib.parse import quote              # 증거 주소에 넣을 경로 글자를 안전하게 바꾸기
 
 from . import protected_tests                                  # 보호 테스트 묶음(D2)
@@ -253,10 +252,15 @@ def read_snapshot(archive: bytes) -> dict:
 
 def _write_tree(root: Path, files: Mapping[str, bytes]):
     # {상대 경로: 바이트}를 root 폴더 아래에 파일로 쓴다(경로 확인은 read_snapshot이 이미 했다).
+    # 컨테이너 안 일반 사용자(10001)가 읽을 수 있게 권한을 정해 둔다(폴더 755·파일 644). 이 컴퓨터의 umask가
+    # 엄격해도(예: 077) 읽기 권한이 빠지지 않는다. (dev sandbox/materialization.py도 권한을 직접 정한다.)
     for name, data in files.items():
         path = root.joinpath(*PurePosixPath(name).parts)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+        path.chmod(0o644)
+    for folder in [root, *(item for item in root.rglob('*') if item.is_dir())]:
+        folder.chmod(0o755)
 
 
 @dataclass(frozen=True)
@@ -298,14 +302,18 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
                             source_run_id: str, runner, architecture: str = 'MULTI_AGENT',
                             criteria: Optional[dict] = None, evaluation_id: Optional[str] = None,
                             created_at: Optional[str] = None, source_run: Optional[SourceRunSummary] = None,
-                            run_bundle: Optional[Mapping] = None, trace_documents: Optional[Mapping] = None) -> dict:
+                            run_bundle: Optional[Mapping] = None, trace_documents: Optional[Mapping] = None,
+                            known_values: Iterable[str] = ()) -> dict:
     # archive        : 최종 Snapshot의 dev canonical tar 바이트
     # expected       : 신뢰할 수 있는 경로로 받은 기준 Manifest(어떤 코드·환경을 채점해야 하는지)
     # runner         : DockerRunner(실제 평가) 또는 LocalRunner(trusted=True, 합성 표본 시험)
     # run_bundle     : (선택) run_metrics.fetch_run_bundle 결과. 있으면 REQ-008 추적 검사를 함께 한다.
     # trace_documents: (선택) trace_checks.fetch_trace_documents 결과. 있으면 Run 기록 노출 검사를 함께 한다.
+    # known_values   : (선택) 이 Run에서 쓴 것으로 알려진 시험 비밀번호 등. 노출 검사가 자유 글에서도 찾는다.
+    #                  결과에는 값이 아니라 개수와 찾은 위치만 남는다. 값을 받는 경로(Host가 안전하게 넘김)는 팀과 정한다.
     # 돌려주는 값: {'report': 독립 평가 보고서, 'evidence': {증거 번호: 증거 문서}, 'snapshot': 확인 결과,
-    #              'runner': 실행 정보, 'trace': Trace 검사 결과 또는 None}
+    #              'runner': 실행 정보(+evaluationId), 'trace': Trace 검사 결과(+runId) 또는 None}
+    #   runner·trace에 출처(평가 번호·Run 번호)를 붙여 summary.render_summary가 다른 실행 자료와 섞이지 않았는지 대조한다.
     # 0) 함께 넘긴 Run 기록이 채점 대상 Run·최종 코드 버전의 것인지 확인한다(다른 Run 기록을 섞지 않게).
     if run_bundle is not None:
         run = run_bundle.get('run', {})
@@ -374,12 +382,15 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     # 5) (선택) Run 기록 검사와 증거 문서 정리
     trace = None
     if run_bundle is not None or trace_documents is not None:
-        trace = {'traceability': check_traceability(run_bundle, scenario_contract).to_dict() if run_bundle is not None else None,
-                 'exposure': check_trace_exposure(trace_documents, criteria).to_dict() if trace_documents is not None else None}
+        trace = {'runId': source_run_id,
+                 'traceability': check_traceability(run_bundle, scenario_contract).to_dict() if run_bundle is not None else None,
+                 'exposure': (check_trace_exposure(trace_documents, criteria, known_values=known_values).to_dict()
+                              if trace_documents is not None else None)}
     evidence = {unit_evidence_id: {'kind': 'UNIT_TEST_REPORT', 'runner': outcome.to_dict(), 'report': unit_report}}
     if static_evidence is not None or static_error is not None:
         evidence[static_evidence_id] = {'kind': 'STATIC_ASSESSMENT', 'error': static_error, 'evidence': static_evidence}
-    return {'report': report, 'evidence': evidence, 'snapshot': snapshot_info, 'runner': outcome.to_dict(), 'trace': trace}
+    return {'report': report, 'evidence': evidence, 'snapshot': snapshot_info,
+            'runner': {**outcome.to_dict(), 'evaluationId': evaluation_id}, 'trace': trace}
 
 
 def _runner_source() -> bytes:

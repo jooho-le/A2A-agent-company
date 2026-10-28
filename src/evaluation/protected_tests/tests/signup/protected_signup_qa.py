@@ -33,7 +33,7 @@ class SignupQAChecks(link.SignupCheck):
                     self.assertEqual(service.count(), before, "형식 오류 이메일로 사용자가 생성됨")
         self.check(body)
 
-    # 003: 대소문자·공백만 다른 이메일 재가입 → 거부, 사용자 1명 유지
+    # 003: 대소문자·공백만 다른 이메일 재가입 → 4xx 거부, 사용자 1명 유지
     def test_qa_signup_003_same_canonical_email_cannot_register_twice(self):
         def body(service):
             email = link.new_email()
@@ -45,7 +45,7 @@ class SignupQAChecks(link.SignupCheck):
             for index, variant in enumerate(variants):
                 with self.case(variant=index):
                     status = service.signup(variant, link.new_password())
-                    self.assertNotIn(status, link.SUCCESS, "같은 canonical 이메일 재가입이 성공 응답을 받음")
+                    self.assertIn(status, link.REJECTED, "같은 canonical 이메일 재가입이 4xx로 거부되지 않음")
             self.assertEqual(service.count_canonical(email), 1, "같은 canonical 이메일의 사용자가 1명이 아님")
         self.check(body)
 

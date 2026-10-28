@@ -38,7 +38,7 @@ index = build_demo_index(
 
 ## 결과 요약 만들기 (`src/evaluation/summary.py`)
 
-발표·회의에 쓸 요약은 `render_summary(독립 평가 보고서, scenario_contract=..., metrics=run_metrics 결과, run_bundle=..., trace=...)`로 만든다. 판정, 요구사항별·검사별 결과, 코드 버전별 "실패 → 수정 → 재검증" 흐름, 시간·비용·협업 지표가 Markdown 한 장으로 나온다. 에이전트가 쓴 자유 글(Issue 제목·설명)은 넣지 않고, 모르는 값은 "미확인"으로 적는다. 검증 종료 사건만으로는 PASS를 추정하지 않는다. 만든 요약은 `reports/`에 둔다.
+발표·회의에 쓸 요약은 `render_summary(독립 평가 보고서, scenario_contract=..., metrics=run_metrics 결과, run_bundle=..., trace=D5 결과의 trace, runner=D5 결과의 runner, regression=regression_from_reports 결과)`로 만든다. 함께 넣는 자료가 평가 보고서와 다른 Run·코드 버전·평가의 것이거나 출처가 없으면 요약을 만들지 않는다. 판정, 요구사항별·검사별 결과, 코드 버전별 "실패 → 수정 → 재검증" 흐름, 시간·비용·협업 지표가 Markdown 한 장으로 나온다. 에이전트가 쓴 자유 글(Issue 제목·설명)은 넣지 않고, 모르는 값은 "미확인"으로 적는다. 검증 종료 사건만으로는 PASS를 추정하지 않는다. 만든 요약은 `reports/`에 둔다.
 
 ## 지켜야 할 것
 

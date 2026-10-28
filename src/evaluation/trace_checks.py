@@ -36,6 +36,12 @@ HASH_FORMAT = re.compile(
 # 가린 값으로 보는 글자: [REDACTED]·REDACTED·<masked>·***** 등. 이런 값은 비밀번호 칸에 있어도 노출이 아니다.
 _REDACTED = re.compile(r'\s*(\[|<)?\s*(redacted|masked|hidden|removed)\s*(\]|>)?\s*|\s*\*+\s*', re.IGNORECASE)
 MAX_FINDINGS = 64  # 결과에 남기는 위치 정보의 최대 개수(문서가 아주 커도 결과가 끝없이 커지지 않게)
+EXPOSURE_DOCUMENTS = ('events', 'issues', 'artifacts', 'toolAttempts', 'telemetry')  # 노출 검사가 읽는 기록 다섯 가지
+# 지금 수집 경로로는 받을 수 없어 노출 검사가 보지 못하는 출력. 그래서 이 검사의 PASS는 REQ-006 전체 충족이 아니다.
+#   A2A_MESSAGE_BODY      : 에이전트 사이 A2A Message 본문(조회 API 없음)
+#   ARTIFACT_FILE_CONTENT : Artifact 조회는 등록된 JSON 기록만 준다(원본 파일·Snapshot 내용은 아님)
+#   AGENT_PROCESS_OUTPUT  : 에이전트·Orchestrator 서버 프로세스의 로그·출력 스트림
+NOT_COLLECTED_OUTPUTS = ('A2A_MESSAGE_BODY', 'ARTIFACT_FILE_CONTENT', 'AGENT_PROCESS_OUTPUT')
 MAX_DEPTH = 64     # JSON을 파고드는 최대 깊이(지나치게 깊은 문서가 검사기를 멈추지 않게)
 
 
@@ -45,10 +51,14 @@ class TraceCheck:
     status: str                                   # PASS / FAIL / UNVERIFIED
     reasons: tuple[str, ...] = ()                 # 판정 근거 코드
     findings: tuple[dict, ...] = field(default=())  # 위치 정보(값 없음)
+    coverage: Optional[dict] = None               # (노출 검사만) 읽은 기록·못 받은 기록·보지 못하는 출력·알려 준 값 개수
 
     def to_dict(self) -> dict:
         # JSON으로 저장하기 쉬운 사전 모양으로 바꾼다.
-        return {'status': self.status, 'reasons': list(self.reasons), 'findings': list(self.findings)}
+        result = {'status': self.status, 'reasons': list(self.reasons), 'findings': list(self.findings)}
+        if self.coverage is not None:
+            result['coverage'] = self.coverage
+        return result
 
     def to_check_result(self, check_id: str, evidence_id: str, *, expected: Optional[str] = None) -> CheckResult:
         # 독립 평가 보고서에 넣을 검사 결과로 바꾼다. UNVERIFIED는 ERROR(첫 근거 코드)로 옮긴다.
@@ -149,7 +159,7 @@ def check_trace_exposure(documents: Mapping, criteria: Mapping, *, known_values:
 
     # 다섯 가지 기록을 모두 훑는다. 없는 기록은 따로 적어 둔다.
     missing = []
-    for name in ('events', 'issues', 'artifacts', 'toolAttempts', 'telemetry'):
+    for name in EXPOSURE_DOCUMENTS:
         if documents.get(name) is None:
             missing.append(name)
         else:
@@ -157,15 +167,20 @@ def check_trace_exposure(documents: Mapping, criteria: Mapping, *, known_values:
     # 페이지로 받는 기록은 받은 개수가 전체 개수와 같아야 "다 봤다"고 할 수 있다.
     incomplete = [name for name, total in (('events', 'eventsTotal'), ('telemetry', 'telemetryTotal'))
                   if documents.get(name) is not None and documents.get(total) != len(documents[name])]
+    # 검사 범위: 끝까지 읽은 기록, 못 받았거나 일부만 받은 기록, 수집 경로가 없어 보지 못하는 출력, 알려 준 값 개수(값은 남기지 않음)
+    coverage = {'checkedDocuments': [name for name in EXPOSURE_DOCUMENTS if name not in missing and name not in incomplete],
+                'missingDocuments': missing, 'incompleteDocuments': incomplete,
+                'notCollectedOutputs': list(NOT_COLLECTED_OUTPUTS), 'knownValues': len(secrets)}
     # 판정 순서: 실제로 찾은 노출이 있으면 기록이 모자라도 FAIL(확인된 위반) → 기록이 모자라면 UNVERIFIED → 아니면 PASS.
     if reasons - {'DOCUMENT_TOO_DEEP'}:
-        return TraceCheck('FAIL', tuple(sorted(reasons)), tuple(findings))
+        return TraceCheck('FAIL', tuple(sorted(reasons)), tuple(findings), coverage)
     if missing or incomplete or reasons:
         codes = (['TRACE_DOCUMENT_MISSING'] if missing else []) + (['TRACE_DOCUMENT_INCOMPLETE'] if incomplete else [])
         return TraceCheck('UNVERIFIED', tuple(codes + sorted(reasons)),
                           tuple({'document': name, 'kind': 'MISSING'} for name in missing)
-                          + tuple({'document': name, 'kind': 'INCOMPLETE'} for name in incomplete) + tuple(findings))
-    return TraceCheck('PASS')
+                          + tuple({'document': name, 'kind': 'INCOMPLETE'} for name in incomplete) + tuple(findings),
+                          coverage)
+    return TraceCheck('PASS', coverage=coverage)
 
 
 # ---------------------------------------------------------------- REQ-008: 추적 가능성

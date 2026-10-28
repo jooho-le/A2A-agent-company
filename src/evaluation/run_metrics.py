@@ -280,6 +280,8 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
 
 A2A_STEP_END_STATES = frozenset({'TASK_STATE_COMPLETED', 'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_REJECTED',
                                  'TASK_STATE_INPUT_REQUIRED', 'TASK_STATE_AUTH_REQUIRED'})
+A2A_ACTIVE_STATES = frozenset({'TASK_STATE_SUBMITTED', 'TASK_STATE_WORKING'})  # 에이전트가 일하는 중인 상태
+A2A_STATE_EVENTS = ('A2A_TASK_RECEIVED', 'A2A_TASK_STATE_CHANGED', 'A2A_TASK_UPDATED')  # A2A 상태를 싣는 사건
 HUMAN_WAIT_STATES = frozenset({'HUMAN_REVIEW', 'WAITING_INPUT'})
 AGENT_ROLES = ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')
 
@@ -300,13 +302,16 @@ def collaboration_metrics(events) -> dict:
     #   llmMs·toolMs        : 역할별 LLM 호출(LLM_CALL_FINISHED)·도구 호출(MCP_TOOL_FINISHED)의 durationMs 합과 호출 수.
     #                         병렬로 겹친 시간도 각각 더한 "작업 시간 합"이라 전체 경과 시간으로 쓰지 않는다.
     #   handoffMs           : Step마다 일을 넘긴 시각(A2A_MESSAGE_SENT) ~ 에이전트가 받은 시각(첫 A2A_TASK_RECEIVED)의 합
-    #   agentStepSumMs      : Step 구간(넘기기 시작 ~ A2A 종료 상태) 길이의 단순 합
+    #   agentStepSumMs      : Step 구간 길이의 단순 합. 구간은 일을 넘기기 시작(첫 시작·재개 요청 A2A_MESSAGE_SENT)부터
+    #                         끝 상태(완료·실패·취소·거절) 또는 중단 상태(입력·인증 대기)까지다. 첫 응답(A2A_TASK_RECEIVED)이
+    #                         이미 끝 상태여도 그 시각에 닫는다(dev는 이때 더 폴링하지 않는다). 사람을 기다리는 동안은 구간 밖이고,
+    #                         재개하면(같은 Step, attempt+1) 새 구간이 열린다. 폴링 시간 초과는 에이전트가 계속 일하므로 끊지 않는다.
     #   agentActiveMs       : 같은 구간들의 합집합 길이. agentStepSumMs - agentActiveMs = 병렬 실행으로 겹친 시간(parallelOverlapMs)
     #   outsideAgentMs      : (실행 시작 ~ 마지막 판정) - agentActiveMs. 어느 에이전트도 일하지 않은 시간
     #                         (Orchestrator의 판단·Snapshot 고정·빌드·Issue 처리, 사람 대기 등)
     #   humanWaitMs         : HUMAN_REVIEW·WAITING_INPUT 상태에 들어갔다가 벗어난 구간의 합. 아직 그 상태로 끝났으면
     #                         그 구간은 더하지 않고 humanWaitOpen=True. 상태 변화 사건이 하나도 없으면 None(알 수 없음)
-    # 끝 상태가 없는 Step(중단·진행 중)은 stepsWithoutEnd로 세고 구간 계산에서 뺀다.
+    # 마지막 구간이 끝 상태 없이 열려 있는 Step(멈춤·진행 중)은 stepsWithoutEnd로 세고 그 구간은 계산에서 뺀다.
     stamped = sorted(((aware_time(event['occurredAt'], 'occurredAt'), index, event) for index, event in enumerate(events)),
                      key=lambda item: (item[0], item[1]))
 
@@ -326,25 +331,30 @@ def collaboration_metrics(events) -> dict:
         step_id = event.get('workflowStepId')
         if not step_id:
             continue
-        step = steps.setdefault(step_id, {'start': None, 'sent': None, 'received': None, 'end': None, 'role': None})
-        if kind in ('WORKFLOW_STEP_DISPATCH_STARTED', 'A2A_MESSAGE_SENT') and step['start'] is None:
-            step['start'] = moment
+        # open: 지금 열린 구간의 시작 시각(없으면 None), segments: 닫힌 구간 [(시작, 끝)] 목록
+        step = steps.setdefault(step_id, {'open': None, 'segments': [], 'sent': None, 'received': None, 'role': None})
+        state = event.get('a2aTaskState')
+        # 구간 열기: 일을 넘기기 시작했거나(첫 시작·재개 요청), 중단 뒤 폴링에서 다시 일하는 상태가 보였을 때
+        if step['open'] is None and (kind in ('WORKFLOW_STEP_DISPATCH_STARTED', 'A2A_MESSAGE_SENT')
+                                     or (kind in A2A_STATE_EVENTS and state in A2A_ACTIVE_STATES and step['segments'])):
+            step['open'] = moment
         if kind == 'A2A_MESSAGE_SENT' and step['sent'] is None:
             step['sent'] = moment
         if kind == 'A2A_TASK_RECEIVED' and step['received'] is None and step['sent'] is not None:
             step['received'] = moment
-        if kind in ('A2A_TASK_STATE_CHANGED', 'A2A_TASK_UPDATED') and event.get('a2aTaskState') in A2A_STEP_END_STATES:
-            step['end'] = moment
+        # 구간 닫기: 첫 응답·상태 변화·갱신이 끝 상태나 중단 상태를 실었을 때
+        if kind in A2A_STATE_EVENTS and state in A2A_STEP_END_STATES and step['open'] is not None:
+            step['segments'].append((step['open'], moment))
+            step['open'] = None
         if actor in AGENT_ROLES and step['role'] is None:
             step['role'] = actor
-    intervals = [(step['start'], step['end']) for step in steps.values()
-                 if step['start'] is not None and step['end'] is not None and step['end'] >= step['start']]
+    intervals = [(start, finish) for step in steps.values() for start, finish in step['segments'] if finish >= start]
     by_role = {}
     for step in steps.values():
-        if step['start'] is not None and step['end'] is not None:
+        if step['segments']:
             role = by_role.setdefault(step['role'] or 'UNKNOWN', {'steps': 0, 'ms': 0})
             role['steps'] += 1
-            role['ms'] += millis(step['end'] - step['start'])
+            role['ms'] += sum(millis(finish - start) for start, finish in step['segments'])
     step_sum = sum(millis(finish - start) for start, finish in intervals)
     active = int(_merged_length([(start.timestamp() * 1000, finish.timestamp() * 1000) for start, finish in intervals]))
     starts = [moment for moment, _index, event in stamped if event.get('eventType') == 'RUN_STARTED']
@@ -365,7 +375,7 @@ def collaboration_metrics(events) -> dict:
         'handoffMs': sum(millis(step['received'] - step['sent']) for step in steps.values() if step['received'] is not None),
         'agentStepSumMs': step_sum, 'agentActiveMs': active, 'parallelOverlapMs': step_sum - active,
         'outsideAgentMs': wall - active if wall is not None else None, 'wallToVerdictMs': wall,
-        'stepsWithoutEnd': sum(1 for step in steps.values() if step['start'] is not None and step['end'] is None),
+        'stepsWithoutEnd': sum(1 for step in steps.values() if step['open'] is not None),
         'humanWaitMs': human, 'humanWaitOpen': waiting_since is not None,
     }
 
@@ -393,6 +403,26 @@ def regression_count(version_results: dict) -> dict:
     return {'regressionCount': len(regressions), 'regressions': regressions,
             'comparedVersionPairs': len(versions) - 1, 'uncomparedChecks': uncompared,
             'complete': uncompared == 0}
+
+
+def regression_from_reports(reports) -> dict:
+    # 코드 버전마다 같은 보호 묶음으로 채점한 독립 평가 보고서들에서 Regression Count를 바로 계산한다.
+    #   (D5 evaluate_final_snapshot을 버전별 Snapshot마다 돌린 결과의 'report'들을 넣는다.)
+    # 버전은 보고서의 expectedManifest.codeVersion(채점한 Snapshot의 코드 버전)이고, 검사 상태는 보고서의 checks에서 읽는다.
+    # 보고서들은 같은 Run·같은 보호 묶음(suite 지문)이어야 하고 버전마다 하나여야 한다. 어기면 ValueError로 멈춘다
+    # (다른 묶음으로 채점한 버전끼리 비교하면 Regression이 아니라 시험 변경이 섞인다).
+    # 돌려주는 값: regression_count 결과 + runId·suiteSha256(요약에서 다른 Run의 결과와 섞이지 않았는지 대조용)
+    results, run_ids, suites = {}, set(), set()
+    for report in reports:
+        version = (report.get('expectedManifest') or {}).get('codeVersion')
+        if type(version) is not int or version in results:
+            raise ValueError('Each report needs its own code version')
+        run_ids.add(report.get('sourceRunId'))
+        suites.add((report.get('suite') or {}).get('sha256'))
+        results[version] = {check['testId']: check['status'] for check in report.get('checks', [])}
+    if len(run_ids) != 1 or len(suites) != 1 or None in run_ids | suites:
+        raise ValueError('Reports must come from one Run and one protected suite')
+    return {**regression_count(results), 'runId': run_ids.pop(), 'suiteSha256': suites.pop()}
 
 
 def _lookup(document, dotted):

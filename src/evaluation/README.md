@@ -149,7 +149,8 @@ output['report']   # 독립 평가 보고서(11개 검사, 요구사항 7개)
 - 압축 파일은 일반 파일·상대 경로만 받습니다(../·절대 경로·링크·폴더 항목·압축 tar·중복·크기 초과 거부).
 - `DockerRunner`는 dev 샌드박스와 같은 제한(네트워크 차단, 읽기 전용, 일반 사용자, 권한 제거, CPU·메모리·프로세스 제한)으로 dev의 `unit_runner.py`를 실행합니다. `LocalRunner(trusted=True)`는 합성 표본 시험용이며 이미지를 확인할 수 없어 결과가 판정에 쓰이지 않습니다. 생성 코드를 호스트에서 실행하지 않습니다.
 - 정적 판정은 같은 Snapshot 소스로 `security.assess.evaluate()`를 부릅니다(dev Host 없이).
-- `evaluation.summary.render_summary(output['report'], scenario_contract=..., metrics=..., run_bundle=..., trace=output['trace'])`로 회의·발표용 요약을 만듭니다. 에이전트가 쓴 자유 글은 넣지 않습니다.
+- `evaluation.summary.render_summary(output['report'], scenario_contract=..., metrics=..., run_bundle=..., trace=output['trace'], runner=output['runner'])`로 회의·발표용 요약을 만듭니다. 에이전트가 쓴 자유 글은 넣지 않습니다. `trace`(runId)·`runner`(evaluationId)·`metrics`·`run_bundle`이 보고서와 다른 Run·평가의 것이면 ValueError로 멈춥니다.
+- `known_values=[...]`로 이 Run에서 쓴 시험 비밀값을 넘기면 Run 기록 노출 검사가 자유 글에서도 찾습니다(결과에는 개수·위치만 남음). 노출 결과의 `coverage`에 읽은 기록과 보지 못한 출력(A2A Message 본문·Artifact 파일 내용·에이전트 프로세스 출력)을 적어, PASS가 REQ-006 전체 충족이 아니라 부분 검사임을 드러냅니다.
 - 팀장 전달 파일: `python -m evaluation.protected_tests export --out <폴더>`가 `owned-qa-cases.local.json`, `unit-protected-scope.json`(owned-tools의 unit.scopes에 추가), `handoff.json`(suite 지문·참조)을 만듭니다.
 
 ## 결과 지표와 시연 자료 (D4)
@@ -161,7 +162,8 @@ output['report']   # 독립 평가 보고서(11개 검사, 요구사항 7개)
 측정하지 못한 값은 0이 아니라 `None`이고, 성공률 분모는 시작하지 못한 Run을 포함한 계획 Run 수입니다.
 모델 호출 수는 대상 Run이 모두 측정됐을 때만 `modelCalls`에 합계를 쓰고, 부분 합은 `knownModelCalls`, 완전성은 `modelCallsComplete`로 구분합니다. 놓친 결함 수는 연결된 Run의 SUCCESS와 독립 보고서의 확인된 필수 실패로 계산하므로 선택 항목 `sourceRun` 생략에 영향받지 않습니다.
 API 페이지 요청에 실패하면 수집을 중단합니다. 빈 페이지 등으로 선언된 사건 수와 수집 수가 다르면 `EVENTS_INCOMPLETE`, 전체 사건 수가 없으면 `EVENTS_COMPLETENESS_UNKNOWN`이며, 두 경우 모두 사건 기반 시간은 `None`입니다. 시간 계산은 `RUN_STARTED`부터라 Run 생성 시각을 쓰는 `sourceRun.durationMs`와 시작점이 다릅니다.
-`regression_count({코드 버전: {검사 번호: 상태}})`는 앞 버전 PASS → 다음 버전 FAIL을 Regression으로 세고, 비교할 수 없는 검사가 있으면 `complete=False`로 알립니다.
+`regression_count({코드 버전: {검사 번호: 상태}})`는 앞 버전 PASS → 다음 버전 FAIL을 Regression으로 세고, 비교할 수 없는 검사가 있으면 `complete=False`로 알립니다. `regression_from_reports(버전별 독립 평가 보고서들)`는 같은 Run·같은 보호 묶음인지 확인한 뒤 바로 계산합니다(버전별 Snapshot 인계 전이라 아직 실행 결과에서 자동으로 나오지는 않음).
+`collaboration_metrics(events)`의 Step 구간은 시도·재개마다 끊습니다: 일을 넘기기 시작 ~ 끝 상태 또는 입력·인증 대기. 첫 응답이 이미 끝 상태여도 그 시각에 닫고, 사람을 기다린 시간은 에이전트 시간에 넣지 않습니다.
 
 `evaluation.trace_checks`: `fetch_trace_documents(get, run_id)`로 events·telemetry(페이지 전부)·issues·artifacts·tool-attempts를 받아
 `check_trace_exposure`가 비밀번호 필드 값(정적 판정과 같은 단어 단위 이름 규칙)·실제 해시 값 모양·알려 준 값을 찾고,

@@ -23,7 +23,7 @@ from uuid import UUID
 
 import pytest
 
-from evaluation.final_evaluation import (ArchiveError, DockerRunner, LocalRunner, RunnerOutcome,
+from evaluation.final_evaluation import (ArchiveError, DockerRunner, LocalRunner, RunnerOutcome, _write_tree,
                                          evaluate_final_snapshot, read_snapshot)
 from evaluation.manifest import ExecutionManifest
 from orchestrator.domain.scenario_registry import SCN_001_ID, get_scenario
@@ -230,6 +230,18 @@ def test_docker_command_matches_dev_sandbox_limits(tmp_path):
     assert f'type=bind,src={tmp_path / "i"},dst=/inputs,readonly' in args
     assert args[-10:] == [IMAGE, '-I', '-B', '/inputs/_unit_runner.py', '--kind', 'PROTECTED', '--directory',
                           'tests/signup', '--pattern', 'protected_signup_*.py']
+
+
+def test_written_tree_is_readable_by_container_user(tmp_path):
+    """이 컴퓨터의 umask가 엄격해도(077) 컨테이너 안 일반 사용자가 읽을 수 있게 폴더 755·파일 644로 쓴다."""
+    previous = os.umask(0o077)
+    try:
+        _write_tree(tmp_path / 'tree', {'main.py': b'x', 'routers/auth.py': b'y'})
+    finally:
+        os.umask(previous)
+    modes = {path.relative_to(tmp_path).as_posix(): stat.S_IMODE(path.stat().st_mode)
+             for path in [tmp_path / 'tree', *(tmp_path / 'tree').rglob('*')]}
+    assert modes == {'tree': 0o755, 'tree/main.py': 0o644, 'tree/routers': 0o755, 'tree/routers/auth.py': 0o644}
 
 
 def fake_docker(tmp_path, image_id, report):

@@ -6,8 +6,11 @@
 #   - (run_bundle이 있으면) 코드 버전별 빌드·검증·발견한 문제·수정 요청 흐름: "실패 → 수정 → 재검증" 장면
 #   - (metrics가 있으면) 시간·수정·재시도·모델 호출·토큰·비용, 협업 시간(전달·병렬·에이전트 밖·사람 대기)
 #   - (trace가 있으면) Run 기록의 노출 검사·추적 검사 결과
+#   - (regression이 있으면) 버전별 보호 테스트 결과에서 계산한 Regression Count(run_metrics.regression_from_reports)
 # 에이전트가 쓴 자유 글(Issue 제목·설명, 실패 상세)은 비밀값이 섞일 수 있어서 넣지 않는다. 검사 제목·상태·근거 코드,
 # Issue의 종류·보고 역할·요구사항 이름만 쓴다. 모르는 값은 0이 아니라 "미확인"으로 적는다.
+# 함께 넣는 자료(run_bundle·metrics·trace·runner)는 평가 보고서와 같은 Run·같은 최종 코드 버전·같은 평가의 것이어야 한다.
+# 다르거나 출처를 적지 않은 자료가 있으면 요약을 만들지 않고 ValueError로 멈춘다(다른 실행 자료가 섞이지 않게).
 #
 # [처음 읽는 분을 위한 용어]
 # - Markdown 표: "| 칸 | 칸 |" 줄과 "|---|---|" 구분 줄로 만드는 표. 칸 안의 "|"는 "\|"로 바꿔야 표가 깨지지 않는다.
@@ -15,6 +18,8 @@
 from typing import Mapping, Optional  # 자료형 이름표(실행에는 영향 없음)
 
 UNKNOWN = '미확인'  # 모르는 값을 적는 글자(0으로 바꾸지 않는다)
+OUTPUT_NAMES = {'A2A_MESSAGE_BODY': 'A2A Message 본문', 'ARTIFACT_FILE_CONTENT': 'Artifact 파일 내용',
+                'AGENT_PROCESS_OUTPUT': '에이전트 프로세스 출력'}  # 노출 검사가 보지 못하는 출력의 표시 이름
 
 
 def _cell(value) -> str:
@@ -72,13 +77,38 @@ def _flow(run_bundle, keys) -> list:
     return rows
 
 
+def _check_same_sources(report, metrics, run_bundle, trace, runner, regression=None):
+    # 요약에 함께 넣는 자료의 출처를 평가 보고서와 대조한다. 다르거나 출처가 없으면 ValueError.
+    #   run_bundle: Run 번호·최종 코드 버전, metrics: Run 번호(+ 값이 있으면 구조·코드 버전),
+    #   trace: Run 번호(final_evaluation 결과의 trace에 들어 있다), runner: 평가 번호(final_evaluation 결과의 runner)
+    run_id = report.get('sourceRunId')
+    version = (report.get('expectedManifest') or {}).get('codeVersion')  # 채점한 최종 코드 버전
+    if run_bundle is not None:
+        run = run_bundle.get('run') or {}
+        if run.get('runId') != run_id or (version is not None and run.get('codeVersion') != version):
+            raise ValueError('Run bundle differs from the evaluated Run or final code version')
+    if metrics is not None:
+        if (metrics.get('runId') != run_id or metrics.get('architecture') not in (None, report.get('architecture'))
+                or metrics.get('codeVersion') not in (None, version)):
+            raise ValueError('Metrics differ from the evaluated Run')
+    if trace is not None and trace.get('runId') != run_id:
+        raise ValueError('Trace results differ from the evaluated Run')
+    if runner is not None and runner.get('evaluationId') != report.get('evaluationId'):
+        raise ValueError('Runner details belong to another evaluation')
+    if regression is not None and (regression.get('runId') != run_id
+                                   or regression.get('suiteSha256') != (report.get('suite') or {}).get('sha256')):
+        raise ValueError('Regression results differ from the evaluated Run or protected suite')
+
+
 def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = None, metrics: Optional[Mapping] = None,
                    run_bundle: Optional[Mapping] = None, trace: Optional[Mapping] = None,
-                   runner: Optional[Mapping] = None) -> str:
+                   runner: Optional[Mapping] = None, regression: Optional[Mapping] = None) -> str:
     # 독립 평가 보고서(report)와 선택 자료로 Markdown 요약 글을 만들어 돌려준다.
     # scenario_contract: 요구사항 표시 이름(REQ-001 등)을 쓰기 위한 시나리오 정책
     # metrics          : run_metrics() 결과(시간·수정·비용·협업 시간)
     # run_bundle       : Run 기록(코드 버전별 흐름 표), trace: Trace 검사 결과, runner: D5 실행 정보
+    # regression       : run_metrics.regression_from_reports 결과(버전별 보호 테스트 결과의 PASS → FAIL 수)
+    _check_same_sources(report, metrics, run_bundle, trace, runner, regression)  # 0) 다른 Run·평가의 자료가 섞이지 않았는지
     keys = _requirement_keys(scenario_contract)
     source = report.get('sourceRun') or {}
     manifest = report.get('manifestCheck') or {}
@@ -136,10 +166,27 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
             if roles:
                 lines.append('- 역할별 Step 시간: ' + ', '.join(f"{role} {item['steps']}회 {_seconds(item['ms'])}"
                                                            for role, item in roles.items()))
+    if regression:
+        # 비교할 수 없는 검사(미검증)가 있으면 숨은 Regression이 있을 수 있어 "최소 n건"으로 적는다.
+        count = regression.get('regressionCount')
+        lines += ['', '## Regression(수정으로 새로 생긴 실패)', '',
+                  f"- {'' if regression.get('complete') else '최소 '}{count}건 · 비교한 버전 쌍 "
+                  f"{regression.get('comparedVersionPairs')}개 · 비교 못 한 검사 {regression.get('uncomparedChecks')}개"]
+        lines += [f"  - v{item['fromVersion']} → v{item['toVersion']}: {_cell(titles.get(item['checkId'], item['checkId']).split(' ', 1)[0])}"
+                  for item in regression.get('regressions', [])]
     if trace:
         lines += ['', '## Run 기록 검사', '']
         for name, label in (('exposure', '비밀번호·해시 노출(REQ-006 Orchestrator 기록)'), ('traceability', '추적 가능성(REQ-008)')):
             item = trace.get(name)
             if item:
                 lines.append(f"- {label}: {item.get('status')}" + (f" ({', '.join(item.get('reasons', []))})" if item.get('reasons') else ''))
+                coverage = item.get('coverage')
+                if coverage:
+                    # 노출 검사는 받은 기록만 본다. 못 본 출력이 있으므로 PASS여도 REQ-006 전체 충족이 아니라 부분 검사다.
+                    lines.append(f"  - 검사 범위(부분 검사, REQ-006 전체 충족 아님): 읽은 기록 "
+                                 f"{'·'.join(coverage.get('checkedDocuments') or []) or '없음'}, 보지 못한 출력 "
+                                 f"{'·'.join(OUTPUT_NAMES.get(name, name) for name in coverage.get('notCollectedOutputs') or []) or '없음'}"
+                                 + (f", 받지 못한 기록 {'·'.join(coverage['missingDocuments'] + coverage['incompleteDocuments'])}"
+                                    if coverage.get('missingDocuments') or coverage.get('incompleteDocuments') else '')
+                                 + f", 알려 준 비밀값 {_count(coverage.get('knownValues'), '개')}")
     return '\n'.join(lines) + '\n'

@@ -7,6 +7,8 @@
   - 다른 Run의 사건·Issue가 섞이거나 최종 코드 버전의 검증 사건이 없으면 추적 검사가 PASS가 되지 않는가?
   - Security 증거가 없는 버전을 요약 흐름 표에서 "문제 없음"으로 적지 않는가?
   - 대상 Run 번호·코드 버전·Trace 문서가 서로 어긋나면 실행 전에 멈추는가?
+  - (2026-10-29 점검) 대문자·공백 이메일 재가입이 500이어도 최종 PASS가 나오지 않는가?(F1) 최종 채점기 결과를 다른 Run 자료와
+    섞어 요약하지 않는가?(F4) 알려 준 시험 비밀값이 최종 채점기의 노출 검사까지 전달되고 결과에는 값이 남지 않는가?
 실행 시험은 sqlalchemy·argon2-cffi가 있어야 돈다(없으면 건너뜀). 믿을 수 있는 합성 서비스 코드만 로컬에서 실행하고,
 Docker 호출은 흉내 낸다.
 """
@@ -24,7 +26,7 @@ from tests.evaluation.test_security_assess import make_request
 from evaluation import protected_tests as pt
 from evaluation.final_evaluation import DockerRunner
 from evaluation.security.assess import evaluate
-from evaluation.summary import _flow
+from evaluation.summary import _flow, render_summary
 from evaluation.trace_checks import check_traceability
 
 
@@ -197,3 +199,53 @@ def test_final_evaluation_rejects_foreign_metadata_before_execution(change):
     with pytest.raises(ValueError):
         final(archive, manifest(archive), runner, **kwargs)
     assert runner.calls == 0
+
+
+# ---------------------------------------------------------------- 외부 점검(2026-10-29)
+
+@pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
+def test_server_error_on_email_variants_is_not_a_final_pass():
+    """F1: 대문자·앞뒤 공백 이메일 재가입에서만 500이 나는 서비스는 QA-SIGNUP-003 FAIL, 최종 판정 FAIL이다.
+    (중복 계정은 생기지 않지만 기준표 4절의 "중복은 4xx 거부"를 어긴다.)"""
+    from tests.evaluation.test_final_evaluation import LOCK, VerifiedImageRunner, canonical_tar, statuses
+    files = signup_service.build('variant_email_server_error')
+    archive = canonical_tar({**{name: text.encode('utf-8') for name, text in files.items()}, 'requirements.lock': LOCK})
+    output = final(archive, manifest(archive), VerifiedImageRunner())
+    result = statuses(output)
+    assert result['QA-SIGNUP-003'] == 'FAIL' and output['report']['evaluationVerdict'] == 'FAIL'
+    assert {key for key, status in result.items() if status != 'PASS'} == {'QA-SIGNUP-003'}
+
+
+def test_final_output_carries_its_sources_into_the_summary():
+    """F4: 최종 채점기 결과의 trace·runner에는 출처(Run 번호·평가 번호)가 붙어 그대로 요약할 수 있고,
+    다른 Run의 흐름 자료를 함께 넣으면 요약을 만들지 않는다."""
+    from tests.evaluation.test_final_evaluation import RecordingRunner
+    archive = snapshot()
+    bundle = copy.deepcopy(RUNS[QA_FIX])
+    output = final(archive, manifest(archive), RecordingRunner(), source_run_id=bundle['run']['runId'], run_bundle=bundle)
+    assert output['trace']['runId'] == bundle['run']['runId']
+    assert output['runner']['evaluationId'] == output['report']['evaluationId']
+    text = render_summary(output['report'], scenario_contract=CONTRACT, run_bundle=bundle, trace=output['trace'],
+                          runner=output['runner'])
+    assert '추적 가능성(REQ-008)' in text
+    other = copy.deepcopy(RUNS['repeated_issue_stops_after_two_unsolved_fix_cycles'])
+    with pytest.raises(ValueError):
+        render_summary(output['report'], scenario_contract=CONTRACT, run_bundle=other)
+
+
+def test_known_secret_reaches_final_exposure_check_without_its_value():
+    """알려 준 시험 비밀값을 최종 채점기에 넘기면 Run 기록의 자유 글에서도 찾아 FAIL이고, 결과 어디에도 값이 남지 않는다.
+    노출 검사 결과에는 검사 범위(읽은 기록·보지 못한 출력·알려 준 값 개수)가 붙는다."""
+    from tests.evaluation.test_final_evaluation import RecordingRunner, uid
+    from tests.evaluation.test_trace_checks import documents
+    secret = 'Audit' + 'SyntheticValue2948'
+    trace = documents(events=[{'runId': uid(2), 'message': 'received input: ' + secret}], eventsTotal=1)
+    trace['runId'] = uid(2)
+    archive = snapshot()
+    output = final(archive, manifest(archive), RecordingRunner(), trace_documents=trace, known_values=[secret])
+    exposure = output['trace']['exposure']
+    assert exposure['status'] == 'FAIL' and 'KNOWN_SECRET_VALUE' in exposure['reasons']
+    assert exposure['coverage']['knownValues'] == 1 and 'A2A_MESSAGE_BODY' in exposure['coverage']['notCollectedOutputs']
+    assert secret not in json.dumps(output, ensure_ascii=False, default=str)
+    without = final(archive, manifest(archive), RecordingRunner(), trace_documents=trace)
+    assert without['trace']['exposure']['status'] == 'PASS'  # 값을 모르면 자유 글 속 비밀번호는 찾지 못한다(한계)

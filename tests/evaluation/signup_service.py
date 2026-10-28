@@ -133,6 +133,22 @@ _HANDLED_COMMIT = '''\
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="duplicate email") from None
 '''
+# 앱이 시작할 때(lifespan) 자기 엔진으로 테이블을 만드는 구조(세화 backend와 같은 방식)
+_LIFESPAN_APP = '''\
+from contextlib import asynccontextmanager
+
+from database import Base, engine
+import models
+
+
+@asynccontextmanager
+async def lifespan(app):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+'''
 
 # 변형 이름: [(파일, 바꿀 글자, 새 글자)]. 바꿀 글자는 정상 서비스에 정확히 한 번 있어야 한다.
 VARIANTS = {
@@ -175,6 +191,17 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     'wrong_signup_path': [('routers/auth.py', 'prefix="/api/auth"', 'prefix="/api/v2/auth"')],
     # 요청 필드가 규격과 달라 모든 가입이 422로 거부된다. 형식 오류 거부 검사가 거저 통과하면 안 된다.
     'different_request_field': [('schemas.py', '    email: str\n', '    username: str\n    email: str\n')],
+    # 대문자·앞뒤 공백이 있는 이메일에서 처리하지 못한 예외(500)가 난다. 중복은 생기지 않지만 4xx 거부가 아니다(Codex F1).
+    'variant_email_server_error': [('schemas.py', '        value = value.strip().lower()\n',
+                                    '        if value != value.strip().lower():\n'
+                                    '            raise RuntimeError("normalization failed")\n'
+                                    '        value = value.strip().lower()\n')],
+    # 시작할 때 테이블을 만드는 앱. DB 위치를 DATABASE_URL로 받으면 보호 테스트의 임시 DB를 써서 정상 판정된다.
+    'lifespan_env_database': [('main.py', 'app = FastAPI()\n', _LIFESPAN_APP)],
+    # 같은 앱이 DB 파일을 소스 폴더 옆에 고정하면, 읽기 전용 Snapshot(컨테이너)에서 시작이 실패해 모두 미검증이다.
+    'lifespan_source_database': [('main.py', 'app = FastAPI()\n', _LIFESPAN_APP),
+                                 ('database.py', 'DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./app.db")',
+                                  'DATABASE_URL = "sqlite:///" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.db")')],
     'app_missing': [('main.py', 'app.include_router(auth_router)\n', 'app.include_router(auth_router)\napplication = app\n'),
                     ('main.py', '    return JSONResponse(status_code=422, content={"detail": errors})\n',
                      '    return JSONResponse(status_code=422, content={"detail": errors})\n\n\ndel app\n')],

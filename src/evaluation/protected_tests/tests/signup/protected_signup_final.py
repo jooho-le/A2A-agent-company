@@ -45,6 +45,9 @@ class SignupFinalChecks(link.SignupCheck):
                         raise link.Unverified("CONCURRENT_SIGNUP_NOT_CREATED")
                     self.assertEqual(created, 1, "동시 요청으로 같은 이메일 사용자가 1명이 아님")
                     self.assertEqual(successes, 1, "동시 요청 중 성공 응답이 정확히 1건이 아님")
+                    # 나머지는 중복 실패이므로 4xx여야 한다(5xx는 처리하지 못한 서버 오류).
+                    self.assertTrue(all(status in link.SUCCESS or status in link.REJECTED for status in statuses),
+                                    "동시 요청의 중복 실패가 4xx로 거부되지 않음")
         self.check(body)
 
     def test_sec_signup_002_password_stored_as_argon2id_hash(self):

@@ -5,8 +5,9 @@
   - dev가 보호 파일 설정(UnitTestScope)과 보호 QA 케이스(QACaseBinding)를 받아 주는가?
   - unittest 보고서·정적 판정 결과가 검사 결과로 옮겨질 때 근거 없는 PASS가 생기지 않는가?
   - 독립 평가 보고서까지 이어지는가?
-  - (실행) 최소 회원가입 서비스와 결함 변형 14개를 dev unittest 실행기로 돌렸을 때 결함마다
-    해당 검사만 FAIL이 되고, 연결이 안 되면 모두 UNVERIFIED가 되는가?
+  - (실행) 최소 회원가입 서비스와 변형 20개(결함 15·연결 실패 2·공백 이메일 거부 1·시작할 때 테이블을 만드는 앱 2)를
+    컨테이너처럼 읽기 전용 Snapshot으로 두고 dev unittest 실행기로 돌렸을 때 결함마다 해당 검사만 FAIL이 되고,
+    연결이 안 되면(시작 실패 포함) 모두 UNVERIFIED가 되는가?
 실행 시험은 sqlalchemy·argon2-cffi가 있어야 돈다(없으면 건너뜀):
   uv run --with sqlalchemy --with argon2-cffi python -m pytest tests/evaluation/test_protected_signup.py
 """
@@ -268,25 +269,57 @@ EXPECTED_FAILURES = {
     'validation_input_echoed': {'SEC-SIGNUP-005'},
     'password_logged': {'SEC-SIGNUP-005'},
     'hash_in_response': {'SEC-SIGNUP-005'},
-    # 처리하지 못한 DB 오류: 중복이 500으로 응답되고, traceback의 SQL 파라미터로 해시가 로그에 남는다.
-    'unhandled_duplicate': {'QA-SIGNUP-006', 'SEC-SIGNUP-005'},
+    # 처리하지 못한 DB 오류: 중복(동시 요청 포함)이 500으로 응답되고, traceback의 SQL 파라미터로 해시가 로그에 남는다.
+    'unhandled_duplicate': {'QA-SIGNUP-003', 'QA-SIGNUP-005', 'QA-SIGNUP-006', 'SEC-SIGNUP-005'},
+    # 대문자·공백 이메일 재가입이 500: 중복은 생기지 않지만 4xx 거부가 아니다(Codex F1 재현).
+    'variant_email_server_error': {'QA-SIGNUP-003'},
     'password_printed': {'SEC-SIGNUP-005'},
     'isolated_logger': {'SEC-SIGNUP-005'},
     # 모든 가입이 422가 되는 서비스: 정상 가입 실패가 FAIL이고, 거부 검사·전제 조건이 필요한 검사는 미검증이다.
     'different_request_field': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-006'},
     'app_missing': None,
     'wrong_signup_path': None,
+    # 시작할 때 테이블을 만드는 앱: DB 위치를 DATABASE_URL로 받으면 정상, 소스 폴더 옆에 고정하면 읽기 전용
+    # Snapshot에서 시작이 실패해 모두 미검증이다(제품 결함으로 FAIL을 내지도, 시작 단계를 건너뛰어 PASS를 내지도 않는다).
+    'lifespan_env_database': set(),
+    'lifespan_source_database': None,
 }
 # 모두 미검증이 되는 변형의 근거 코드
-UNVERIFIED_CODES = {'app_missing': {'APP_IMPORT_FAILED'}, 'wrong_signup_path': {'SIGNUP_ROUTE_NOT_FOUND'}}
+UNVERIFIED_CODES = {'app_missing': {'APP_IMPORT_FAILED'}, 'wrong_signup_path': {'SIGNUP_ROUTE_NOT_FOUND'},
+                    'lifespan_source_database': {'SERVICE_SETUP_FAILED'}}
 # FAIL도 PASS도 아닌(미검증) 검사가 있는 변형
 EXPECTED_UNVERIFIED = {'different_request_field': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'QA-SIGNUP-005',
                                                    'SEC-SIGNUP-002', 'SEC-SIGNUP-005'}}
 
 
+def _set_read_only(folder, read_only):
+    """폴더 아래 파일·폴더의 쓰기 권한을 빼거나(read_only=True) 되돌린다. 컨테이너의 읽기 전용 /snapshot을 흉내 낸다."""
+    for path in [folder, *folder.rglob('*')]:
+        path.chmod((0o555 if path.is_dir() else 0o444) if read_only else (0o755 if path.is_dir() else 0o644))
+
+
+def _read_only_enforced():
+    """이 컴퓨터에서 쓰기 권한을 뺀 폴더에 정말 쓸 수 없는지 확인한다(관리자 계정 등은 권한과 상관없이 쓸 수 있다)."""
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory) / 'locked'
+        folder.mkdir()
+        _set_read_only(folder, True)
+        try:
+            (folder / 'probe').write_text('x')
+            return False
+        except OSError:
+            return True
+        finally:
+            _set_read_only(folder, False)
+
+
+READ_ONLY = _read_only_enforced()
+
+
 def run_protected(variant):
     """합성 회원가입 서비스 변형(variant)을 임시 폴더에 쓰고, 최종 범위 보호 테스트를 dev unittest 실행기로 돌린다.
-    돌려주는 값: {"report": unittest-v1 보고서, "exit": 종료 코드}. 믿을 수 있는 합성 코드만 이 방식으로 실행한다."""
+    돌려주는 값: {"report": unittest-v1 보고서, "exit": 종료 코드}. 믿을 수 있는 합성 코드만 이 방식으로 실행한다.
+    Snapshot 폴더는 컨테이너(dev 샌드박스·D5)처럼 읽기 전용으로 둔다."""
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         for path, content in signup_service.build(variant).items():
@@ -295,11 +328,15 @@ def run_protected(variant):
         for path, content in pt.protected_files('final').items():
             (root / 'inputs' / path).parent.mkdir(parents=True, exist_ok=True)
             (root / 'inputs' / path).write_text(content, encoding='utf-8')
-        # 변형마다 새 파이썬 프로세스에서 돌린다(앱 모듈 main·models가 프로세스에 남지 않게).
-        completed = subprocess.run(
-            [sys.executable, '-I', '-c', _RUN, str(RUNNER), str(root / 'inputs/tests/signup'),
-             str(root / 'snapshot'), SUITE['scopes']['final']['pattern']],
-            capture_output=True, text=True, timeout=600, cwd=root)
+        _set_read_only(root / 'snapshot', True)
+        try:
+            # 변형마다 새 파이썬 프로세스에서 돌린다(앱 모듈 main·models가 프로세스에 남지 않게).
+            completed = subprocess.run(
+                [sys.executable, '-I', '-c', _RUN, str(RUNNER), str(root / 'inputs/tests/signup'),
+                 str(root / 'snapshot'), SUITE['scopes']['final']['pattern']],
+                capture_output=True, text=True, timeout=600, cwd=root)
+        finally:
+            _set_read_only(root / 'snapshot', False)  # 임시 폴더를 지울 수 있게 되돌린다
         return json.loads(completed.stdout)
 
 
@@ -308,6 +345,8 @@ def run_protected(variant):
 def test_protected_suite_catches_each_defect(variant):
     """변형마다 기대한 검사만 FAIL이고 나머지는 PASS다(EXPECTED_FAILURES). 연결이 안 되는 변형은 모두
     미검증이고 근거 코드가 맞다. 실패 설명에 해시 형식 글자가 남지 않는다."""
+    if variant == 'lifespan_source_database' and not READ_ONLY:
+        pytest.skip('이 계정은 쓰기 권한을 뺀 폴더에도 쓸 수 있어 읽기 전용 Snapshot을 흉내 낼 수 없다')
     output = run_protected(variant)
     inputs = pt.evaluation_inputs(CONTRACT)
     results = by_id(check_results_from_unit_report(output['report'], inputs['unit_cases'], evidence_id=uid(70)))

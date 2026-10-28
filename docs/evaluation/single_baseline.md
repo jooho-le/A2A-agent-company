@@ -65,12 +65,12 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 | 시간 | wall clock(시작~판정 시각). 병렬 Step 합산 금지, 사람 대기는 `human_wait_ms`로 분리 | `/events`의 `RUN_STARTED`·`BUILD_PASSED`·`VERDICT_CREATED`·`RUN_FINISHED`/`RUN_ABORTED` 시각 차이(`run_metrics.py`). `createdAt`~`updatedAt`은 근사값 |
 | LLM 호출·토큰 | 전체 호출 수, 입력·출력 토큰 | `/usage`의 `summary.modelCalls`, `knownTotalTokens`, `totalTokens`(불완전하면 null) |
 | 비용 | 전체 비용. **누락은 0원이 아니라 unknown** | `summary.costUsd`(완전할 때만), `knownCostUsd`(부분 합), `costComplete` |
-| Regression | 수정으로 새로 실패한 공통 테스트 수 | 코드 버전별 독립 평가 결과를 `run_metrics.regression_count`로 비교(버전별 평가는 기록만 하고 순환에 전달하지 않음) |
+| Regression | 수정으로 새로 실패한 공통 테스트 수 | 코드 버전별 독립 평가 보고서를 `run_metrics.regression_from_reports`로 비교(같은 Run·같은 보호 묶음만, 버전별 평가는 기록만 하고 순환에 전달하지 않음) |
 | 협업 오버헤드 | Multi의 Agent 간 전달·대기 시간 | `/events`의 사건 시각으로 `run_metrics.collaboration_metrics`가 계산: 전달 지연, 에이전트 활동·병렬 겹침·에이전트 밖 시간, 사람 대기(Single에는 해당 없음, 비교는 총시간으로) |
 
 `/usage.summary`는 Run 전체 요약이므로 페이지의 record를 다시 더하지 않는다. `costUsd=null`과 미측정 모델 호출 수를 0으로 쓰지 않는다. 구조별 모델 호출 합계 `modelCalls`는 모든 대상 Run의 측정이 있을 때만 표시하고, 확인된 부분 합은 `knownModelCalls`, 완전성은 `modelCallsComplete`로 구분한다. `HUMAN_REVIEW`는 재개될 수 있어 영구 종료로 일괄 처리하지 않는다. Orchestrator SUCCESS인데 독립 평가의 필수 실패가 확인된 Run 수는 두 구조의 "자체 성공" 신뢰도를 비교하는 보조 지표다. 이 값은 실제 연결한 Run과 평가 결과로 계산하며 선택 항목 `sourceRun` 생략에 영향받지 않는다.
 
-위 표의 계산은 모두 구현했다(합성 입력과 dev 파이프라인 테스트 Run으로 확인). Regression은 버전별 평가 기록이 있어야 한다. 보고서의 `sourceRun.durationMs`는 Run 생성~종료 시간이고, `run_metrics()`의 시간은 RUN_STARTED 사건부터 계산한다. 사건 수가 누락되거나 불일치하면 사건 기반 시간은 None으로 남긴다.
+위 표의 계산은 모두 구현했다(합성 입력과 dev 파이프라인 테스트 Run으로 확인). 구현과 실제 자동 산출은 다르다: Regression은 버전별 Snapshot을 받아 D5로 채점한 보고서가 있어야 하는데, Snapshot 인계 경로가 정해지지 않아 아직 실행 결과에서 자동으로 나오지 않는다. 보고서의 `sourceRun.durationMs`는 Run 생성~종료 시간이고, `run_metrics()`의 시간은 RUN_STARTED 사건부터 계산한다. 사건 수가 누락되거나 불일치하면 사건 기반 시간은 None으로 남긴다.
 
 ## 6. 비교가 무효가 되는 경우 (개발정의서 11-A)
 
@@ -107,5 +107,5 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 
 ## 9. 4번이 먼저 해 둘 수 있는 것
 
-- 완료: 통제 조건 비교, 지표 변환, 구조별 요약, 협업 시간, Regression 계산(`run_metrics.py`), 최종 독립 채점기(`final_evaluation.py`). 남음: Single 실행 경로(1·2번 코드 협의), 버전별 평가 기록, 실제 Run으로 검증.
+- 완료(구현): 통제 조건 비교, 지표 변환, 구조별 요약, 협업 시간(시도·재개 구간별), Regression 계산과 버전별 보고서 연결(`run_metrics.py`), 최종 독립 채점기(`final_evaluation.py`). 남음: Single 실행 경로(1·2번 코드 협의), 버전별 Snapshot 인계와 평가 기록, 실제 Run으로 검증.
 - 실제 Run이 없으므로 합성 데이터 결과는 실험 결과로 쓰지 않는다.
