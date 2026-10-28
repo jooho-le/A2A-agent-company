@@ -9,25 +9,33 @@
 #   - 정적 검사 SEC-SIGNUP-001·003·004는 security/assess.py가 판정하고 최종 평가에서 함께 집계한다.
 # 순환 안 보호 테스트는 QA 담당 요구사항(REQ-001·002·003·004·007)만 연결할 수 있다(dev qa_services.py).
 # 이 모듈은 테스트를 실행하지 않는다. 실행은 dev run_unit_tests(컨테이너) 또는 D5 채점기가 한다.
-import hashlib
-import json
-import re
-from pathlib import Path
-from typing import Mapping, Optional
+#
+# [처음 읽는 분을 위한 용어]
+# - 보호 테스트(PROTECTED): 개발 에이전트가 읽거나 고칠 수 없게 따로 넣어 실행하는 테스트. 에이전트가 테스트를 바꿔
+#   통과시키는 일을 막는다.
+# - 범위(scope): "in-loop"(개발 순환 안에서 QA가 돌리는 것)와 "final"(최종 독립 평가에서 돌리는 것) 두 가지.
+# - 선택자(selector): dev 설정에서 보호 범위를 부르는 이름. 패턴(pattern): 그 범위에서 실행할 테스트 파일 이름 규칙.
+# - 지문(suite SHA-256): 파일 내용으로 만든 해시. 한 글자라도 바뀌면 값이 달라져서 "같은 묶음"인지 확인할 수 있다.
+import hashlib  # SHA-256 지문 계산
+import json  # suite.json 읽기, 지문 계산용 canonical JSON 만들기
+import re  # 선택자·패턴·요구사항 이름 모양 검사(정규식)
+from pathlib import Path  # 파일 경로 다루기
+from typing import Mapping, Optional  # 자료형 이름표(실행에는 영향 없음)
 
-from ..aggregation import CheckPlan, _uuid4
-from ..check_adapters import check_results_from_assessment, check_results_from_unit_report
-from ..independent import EvaluationBinding
+from ..aggregation import CheckPlan, _uuid4  # 검사 계획 상자, UUIDv4 모양 검사
+from ..check_adapters import check_results_from_assessment, check_results_from_unit_report  # 결과 어댑터 두 가지
+from ..independent import EvaluationBinding  # 검사 꼬리표(요구사항·관점·제목)
 
-ROOT = Path(__file__).resolve().parent
-SUITE_FILE = ROOT / 'suite.json'
-SCOPES = ('in-loop', 'final')
+ROOT = Path(__file__).resolve().parent  # 이 폴더(protected_tests). 묶음 파일 경로는 여기서부터 센다
+SUITE_FILE = ROOT / 'suite.json'  # 묶음 정의 파일(검사 목록·범위·파일 목록)
+SCOPES = ('in-loop', 'final')  # 쓸 수 있는 범위 이름 두 가지
 _SELECTOR = re.compile(r'[a-z][a-z0-9_-]{0,63}\Z')           # dev qa_contract.py와 같은 규칙
 _PATTERN = re.compile(r'[A-Za-z0-9_*?\[\].-]{1,128}\.py\Z')   # dev unit_runner.py와 같은 규칙
-_REQUIREMENT = re.compile(r'REQ-\d{3}\Z')
+_REQUIREMENT = re.compile(r'REQ-\d{3}\Z')  # 요구사항 이름 모양(예: REQ-001)
 
 
 def _text(value, name):
+    # 값이 빈칸이 아닌 글자인지 확인한다. 아니면 어떤 필드(name)인지 적어 ValueError로 멈춘다.
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'{name} must be nonempty text')
 
@@ -35,12 +43,15 @@ def _text(value, name):
 def load_suite(path: Path = SUITE_FILE) -> dict:
     # suite.json을 읽고 모양을 확인한다. 이상하면 ValueError로 멈춘다.
     suite = json.loads(Path(path).read_text(encoding='utf-8'))
+    # 1) 머리 부분: 형식 버전, 범위 두 개(in-loop·final), 이름·버전 같은 필수 글자 필드
     if suite.get('schemaVersion') != 1 or set(suite.get('scopes', {})) != set(SCOPES):
         raise ValueError('Unsupported protected suite')
     for name in ('suiteId', 'suiteVersion', 'scenarioKey', 'toolName', 'sourceDirectory'):
         _text(suite.get(name), name)
+    # 2) 범위마다 선택자·패턴 모양과 파일 목록을 확인한다. 파일은 sourceDirectory 바로 아래의 .py여야 한다
+    #    (dev가 보호 파일을 그 폴더에 넣어 실행하므로 하위 폴더·다른 위치는 받지 않는다).
     directory = suite['sourceDirectory']
-    modules = {}
+    modules = {}  # {범위 이름: 그 범위의 테스트 모듈 이름들}. 검사의 testId가 어느 범위 파일에 있는지 확인할 때 쓴다
     for scope_name, scope in suite['scopes'].items():
         if not _SELECTOR.fullmatch(scope.get('selector', '')) or not _PATTERN.fullmatch(scope.get('pattern', '')):
             raise ValueError('Invalid scope selector or pattern')
@@ -55,7 +66,8 @@ def load_suite(path: Path = SUITE_FILE) -> dict:
         modules[scope_name] = {Path(file).stem for file in files}
     if suite['scopes']['in-loop']['selector'] == suite['scopes']['final']['selector']:
         raise ValueError('Scopes need distinct selectors')
-    seen = {'key': set(), 'checkId': set(), 'testId': set()}
+    # 3) 검사 목록: 검사마다 번호·이름·요구사항·관점·범위·방법(unittest/static)을 확인하고 겹침을 막는다.
+    seen = {'key': set(), 'checkId': set(), 'testId': set()}  # 이미 나온 값(검사 이름·검사 번호·테스트 ID)
     for check in suite.get('checks', []):
         _uuid4(check.get('checkId'))
         for name in ('key', 'title', 'expectedResult'):
@@ -69,7 +81,7 @@ def load_suite(path: Path = SUITE_FILE) -> dict:
             raise ValueError('Invalid check scopes')
         if check.get('method') == 'unittest':
             _text(check.get('testId'), 'testId')
-            module = check['testId'].split('.', 1)[0]
+            module = check['testId'].split('.', 1)[0]  # "protected_signup_qa.클래스.메서드"의 첫 부분 = 모듈 이름
             if any(module not in modules[scope] for scope in scopes):
                 raise ValueError('Check test module is not part of its scope')
         elif check.get('method') == 'static':
@@ -77,6 +89,7 @@ def load_suite(path: Path = SUITE_FILE) -> dict:
                 raise ValueError('Static checks belong to the final scope without a unittest ID')
         else:
             raise ValueError('Unsupported check method')
+        # 순환 안에서는 QA가 실행 테스트로만 확인한다(Security·정적 검사는 최종 평가에서만).
         if 'in-loop' in scopes and (check['perspective'] != 'QA' or check['method'] != 'unittest'):
             raise ValueError('Only QA unittest checks can run inside the development loop')
         for name in seen:
@@ -90,6 +103,7 @@ def load_suite(path: Path = SUITE_FILE) -> dict:
 
 
 def _scope(scope: str, suite: Optional[dict]):
+    # (묶음, 그 범위의 설정)을 돌려준다. 묶음을 주지 않으면 suite.json을 읽는다. 모르는 범위 이름이면 멈춘다.
     suite = suite or load_suite()
     if scope not in SCOPES:
         raise ValueError('Unknown scope')

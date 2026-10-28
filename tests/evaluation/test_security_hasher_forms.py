@@ -20,6 +20,7 @@ HASH_FUNCTION = 'def hash_password(password: str) -> str:\n    return {name}.has
 
 
 def module(header, name):
+    """security.py 내용을 만든다: header(import·해시 도구 준비) 뒤에 name.hash(password)를 돌려주는 hash_password 함수를 붙인다."""
     return header + '\n\n\n' + HASH_FUNCTION.format(name=name)
 
 
@@ -83,6 +84,8 @@ CASES = [
 
 @pytest.mark.parametrize('name, security, extra, expected', CASES, ids=[case[0] for case in CASES])
 def test_hasher_forms(name, security, extra, expected):
+    """정상 표본(GOOD)의 security.py만 사례 코드로 바꾸고(extra 파일은 더한다) REQ-005 정적 판정이 기대값과 같은지 본다.
+    틀리면 판정 근거(basis)를 함께 보여 준다."""
     files = dict(GOOD, **{'security.py': security}, **extra)
     requirement = json.loads(evaluate(make_request(files))['evidence_json'])['requirements']['REQ-005']
     assert requirement['outcome'] == expected, requirement['basis']

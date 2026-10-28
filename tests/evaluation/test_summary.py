@@ -25,6 +25,8 @@ SECRET = 'Zq7' + 'uX2pLm9'
 
 
 def report(fail_key=None):
+    """SCN-001 검사 11개로 독립 평가 보고서를 만든다. 모두 PASS이고, fail_key로 고른 검사 하나만 FAIL로 바꿀 수 있다.
+    Orchestrator는 SUCCESS라고 한 Run(dev 파이프라인 표본)을 대상으로 둔다."""
     inputs = pt.evaluation_inputs(CONTRACT)
     names = {check['checkId']: check['key'] for check in pt.load_suite()['checks']}
     results = [CheckResult(check.test_id, Status.FAIL if names[check.test_id] == fail_key else Status.PASS,
@@ -42,6 +44,8 @@ def report(fail_key=None):
 
 
 def test_summary_shows_results_flow_metrics_and_trace():
+    """판정·요구사항별 결과·코드 버전별 흐름(v1 QA FAIL → 수정 요청 → v2)·실행 지표·협업 시간·추적 검사가
+    요약에 들어가고, 모르는 토큰·비용은 "미확인"으로 적힌다."""
     metrics = {'verdictMs': 11239, 'firstBuildPassMs': 2100, 'fixAttempts': 1, 'toolRetries': 0, 'issues': 1,
                'issuesFixRequested': 1, 'issuesFixed': 1, 'modelCalls': 13, 'totalTokens': None, 'costUsd': None,
                'knownCostUsd': '0.01',
@@ -59,11 +63,13 @@ def test_summary_shows_results_flow_metrics_and_trace():
 
 
 def test_missed_defect_is_called_out():
+    """Orchestrator는 SUCCESS인데 독립 평가에서 필수 검사 FAIL이 나오면 "놓친 결함"으로 드러내 적는다."""
     text = render_summary(report(fail_key='SEC-SIGNUP-002'), scenario_contract=CONTRACT)
     assert '**놓친 결함**' in text and '**독립 평가 판정: FAIL**' in text
 
 
 def test_free_text_from_agents_is_not_copied():
+    """Issue 제목·설명에 비밀값이 있어도 요약에는 옮겨지지 않는다(종류·보고 역할·요구사항 이름만 쓴다)."""
     bundle = copy.deepcopy(RUN)
     for issue in bundle['issues']:
         issue['title'] = 'password ' + SECRET

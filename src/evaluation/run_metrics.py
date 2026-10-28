@@ -311,6 +311,7 @@ def collaboration_metrics(events) -> dict:
                      key=lambda item: (item[0], item[1]))
 
     def millis(delta):
+        # 시간 차이(timedelta)를 정수 밀리초로 바꾼다.
         return int(delta.total_seconds() * 1000)
 
     llm = {role: {'calls': 0, 'ms': 0} for role in AGENT_ROLES}
@@ -438,6 +439,7 @@ def comparison_validity(entries) -> dict:
         return item['configuration'].get('configuration') or {}
 
     def flag(field, severity, values):
+        # 어긋난 조건 하나를 기록한다(설정 이름, 심각도, Run별 값).
         violations.append({'field': field, 'severity': severity, 'values': values})
 
     def reported(item, field):

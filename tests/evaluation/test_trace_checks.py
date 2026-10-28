@@ -29,6 +29,7 @@ BUILD_GAP = 'build_failure_gap_keeps_report_lineage_distinct_from_code_version'
 
 
 def uid(number):
+    """시험용 가짜 UUIDv4. 같은 숫자면 같은 값이다."""
     return str(UUID(int=number, version=4))
 
 
@@ -49,6 +50,7 @@ def test_real_dev_runs_are_traceable(name, status):
 
 
 def without(bundle, predicate):
+    """Run 기록을 복사하고 predicate에 맞는 사건을 지운다(사건 총수도 맞춘다). 연결을 일부러 끊는 데 쓴다."""
     bundle = copy.deepcopy(bundle)
     bundle['events'] = [event for event in bundle['events'] if not predicate(event)]
     bundle['eventsTotal'] = len(bundle['events'])
@@ -56,6 +58,7 @@ def without(bundle, predicate):
 
 
 def first_issue(bundle):
+    """Run 기록의 첫 Issue 번호"""
     return bundle['issues'][0]['issueId']
 
 
@@ -78,17 +81,20 @@ def first_issue(bundle):
                                   and e['codeVersion'] >= 2), 'REVALIDATION_UNTRACEABLE'),
 ])
 def test_broken_links_fail(name, mutate, reason):
+    """실제 Run 기록에서 사건·Issue를 하나씩 지우거나 바꾸면, 끊어진 연결을 그 사유 코드와 함께 FAIL로 찾는다."""
     result = check_traceability(mutate(RUNS[name]), CONTRACT)
     assert result.status == 'FAIL' and reason in result.reasons
 
 
 def test_partial_events_are_unverified():
+    """사건 총수보다 받은 사건이 적으면(일부만 받음) 판정하지 않고 EVENTS_INCOMPLETE 미검증이다."""
     bundle = copy.deepcopy(RUNS[QA_FIX])
     bundle['eventsTotal'] += 1
     assert check_traceability(bundle, CONTRACT).reasons == ('EVENTS_INCOMPLETE',)
 
 
 def test_trace_result_maps_to_check_result():
+    """추적 검사 PASS는 증거 번호가 붙은 PASS로, 판정 없이 멈춘 Run은 RUN_NOT_FINISHED 미검증(증거 번호 없음)으로 옮겨진다."""
     passed = check_traceability(RUNS[QA_FIX], CONTRACT).to_check_result(uid(1), uid(2))
     assert passed.status == Status.PASS and passed.evidence_ids == (uid(2),)
     stopped = check_traceability(RUNS['fix_cannot_reset_budget_after_initial_agents_spend_call_cap'], CONTRACT)
@@ -99,6 +105,8 @@ def test_trace_result_maps_to_check_result():
 # ---------------------------------------------------------------- REQ-006 기록 속 노출
 
 def documents(**changes):
+    """노출 검사에 넣을 깨끗한 Run 기록 묶음. 설명용 정책 이름·가린 값([REDACTED], ****)만 있어 노출이 없다.
+    changes로 일부 문서만 바꿔 노출 사례를 만든다."""
     clean = {'events': copy.deepcopy(RUNS[QA_FIX]['events']), 'eventsTotal': len(RUNS[QA_FIX]['events']),
              'issues': copy.deepcopy(RUNS[QA_FIX]['issues']),
              'artifacts': [{'artifactType': 'RUN_CONFIGURATION', 'content': {
@@ -112,6 +120,7 @@ def documents(**changes):
 
 
 def test_clean_run_records_pass():
+    """정책 이름·설명 글·가린 값만 있는 기록은 노출이 아니다(PASS)."""
     assert check_trace_exposure(documents(), CRITERIA).status == 'PASS'
 
 
@@ -144,6 +153,8 @@ HASHED = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHQ$' + 'h' * 43
     ({'telemetry': [{'prompt': 'user typed ' + SECRET}], 'telemetryTotal': 1}, 'KNOWN_SECRET_VALUE', '/0/prompt'),
 ])
 def test_exposures_are_found_without_values(change, kind, path):
+    """비밀번호 필드 값·해시 필드 값·해시 형식·알려 준 비밀값을 위치(JSON 경로)와 함께 FAIL로 찾고,
+    결과에는 찾은 값 자체를 남기지 않는다."""
     result = check_trace_exposure(documents(**change), CRITERIA, known_values=[SECRET])
     assert result.status == 'FAIL' and kind in result.reasons
     assert any(item['path'] == path and item['kind'] == kind for item in result.findings)
@@ -152,6 +163,7 @@ def test_exposures_are_found_without_values(change, kind, path):
 
 
 def test_missing_or_partial_records_are_unverified_but_findings_still_fail():
+    """기록이 없거나 일부만 있으면 미검증이지만, 받은 부분에서 노출을 찾았으면 FAIL이다."""
     missing = check_trace_exposure(documents(toolAttempts=None), CRITERIA)
     assert missing.status == 'UNVERIFIED' and 'TRACE_DOCUMENT_MISSING' in missing.reasons
     partial = check_trace_exposure(documents(eventsTotal=999), CRITERIA)
@@ -161,10 +173,12 @@ def test_missing_or_partial_records_are_unverified_but_findings_still_fail():
 
 
 def test_fetch_trace_documents_reads_every_page():
+    """사건·Telemetry를 쪽(page) 단위로 끝까지 읽어 총수와 맞추고, Run 번호가 UUID 모양이 아니면 거부한다."""
     run_id = uid(5)
     pages = {'events': [{'n': i} for i in range(3)], 'telemetry': [{'n': i} for i in range(2)]}
 
     def get(path, query):
+        """dev Run 조회 API를 흉내 낸다. 사건·Telemetry는 한 번에 2개씩만 돌려준다."""
         name = path.rsplit('/', 1)[1]
         if name in pages:
             items = pages[name][query['offset']:query['offset'] + 2]
@@ -182,6 +196,7 @@ def test_fetch_trace_documents_reads_every_page():
 
 
 def test_regression_counts_only_pass_to_fail():
+    """코드 버전 사이에 PASS → FAIL로 바뀐 검사만 Regression으로 센다(FAIL → PASS는 세지 않는다)."""
     result = regression_count({1: {'a': 'PASS', 'b': 'FAIL', 'c': 'PASS'},
                                2: {'a': 'FAIL', 'b': 'PASS', 'c': 'PASS'},
                                3: {'a': 'PASS', 'b': 'FAIL', 'c': 'PASS'}})
@@ -191,6 +206,8 @@ def test_regression_counts_only_pass_to_fail():
 
 
 def test_regression_reports_uncompared_checks_and_rejects_gaps():
+    """한쪽이 미검증(ERROR)이라 비교할 수 없는 검사는 따로 세어 complete=False로 알린다.
+    빈 입력, 버전 번호가 비거나 1부터 시작하지 않는 입력은 거부한다."""
     result = regression_count({1: {'a': 'PASS', 'b': 'ERROR'}, 2: {'a': 'PASS', 'b': 'FAIL'}})
     assert result['regressionCount'] == 0 and result['uncomparedChecks'] == 1 and result['complete'] is False
     for broken in ({}, {1: {}, 3: {}}, {2: {}}):

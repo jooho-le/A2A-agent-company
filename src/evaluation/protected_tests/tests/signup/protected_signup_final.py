@@ -48,6 +48,7 @@ class SignupFinalChecks(link.SignupCheck):
         self.check(body)
 
     def test_sec_signup_002_password_stored_as_argon2id_hash(self):
+        # 같은 비밀번호로 두 계정을 만들고 저장값의 형식·설정값·salt·검증 결과를 본다.
         def body(service):
             try:
                 from argon2 import PasswordHasher, exceptions
@@ -67,6 +68,7 @@ class SignupFinalChecks(link.SignupCheck):
                 for name, minimum in ARGON2_MINIMUM.items():
                     self.assertGreaterEqual(params[name], minimum, "Argon2 " + name + " 값이 기준 미만")
             self.assertFalse(parsed[0][1] == parsed[1][1], "같은 비밀번호인데 두 계정의 salt가 같음")
+            # 가입한 비밀번호로는 검증 성공, 다른 비밀번호로는 실패해야 한다.
             hasher = PasswordHasher()
             for value in stored:
                 try:

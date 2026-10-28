@@ -37,6 +37,7 @@ CHECKS = {check['key']: check for check in SUITE['checks']}
 
 
 def uid(number):
+    """시험용 가짜 UUIDv4. 같은 숫자면 같은 값이다."""
     return str(UUID(int=number, version=4))
 
 
@@ -53,6 +54,7 @@ def defined_tests(scope):
 
 
 def matches(pattern, name):
+    """파일 이름이 범위의 패턴(예: protected_signup_*.py)에 맞는지 본다. dev 실행기와 같은 fnmatch 규칙이다."""
     import fnmatch
     return fnmatch.fnmatch(name, pattern)
 
@@ -61,6 +63,8 @@ def matches(pattern, name):
 
 
 def test_suite_lists_exactly_the_checks_of_the_criteria_table():
+    """묶음의 검사는 기준표(scn001_criteria.md)의 QA 6개·SEC 5개와 정확히 같고,
+    정적 검사의 요구사항 연결은 Security 정적 판정 기준(scn001_security_criteria.json)과 같다."""
     assert set(CHECKS) == {f'QA-SIGNUP-00{n}' for n in range(1, 7)} | {f'SEC-SIGNUP-00{n}' for n in range(1, 6)}
     criteria = json.loads((ROOT / 'src/evaluation/security/scn001_security_criteria.json').read_text(encoding='utf-8'))
     static = {check['key']: check['requirementKey'] for check in SUITE['checks'] if check['method'] == 'static'}
@@ -77,6 +81,8 @@ def test_every_protected_test_is_bound_and_every_bound_test_exists(scope):
 
 
 def test_in_loop_scope_holds_only_qa_requirements():
+    """순환 안 보호 케이스는 dev가 QA 담당으로 정한 요구사항만 쓰고, 모두 run_unit_tests 도구의
+    protected-signup 선택자에 묶인다."""
     qa_ids = {str(value) for value in get_scenario(SCN_001_ID).requirement_ids_for(RequirementValidator.QA)}
     cases = pt.owned_qa_cases(CONTRACT)['cases']
     assert {case['requirementId'] for case in cases} == qa_ids
@@ -84,6 +90,8 @@ def test_in_loop_scope_holds_only_qa_requirements():
 
 
 def test_dev_accepts_protected_files_and_cases():
+    """dev 코드가 우리 설정을 그대로 받아 준다: 보호 파일 설정(UnitTestScope)과 보호 QA 케이스(QACaseBinding).
+    범위별 설정 크기도 Host CLI 설정 한도 안에 여유 있게 들어간다."""
     from agents.roles.qa_contract import QACaseBinding
     from mcp_tools.tools.unit_config import UnitTestScope
     for scope in pt.SCOPES:
@@ -104,6 +112,7 @@ def test_protected_files_parse_as_python_310():
 
 
 def test_suite_fingerprint_follows_file_bytes(monkeypatch):
+    """지문(suite SHA-256)은 같은 내용이면 같고, 범위가 다르거나 파일에 한 글자(줄바꿈)만 더해져도 달라진다."""
     first = pt.suite_sha256('final')
     assert first == pt.suite_sha256('final') and first != pt.suite_sha256('in-loop')
     original = pt.protected_files
@@ -120,6 +129,8 @@ def test_suite_fingerprint_follows_file_bytes(monkeypatch):
     (lambda s: s['scopes']['final']['files'].append('tests/signup/../secret.py'), 'directly'),
 ])
 def test_broken_suite_is_rejected(tmp_path, mutate, message):
+    """잘못된 suite.json(검사 중복, 정적 검사를 순환 안에 넣음, 범위 밖 테스트 모듈, 같은 선택자,
+    폴더 밖 파일)은 읽을 때 ValueError로 거부된다."""
     suite = json.loads(pt.SUITE_FILE.read_text(encoding='utf-8'))
     mutate(suite)
     path = tmp_path / 'suite.json'
@@ -134,6 +145,7 @@ CASES = {'m.C.test_a': uid(1), 'm.C.test_b': uid(2), 'm.C.test_c': uid(3)}
 
 
 def report(*rows):
+    """unittest-v1 보고서를 흉내 낸다. 줄은 (testId, outcome) 또는 (testId, outcome, details)이고 건수는 자동으로 맞춘다."""
     tests = [dict(zip(('testId', 'outcome', 'details'), row)) if len(row) == 3
              else {'testId': row[0], 'outcome': row[1]} for row in rows]
     count = {outcome: sum(t['outcome'] == outcome for t in tests) for outcome in ('PASS', 'FAIL', 'SKIP')}
@@ -142,10 +154,13 @@ def report(*rows):
 
 
 def by_id(results):
+    """검사 결과 목록을 {검사 번호: 결과} 사전으로 바꾼다."""
     return {result.test_id: result for result in results}
 
 
 def test_unit_report_outcomes_map_to_check_statuses():
+    """PASS → PASS(증거 번호 붙음), FAIL → FAIL(실패 설명 유지),
+    SKIP "UNVERIFIED:코드" → ERROR(그 코드, 증거 번호 없음)로 옮겨진다."""
     results = by_id(check_results_from_unit_report(
         report(('m.C.test_a', 'PASS'), ('m.C.test_b', 'FAIL', 'AssertionError: 7자 거부 안 됨'),
                ('m.C.test_c', 'SKIP', 'UNVERIFIED:APP_IMPORT_FAILED')),
@@ -157,6 +172,7 @@ def test_unit_report_outcomes_map_to_check_statuses():
 
 
 def test_plain_skip_and_missing_case_are_unverified():
+    """사유 없는 SKIP은 RUNNER_REPORTED_SKIP, 보고서에 없는 계획 검사는 PLANNED_CASE_NOT_REPORTED로 미검증이다."""
     results = by_id(check_results_from_unit_report(
         report(('m.C.test_a', 'SKIP', 'not supported'), ('m.C.test_b', 'PASS')), CASES, evidence_id=uid(9)))
     assert results[uid(1)].error_code == 'RUNNER_REPORTED_SKIP'
@@ -178,6 +194,7 @@ def test_untrusted_report_never_yields_pass(bad, code):
 
 
 def test_assessment_outcomes_map_to_check_statuses():
+    """정적 판정의 PASS·FAIL·UNVERIFIED가 검사 상태로 옮겨지고, 모르는 outcome은 ASSESSMENT_INVALID 미검증이다."""
     requirements = {
         'REQ-003': {'checkId': 'SEC-SIGNUP-003', 'outcome': 'FAIL', 'basis': 'VIOLATION_FOUND'},
         'REQ-005': {'checkId': 'SEC-SIGNUP-001', 'outcome': 'PASS', 'basis': 'APPROVED_HASH_STORAGE'},
@@ -193,6 +210,8 @@ def test_assessment_outcomes_map_to_check_statuses():
 
 
 def evaluate(unit_outcome='PASS', static_outcome='PASS', static=True):
+    """보호 테스트 결과(모두 unit_outcome)와 정적 판정 결과(모두 static_outcome)로 독립 평가 보고서를 만든다.
+    static=False면 정적 판정을 넣지 않는다. Manifest는 기대값과 관측값을 같게 둔다."""
     inputs = pt.evaluation_inputs(CONTRACT)
     unit = report(*[(test_id, unit_outcome) + (('UNVERIFIED:APP_IMPORT_FAILED',) if unit_outcome == 'SKIP' else ())
                     for test_id in inputs['unit_cases']])
@@ -210,6 +229,8 @@ def evaluate(unit_outcome='PASS', static_outcome='PASS', static=True):
 
 
 def test_final_inputs_build_an_independent_report():
+    """최종 평가 입력으로 검사 11개·요구사항 7개 보고서가 만들어지고, 하나라도 FAIL이면 FAIL,
+    미검증(SKIP·정적 UNVERIFIED·정적 판정 누락)이 있으면 UNVERIFIED가 된다."""
     passed = evaluate()
     assert passed['evaluationVerdict'] == 'PASS' and len(passed['checks']) == 11
     assert len(passed['requirements']) == 7  # REQ-008은 Orchestrator 검증이라 제외
@@ -264,6 +285,8 @@ EXPECTED_UNVERIFIED = {'different_request_field': {'QA-SIGNUP-002', 'QA-SIGNUP-0
 
 
 def run_protected(variant):
+    """합성 회원가입 서비스 변형(variant)을 임시 폴더에 쓰고, 최종 범위 보호 테스트를 dev unittest 실행기로 돌린다.
+    돌려주는 값: {"report": unittest-v1 보고서, "exit": 종료 코드}. 믿을 수 있는 합성 코드만 이 방식으로 실행한다."""
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         for path, content in signup_service.build(variant).items():
@@ -283,6 +306,8 @@ def run_protected(variant):
 @pytest.mark.skipif(not RUNTIME, reason='fastapi·httpx·sqlalchemy·argon2-cffi가 있어야 실행 시험을 돈다')
 @pytest.mark.parametrize('variant', sorted(EXPECTED_FAILURES))
 def test_protected_suite_catches_each_defect(variant):
+    """변형마다 기대한 검사만 FAIL이고 나머지는 PASS다(EXPECTED_FAILURES). 연결이 안 되는 변형은 모두
+    미검증이고 근거 코드가 맞다. 실패 설명에 해시 형식 글자가 남지 않는다."""
     output = run_protected(variant)
     inputs = pt.evaluation_inputs(CONTRACT)
     results = by_id(check_results_from_unit_report(output['report'], inputs['unit_cases'], evidence_id=uid(70)))
@@ -303,6 +328,8 @@ def test_protected_suite_catches_each_defect(variant):
 
 
 def test_export_writes_dev_ready_files(tmp_path):
+    """export가 만든 세 파일을 dev 코드가 받아 주고, suite 참조·지문이 서로 맞는다.
+    이미 있는 파일은 --force 없이 덮어쓰지 않고, 명령줄(main)의 --suite-ref가 반영된다."""
     from agents.roles.qa_contract import QACaseBinding
     from evaluation.protected_tests.__main__ import export, main
     from mcp_tools.tools.unit_config import UnitTestScope

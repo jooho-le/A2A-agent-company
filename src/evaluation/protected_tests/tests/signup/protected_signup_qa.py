@@ -9,6 +9,7 @@ INVALID_EMAILS = ("", "plainaddress", "user@", "@example.com", "user@@example.co
 
 
 class SignupQAChecks(link.SignupCheck):
+    # 001: 유효한 가입 → 성공 응답, 사용자 1명 증가
     def test_qa_signup_001_valid_signup_creates_one_user(self):
         def body(service):
             email, before = link.new_email(), service.count()
@@ -18,6 +19,7 @@ class SignupQAChecks(link.SignupCheck):
             self.assertEqual(service.count_canonical(email), 1, "가입한 이메일의 사용자가 1명이 아님")
         self.check(body)
 
+    # 002: 형식 오류 이메일 → 4xx 거부, 사용자 생성 없음
     def test_qa_signup_002_invalid_email_is_rejected(self):
         def body(service):
             # 정상 가입이 먼저 되어야 한다. 모든 요청을 거부하는 서비스에서 거부 검사가 거저 통과하지 않게 한다.
@@ -31,6 +33,7 @@ class SignupQAChecks(link.SignupCheck):
                     self.assertEqual(service.count(), before, "형식 오류 이메일로 사용자가 생성됨")
         self.check(body)
 
+    # 003: 대소문자·공백만 다른 이메일 재가입 → 거부, 사용자 1명 유지
     def test_qa_signup_003_same_canonical_email_cannot_register_twice(self):
         def body(service):
             email = link.new_email()
@@ -46,6 +49,7 @@ class SignupQAChecks(link.SignupCheck):
             self.assertEqual(service.count_canonical(email), 1, "같은 canonical 이메일의 사용자가 1명이 아님")
         self.check(body)
 
+    # 004: 비밀번호 7자는 거부, 8자는 가입
     def test_qa_signup_004_password_minimum_length_is_eight(self):
         def body(service):
             with self.case(length=7):
@@ -60,6 +64,7 @@ class SignupQAChecks(link.SignupCheck):
                 self.assertEqual(service.count(), before + 1, "8자 비밀번호로 사용자가 1명 생성되지 않음")
         self.check(body)
 
+    # 006: 성공 응답이면 실제로 1명 생성, 실패 응답이면 생성 없음
     def test_qa_signup_006_response_matches_actual_result(self):
         def body(service):
             email = link.new_email()

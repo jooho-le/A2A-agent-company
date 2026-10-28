@@ -1,6 +1,14 @@
-"""Independent review regressions. 57eba00에서 재현한 오판의 회귀 검사와 정상 동작 대조.
-Run with repo importable and pytest, sqlalchemy, argon2-cffi available.
-Only trusted synthetic service code is executed locally. Docker calls are simulated.
+"""외부 점검(2026-10-28)에서 재현한 오판의 회귀 검사와, 고친 뒤에도 정상 동작은 그대로인지 대조한다.
+
+확인하는 것:
+  - 서비스 시작(startup)이 실패하면 보호 검사가 PASS가 되지 않고, 시작 때 준비한 값은 요청에서 쓸 수 있는가?
+  - passlib CryptContext의 category별 설정(기준 미만 메모리 등)을 기본 설정으로 추정해 PASS를 내지 않는가?
+  - 실행기 종료 코드와 보고서가 어긋나거나(강제 종료 137 등) 실행기 오류가 있으면 보고서를 쓰지 않는가?
+  - 다른 Run의 사건·Issue가 섞이거나 최종 코드 버전의 검증 사건이 없으면 추적 검사가 PASS가 되지 않는가?
+  - Security 증거가 없는 버전을 요약 흐름 표에서 "문제 없음"으로 적지 않는가?
+  - 대상 Run 번호·코드 버전·Trace 문서가 서로 어긋나면 실행 전에 멈추는가?
+실행 시험은 sqlalchemy·argon2-cffi가 있어야 돈다(없으면 건너뜀). 믿을 수 있는 합성 서비스 코드만 로컬에서 실행하고,
+Docker 호출은 흉내 낸다.
 """
 import copy
 import json
@@ -22,8 +30,11 @@ from evaluation.trace_checks import check_traceability
 
 @pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
 def test_startup_failure_must_not_pass_all_protected_checks(monkeypatch):
+    """서비스 시작(startup)이 실패하면 보호 테스트 8개가 모두 SERVICE_SETUP_FAILED 미검증(SKIP)이다.
+    (시작 단계를 건너뛰고 요청만 보내 PASS가 되지 않게 한다.)"""
     original = signup_service.build
     def broken_startup(variant):
+        """정상 서비스에 시작할 때 예외를 내는 startup 처리기를 붙인다."""
         files = original(variant)
         files['main.py'] += '\n@app.on_event("startup")\nasync def startup():\n    raise RuntimeError("synthetic startup failure")\n'
         return files
@@ -35,6 +46,7 @@ def test_startup_failure_must_not_pass_all_protected_checks(monkeypatch):
 
 
 def test_passlib_category_below_minimum_must_not_pass():
+    """CryptContext의 admin category 설정이 기준 미만 메모리인데 category="admin"으로 해시하면 PASS가 아니다."""
     code = '''from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["argon2"], admin__argon2__memory_cost=1024)
 def hash_password(password: str) -> str:
@@ -45,7 +57,9 @@ def hash_password(password: str) -> str:
 
 
 def test_killed_docker_process_must_not_produce_pass():
+    """컨테이너가 강제 종료(137)되면 출력에 전부 PASS인 보고서가 있어도 최종 판정이 PASS가 아니다."""
     class KilledDocker(DockerRunner):
+        """시험 대역: 이미지 확인은 성공하고, 실행은 전부 PASS 보고서를 출력한 뒤 종료 코드 137로 끝난다."""
         def _call(self, args, timeout):
             if args[0] == 'image':
                 return subprocess.CompletedProcess(args, 0, json.dumps([{'Os': 'linux', 'Id': IMAGE}]), '')
@@ -59,12 +73,14 @@ def test_killed_docker_process_must_not_produce_pass():
 
 
 def test_foreign_run_events_must_not_pass():
+    """Run 번호가 사건·Issue의 Run 번호와 다르면(다른 Run 기록) 추적 검사가 PASS가 아니다."""
     bundle = copy.deepcopy(RUNS[QA_FIX])
     bundle['run']['runId'] = '00000000-0000-4000-8000-000000000099'
     assert check_traceability(bundle, CONTRACT).status != 'PASS'
 
 
 def test_missing_final_validation_events_must_not_pass():
+    """최종 코드 버전의 검증 종료 사건이 없으면 추적 검사가 PASS가 아니다(최종 요구사항 검증을 확인할 수 없음)."""
     bundle = copy.deepcopy(RUNS[QA_FIX])
     bundle['events'] = [event for event in bundle['events'] if not (
         event.get('eventType') == 'VALIDATION_FINISHED' and event.get('codeVersion') == bundle['run']['codeVersion'])]
@@ -73,6 +89,7 @@ def test_missing_final_validation_events_must_not_pass():
 
 
 def test_missing_security_proof_must_not_be_shown_as_no_problem():
+    """Security 증거가 없어 HUMAN_REVIEW로 끝난 Run의 흐름 표에서, 검증 칸을 "문제 없음"으로 적지 않는다."""
     bundle = RUNS['initial_build_failure_is_fixed_then_missing_security_proof_stays_unverified']
     assert bundle['run']['verdict'] == 'HUMAN_REVIEW'
     text = '\n'.join(_flow(bundle, {}))
@@ -81,8 +98,10 @@ def test_missing_security_proof_must_not_be_shown_as_no_problem():
 
 @pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
 def test_startup_initialization_is_available_to_requests(monkeypatch):
+    """보호 테스트가 실제 서버처럼 startup을 실행해서, 시작 때 준비한 값을 가입 요청이 쓸 수 있다(정상 서비스는 8개 PASS)."""
     original = signup_service.build
     def with_startup(variant):
+        """정상 서비스에 startup 처리기를 붙이고, 가입 처리에서 그 처리기가 준비한 값을 확인하게 바꾼다."""
         files = original(variant)
         files['main.py'] += '\n@app.on_event("startup")\nasync def startup():\n    app.state.ready = True\n'
         files['routers/auth.py'] = files['routers/auth.py'].replace(
@@ -99,6 +118,8 @@ def test_startup_initialization_is_available_to_requests(monkeypatch):
     'pwd_context.hash(password)',
 ])
 def test_category_policies_cannot_be_inferred_from_defaults(call):
+    """category별 설정이 있는 CryptContext는 어떤 호출 방식이든(category 지정·**kwargs·생략)
+    어떤 설정으로 해시하는지 정적으로 확정할 수 없으므로 UNVERIFIED다."""
     code = ('from passlib.context import CryptContext\n'
             'pwd_context = CryptContext(schemes=["argon2"], admin__argon2__memory_cost=1024)\n'
             'def hash_password(password: str) -> str:\n    return ' + call + '\n')
@@ -120,6 +141,8 @@ def test_category_policies_cannot_be_inferred_from_defaults(call):
     (0, 'PASS', 'TIMEOUT', 'TIMEOUT'),
 ])
 def test_runner_exit_and_report_agreement(exit_code, outcome, error, expected_error):
+    """실행기 종료 코드와 보고서가 맞을 때만 보고서를 쓴다: 0은 FAIL 없음, 1은 FAIL 있음.
+    그 밖의 종료 코드(2·137·음수·None·False)나 실행기 오류가 있으면 보고서를 버리고 오류 코드를 남긴다."""
     from evaluation.final_evaluation import RunnerOutcome, _checked_outcome
     report = {'format': 'unittest-v1', 'total': 1, 'passed': int(outcome == 'PASS'),
               'failed': int(outcome == 'FAIL'), 'skipped': int(outcome == 'SKIP'),
@@ -130,8 +153,10 @@ def test_runner_exit_and_report_agreement(exit_code, outcome, error, expected_er
 
 
 def test_final_evaluation_rechecks_custom_runner_error():
+    """직접 만든 실행기가 오류(TIMEOUT)와 전부 PASS 보고서를 함께 돌려줘도 최종 채점기가 다시 확인해 UNVERIFIED로 둔다."""
     from evaluation.final_evaluation import RunnerOutcome
     class FailedRunner:
+        """시험 대역: 전부 PASS인 보고서와 TIMEOUT 오류를 함께 돌려주는 실행기"""
         kind = 'docker'
         def run(self, *args):
             rows = [{'testId': key, 'outcome': 'PASS'} for key in pt.evaluation_inputs(CONTRACT)['unit_cases']]
@@ -146,6 +171,7 @@ def test_final_evaluation_rechecks_custom_runner_error():
 @pytest.mark.parametrize('section', ['events', 'issues'])
 @pytest.mark.parametrize('missing', [True, False])
 def test_trace_rows_need_matching_run_identity(section, missing):
+    """사건·Issue 줄에 Run 번호가 없거나 다른 Run 번호가 있으면 추적 검사는 TRACE_RUN_MISMATCH 미검증이다."""
     bundle = copy.deepcopy(RUNS[QA_FIX])
     if missing:
         bundle[section][0].pop('runId')
@@ -157,6 +183,7 @@ def test_trace_rows_need_matching_run_identity(section, missing):
 
 @pytest.mark.parametrize('change', ['run', 'version', 'trace'])
 def test_final_evaluation_rejects_foreign_metadata_before_execution(change):
+    """대상 Run 번호·코드 버전·Trace 문서의 Run 번호가 서로 어긋나면 실행기를 부르기 전에 ValueError로 멈춘다."""
     from tests.evaluation.test_final_evaluation import RecordingRunner, uid
     archive, runner = snapshot(), RecordingRunner()
     bundle = copy.deepcopy(RUNS[QA_FIX])

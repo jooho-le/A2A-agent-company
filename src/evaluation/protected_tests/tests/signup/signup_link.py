@@ -4,6 +4,7 @@
 # 연결·전제 조건을 확인하지 못하면 제품 결함(FAIL)이 아니라 Unverified를 내고,
 # 테스트는 이를 SKIP("UNVERIFIED:코드")로 바꾼다. 비밀번호는 실행할 때 만들고(dev 19번)
 # 실패 메시지에 비밀번호·해시 값을 넣지 않는다.
+# 표준 라이브러리만 미리 불러온다. fastapi·sqlalchemy는 _open에서 불러오고 없으면 Unverified다.
 import contextlib
 import importlib
 import inspect
@@ -19,6 +20,7 @@ import threading
 import traceback
 import unittest
 
+# 연결 규격: (모듈, 이름) 위치, User 필드 이름, 가입 경로
 APP = ("main", "app")
 DB_DEPENDENCY = ("database", "get_db")
 USER_MODEL = ("models", "User")
@@ -30,10 +32,12 @@ REJECTED = range(400, 500)  # 입력 검증·중복 실패 응답(5xx는 처리�
 
 
 def signup_body(email, password):
+    # 가입 요청 본문(JSON)
     return {"email": email, "password": password}
 
 
 class Unverified(Exception):
+    # 확인 불가 신호. code는 SKIP 사유 "UNVERIFIED:코드"가 된다.
     def __init__(self, code):
         super().__init__(code)
         self.code = code
@@ -50,6 +54,7 @@ def new_password(length=12):
 
 
 def new_email():
+    # 매번 다른 가입용 이메일
     return "user" + secrets.token_hex(6) + "@example.com"
 
 
@@ -59,6 +64,7 @@ def canonical(email):
 
 
 def _load(location, code):
+    # (모듈, 이름) 위치의 값을 불러온다. 실패하면 code로 Unverified.
     module_name, attribute = location
     try:
         value = getattr(importlib.import_module(module_name), attribute)
@@ -106,6 +112,7 @@ class Service:
             directory = tempfile.mkdtemp(prefix="signup-eval-")
         except OSError:
             raise Unverified("TEMP_DIRECTORY_UNAVAILABLE") from None
+        # 정리 작업은 _undo에 쌓고 close()가 거꾸로 실행한다.
         self._undo.append(lambda: shutil.rmtree(directory, ignore_errors=True))
         url = "sqlite:///" + os.path.join(directory, "signup.db")
         previous_url = os.environ.get("DATABASE_URL")
@@ -119,6 +126,7 @@ class Service:
             from sqlalchemy.orm import sessionmaker
         except Exception:
             raise Unverified("TEST_LIBRARY_UNAVAILABLE") from None
+        # 생성물의 앱·DB 의존성·User 모델을 불러오고 규격에 맞는지 본다.
         app = _load(APP, "APP_IMPORT_FAILED")
         get_db = _load(DB_DEPENDENCY, "DB_DEPENDENCY_MISSING")
         self.User = _load(USER_MODEL, "USER_MODEL_MISSING")
@@ -137,6 +145,7 @@ class Service:
             raise Unverified("TEST_DATABASE_SETUP_FAILED") from None
         self.Session = sessionmaker(bind=engine, autoflush=False)
 
+        # 앱의 get_db를 임시 DB 세션으로 바꿔 끼운다.
         def override():
             with self.Session() as db:
                 yield db
@@ -160,6 +169,7 @@ class Service:
         self._undo.append(lambda: (setattr(sys, "stdout", saved[0]), setattr(sys, "stderr", saved[1])))
 
     def _attach(self, logger):
+        # 로거 하나에 수집기를 한 번만 단다.
         if id(logger) not in self._attached:
             self._attached.add(id(logger))
             logger.addHandler(self._handler)
@@ -171,6 +181,7 @@ class Service:
                 self._attach(item)
 
     def close(self):
+        # 정리 작업을 거꾸로 실행한다. 하나가 실패해도 나머지는 계속한다.
         while self._undo:
             try:
                 self._undo.pop()()
@@ -194,6 +205,7 @@ class Service:
         return response.status_code
 
     def emails(self):
+        # DB에 저장된 이메일 목록(가입 결과 확인용)
         try:
             with self.Session() as db:
                 rows = db.query(getattr(self.User, EMAIL_FIELD)).all()
@@ -208,6 +220,7 @@ class Service:
         return sum(1 for value in self.emails() if isinstance(value, str) and canonical(value) == canonical(email))
 
     def stored_hash(self, email):
+        # 그 이메일 사용자의 저장 해시. 정확히 1명이 아니면 Unverified.
         try:
             with self.Session() as db:
                 rows = db.query(getattr(self.User, EMAIL_FIELD), getattr(self.User, HASH_FIELD)).all()
@@ -220,6 +233,7 @@ class Service:
         return found[0]
 
     def log_text(self):
+        # 서버 로그와 stdout·stderr 출력을 합친 글(노출 검사용)
         return "\n".join(self.server_log) + "\n" + self._stdout.getvalue() + "\n" + self._stderr.getvalue()
 
     def concurrent_signups(self, email, password, workers=5):
@@ -227,6 +241,7 @@ class Service:
         barrier = threading.Barrier(workers)
         statuses, unverified = [None] * workers, []
 
+        # 스레드마다 자기 client로, barrier에서 함께 출발해 요청한다.
         def run(index):
             client = self._client_type(self._app)
             barrier.wait(timeout=30)
