@@ -79,7 +79,9 @@ def _scan_findings(request):
 def _result(request, outcomes, dispositions, observations, analyzed_paths):
     # 판정 결과를 시스템이 요구하는 모양으로 조립한다. 특히 "증거 주소"를 붙이는 일을 한다.
     # 규칙: PASS나 FAIL 같은 확정 판정에는 시스템이 허용한 증거 주소가 반드시 하나 이상 붙어야 한다.
-    #       붙일 수 있는 증거가 없으면 확정하지 않고 UNVERIFIED로 낮춘다.
+    #       붙일 수 있는 증거가 없거나, 주소 개수 한도(MAX_REFS) 때문에 그 판정의 주소가 잘려 나가면 확정하지 않고 UNVERIFIED로 낮춘다.
+    #       증거 JSON이 바이트 한도(MAX_EVIDENCE_BYTES)를 넘으면 _bounded_evidence가 경고 판정부터 덜어 낸다.
+    #       낮춘 판정은 증거 JSON의 requirements에도 같은 판정과 이유로 남겨서, 판정과 근거가 서로 어긋나지 않게 한다.
     permitted = list(request.permitted_evidence_refs)  # 시스템이 허용한 증거 주소 목록
     requirement_outcomes, refs = [], []
     for requirement_id, key, result in outcomes:

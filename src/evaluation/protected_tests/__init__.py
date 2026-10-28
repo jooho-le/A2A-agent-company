@@ -1,0 +1,184 @@
+# SCN-001 회원가입 보호 테스트 묶음(D2)을 읽고, 두 곳에서 쓰는 모양으로 바꿔 주는 모듈이다.
+#   1) 개발 순환 안(dev PROTECTED): 보호 파일 설정(unit_test_scope)과 보호 QA 케이스(owned_qa_cases)
+#   2) 최종 독립 평가: 검사 계획·꼬리표(evaluation_inputs)와 검사 결과(final_check_results)
+#
+# 묶음 구성(suite.json)
+#   - tests/signup/signup_link.py      : 연결부. 생성물 규격이 바뀌면 이 파일만 고친다.
+#   - tests/signup/protected_signup_qa.py    : QA-SIGNUP-001·002·003·004·006 (순환 안 + 최종)
+#   - tests/signup/protected_signup_final.py : QA-SIGNUP-005, SEC-SIGNUP-002·005 (최종 평가 전용)
+#   - 정적 검사 SEC-SIGNUP-001·003·004는 security/assess.py가 판정하고 최종 평가에서 함께 집계한다.
+# 순환 안 보호 테스트는 QA 담당 요구사항(REQ-001·002·003·004·007)만 연결할 수 있다(dev qa_services.py).
+# 이 모듈은 테스트를 실행하지 않는다. 실행은 dev run_unit_tests(컨테이너) 또는 D5 채점기가 한다.
+import hashlib
+import json
+import re
+from pathlib import Path
+from typing import Mapping, Optional
+
+from ..aggregation import CheckPlan, _uuid4
+from ..check_adapters import check_results_from_assessment, check_results_from_unit_report
+from ..independent import EvaluationBinding
+
+ROOT = Path(__file__).resolve().parent
+SUITE_FILE = ROOT / 'suite.json'
+SCOPES = ('in-loop', 'final')
+_SELECTOR = re.compile(r'[a-z][a-z0-9_-]{0,63}\Z')           # dev qa_contract.py와 같은 규칙
+_PATTERN = re.compile(r'[A-Za-z0-9_*?\[\].-]{1,128}\.py\Z')   # dev unit_runner.py와 같은 규칙
+_REQUIREMENT = re.compile(r'REQ-\d{3}\Z')
+
+
+def _text(value, name):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f'{name} must be nonempty text')
+
+
+def load_suite(path: Path = SUITE_FILE) -> dict:
+    # suite.json을 읽고 모양을 확인한다. 이상하면 ValueError로 멈춘다.
+    suite = json.loads(Path(path).read_text(encoding='utf-8'))
+    if suite.get('schemaVersion') != 1 or set(suite.get('scopes', {})) != set(SCOPES):
+        raise ValueError('Unsupported protected suite')
+    for name in ('suiteId', 'suiteVersion', 'scenarioKey', 'toolName', 'sourceDirectory'):
+        _text(suite.get(name), name)
+    directory = suite['sourceDirectory']
+    modules = {}
+    for scope_name, scope in suite['scopes'].items():
+        if not _SELECTOR.fullmatch(scope.get('selector', '')) or not _PATTERN.fullmatch(scope.get('pattern', '')):
+            raise ValueError('Invalid scope selector or pattern')
+        files = scope.get('files')
+        if not files or len(set(files)) != len(files):
+            raise ValueError('Scope files must be nonempty and unique')
+        for file in files:
+            if not file.startswith(directory + '/') or '/' in file[len(directory) + 1:] or not file.endswith('.py'):
+                raise ValueError('Protected files must sit directly in the source directory')
+            if not (ROOT / file).is_file():
+                raise ValueError('Protected file is missing')
+        modules[scope_name] = {Path(file).stem for file in files}
+    if suite['scopes']['in-loop']['selector'] == suite['scopes']['final']['selector']:
+        raise ValueError('Scopes need distinct selectors')
+    seen = {'key': set(), 'checkId': set(), 'testId': set()}
+    for check in suite.get('checks', []):
+        _uuid4(check.get('checkId'))
+        for name in ('key', 'title', 'expectedResult'):
+            _text(check.get(name), name)
+        if not _REQUIREMENT.fullmatch(check.get('requirementKey', '')):
+            raise ValueError('Invalid requirement key')
+        if check.get('perspective') not in ('QA', 'SECURITY'):
+            raise ValueError('Unsupported perspective')
+        scopes = check.get('scopes')
+        if not scopes or not set(scopes) <= set(SCOPES) or len(set(scopes)) != len(scopes):
+            raise ValueError('Invalid check scopes')
+        if check.get('method') == 'unittest':
+            _text(check.get('testId'), 'testId')
+            module = check['testId'].split('.', 1)[0]
+            if any(module not in modules[scope] for scope in scopes):
+                raise ValueError('Check test module is not part of its scope')
+        elif check.get('method') == 'static':
+            if check.get('testId') is not None or scopes != ['final']:
+                raise ValueError('Static checks belong to the final scope without a unittest ID')
+        else:
+            raise ValueError('Unsupported check method')
+        if 'in-loop' in scopes and (check['perspective'] != 'QA' or check['method'] != 'unittest'):
+            raise ValueError('Only QA unittest checks can run inside the development loop')
+        for name in seen:
+            value = check.get(name)
+            if value is not None and value in seen[name]:
+                raise ValueError(f'Duplicate check {name}')
+            seen[name].add(value)
+    if not seen['key']:
+        raise ValueError('Protected suite has no checks')
+    return suite
+
+
+def _scope(scope: str, suite: Optional[dict]):
+    suite = suite or load_suite()
+    if scope not in SCOPES:
+        raise ValueError('Unknown scope')
+    return suite, suite['scopes'][scope]
+
+
+def protected_files(scope: str, suite: Optional[dict] = None) -> dict[str, str]:
+    # {"tests/signup/...py": 파일 내용} 사전. dev 보호 파일 설정(protected_files)에 그대로 넣는다.
+    _suite, entry = _scope(scope, suite)
+    return {file: (ROOT / file).read_text(encoding='utf-8') for file in sorted(entry['files'])}
+
+
+def suite_sha256(scope: str, suite: Optional[dict] = None) -> str:
+    # 묶음의 지문. 정렬한 [{path, sha256, sizeBytes}] 목록을 canonical JSON으로 만들어 SHA-256을 구한다
+    # (dev unittest 도구의 Input Manifest와 같은 방식). 독립 평가 보고서의 suite_sha256에 쓴다.
+    entries = []
+    for path, content in protected_files(scope, suite).items():
+        data = content.encode('utf-8')
+        entries.append({'path': path, 'sha256': hashlib.sha256(data).hexdigest(), 'sizeBytes': len(data)})
+    canonical = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def unit_test_scope(scope: str, *, suite_ref: str, suite: Optional[dict] = None) -> dict:
+    # dev UnitTestScope 설정 한 개(PROTECTED). suite_ref는 동결 RunConfiguration의 protected_test_suite_ref와 같아야 한다.
+    suite, entry = _scope(scope, suite)
+    return {'name': entry['selector'], 'kind': 'PROTECTED', 'pattern': entry['pattern'],
+            'source_directory': suite['sourceDirectory'], 'protected_files': protected_files(scope, suite),
+            'protected_suite_ref': suite_ref}
+
+
+def _requirement_ids(scenario_contract: Mapping, suite: dict) -> dict[str, str]:
+    # 동결 시나리오 정책에서 {REQ-001: 요구사항 UUID} 표를 만든다.
+    if not isinstance(scenario_contract, Mapping) or scenario_contract.get('scenarioKey') != suite['scenarioKey']:
+        raise ValueError('Scenario contract does not match the protected suite')
+    ids = {}
+    for item in scenario_contract.get('requirements', []):
+        key, requirement_id = item.get('key'), str(item.get('requirementId'))
+        _uuid4(requirement_id)
+        if key in ids:
+            raise ValueError('Duplicate requirement key in scenario contract')
+        ids[key] = requirement_id
+    missing = {check['requirementKey'] for check in suite['checks']} - set(ids)
+    if missing:
+        raise ValueError('Scenario contract lacks a requirement used by the suite')
+    return ids
+
+
+def owned_qa_cases(scenario_contract: Mapping, suite: Optional[dict] = None) -> dict:
+    # dev configs/owned-qa-cases.local.json 내용(순환 안 PROTECTED 케이스). 보고서의 모든 테스트가 여기 묶여야 한다.
+    suite, entry = _scope('in-loop', suite)
+    ids = _requirement_ids(scenario_contract, suite)
+    return {'schemaVersion': 1, 'cases': [
+        {'toolName': suite['toolName'], 'selector': entry['selector'], 'testId': check['testId'],
+         'requirementId': ids[check['requirementKey']], 'title': check['title'],
+         'expectedResult': check['expectedResult']}
+        for check in suite['checks'] if 'in-loop' in check['scopes']]}
+
+
+def evaluation_inputs(scenario_contract: Mapping, suite: Optional[dict] = None) -> dict:
+    # 최종 독립 평가(build_evaluation_report)에 넣을 계획·꼬리표와 결과 대응표를 만든다.
+    suite = suite or load_suite()
+    ids = _requirement_ids(scenario_contract, suite)
+    checks = [check for check in suite['checks'] if 'final' in check['scopes']]
+    return {
+        'suite_id': suite['suiteId'], 'suite_version': suite['suiteVersion'],
+        'suite_sha256': suite_sha256('final', suite),
+        'plan': tuple(CheckPlan(test_id=check['checkId']) for check in checks),
+        'bindings': {check['checkId']: EvaluationBinding(ids[check['requirementKey']], check['perspective'],
+                                                         check['key'] + ' ' + check['title'])
+                     for check in checks},
+        'required_requirement_ids': tuple(dict.fromkeys(ids[check['requirementKey']] for check in checks)),
+        'unit_cases': {check['testId']: check['checkId'] for check in checks if check['method'] == 'unittest'},
+        'static_cases': {check['key']: check['checkId'] for check in checks if check['method'] == 'static'},
+        'expected': {check['checkId']: check['expectedResult'] for check in checks},
+    }
+
+
+def final_check_results(inputs: dict, *, unit_report: Optional[dict], unit_evidence_id: str,
+                        assessment_requirements: Optional[Mapping] = None,
+                        static_evidence_id: Optional[str] = None,
+                        runner_error: str = 'TEST_RUNNER_ERROR') -> tuple:
+    # 실행 테스트 보고서와 정적 판정 결과를 합쳐 최종 평가의 검사 결과 목록을 만든다.
+    # 정적 판정이 없으면 정적 검사의 결과를 만들지 않아 집계에서 미검증(RESULT_MISSING)이 된다.
+    results = check_results_from_unit_report(unit_report, inputs['unit_cases'], evidence_id=unit_evidence_id,
+                                             expected=inputs['expected'], runner_error=runner_error)
+    if assessment_requirements is not None:
+        if static_evidence_id is None:
+            raise ValueError('Static results need their evidence ID')
+        results += check_results_from_assessment(assessment_requirements, inputs['static_cases'],
+                                                 evidence_id=static_evidence_id, expected=inputs['expected'])
+    return results

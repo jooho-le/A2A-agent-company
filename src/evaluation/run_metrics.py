@@ -144,6 +144,8 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
     fix_events = sum(1 for event in events if event['eventType'] == 'FIX_ATTEMPT_STARTED')
     if total == len(events) and fix_events != run['fixAttempt']:
         notes.append('FIX_ATTEMPT_COUNT_DIFFERS')
+    # 협업 시간(전달·병렬·에이전트 밖 시간·사람 대기)은 사건을 모두 받았을 때만 계산한다.
+    collaboration = collaboration_metrics(events) if start is not None else None
 
     return {
         'runId': run_id, 'scenarioId': run.get('scenarioId'), 'experimentId': settings.get('experimentId'),
@@ -154,7 +156,9 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
         'firstBuildPassMs': _millis(start, builds[0] if builds else None),    # 시작 ~ 첫 빌드 성공
         'verdictMs': _millis(start, verdicts[-1] if verdicts else None),      # 시작 ~ (마지막) 판정 생성
         'totalMs': _millis(start, ends[-1] if ends else None),                # 시작 ~ 끝남/중단
-        'humanWaitMs': None,  # 사람을 기다린 시간. 시스템이 따로 기록하지 않아서 모른다(있으면 부르는 쪽이 채운다).
+        # 사람을 기다린 시간(HUMAN_REVIEW·WAITING_INPUT에 머문 끝난 구간의 합). 상태 변화 사건이 없거나 사건이 모자라면 None.
+        'humanWaitMs': collaboration['humanWaitMs'] if collaboration else None,
+        'collaboration': collaboration,
         **spent,  # 사용량·비용 항목들을 여기에 풀어서 넣는다
         'issues': len(issues), 'issuesByReporter': reporters, 'issuesByCategory': categories,
         # newCodeVersion은 Developer에게 "수정을 요청한 시점"에 기록된다. 요청했다고 해결된 것은 아니므로 둘을 나눠 센다.
@@ -272,6 +276,122 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
             },
         }
     return result
+
+
+A2A_STEP_END_STATES = frozenset({'TASK_STATE_COMPLETED', 'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_REJECTED',
+                                 'TASK_STATE_INPUT_REQUIRED', 'TASK_STATE_AUTH_REQUIRED'})
+HUMAN_WAIT_STATES = frozenset({'HUMAN_REVIEW', 'WAITING_INPUT'})
+AGENT_ROLES = ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')
+
+
+def _merged_length(intervals):
+    # 시간 구간들의 합집합 길이(겹치는 부분은 한 번만 센다). 병렬로 일한 시간을 두 번 세지 않으려고 쓴다.
+    total, end = 0, None
+    for start, finish in sorted(intervals):
+        if end is None or start > end:
+            total, end = total + (finish - start), finish
+        elif finish > end:
+            total, end = total + (finish - end), finish
+    return total
+
+
+def collaboration_metrics(events) -> dict:
+    # 협업 시간 지표(개발정의서 11-A "Agent Coordination Overhead"와 사람 대기 human_wait_ms). 사건 기록이 모두 있을 때만 부른다.
+    #   llmMs·toolMs        : 역할별 LLM 호출(LLM_CALL_FINISHED)·도구 호출(MCP_TOOL_FINISHED)의 durationMs 합과 호출 수.
+    #                         병렬로 겹친 시간도 각각 더한 "작업 시간 합"이라 전체 경과 시간으로 쓰지 않는다.
+    #   handoffMs           : Step마다 일을 넘긴 시각(A2A_MESSAGE_SENT) ~ 에이전트가 받은 시각(첫 A2A_TASK_RECEIVED)의 합
+    #   agentStepSumMs      : Step 구간(넘기기 시작 ~ A2A 종료 상태) 길이의 단순 합
+    #   agentActiveMs       : 같은 구간들의 합집합 길이. agentStepSumMs - agentActiveMs = 병렬 실행으로 겹친 시간(parallelOverlapMs)
+    #   outsideAgentMs      : (실행 시작 ~ 마지막 판정) - agentActiveMs. 어느 에이전트도 일하지 않은 시간
+    #                         (Orchestrator의 판단·Snapshot 고정·빌드·Issue 처리, 사람 대기 등)
+    #   humanWaitMs         : HUMAN_REVIEW·WAITING_INPUT 상태에 들어갔다가 벗어난 구간의 합. 아직 그 상태로 끝났으면
+    #                         그 구간은 더하지 않고 humanWaitOpen=True. 상태 변화 사건이 하나도 없으면 None(알 수 없음)
+    # 끝 상태가 없는 Step(중단·진행 중)은 stepsWithoutEnd로 세고 구간 계산에서 뺀다.
+    stamped = sorted(((aware_time(event['occurredAt'], 'occurredAt'), index, event) for index, event in enumerate(events)),
+                     key=lambda item: (item[0], item[1]))
+
+    def millis(delta):
+        return int(delta.total_seconds() * 1000)
+
+    llm = {role: {'calls': 0, 'ms': 0} for role in AGENT_ROLES}
+    tools = {role: {'calls': 0, 'ms': 0} for role in AGENT_ROLES}
+    steps = {}
+    for moment, _index, event in stamped:
+        kind, actor = event.get('eventType'), event.get('actor')
+        bucket = llm if kind == 'LLM_CALL_FINISHED' else tools if kind == 'MCP_TOOL_FINISHED' else None
+        if bucket is not None and actor in bucket and isinstance(event.get('durationMs'), int):
+            bucket[actor]['calls'] += 1
+            bucket[actor]['ms'] += event['durationMs']
+        step_id = event.get('workflowStepId')
+        if not step_id:
+            continue
+        step = steps.setdefault(step_id, {'start': None, 'sent': None, 'received': None, 'end': None, 'role': None})
+        if kind in ('WORKFLOW_STEP_DISPATCH_STARTED', 'A2A_MESSAGE_SENT') and step['start'] is None:
+            step['start'] = moment
+        if kind == 'A2A_MESSAGE_SENT' and step['sent'] is None:
+            step['sent'] = moment
+        if kind == 'A2A_TASK_RECEIVED' and step['received'] is None and step['sent'] is not None:
+            step['received'] = moment
+        if kind in ('A2A_TASK_STATE_CHANGED', 'A2A_TASK_UPDATED') and event.get('a2aTaskState') in A2A_STEP_END_STATES:
+            step['end'] = moment
+        if actor in AGENT_ROLES and step['role'] is None:
+            step['role'] = actor
+    intervals = [(step['start'], step['end']) for step in steps.values()
+                 if step['start'] is not None and step['end'] is not None and step['end'] >= step['start']]
+    by_role = {}
+    for step in steps.values():
+        if step['start'] is not None and step['end'] is not None:
+            role = by_role.setdefault(step['role'] or 'UNKNOWN', {'steps': 0, 'ms': 0})
+            role['steps'] += 1
+            role['ms'] += millis(step['end'] - step['start'])
+    step_sum = sum(millis(finish - start) for start, finish in intervals)
+    active = int(_merged_length([(start.timestamp() * 1000, finish.timestamp() * 1000) for start, finish in intervals]))
+    starts = [moment for moment, _index, event in stamped if event.get('eventType') == 'RUN_STARTED']
+    verdicts = [moment for moment, _index, event in stamped if event.get('eventType') == 'VERDICT_CREATED']
+    wall = millis(verdicts[-1] - starts[0]) if starts and verdicts else None
+
+    changes = [(moment, event.get('workflowState')) for moment, _index, event in stamped
+               if event.get('eventType') == 'WORKFLOW_STATE_CHANGED' and event.get('workflowState')]
+    human, waiting_since = (0 if changes else None), None
+    for moment, state in changes:
+        if state in HUMAN_WAIT_STATES and waiting_since is None:
+            waiting_since = moment
+        elif state not in HUMAN_WAIT_STATES and waiting_since is not None:
+            human += millis(moment - waiting_since)
+            waiting_since = None
+    return {
+        'llm': llm, 'tools': tools, 'stepsByRole': by_role,
+        'handoffMs': sum(millis(step['received'] - step['sent']) for step in steps.values() if step['received'] is not None),
+        'agentStepSumMs': step_sum, 'agentActiveMs': active, 'parallelOverlapMs': step_sum - active,
+        'outsideAgentMs': wall - active if wall is not None else None, 'wallToVerdictMs': wall,
+        'stepsWithoutEnd': sum(1 for step in steps.values() if step['start'] is not None and step['end'] is None),
+        'humanWaitMs': human, 'humanWaitOpen': waiting_since is not None,
+    }
+
+
+def regression_count(version_results: dict) -> dict:
+    # Regression Count(개발정의서 11-A): 수정으로 새롭게 발생한 공통 테스트 실패 수.
+    # version_results: {코드 버전(1부터): {검사 번호: 상태}}. 같은 공통 보호 테스트를 버전마다 돌린 결과다.
+    #   상태는 독립 평가 보고서의 검사 상태(PASS·FAIL·ERROR·NOT_RUN·NOT_APPLICABLE)를 그대로 쓴다.
+    # 버전 k에서 PASS였던 검사가 바로 다음 버전 k+1에서 FAIL이면 Regression 1건이다.
+    # 둘 중 한 버전이라도 PASS·FAIL이 아닌 검사는 비교할 수 없어 uncomparedChecks로 센다. 그런 검사가 있으면
+    # 숨은 Regression이 있을 수 있으므로 complete=False이고 regressionCount는 확인된 건수(하한)다.
+    # 버전이 1부터 빈틈없이 이어지지 않으면 ValueError로 멈춘다(중간 버전을 건너뛰면 원인 버전을 알 수 없다).
+    versions = sorted(version_results)
+    if not versions or any(type(v) is not int for v in versions) or versions != list(range(1, len(versions) + 1)):
+        raise ValueError('Version results must cover consecutive code versions from 1')
+    regressions, uncompared = [], 0
+    for before, after in zip(versions, versions[1:]):
+        old, new = version_results[before], version_results[after]
+        for check_id in sorted(set(old) | set(new)):
+            pair = (old.get(check_id), new.get(check_id))
+            if not all(status in ('PASS', 'FAIL') for status in pair):
+                uncompared += 1
+            elif pair == ('PASS', 'FAIL'):
+                regressions.append({'fromVersion': before, 'toVersion': after, 'checkId': check_id})
+    return {'regressionCount': len(regressions), 'regressions': regressions,
+            'comparedVersionPairs': len(versions) - 1, 'uncomparedChecks': uncompared,
+            'complete': uncompared == 0}
 
 
 def _lookup(document, dotted):

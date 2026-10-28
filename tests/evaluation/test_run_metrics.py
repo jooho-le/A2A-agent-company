@@ -1,10 +1,12 @@
-"""run_metrics.py를 시험하는 파일이다. 모든 데이터는 가짜이다.
+"""run_metrics.py를 시험하는 파일이다. 협업 시간 시험 하나(dev 파이프라인 Run 표본)를 빼면 모든 데이터는 가짜이다.
 
 확인하는 것:
   1) 시스템의 실행 기록(JSON)이 지표로 올바르게 바뀌는가? (모르는 값은 0이 아니라 None인가?)
   2) 구조별 요약에서 성공률의 분모, 비용·토큰 합계를 올바르게 다루는가?
   3) Single과 Multi를 "공정하게 비교해도 되는지" 올바르게 판정하는가?
+  4) 협업 시간(전달·병렬 겹침·에이전트 밖 시간·사람 대기)을 병렬 구간을 두 번 세지 않고 계산하는가?
 """
+import json
 from uuid import UUID
 
 import pytest
@@ -587,3 +589,49 @@ def test_fetch_page_error_is_propagated_instead_of_returning_partial_bundle():
 
     with pytest.raises(RuntimeError, match='page request failed'):
         fetch_run_bundle(get, data['run']['runId'])
+
+
+# ---------------------------------------------------------------- 협업 시간(D4)
+
+def test_collaboration_times_on_real_dev_run():
+    """dev 파이프라인 실제 Run: QA·Security 병렬 구간은 한 번만 세고, 에이전트가 일한 시간은 전체 경과 시간을 넘지 않는다."""
+    from pathlib import Path
+    from evaluation.run_metrics import collaboration_metrics
+    runs = json.loads((Path(__file__).parent / 'fixtures/dev_pipeline_timing.json').read_text(encoding='utf-8'))['runs']
+    fixed = collaboration_metrics(runs['qa_failure_actual_fix_and_revalidation_preserve_all_lineages_and_shared_budget'])
+    assert fixed['stepsByRole']['DEVELOPER']['steps'] == 2 and fixed['stepsByRole']['QA']['steps'] == 2
+    assert 0 < fixed['agentActiveMs'] <= fixed['wallToVerdictMs'] and fixed['parallelOverlapMs'] > 0
+    assert fixed['outsideAgentMs'] == fixed['wallToVerdictMs'] - fixed['agentActiveMs']
+    assert fixed['handoffMs'] > 0 and fixed['llm']['DEVELOPER']['calls'] > 0 and fixed['stepsWithoutEnd'] == 0
+    assert (fixed['humanWaitMs'], fixed['humanWaitOpen']) == (0, False)
+    waiting = collaboration_metrics(runs['repeated_issue_stops_after_two_unsolved_fix_cycles'])
+    assert (waiting['humanWaitMs'], waiting['humanWaitOpen']) == (0, True)  # HUMAN_REVIEW에서 아직 끝나지 않은 대기
+
+
+def stamp(seconds):
+    return f'2026-10-14T00:00:{seconds:02d}+00:00'
+
+
+def test_parallel_steps_and_closed_human_wait():
+    from evaluation.run_metrics import collaboration_metrics
+    events = [
+        {'eventType': 'RUN_STARTED', 'occurredAt': stamp(0)},
+        {'eventType': 'A2A_MESSAGE_SENT', 'workflowStepId': 'qa', 'occurredAt': stamp(1)},
+        {'eventType': 'A2A_TASK_RECEIVED', 'workflowStepId': 'qa', 'occurredAt': stamp(2)},
+        {'eventType': 'A2A_MESSAGE_SENT', 'workflowStepId': 'sec', 'occurredAt': stamp(1)},
+        {'eventType': 'A2A_TASK_RECEIVED', 'workflowStepId': 'sec', 'occurredAt': stamp(3)},
+        {'eventType': 'LLM_CALL_FINISHED', 'workflowStepId': 'qa', 'actor': 'QA', 'durationMs': 4000, 'occurredAt': stamp(6)},
+        {'eventType': 'A2A_TASK_STATE_CHANGED', 'workflowStepId': 'qa', 'a2aTaskState': 'TASK_STATE_COMPLETED', 'occurredAt': stamp(11)},
+        {'eventType': 'MCP_TOOL_FINISHED', 'workflowStepId': 'sec', 'actor': 'SECURITY', 'durationMs': 500, 'occurredAt': stamp(7)},
+        {'eventType': 'A2A_TASK_STATE_CHANGED', 'workflowStepId': 'sec', 'a2aTaskState': 'TASK_STATE_COMPLETED', 'occurredAt': stamp(9)},
+        {'eventType': 'WORKFLOW_STATE_CHANGED', 'workflowState': 'HUMAN_REVIEW', 'occurredAt': stamp(12)},
+        {'eventType': 'WORKFLOW_STATE_CHANGED', 'workflowState': 'REVALIDATING', 'occurredAt': stamp(20)},
+        {'eventType': 'A2A_MESSAGE_SENT', 'workflowStepId': 'stuck', 'occurredAt': stamp(21)},
+        {'eventType': 'VERDICT_CREATED', 'occurredAt': stamp(25)},
+    ]
+    result = collaboration_metrics(events)
+    assert result['agentStepSumMs'] == 18000 and result['agentActiveMs'] == 10000 and result['parallelOverlapMs'] == 8000
+    assert result['wallToVerdictMs'] == 25000 and result['outsideAgentMs'] == 15000
+    assert result['handoffMs'] == 3000 and result['humanWaitMs'] == 8000 and result['humanWaitOpen'] is False
+    assert result['stepsWithoutEnd'] == 1 and result['llm']['QA'] == {'calls': 1, 'ms': 4000}
+    assert result['tools']['SECURITY'] == {'calls': 1, 'ms': 500} and result['stepsByRole']['QA']['steps'] == 1

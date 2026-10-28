@@ -21,6 +21,12 @@
     "libraryDefaults": {"time_cost": 3, "memory_cost": 65536, "parallelism": 4},
     "defaultFactories": ["pwdlib.PasswordHash.recommended"],
     "hasherWrappers": ["pwdlib.PasswordHash"],
+    "passlibHandlers": ["passlib.hash.argon2"],
+    "passlibContexts": ["passlib.context.CryptContext"],
+    "passlibParameters": {"time_cost": "time_cost", "rounds": "time_cost", "default_rounds": "time_cost",
+                          "memory_cost": "memory_cost", "parallelism": "parallelism"},
+    "passlibIgnoredSettings": ["digest_size", "hash_len", "checksum_size", "max_threads"],
+    "passlibArgon2idTypes": ["id", "ID"],
     "profiles": {
       "argon2.profiles.RFC_9106_LOW_MEMORY": {"time_cost": 3, "memory_cost": 65536, "parallelism": 4},
       "argon2.profiles.RFC_9106_HIGH_MEMORY": {"time_cost": 1, "memory_cost": 2097152, "parallelism": 4}
