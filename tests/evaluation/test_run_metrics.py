@@ -1,10 +1,12 @@
-"""run_metrics.py를 시험하는 파일이다. 모든 데이터는 가짜이다.
+"""run_metrics.py를 시험하는 파일이다. 협업 시간 시험 하나(dev 파이프라인 Run 표본)를 빼면 모든 데이터는 가짜이다.
 
 확인하는 것:
   1) 시스템의 실행 기록(JSON)이 지표로 올바르게 바뀌는가? (모르는 값은 0이 아니라 None인가?)
   2) 구조별 요약에서 성공률의 분모, 비용·토큰 합계를 올바르게 다루는가?
   3) Single과 Multi를 "공정하게 비교해도 되는지" 올바르게 판정하는가?
+  4) 협업 시간(전달·병렬 겹침·에이전트 밖 시간·사람 대기)을 병렬 구간을 두 번 세지 않고 계산하는가?
 """
+import json
 from uuid import UUID
 
 import pytest
@@ -587,3 +589,147 @@ def test_fetch_page_error_is_propagated_instead_of_returning_partial_bundle():
 
     with pytest.raises(RuntimeError, match='page request failed'):
         fetch_run_bundle(get, data['run']['runId'])
+
+
+# ---------------------------------------------------------------- 협업 시간(D4)
+
+def test_collaboration_times_on_real_dev_run():
+    """dev 파이프라인 실제 Run: QA·Security 병렬 구간은 한 번만 세고, 에이전트가 일한 시간은 전체 경과 시간을 넘지 않는다."""
+    from pathlib import Path
+    from evaluation.run_metrics import collaboration_metrics
+    runs = json.loads((Path(__file__).parent / 'fixtures/dev_pipeline_timing.json').read_text(encoding='utf-8'))['runs']
+    fixed = collaboration_metrics(runs['qa_failure_actual_fix_and_revalidation_preserve_all_lineages_and_shared_budget'])
+    assert fixed['stepsByRole']['DEVELOPER']['steps'] == 2 and fixed['stepsByRole']['QA']['steps'] == 2
+    assert 0 < fixed['agentActiveMs'] <= fixed['wallToVerdictMs'] and fixed['parallelOverlapMs'] > 0
+    assert fixed['outsideAgentMs'] == fixed['wallToVerdictMs'] - fixed['agentActiveMs']
+    assert fixed['handoffMs'] > 0 and fixed['llm']['DEVELOPER']['calls'] > 0 and fixed['stepsWithoutEnd'] == 0
+    assert (fixed['humanWaitMs'], fixed['humanWaitOpen']) == (0, False)
+    waiting = collaboration_metrics(runs['repeated_issue_stops_after_two_unsolved_fix_cycles'])
+    assert (waiting['humanWaitMs'], waiting['humanWaitOpen']) == (0, True)  # HUMAN_REVIEW에서 아직 끝나지 않은 대기
+
+
+def stamp(seconds):
+    return f'2026-10-14T00:00:{seconds:02d}+00:00'
+
+
+def test_parallel_steps_and_closed_human_wait():
+    from evaluation.run_metrics import collaboration_metrics
+    events = [
+        {'eventType': 'RUN_STARTED', 'occurredAt': stamp(0)},
+        {'eventType': 'A2A_MESSAGE_SENT', 'workflowStepId': 'qa', 'occurredAt': stamp(1)},
+        {'eventType': 'A2A_TASK_RECEIVED', 'workflowStepId': 'qa', 'occurredAt': stamp(2)},
+        {'eventType': 'A2A_MESSAGE_SENT', 'workflowStepId': 'sec', 'occurredAt': stamp(1)},
+        {'eventType': 'A2A_TASK_RECEIVED', 'workflowStepId': 'sec', 'occurredAt': stamp(3)},
+        {'eventType': 'LLM_CALL_FINISHED', 'workflowStepId': 'qa', 'actor': 'QA', 'durationMs': 4000, 'occurredAt': stamp(6)},
+        {'eventType': 'A2A_TASK_STATE_CHANGED', 'workflowStepId': 'qa', 'a2aTaskState': 'TASK_STATE_COMPLETED', 'occurredAt': stamp(11)},
+        {'eventType': 'MCP_TOOL_FINISHED', 'workflowStepId': 'sec', 'actor': 'SECURITY', 'durationMs': 500, 'occurredAt': stamp(7)},
+        {'eventType': 'A2A_TASK_STATE_CHANGED', 'workflowStepId': 'sec', 'a2aTaskState': 'TASK_STATE_COMPLETED', 'occurredAt': stamp(9)},
+        {'eventType': 'WORKFLOW_STATE_CHANGED', 'workflowState': 'HUMAN_REVIEW', 'occurredAt': stamp(12)},
+        {'eventType': 'WORKFLOW_STATE_CHANGED', 'workflowState': 'REVALIDATING', 'occurredAt': stamp(20)},
+        {'eventType': 'A2A_MESSAGE_SENT', 'workflowStepId': 'stuck', 'occurredAt': stamp(21)},
+        {'eventType': 'VERDICT_CREATED', 'occurredAt': stamp(25)},
+    ]
+    result = collaboration_metrics(events)
+    assert result['agentStepSumMs'] == 18000 and result['agentActiveMs'] == 10000 and result['parallelOverlapMs'] == 8000
+    assert result['wallToVerdictMs'] == 25000 and result['outsideAgentMs'] == 15000
+    assert result['handoffMs'] == 3000 and result['humanWaitMs'] == 8000 and result['humanWaitOpen'] is False
+    assert result['stepsWithoutEnd'] == 1 and result['llm']['QA'] == {'calls': 1, 'ms': 4000}
+    assert result['tools']['SECURITY'] == {'calls': 1, 'ms': 500} and result['stepsByRole']['QA']['steps'] == 1
+
+
+# ---------------------------------------------------------------- 외부 점검(2026-10-29) F2·F3: Step 구간 끊기
+
+def a2a(step, kind, second, state=None, attempt=0):
+    """Step 하나의 A2A 사건(dev a2a_tasks.py가 남기는 모양). state는 'COMPLETED'처럼 TASK_STATE_ 뒤 이름만 쓴다."""
+    event = {'eventType': kind, 'workflowStepId': step, 'actor': 'ORCHESTRATOR', 'attempt': attempt,
+             'occurredAt': stamp(second)}
+    if state:
+        event['a2aTaskState'] = 'TASK_STATE_' + state
+    return event
+
+
+def run_events(*events, verdict=None):
+    """RUN_STARTED(0초) + 사건들 + (verdict초에) VERDICT_CREATED"""
+    tail = [{'eventType': 'VERDICT_CREATED', 'occurredAt': stamp(verdict)}] if verdict is not None else []
+    return [{'eventType': 'RUN_STARTED', 'occurredAt': stamp(0)}, *events, *tail]
+
+
+def wait(second, state):
+    """Run 상태 변화 사건(사람 대기 HUMAN_REVIEW·WAITING_INPUT 판단용)"""
+    return {'eventType': 'WORKFLOW_STATE_CHANGED', 'workflowState': state, 'occurredAt': stamp(second)}
+
+
+@pytest.mark.parametrize('state', ['COMPLETED', 'FAILED', 'REJECTED', 'CANCELED', 'INPUT_REQUIRED', 'AUTH_REQUIRED'])
+def test_task_finished_in_first_response_ends_the_step(state):
+    """F2: 첫 응답(A2A_TASK_RECEIVED)이 이미 끝·중단 상태면 dev는 더 폴링하지 않는다. 그 시각을 Step의 끝으로 본다."""
+    from evaluation.run_metrics import collaboration_metrics
+    result = collaboration_metrics(run_events(
+        a2a('qa', 'WORKFLOW_STEP_DISPATCH_STARTED', 1), a2a('qa', 'A2A_MESSAGE_SENT', 2),
+        a2a('qa', 'A2A_TASK_RECEIVED', 4, state), verdict=5))
+    assert (result['agentActiveMs'], result['stepsWithoutEnd'], result['outsideAgentMs']) == (3000, 0, 2000)
+    assert result['handoffMs'] == 2000
+
+
+@pytest.mark.parametrize('interrupt', ['INPUT_REQUIRED', 'AUTH_REQUIRED'])
+def test_resumed_step_does_not_count_the_human_wait_as_agent_time(interrupt):
+    """F3: 입력·인증을 기다리는 동안(3~13초)은 에이전트가 일한 시간이 아니다. 재개(attempt+1)는 새 구간이다.
+    활동 1~3초 + 13~16초 = 5초, 사람 대기 10초, 에이전트 밖 17 - 5 = 12초."""
+    from evaluation.run_metrics import collaboration_metrics
+    result = collaboration_metrics(run_events(
+        a2a('qa', 'A2A_MESSAGE_SENT', 1, attempt=1), a2a('qa', 'A2A_TASK_RECEIVED', 2, 'WORKING', 1),
+        a2a('qa', 'A2A_TASK_STATE_CHANGED', 3, interrupt, 1), wait(3, 'WAITING_INPUT'),
+        wait(13, 'VALIDATING'), a2a('qa', 'A2A_MESSAGE_SENT', 13, attempt=2),
+        a2a('qa', 'A2A_TASK_STATE_CHANGED', 14, 'WORKING', 2), a2a('qa', 'A2A_TASK_STATE_CHANGED', 16, 'COMPLETED', 2),
+        verdict=17))
+    assert (result['agentActiveMs'], result['agentStepSumMs'], result['outsideAgentMs']) == (5000, 5000, 12000)
+    assert (result['humanWaitMs'], result['humanWaitOpen'], result['stepsWithoutEnd']) == (10000, False, 0)
+    assert result['stepsByRole'] == {'UNKNOWN': {'steps': 1, 'ms': 5000}}
+
+
+def test_other_agent_working_during_the_wait_is_still_agent_time():
+    """QA가 사람을 기다리는 동안(3~13초) Security가 5~10초에 일했으면 그 5초는 에이전트 시간이다.
+    (사람 대기를 전체에서 무조건 빼면 틀린다.) 활동 = QA 2초 + Security 5초 + QA 3초 = 10초."""
+    from evaluation.run_metrics import collaboration_metrics
+    result = collaboration_metrics(run_events(
+        a2a('qa', 'A2A_MESSAGE_SENT', 1, attempt=1), a2a('qa', 'A2A_TASK_STATE_CHANGED', 3, 'INPUT_REQUIRED', 1),
+        wait(3, 'WAITING_INPUT'), a2a('sec', 'A2A_MESSAGE_SENT', 5), a2a('sec', 'A2A_TASK_RECEIVED', 6, 'WORKING'),
+        a2a('sec', 'A2A_TASK_STATE_CHANGED', 10, 'COMPLETED'), wait(13, 'VALIDATING'),
+        a2a('qa', 'A2A_MESSAGE_SENT', 13, attempt=2), a2a('qa', 'A2A_TASK_STATE_CHANGED', 16, 'COMPLETED', 2),
+        verdict=17))
+    assert (result['agentActiveMs'], result['parallelOverlapMs'], result['outsideAgentMs']) == (10000, 0, 7000)
+    assert result['humanWaitMs'] == 10000
+
+
+def test_open_wait_and_polling_timeout():
+    """아직 재개되지 않은 대기: 중단 시각까지가 에이전트 시간이고 Step은 끝난 것으로 센다(사람 대기는 열림).
+    폴링 시간 초과(A2A_POLL_TIMED_OUT)는 에이전트가 계속 일하는 중이므로 구간을 끊지 않는다."""
+    from evaluation.run_metrics import collaboration_metrics
+    waiting = collaboration_metrics(run_events(
+        a2a('qa', 'A2A_MESSAGE_SENT', 1), a2a('qa', 'A2A_TASK_STATE_CHANGED', 3, 'INPUT_REQUIRED'),
+        wait(3, 'WAITING_INPUT')))
+    assert (waiting['agentActiveMs'], waiting['stepsWithoutEnd'], waiting['humanWaitOpen']) == (2000, 0, True)
+    timeout = collaboration_metrics(run_events(
+        a2a('qa', 'A2A_MESSAGE_SENT', 1), a2a('qa', 'A2A_TASK_RECEIVED', 2, 'WORKING'),
+        a2a('qa', 'A2A_POLL_TIMED_OUT', 5, 'WORKING'), a2a('qa', 'A2A_TASK_STATE_CHANGED', 9, 'COMPLETED'), verdict=10))
+    assert (timeout['agentActiveMs'], timeout['stepsWithoutEnd']) == (8000, 0)
+
+
+def test_work_observed_again_after_interrupt_reopens_the_step():
+    """중단 뒤 새 요청 없이 폴링에서 다시 WORKING이 보이면(dev resume_polling) 그 시각부터 새 구간이다.
+    활동 1~3초 + 8~10초 = 4초. 두 번 중단·재개해도 구간마다 끊는다."""
+    from evaluation.run_metrics import collaboration_metrics
+    observed = collaboration_metrics(run_events(
+        a2a('qa', 'A2A_MESSAGE_SENT', 1), a2a('qa', 'A2A_TASK_STATE_CHANGED', 3, 'INPUT_REQUIRED'),
+        a2a('qa', 'A2A_TASK_STATE_CHANGED', 8, 'WORKING'), a2a('qa', 'A2A_TASK_STATE_CHANGED', 10, 'COMPLETED'),
+        verdict=11))
+    assert observed['agentActiveMs'] == 4000
+    twice = collaboration_metrics(run_events(
+        a2a('qa', 'A2A_MESSAGE_SENT', 1, attempt=1), a2a('qa', 'A2A_TASK_STATE_CHANGED', 2, 'AUTH_REQUIRED', 1),
+        a2a('qa', 'A2A_MESSAGE_SENT', 5, attempt=2), a2a('qa', 'A2A_TASK_STATE_CHANGED', 7, 'INPUT_REQUIRED', 2),
+        a2a('qa', 'A2A_MESSAGE_SENT', 20, attempt=3), a2a('qa', 'A2A_TASK_UPDATED', 21, 'WORKING', 3),
+        a2a('qa', 'A2A_TASK_STATE_CHANGED', 24, 'COMPLETED', 3), verdict=25))
+    assert (twice['agentActiveMs'], twice['stepsByRole']['UNKNOWN']) == (1000 + 2000 + 4000, {'steps': 1, 'ms': 7000})
+    unfinished = collaboration_metrics(run_events(
+        a2a('qa', 'A2A_MESSAGE_SENT', 1, attempt=1), a2a('qa', 'A2A_TASK_STATE_CHANGED', 3, 'INPUT_REQUIRED', 1),
+        a2a('qa', 'A2A_MESSAGE_SENT', 8, attempt=2), verdict=11))
+    assert (unfinished['agentActiveMs'], unfinished['stepsWithoutEnd']) == (2000, 1)  # 끝나지 않은 재개 구간은 빼고 센다

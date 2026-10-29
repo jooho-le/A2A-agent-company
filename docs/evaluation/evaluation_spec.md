@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 담당자 | 강석민 |
-| 작성일 / 버전 | 2026-09-28 작성 · 2026-10-17 갱신 / 0.4 |
+| 작성일 / 버전 | 2026-09-28 작성 · 2026-10-28 갱신 / 0.4 |
 | 상태 | 팀 검수용 설계 초안. 집계·보고서·Security 정적 판정·결과 지표·시연 자료 목록은 구현했고(합성 입력으로 검증), 실제 생성물 실행 검사·최종 Snapshot 채점·비교 실험은 아직이다. 구현·실험 완료 보고서가 아님 |
 | 담당 범위 | 독립 평가 시스템(보호 테스트·QA/보안 관점 채점), 비교 실험, 결과 분석·발표 근거 |
 | 첫 구현 대상 | 회원가입 MVP 확정, 표시 Key SCN-001. 요구사항별 검사는 [scn001_criteria.md](scn001_criteria.md)가 기준 |
@@ -42,9 +42,9 @@ Multi-Agent의 우수성을 전제하지 않는다. 동일 조건에서 공정�
 
 | 담당 | 제공받을 정보 | 전달할 정보 |
 |---|---|---|
-| 1번 | 확인 완료: ID 규칙·Artifact·Manifest·실행 한도, Run 조회 API(`/runs/{id}`·events·issues·tool-attempts·usage·configuration), Run Configuration 필드(dev 45번 인계). 아직 없음: 실행 종료 시 최종 Snapshot 소스를 받는 방법(Artifact API는 메타데이터 JSON만 제공), Single 실행기(`architecture`는 `MULTI_AGENT`만 허용) | 독립 평가 보고서와 실험 지표 |
-| 2번 | 확인 완료: QA 보호 케이스 연결 규격(unittest, 읽기 전용 `/inputs/tests`, 6필드 케이스, REQ-001·002·003·004·007만 연결 가능), Security 승인 함수 계약(dev 42번). 아직 없음: 평가 전용 보호 테스트를 컨테이너에서 독립 실행하는 방법과 종료 후 실행 권한 | 보호 테스트 묶음과 필요한 결과 필드 |
-| 3번 | 수령: 플랫폼 backend의 API 규격·응답 코드·실행 방법·DB 구조·이메일 검증 위치(2026-10-05, 3번필요사항 중간정리본). 이는 플랫폼 웹사이트 코드이며 생성물 규격으로 자동 채택하지 않는다. 플랫폼 표본을 채택하면 의존성·초기화·로그 수집 정보를 추가 확인한다. 생성물 시작 코드와 API/DB 규격은 1·2번 및 4번이 함께 별도 합의 | 케이스·테스트 데이터·실패 재현 절차 |
+| 1번 | 확인 완료: ID 규칙·Artifact·Manifest·실행 한도, Run 조회 API(`/runs/{id}`·events·issues·tool-attempts·usage·configuration·artifacts·telemetry), Run Configuration 필드, 시작 Source 준비 계약(dev 40·45번, owned-source 필수). 아직 없음: 시작 코드 확정, 최종 Snapshot tar·Manifest를 받는 경로(Artifact API는 메타데이터 JSON만 제공), Single 실행 경로 | 보안 기준·`assess()`, 보호 테스트 설정(`python -m evaluation.protected_tests export`), 독립 평가 보고서 |
+| 2번 | 확인 완료: QA 보호 케이스 연결 규격(unittest, 읽기 전용 `/inputs/tests`, 6필드 케이스, REQ-001·002·003·004·007만 연결 가능), Security 승인 함수 계약(dev 42번), 컨테이너 실행 제한(dev 샌드박스). 4번 D5는 같은 제한으로 컨테이너를 직접 띄운다 | 순환 안 보호 QA 케이스와 보호 파일 설정 |
+| 3번 | 수령: 서비스 웹페이지 backend의 API·응답 코드·실행 방법·DB 구조·이메일 검증 위치(3번필요사항 중간정리본), 서버 로그는 파일 없이 콘솔뿐, 테스트 DB는 `get_db` 교체(sehwa-dev 테스트). 이 backend는 평가 대상(생성물)이 아니며, 보호 테스트 연결부가 그 구조를 쓰는 것은 시작 코드 확정 전의 임시 가정이다 | — |
 
 최종 독립 평가 보고서 생성 경로는 QA/Security Agent의 개발·수정 순환과 분리한다. 이와 별도로 4번은 순환 안 Security 검증에 사용할 D1 기준과 `assess()`를 제공한다. 승인 파일 등록·Host 연결·Agent 내부 호출·A2A Artifact 포장은 1·2번(주호)의 담당이며, 4번은 판정 계약과 근거를 맞춘다. 보호 테스트를 순환 안에도 제공할지는 OPEN-16의 실험 정책에 따른다.
 
@@ -129,13 +129,13 @@ QA Agent의 요구사항 기반 독립 테스트와 팀의 공통 평가 테스�
 | run_browser_tests | workspaceId, snapshotId, testSuite | total/passed/failed, traceRefs, executionManifestId |
 | run_security_scan | workspaceId, snapshotId, scannerProfile | findings, reportRef, executionManifestId |
 
-개별 검사 결과는 reportRef/traceRefs에서 test ID·요구사항·기대/실제값·증거를 읽어 정규화한다(Unit 결과의 `testResult.tests[].testId/outcome/details`는 dev 26번 형식. 이 정규화 어댑터 자체는 아직 구현하지 않았다). 합계 숫자만으로 항목별 PASS를 만들지 않는다. skipped는 사전 승인된 적용 제외인지 NOT_RUN인지 판단한다. Manifest·보고서 누락은 검증 미완료다.
+개별 검사 결과는 reportRef/traceRefs에서 test ID·요구사항·기대/실제값·증거를 읽어 정규화한다(Unit 결과의 `testResult.tests[].testId/outcome/details`는 dev 26번 형식. 이 정규화는 `check_adapters.py`가 한다). 합계 숫자만으로 항목별 PASS를 만들지 않는다. skipped는 사전 승인된 적용 제외인지 NOT_RUN인지 판단한다. Manifest·보고서 누락은 검증 미완료다.
 
 MCP protocol error, isError=true인 도구 실행 오류, 정상 도구 실행 후 제품 FAIL을 구분한다. QA assertion 실패나 scanner finding 자체는 도구 장애가 아니다. testScope/testSuite/scannerProfile과 보안 HTTP·DB 재현 실행 경로, 보고서 세부 스키마는 2번과 확정한다.
 
 ### 5.3 평가 모듈 구성
 
-2026-10-17 기준 실제 모듈 구성은 다음과 같다. 상세 현황은 15.1절에 있다.
+2026-10-28 기준 실제 모듈 구성은 다음과 같다. 상세 현황은 15.1절에 있다.
 
 | 모듈 | 역할 | 상태 |
 |---|---|---|
@@ -147,8 +147,11 @@ MCP protocol error, isError=true인 도구 실행 오류, 정상 도구 실행 �
 | run_metrics.py | dev Run 조회 JSON → 지표(사건 시각 차이로 시간, 비용·토큰 미확인은 None), 구조별 요약(분모=전체 계획 Run), 비교 가능 여부 검사(모든 Run 대조) | 구현(합성 입력으로 검증) |
 | demo_index.py | 시연 자료 목록·해시(청크 단위), 누락 분류 표시, 알려진 비밀값 거부 | 구현 |
 | common.py | 두 모듈이 함께 쓰는 구조 이름·시각 파싱 | 구현 |
-| protected_tests/ | 회원가입 보호 테스트 | 예정 |
-| 결과 어댑터 | 컨테이너 결과 JSON → CheckResult 정규화 | dev 결과 형식은 확인 완료, 정규화 코드는 미구현 |
+| protected_tests/ | 회원가입 보호 테스트(D2): 순환 안 QA 5개 + 최종 전용 3개, 검사 대응표, dev 설정·평가 입력 생성, 팀장 전달 파일 내보내기 | 구현(합성 서비스로 검증) |
+| check_adapters.py | unittest-v1 보고서·정적 판정 결과 → CheckResult(결과 어댑터) | 구현 |
+| trace_checks.py | Run 기록의 비밀번호·해시 노출(REQ-006 Orchestrator 부분), 추적 연결(REQ-008) | 구현(dev 파이프라인 Run으로 검증) |
+| final_evaluation.py | 최종 독립 채점기(D5): Snapshot 확인·풀기 → 컨테이너 보호 테스트 + 정적 판정 → 보고서 | 구현(Snapshot 인계 경로 대기, 실제 컨테이너 미실행) |
+| summary.py | 회의·발표용 결과 요약(Markdown) | 구현 |
 | experiments/ | 실행 조건·반복 계획·그래프(지표 계산은 run_metrics.py가 담당) | 예정 |
 
 최종 finalVerdict 계산은 1번 Orchestrator가 담당한다. 4번은 독립 평가 결과와 판정 규칙 검증용 fixture를 제공한다.
@@ -210,9 +213,9 @@ MVP scenario_key는 SCN-001이다. 내부 scenario_id와 requirement_id는 Regis
 |---|---|---|
 | QA-SIGNUP-001 | 미가입 유효 이메일 + 8자 이상 비밀번호로 가입, DB/응답 확인 | 성공 응답, 사용자 1명 생성 |
 | QA-SIGNUP-002 | 형식 오류 이메일(@ 없음, 도메인 없음, 빈 값 등), 요청 전후 사용자 수 비교 | 실패 응답, DB 변화 없음 |
-| QA-SIGNUP-003 | 가입한 이메일을 대소문자·앞뒤 공백만 바꿔 재가입 | 실패 응답, 사용자 1명 유지 |
+| QA-SIGNUP-003 | 가입한 이메일을 대소문자·앞뒤 공백만 바꿔 재가입 | 4xx 거부, 사용자 1명 유지 |
 | QA-SIGNUP-004 | 7자 비밀번호 / 8자 비밀번호(시험용으로 실행 때 생성) | 7자 거부·미생성, 8자 성공 |
-| QA-SIGNUP-005 | 같은 canonical 이메일 동시 요청(N=5) | 정확히 1명 생성, 나머지 실패 |
+| QA-SIGNUP-005 | 같은 canonical 이메일 동시 요청(N=5) | 정확히 1명 생성, 나머지 4xx 거부 |
 | QA-SIGNUP-006 | 성공·형식 오류·중복 요청별 응답과 실제 DB 변화 대조 | 응답 성공/실패가 실제 처리와 일치 |
 
 0.3까지 쓰던 QA-SIGNUP-004/005(7자·8자 분리), 006-API/006-UI, 007(동시 요청) 키는 위 키로 재정의했다. 과거 결과를 새 키의 의미로 재해석하지 않는다. 화면(UI) 검사는 2차 기업미팅의 "다수 화면 테스트는 범위 밖"에 따라 MVP에서 뺐다.
@@ -237,9 +240,9 @@ MVP scenario_key는 SCN-001이다. 내부 scenario_id와 requirement_id는 Regis
 
 정적 검사(001·003·004)는 개발 순환 안 Security 판정(`security/assess.py`, dev 42번 승인 함수)으로 쓰고, 실행 검사(002·005)는 최종 독립 평가용이다. 0.3의 SEC-SIGNUP-004~007(SQL 삽입, 화면 스크립트, UI 우회 직접 API, 소스 비밀정보)은 위와 같이 확장 후보로 내렸다. 그래서 OPEN-12(이 항목들의 요구사항 연결)는 해소됐다.
 
-REQ-006 중 A2A Message/Artifact·Trace 노출은 Orchestrator 데이터이므로 위 표에서 제외하고 D4에서 별도로 확인할 계획이다. 이 노출 검사와 REQ-008의 요구→개발→검증→수정 연결 확인은 아직 미구현이며, 현재 D4의 사건 건수·시간 집계만으로 통과를 판정하지 않는다.
+REQ-006 중 Orchestrator 기록(Trace·Issue·Artifact·도구 시도·telemetry)의 노출은 위 표 밖에서 D4 `trace_checks.check_trace_exposure`가, REQ-008의 요구→개발→검증→수정→재검증 연결은 `check_traceability`가 확인한다. A2A Message 본문은 조회 API가 없어 보지 못한다.
 
-해시 세부 권장안은 Argon2id, m=19456 KiB, t=2, p=1, 라이브러리가 생성한 고유 salt와 encoded hash다(registry 값). 수치 규칙(이상/정확히 일치)은 OPEN-01에서 확정하며 지금 기준 JSON의 초안은 "이상"이다. 원문과 저장값이 다르다는 이유만으로 안전 판정하지 않는다.
+해시 세부 권장안은 Argon2id, m=19456 KiB, t=2, p=1, 라이브러리가 생성한 고유 salt와 encoded hash다(registry 값). 수치 규칙은 "이상"(AT_LEAST)으로 정했다(2026-10-28, 정의서 "최소 19 MiB"·"파라미터 충족"). 원문과 저장값이 다르다는 이유만으로 안전 판정하지 않는다.
 
 해시 검사는 격리된 검증 경로에서 수행하고 일반 결과에는 알고리즘·파라미터 충족 여부와 마스킹된 증거만 남긴다. 원문/해시를 증거에 복사하여 노출 검사를 통과했다고 보고하지 않는다.
 
@@ -509,7 +512,7 @@ experiment_type과 defect_origin(natural / injected)을 기록한다. 원본과 
 
 결함 중복은 시나리오·요구사항·원인·위치·재현 증상으로 판단하고 규칙을 기록한다. 줄 번호 변화만으로 새 결함으로 세지 않는다. 발견 수가 많다고 품질이 우수하다고 해석하지 않고 생성 결함·해결률·미해결 상태를 함께 본다.
 
-전체 경과시간과 Agent 누적 작업시간을 구분한다. 병렬 QA 10초·보안 10초를 전체 20초로 합산하지 않는다. 보고서의 `sourceRun.startedAt`은 Run 조회 응답의 `createdAt`이므로 `sourceRun.durationMs`는 생성~종료 시간이다. `run_metrics()`의 실행 시간은 `RUN_STARTED` 사건부터 계산하며 생성 후 대기시간이 제외될 수 있다. 사람 대기(`humanWaitMs`), 협업 전달·대기 시간, 모델 로딩·큐 대기 세부 지표는 아직 구현하지 않았고 `humanWaitMs`는 None이다. `/telemetry` 수집도 후속 작업이며, 계획 지표와 현재 계산하는 값은 15.1절에서 구분한다.
+전체 경과시간과 Agent 누적 작업시간을 구분한다. 병렬 QA 10초·보안 10초를 전체 20초로 합산하지 않는다. 보고서의 `sourceRun.startedAt`은 Run 조회 응답의 `createdAt`이므로 `sourceRun.durationMs`는 생성~종료 시간이다. `run_metrics()`의 실행 시간은 `RUN_STARTED` 사건부터 계산하며 생성 후 대기시간이 제외될 수 있다. 사람 대기(`humanWaitMs`)와 협업 시간(역할별 LLM·도구 시간, 전달 지연, 에이전트 활동·병렬 겹침·에이전트 밖 시간)은 `run_metrics.collaboration_metrics`가 `/events`의 사건 시각으로 계산한다(상태 변화 사건이 없거나 사건이 모자라면 None). 모델 로딩·큐 대기 세부 지표는 다루지 않는다.
 
 페이지 수집에서 API 호출이 예외를 내면 즉시 중단한다. 빈 페이지가 먼저 오면 받은 목록을 반환하고, 선언된 `eventsTotal`과 다르면 `EVENTS_INCOMPLETE`를 표시하여 시간 지표를 None으로 둔다. `eventsTotal` 자체가 없으면 `EVENTS_COMPLETENESS_UNKNOWN`을 표시하고 모든 사건 기반 시간을 None으로 둔다. 전체 사건 수가 확인되지 않은 자료에서 완전한 시간 지표를 만들지 않는다.
 
@@ -538,20 +541,20 @@ docs/evaluation/demo_materials.md         # 시연 자료 정리 방법
 src/evaluation/                           # 평가 모듈 (15.1)
 src/evaluation/contracts/                 # dev 공통 스키마 사본 + 독립 평가 보고서 스키마
 src/evaluation/security/                  # SCN-001 Security 정적 판정(D1)
-src/evaluation/protected_tests/membership/  # 회원가입 보호 테스트·fixture (예정)
-src/evaluation/protected_tests/document/    # 확장 시 추가
-src/evaluation/protected_tests/mystery_game/  # 확장 시 추가
-tests/evaluation/                         # 평가 모듈 자체 테스트(signup_examples.py = 정상·결함 예제, fixtures/ = 사람이 만든 회원가입 backend 표본)
-experiments/                              # 실험 설정·집계 절차 (예정)
+src/evaluation/protected_tests/           # 보호 테스트 묶음: suite.json(검사 대응표) + tests/signup/(연결부·QA·최종 전용 테스트)
+src/evaluation/protected_tests/tests/document/  # 확장 시 추가(전자문서)
+tests/evaluation/                         # 평가 모듈 자체 테스트(signup_examples.py = 정상·결함 예제, signup_service.py = 실행 시험용 합성 서비스,
+                                          #   fixtures/ = 서비스 웹페이지 backend 복사본·dev 파이프라인 Run 표본)
+experiments/                              # 실험 설정·집계 절차 (D6, 후순위)
 ```
 
 보호 테스트는 src/evaluation/protected_tests 아래에 둔다. 단, 실행 시에는 Agent 작업공간에서 보이거나 수정될 수 없는 위치에 넣어야 하며 그 방법은 2번과 정한다(OPEN-06). single_agent/multi_agent 실행 연결과 schemas/project·Registry는 담당 구현을 재사용한다. 가상환경·개인 IDE 설정·비밀정보·대용량 원시 증거는 커밋하지 않는다.
 
 최종 제출물은 명세, 요구사항-검사 표, 실제 검사 코드·fixture, 실행·초기화 안내, 스키마, 실제 보고서·증거, 수정 이력, 실험 설정·원본 측정값·집계 코드, 그래프·발표 사례다. 피드백 ID→변경 요구→반영 버전/커밋→재검증 결과의 이력도 남긴다.
 
-### 15.1 구현 현황 (2026-10-17)
+### 15.1 구현 현황 (2026-10-28)
 
-이 현황은 확정 정책이나 협의 상태를 바꾸지 않는다. 실제 서비스 검증 완료를 뜻하지 않으며, 모든 예시 출력과 시험은 합성 데이터다.
+이 현황은 확정 정책이나 협의 상태를 바꾸지 않는다. 실제 서비스 검증 완료를 뜻하지 않으며, 예시 출력과 시험은 합성 데이터와 dev 파이프라인 테스트가 만든 Run 기록이다.
 
 | 파일 | 구현 범위 |
 |---|---|
@@ -562,6 +565,11 @@ experiments/                              # 실험 설정·집계 절차 (예정
 | src/evaluation/security/ | SCN-001 Security 정적 판정(D1): 기준 JSON + dev 42번 `assess()`. REQ-003·005·006, Bandit 지원 규칙 판정, dev 승인 로더 통과 |
 | src/evaluation/run_metrics.py | dev Run 조회 JSON → 지표(수정 요청과 재검증 PASS로 확인된 해결을 구분), 구조별 요약(평가 보고서의 코드 버전이 Run의 최종 코드 버전과 같을 때만 수용), 비교 가능 여부 검사(평가 보고서의 환경 지문을 그 Run의 동결 환경과도 대조, warm-up 차이 경고), 페이지 조회 도우미 |
 | src/evaluation/demo_index.py | 시연 자료 목록과 SHA-256, 256MiB 이하 텍스트의 알려진 비밀값 검색. 파일별 `sensitiveScan`으로 검색 완료·생략 사유 구분. 일반 파일만 받고 파이프·소켓 등 특수 파일은 거부 |
+| src/evaluation/protected_tests/ | 회원가입 보호 테스트(D2) 8개와 검사 대응표 11개, dev 보호 파일 설정·보호 QA 케이스·최종 평가 입력 생성, 팀장 전달 파일 내보내기(`python -m evaluation.protected_tests export`) |
+| src/evaluation/check_adapters.py | unittest-v1 보고서·정적 판정 결과 → CheckResult. 보고서 없음·형식 오류·대응표 밖 줄은 모두 미검증 |
+| src/evaluation/trace_checks.py | Run 기록의 비밀번호·해시 노출(REQ-006 Orchestrator 부분), 요구→개발→검증→Issue→수정→재검증→판정 연결(REQ-008) |
+| src/evaluation/final_evaluation.py | 최종 독립 채점기(D5): Snapshot tar 해시·lock·이미지 확인, 안전한 풀기, 컨테이너 보호 테스트(dev 샌드박스와 같은 제한), 정적 판정, 독립 평가 보고서·증거 |
+| src/evaluation/summary.py | 회의·발표용 Markdown 요약(판정·요구사항별 결과·실패→수정→재검증 흐름·지표, 에이전트 자유 글 제외) |
 | src/evaluation/common.py | 구조 이름·시각 파싱 공통 도우미 |
 | src/evaluation/__main__.py, report_demo.py | 집계·보고서 합성 예시 |
 | tests/evaluation/ | 평가 모듈 자체 테스트(날짜·검증 대상별 결과는 development_progress.md 7절). 정상 1 + 결함 18 + 정상 변형 9 예제와 외부 점검 사례로 Security 판정 확인(`test_security_assess.py`), 입력 필드를 덮어쓰는 방법의 조합 시험(`test_security_overwrite_matrix.py`), 특정 큰 입력에서 제한 시간 안에 끝나는지 별도 프로세스로 확인(`test_security_limits.py`; 모든 입력의 선형 시간 복잡도를 증명하는 시험은 아님) |
@@ -570,7 +578,7 @@ experiments/                              # 실험 설정·집계 절차 (예정
 
 평가 코드와 테스트에는 파일 맨 위의 역할·용어 설명과 함수·처리 단계별로 초보자도 읽을 수 있는 한국어 주석을 달았다(2026-10-14, 주석만 추가했고 코드 구조(AST)는 같음을 확인했다).
 
-아직 하지 않은 것: 실제 생성물을 실행하는 보호 테스트(D2), 컨테이너 결과 어댑터, 최종 Snapshot 인계와 독립 채점기(D5), 실행 종료 후 자동 채점 연결, 평가 기록 저장, Registry·증거 진위 확인, 수정 전후 Regression 계산, Single 실행기와 실험 코드. D4에서는 A2A/Artifact/Trace의 비밀번호·해시 노출 검사, REQ-008의 연결 추적 확인, `/telemetry` 수집, 협업 전달·대기 시간과 사람 대기 계산이 남아 있다.
+아직 하지 않은 것: 실제 생성물로 돌린 보호 테스트, 최종 Snapshot 인계(받는 경로 미정)와 실제 컨테이너 실행, 실행 종료 후 자동 채점 연결, 평가 기록 저장, Single/Multi 비교(D6).
 
 ### 15.2 코드 검토에서 확인한 제약과 처리
 
@@ -582,6 +590,9 @@ experiments/                              # 실험 설정·집계 절차 (예정
 | 수정 완료 | 2026-10-17 전체 점검: 정규화 후 원문 복원·무관한 정규화 함수, 임의 이름의 logging 로거, 추가 필드 허용 응답 모델에서 보안 PASS | 반환·저장과 연결된 정규화만 인정하고 logging 생성·별칭을 추적. 추가 필드·직렬화·상속을 확인하지 못하는 응답 모델은 필터로 신뢰하지 않음 |
 | 수정 완료 | 2026-10-17 전체 점검: 승인 N/A 요구사항 분모, 선택 sourceRun 생략 시 놓친 결함 누락, 미측정 모델 호출 수 0 처리 | 적용 요구사항만 분모에 포함하고 실제 Run·확인된 필수 실패를 대조. modelCalls는 계획된 모든 Run의 측정이 있을 때만 합계, knownModelCalls·modelCallsComplete로 부분 합 구분 |
 | 수정 완료 | 2026-10-17 전체 점검: 많은 경고의 증거 JSON 한도 초과, 16MiB 초과 로그의 비밀값 검색 생략 | UTF-8 65,536바이트 안에서 경고 판정·근거를 함께 제한하고 omittedFindings 기록. 요구사항 근거만으로 넘치면 EVIDENCE_LIMIT_EXCEEDED·모두 UNVERIFIED. 텍스트는 256MiB 이하 모두 검색, 바이너리·비밀값 미제공은 sensitiveScan에 생략 이유 기록 |
+| 수정 완료 | 2026-10-28 D1: FastAPI 튜토리얼 방식 해시 도구가 모델의 같은 이름 칸 때문에 미검증, passlib Argon2가 FAIL | 클래스 속성 정의를 이름 덮어쓰기로 보지 않음, passlib Argon2 승인(설정·type·salt 판정), bcrypt 기본 컨텍스트는 FAIL. 새 사례 22개, 저장소 402묶음 판정 차이 0 |
+| 수정 완료 | 2026-10-28 외부 점검 후속: 시작 실패 앱의 거저 PASS, passlib category·펼친 인자 승인, 실행기 비정상 종료 결과 사용, 다른 Run 기록 수용, Trace Run 식별자·최종 버전 검증 미확인, Issue 요약만으로 재검증 인정, 요약의 "문제 없음" 추정 | lifespan 실행, UNVERIFIED 처리, 종료 코드·보고서 대조, runId·코드 버전 대조, 최종 버전 검증 사건 요구, 사건 기반 재검증, "판정 미확인" 표기. 회귀 검사 29개 |
+| 수정 완료 | 2026-10-28 D2 자체 점검: 경로 404·405·모든 입력 거부 서비스에서 거부 검사가 거저 PASS, 독립 로거 누락, 설명 글의 해시 형식 이름 오탐, 실패 메시지의 salt 값 | 연결 실패·전제 조건 실패는 미검증, 로거 재수집, 실제 해시 값 모양만 탐지, 값 없는 실패 메시지 |
 | 수정 완료 | confirmedFailureIds·unverifiedTestIds에 선택 검사가 섞이던 문제 | 2026-10-06 필수만 담고 선택은 optional… 필드로 분리 |
 | 수정 완료 | 가상환경 확인 테스트가 기본 pytest 대상이라 컨테이너에서 실패하던 문제 | 2026-10-06 `pytest.ini` testpaths를 tests로 변경 |
 | 수정 완료 | Manifest 불일치 시 통과율이 0.0으로 나오던 문제 | 2026-10-14 null로 바꾸고 검사별 errorCode를 MANIFEST_MISSING/MISMATCH로 기록 |
@@ -598,14 +609,14 @@ experiments/                              # 실험 설정·집계 절차 (예정
 | 수정 완료 | 외부 점검(2026-10-16)에서 찾은 "결함인데 PASS" 4건: ① `payload.password or ""`처럼 and·or가 비밀번호 값을 그대로 돌려주는데 True/False만 만든다고 본 문제 ② 입력 비밀번호가 아니라 변수에 담은 상수를 해시해도 통과 ③ 고정 salt(`salt=b"..."`)를 지정해도 통과 ④ `CREATE TABLE other (id INTEGER UNIQUE, email TEXT)`처럼 같은 줄의 다른 칸 UNIQUE를 이메일 중복 방지로 인정 | 2026-10-16 and·or의 피연산자를 따라감, 해시하는 값은 매개변수에서 나온 것이어야 하고(함수 호출은 해시되는 매개변수 자리에 입력이 들어갔는지 짝지어 확인) 아니면 UNVERIFIED, 고정 salt·8바이트 미만 `salt_len`은 FAIL(정책 `uniqueSalt`), `CREATE TABLE`을 칸별로 읽고 비밀번호 칸이 있는 사용자 표의 이메일 칸 자신의 UNIQUE만 인정(클래스·`Table(...)`도 같은 기준, `CREATE UNIQUE INDEX`는 대상 표 확인 필요) |
 | 수정 완료 | 위 점검의 연장으로 직접 찾아 막은 구멍: 계산만 하고 버리는 이메일 정리(`value.strip().lower()`), 평문이 저장되는 다른 길(`.values()`·`setattr`·`__dict__`·사전·SQL `execute`), 비밀번호가 나가는 다른 출구(`pprint`·`file.write`·헤더·쿠키·`locals()`·람다/안쪽 함수) | 2026-10-16 정리 결과가 쓰일 때만 인정, 저장 경로와 출구를 넓혀 같은 기준으로 판정. 회귀 시험 60개(정상 코드 오탐 방지 포함) |
 | 수정 완료 | 평가 보고서의 환경 지문(컨테이너 이미지 digest·의존성 lock 해시)을 그 Run의 동결 환경과 대조하지 않던 문제. 두 구조의 보고서가 같은 잘못된 환경을 적으면 발견하지 못했다 | 2026-10-15 어긋난 Run과 보고서가 `metadataMatches=false`로 밝힌 Run을 `RERUN_RUN`(해당 Run만 재평가, 비교 전체는 유효)으로 표시 |
-| 미해결 | wheel(배포 패키지)에 `security/scn001_security_criteria.json`이 들어가지 않는다. `assess()`는 기준을 요청으로 받아 실행 중에는 이 파일을 읽지 않지만, 이 파일이 기준의 원본이라 소스 없이 wheel만 받은 환경에서는 승인용 기준을 만들 원본이 없다. 소스 체크아웃에서는 영향이 없다. 포함하려면 루트 `pyproject.toml`의 package-data에 `security/*.json`을 더해야 한다 | 팀 공유 파일이라 수정하지 않았다. 주호 님(팀장) 승인 후 반영 |
-| 미해결 | 루트 `.python-version`(3.13)은 Git에 올리지 않았다. 저장소를 쓰는 모두의 uv가 고르는 Python 버전을 바꾸기 때문이다. 다른 컴퓨터에서는 `uv sync --frozen --python 3.13`으로 직접 지정해야 한다 | 팀 Python 통일(OPEN-15) 때 파일을 올릴지 `pyproject.toml`을 고칠지 정한다 |
+| 미해결 | wheel(배포 패키지)에 기준 JSON(`security/scn001_security_criteria.json`)과 보호 테스트 묶음(`protected_tests/suite.json`, `tests/signup/*.py`)이 들어가지 않는다. 실행 중에는 읽지 않거나(assess) 소스 체크아웃에서 읽으므로 영향이 없지만, 소스 없이 설치본만 전달하면 함께 배포되지 않는다 | 포함하려면 팀 공유 `pyproject.toml` 변경이 필요해 팀장 승인 후 |
+| 참고 | 팀 Python 버전은 `>=3.10`으로 선언돼 있다. 루트 `.python-version`(3.13)은 내 로컬 설정이라 Git에 올리지 않는다. 평가 코드·보호 테스트는 3.10에서도 동작한다. dev 승인 함수가 3.11 전용 속성을 쓰는 점은 1·2번에 전달한다 | — |
 | 참고 | 민감값 치환은 호출자가 알려 준 문자열만, 진단 필드에서만 수행한다. 검사 제목·suite 이름·findings·toolEvidence·context는 치환하지 않는다. | 호출자가 사전 정리 |
 | 참고 | `assess()`는 내부 오류를 모두 `None`(미검증)으로 돌려주고 원인을 남기지 않는다(dev 승인 계약상 로그·전역 상태를 쓰지 않음). | 이유 없이 모두 UNVERIFIED면 `evaluate()`를 직접 호출해 예외 확인 |
 | 참고 | D1 이름 판정은 설명 단어(text, name, key 등)가 낀 이름을 비밀번호 값이 아닌 것으로 본다. 그런 이름의 변수에 실제 비밀번호를 담아 출력하면 놓친다. 정적 분석은 호출 흐름·동시성·런타임 설정을 보지 않는다. | 실행 검사(SEC-SIGNUP-002·005)가 보완 |
 | 참고 | D1은 해시 결과를 담은 변수를 그 변수에 값이 묶이는 곳이 모두 `이름 = 해시 호출(...)`일 때만 따라간다. 분기에서 평문을 대입하거나 매개변수로 받은 변수, 이메일을 해시한 변수는 UNVERIFIED다. | 실제 생성물을 보고 조정 |
 | 참고 | `security/*.py`를 고치면 dev 승인 해시가 달라진다. 이번 수정도 새 승인 해시가 필요하다. | 승인은 코드를 동결한 뒤 |
-| 참고 | created_at은 3.10에서도 읽히도록 `datetime.fromisoformat` 기준이라 소수점 초 자릿수 등 일부 ISO 표기는 받지 못한다. 개발 환경은 Python 3.13이다(3.10은 dev 테스트와 Security 승인 함수가 실패, 3.14는 보안 승인 테스트 6개 실패). | "YYYY-MM-DDTHH:MM:SS+09:00" 형식 사용, 팀 Python 통일은 OPEN-15 |
+| 참고 | created_at은 3.10에서도 읽히도록 `datetime.fromisoformat` 기준이라 소수점 초 자릿수 등 일부 ISO 표기는 받지 못한다. | `YYYY-MM-DDTHH:MM:SS+09:00` 사용 |
 
 ## 16. 완료 조건과 자체 검증
 
@@ -624,16 +635,15 @@ experiments/                              # 실험 설정·집계 절차 (예정
 
 ## 17. 구현 순서와 현재 위치
 
-완료: 집계·Manifest·독립 평가 보고서·에이전트 호환 보고서, SCN-001 기준표(D0), Security 정적 판정(D1), 정상·결함 예제(D3), 결과 지표·비교 가능 여부 검사·시연 자료 목록(D4, 합성 입력), 공유 문서 3종.
+완료: 집계·Manifest·독립 평가 보고서·에이전트 호환 보고서, SCN-001 기준표(D0, 2026-10-28 결정 반영), Security 정적 판정(D1), 회원가입 보호 테스트와 결과 어댑터(D2, 합성 서비스로 검증), 정상·결함 예제(D3), 결과 지표·비교 가능 여부 검사·시연 자료 목록·Trace 노출·추적 검사·Regression 계산·협업 시간(D4, 합성 입력과 dev 파이프라인 테스트 Run), 최종 독립 채점기와 결과 요약(D5), 공유 문서 3종. 단 "구현"은 실제 연결 완료가 아니다: 실제 생성물·컨테이너 실행, 최종 Snapshot 인계·증거 보관, 버전별 평가에서 Regression 자동 산출, 노출 검사의 알려 준 비밀값 전달과 A2A Message 본문 수집은 아직 연결하지 않았다(development_progress.md 2절).
 
-남은 순서(팀장 카톡의 우선순위: 미팅 전에는 기준·준비, 실제 테스트와 비교는 미팅 이후):
+남은 순서(2차 기업미팅·10/22 자문: 실제 동작 우선, Single 비교 후순위):
 
-1. 19일 주 팀 회의: 보안 판정 기준과 합의 항목(OPEN-01·05·11·14~16)을 [share_security_criteria.md](share_security_criteria.md)로 논의.
-2. 팀이 시작 코드·생성물 API/DB 규격을 확정하면(세화 플랫폼 코드 채택 시 해당 표본 정보도 확인) 공통 QA·보안 평가 테스트(D2)를 연결부만 교체할 수 있게 작성하고, 일부러 고장 낸 버전(평문 저장, 7자 허용, 중복 허용)에서 FAIL을 잡는지 확인.
-3. 주호 님(팀장)에게 최종 Snapshot 인계 방법을 받아 독립 채점기(D5)를 만들고, 결과 → CheckResult 정규화 → 독립 평가 보고서까지 연결.
-4. 시연 실행 로그·생성 파일·화면을 팀장에게 받아 `demo_index.py`로 정리(12월 발표용).
-5. 파일럿 비용·시간으로 반복 횟수·예산을 정하고 Single 실행기 담당이 정해지면 Single/Multi 본 실험(D6). 여유가 되면 협업 과정 검증(10절).
-6. 확장 시나리오와 발표 자료 보완.
+1. 팀장 결정: 시작 코드(승인 저장소·커밋)와 플랫폼 표본 채택, 최종 Snapshot 소스·Manifest 인계 경로와 종료 후 실행 권한, 승인 등록·Host 연결 시점, wheel 포함 여부(OPEN-14).
+2. 시작 코드가 정해지면 D2 연결부(`signup_link.py`)만 맞추고, 순환 안 보호 케이스·보호 파일 설정을 Host 설정에 넣도록 팀장에게 전달.
+3. D5 연결: 인계받은 Snapshot tar·Manifest·이미지로 `evaluate_final_snapshot`을 실제 컨테이너에서 한 번 돌려 확인.
+4. 실제 Run으로 D4 검증, 시연 실행 로그·생성 파일·화면을 `demo_index.py`로 정리(12월 발표용).
+5. 후순위: Single 실행 경로 협의(담당 4번, dev 45번 §7)와 Single/Multi 본 실험(D6), 확장 시나리오.
 
 명세는 팀 검수용 초안이며, 구현 범위는 15.1절과 같다. 실제 서비스 검증·자동 채점 연결·비교 실험은 후속 작업이고 합성 예시는 실행 성공 증거가 아니다.
 
@@ -643,22 +653,22 @@ experiments/                              # 실험 설정·집계 절차 (예정
 
 | ID | 미정 결정 | 연결 담당 |
 |---|---|---|
-| OPEN-01 | Argon2id 수치 규칙(이상/정확히 일치, 기준 JSON 초안은 이상)·이메일 정규화 권장안 채택, 파서·길이·최대값·빈값 세부 정책 | 전원·3번 |
+| OPEN-01 | (대부분 해소, 2026-10-28) 이메일 정규화는 정의서·dev `emailPolicy`로 이미 결정, Argon2 수치 값도 결정, 비교 규칙은 "이상"으로 4번 결정. 남은 것: 생성물 이메일 파서 종류(평가는 어떤 파서에서도 형식 오류인 값만 써서 영향 없음) | 3번(채택 시) |
 | OPEN-02 | 생성물 API/DB/화면 계약, 동시 요청 수·동기화·정리, 조회 권한 | 팀 협의. 플랫폼 코드를 채택할 경우 3번의 표본 정보 확인 |
 | OPEN-03 | 평가 전용 report/test/evidence/experiment ID 생성·Registry 매핑, snapshotId 관계, payload 스키마 | 1·2번 |
 | OPEN-04 | 혼합 FAIL/UNVERIFIED 최종 우선순위, finalVerdict 키 통일, 한도 소진·취소 공통 상태 전이 | 1번 |
-| OPEN-05 | MEDIUM 추가 차단, 반복 Issue 자동 인계 조건, fingerprint의 원인/위치 정규화 | 1·2번 |
+| OPEN-05 | MEDIUM 판정 방법은 정의서 1절대로 하고 명시 요구 위반은 차단(해소). 남은 것: 그 밖의 MEDIUM 추가 차단(정의서 10-3 팀 미결정), 반복 Issue 자동 인계 조건, fingerprint 위치 정규화 | 1·2번 |
 | OPEN-06 | testScope/testSuite/scannerProfile·개별 report 계약, Security HTTP/DB 재현 도구 | 2번 |
 | OPEN-07 | 계획·미시작·수락 전 거부·취소 Run 표시, Verified Rate 전체 Run 분모, 중첩 대기 집계 | 1번·4번 |
 | OPEN-08 | CPU/Memory/PID/timeout/출력 및 총시간 예산, 의존성 준비, Single 실행 진입점 | 1·2번 |
 | OPEN-09 | 모델 lock·실험 횟수·실행 순서·단가·비용 예산 | 전원 |
 | OPEN-10 | 증거 공유·접근·보존, 확장 시나리오 채택·상세 검사 | 전원 |
-| OPEN-11 | 최종 독립 평가 운영 확정: 모든 종료 상태 채점, 중간 버전 기록, A/B/B′에 따른 순환용·최종용 시험지 분리와 최종 결과 공개 범위(4.1절, OPEN-16과 함께 결정) | 전원 |
+| OPEN-11 | 최종 독립 평가 운영: 모든 종료 상태 채점, 중간 버전 기록(Regression 계산에 필요). 시험지는 순환 안(QA 5개)과 최종 전용(동시 가입·해시 저장값·노출 3개)으로 나눔(2026-10-28 구현) | 전원 |
 | OPEN-12 | (해소) 0.3의 SEC-SIGNUP-004~007은 8.1절에서 확장 후보로 내리고 REQ-003·005·006 검사로 재정의 | — |
 | OPEN-13 | 에이전트 호환 경로에서 "도구 정상 종료 + 결과 파싱 실패" 기록 방식 | 1번·2번 |
-| OPEN-14 | 생성물 규격(시작 코드·API·DB·로그 위치·의존성), 최종 Snapshot 소스 인계 방법과 종료 후 실행 권한, Single 실행기 담당 | 1·2번(주호), 3번(세화) |
-| OPEN-15 | 팀 Python 버전을 3.13으로 통일(3.10은 dev 테스트·Security 승인 함수 실패). `pyproject.toml`의 `>=3.10`과 루트 `.python-version`은 팀 전체에 영향을 주는 파일이라 아직 바꾸거나 올리지 않았다(그동안은 `uv sync --frozen --python 3.13`) | 전원 |
-| OPEN-16 | 보호 테스트 위치(10/12 논의 기록: B로 평가하고 A로도 실행해 비교, B′ 추가 제안)와 held-out 시험지 | 주호(팀장)·4번 |
+| OPEN-14 | 시작 코드(승인 저장소·커밋)와 플랫폼 표본 채택, 최종 Snapshot 소스 인계 방법과 종료 후 실행 권한. 연결 방식(임시 DB·`get_db` 교체)·로그 수집은 4번이 정해 구현, Single 담당은 4번(dev 45번 §7)이고 실행 경로(`architecture` 확장)만 협의 | 1·2번(주호) |
+| OPEN-15 | (해소, 2026-10-28) 팀 선언은 `>=3.10`(`pyproject.toml`, README, dev 45·46번). 3.13 통일 안건 철회. dev 승인 함수의 3.11 전용 속성 사용은 1·2번에 버그로 전달 | — |
+| OPEN-16 | (해소) B(순환 안)로 진행(2026-10-12 팀장 합의). A 비교는 시간 여유가 있을 때 | — |
 
 3번의 플랫폼 구현(sehwa-dev)을 시작 코드나 참고 예제로 채택할 때는 개발정의서와의 차이를 OPEN-01·02·14에서 함께 정한다. 플랫폼 자체를 생성물의 정답으로 간주하지 않는다. 이메일 앞뒤 공백(정의서는 제거 후 비교, 구현은 형식 오류로 거부), 별도 canonical_email 컬럼(구현은 email을 소문자로 저장해 UNIQUE 적용), Argon2 수치(정의서 m=19456·t=2·p=1, 구현은 pwdlib 기본값), 동시 가입 시 기대 응답 코드, 테스트 DB 경로 분리·초기화·로그 수집 방법이다.
 
@@ -694,3 +704,4 @@ experiments/                              # 실험 설정·집계 절차 (예정
 | 2026-10-09 | 2차 기업미팅·팀장 오더(실행 정보 연결)에 따라 독립 평가 보고서에 sourceRun 추가 | 보고서·스키마 필드 추가 |
 | 2026-10-14 | 기준표·Security 정적 판정·결과 지표·시연 자료 목록·공유 문서 추가, 검수 수정(D1 오탐·미탐, 통과율 null, missedDefect, 비교 가능 검사 순서 의존) 반영, 명세 0.4로 갱신 | 확정 정책 유지, OPEN 항목 갱신 |
 | 2026-10-17 | 전체 점검의 보안·지표·증거 크기·시연 자료 오류와 배포 기준 누락 수정, SEC-SIGNUP-002 입력 비밀번호 verify 조건 추가, 담당·순환 경계·미구현 범위·시간 시작점·과거 검증 기록 설명 정정 | 기준 강화와 구현 정합화. 실제 생성물 실행·Single/Multi 비교 미완료 상태 유지 |
+| 2026-10-28 | 개발정의서·기업 미팅·dev 정책 대조로 결정 사항 반영(OPEN-01·15·16 해소, OPEN-05·11·14 축소), D2 보호 테스트·결과 어댑터, D4 Trace 검사·Regression·협업 시간, D5 최종 채점기·요약, D1 해시 도구 인식 보강. 담당 간 계약·모듈 구성·구현 현황·제약 갱신 | 실제 생성물·실제 Run·실제 컨테이너 실행은 아직. Snapshot 인계 경로는 팀장 결정 대기 |

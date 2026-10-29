@@ -1,6 +1,6 @@
 # Single-Agent 비교 기준선 (D6, 팀 공유·논의용)
 
-작성: 2026-10-14 · 갱신: 2026-10-17 · 4번(강석민) · 상태: **설계 초안. 실행기가 없어 실제 비교는 아직 불가**
+작성: 2026-10-14 · 갱신: 2026-10-28 · 4번(강석민) · 상태: **설계 초안. 담당은 4번, Single 실행 경로가 없어 실제 비교는 아직 불가**
 근거: 개발정의서 11-A, 기업질의응답(Q75~80), 2차 기업미팅 11~12절, dev `run_configuration.py`·`telemetry_store.py`, [evaluation_spec.md](evaluation_spec.md) 13절.
 
 ## 1. 우선순위와 범위
@@ -65,12 +65,12 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 | 시간 | wall clock(시작~판정 시각). 병렬 Step 합산 금지, 사람 대기는 `human_wait_ms`로 분리 | `/events`의 `RUN_STARTED`·`BUILD_PASSED`·`VERDICT_CREATED`·`RUN_FINISHED`/`RUN_ABORTED` 시각 차이(`run_metrics.py`). `createdAt`~`updatedAt`은 근사값 |
 | LLM 호출·토큰 | 전체 호출 수, 입력·출력 토큰 | `/usage`의 `summary.modelCalls`, `knownTotalTokens`, `totalTokens`(불완전하면 null) |
 | 비용 | 전체 비용. **누락은 0원이 아니라 unknown** | `summary.costUsd`(완전할 때만), `knownCostUsd`(부분 합), `costComplete` |
-| Regression | 수정으로 새로 실패한 공통 테스트 수 | 수정 전후 독립 평가 보고서 비교(버전별 평가는 기록만 하고 순환에 전달하지 않음) |
-| 협업 오버헤드 | Multi의 Agent 간 전달·대기 시간 | `/telemetry`(Single에는 해당 없음, 비교는 총시간으로) |
+| Regression | 수정으로 새로 실패한 공통 테스트 수 | 코드 버전별 독립 평가 보고서를 `run_metrics.regression_from_reports`로 비교(같은 Run·같은 보호 묶음만, 버전별 평가는 기록만 하고 순환에 전달하지 않음) |
+| 협업 오버헤드 | Multi의 Agent 간 전달·대기 시간 | `/events`의 사건 시각으로 `run_metrics.collaboration_metrics`가 계산: 전달 지연, 에이전트 활동·병렬 겹침·에이전트 밖 시간, 사람 대기(Single에는 해당 없음, 비교는 총시간으로) |
 
 `/usage.summary`는 Run 전체 요약이므로 페이지의 record를 다시 더하지 않는다. `costUsd=null`과 미측정 모델 호출 수를 0으로 쓰지 않는다. 구조별 모델 호출 합계 `modelCalls`는 모든 대상 Run의 측정이 있을 때만 표시하고, 확인된 부분 합은 `knownModelCalls`, 완전성은 `modelCallsComplete`로 구분한다. `HUMAN_REVIEW`는 재개될 수 있어 영구 종료로 일괄 처리하지 않는다. Orchestrator SUCCESS인데 독립 평가의 필수 실패가 확인된 Run 수는 두 구조의 "자체 성공" 신뢰도를 비교하는 보조 지표다. 이 값은 실제 연결한 Run과 평가 결과로 계산하며 선택 항목 `sourceRun` 생략에 영향받지 않는다.
 
-위 표는 측정 계획을 포함한다. 현재 `/telemetry` 수집·협업 전달 및 대기 시간·사람 대기 시간·Regression 계산은 미구현이다. 보고서의 `sourceRun.durationMs`는 Run 생성~종료 시간이고, `run_metrics()`의 시간은 RUN_STARTED 사건부터 계산한다. 사건 수가 누락되거나 불일치하면 사건 기반 시간은 None으로 남긴다.
+위 표의 계산은 모두 구현했다(합성 입력과 dev 파이프라인 테스트 Run으로 확인). 구현과 실제 자동 산출은 다르다: Regression은 버전별 Snapshot을 받아 D5로 채점한 보고서가 있어야 하는데, Snapshot 인계 경로가 정해지지 않아 아직 실행 결과에서 자동으로 나오지 않는다. 보고서의 `sourceRun.durationMs`는 Run 생성~종료 시간이고, `run_metrics()`의 시간은 RUN_STARTED 사건부터 계산한다. 사건 수가 누락되거나 불일치하면 사건 기반 시간은 None으로 남긴다.
 
 ## 6. 비교가 무효가 되는 경우 (개발정의서 11-A)
 
@@ -99,13 +99,13 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 
 | 막힌 것 | 필요한 결정·작업 | 담당 논의 |
 |---|---|---|
-| Single 실행기가 없음. `architecture`가 `MULTI_AGENT`만 허용 | 누가 만들지, 기존 Multi 구현 일부를 단일 구조로 바꾸는 방법을 쓸지(기업 미팅의 제안) | 주호(팀장)·석민 |
-| 시작 코드 미정(owned-source 미설정) | 승인 저장소·commit, 최소 실행 샘플 | 주호(팀장)·세화·석민 |
-| 보호 테스트 위치 | A / B / B′ 선택, held-out 필요 여부 | 주호(팀장) |
+| Single 실행기가 없음. `architecture`가 `MULTI_AGENT`만 허용 | 담당은 4번(dev 45번 §7 "Single-Agent 기준선은 역할 4 범위", 개발계획). 실행 경로(`architecture` 확장 또는 기존 Multi 구현 일부를 단일 구조로 바꾸는 방법, 기업 미팅 제안)는 1·2번 코드라 협의 필요 | 주호(팀장)·석민 |
+| 시작 코드 미정(owned-source 미설정) | 서비스 웹페이지 저장소의 특정 커밋인지 회원가입 자리만 비운 별도 틀인지, 승인 커밋. Single·Multi는 같은 시작 Commit에서 출발해야 한다(정의서 11-A) | 주호(팀장) |
+| 보호 테스트 위치 | (결정) B(순환 안)로 진행, A 비교는 시간 여유가 있을 때. 순환 안 QA 5개·최종 전용 3개로 나눠 구현(2026-10-28) | — |
 | 실험 예산·모델·가격표 | 모델 lock, 단가, 한도, 반복 횟수 | 전원 |
 | 최종 Snapshot 인계 | 소스 접근·Manifest·권한 | 주호(팀장) |
 
 ## 9. 4번이 먼저 해 둘 수 있는 것
 
-- 완료: 통제 조건 비교, 지표 변환, 구조별 요약(`run_metrics.py`). 남음: 수정 전후 Regression 계산(버전별 평가 기록이 필요), 실제 Run으로 검증.
+- 완료(구현): 통제 조건 비교, 지표 변환, 구조별 요약, 협업 시간(시도·재개 구간별), Regression 계산과 버전별 보고서 연결(`run_metrics.py`), 최종 독립 채점기(`final_evaluation.py`). 남음: Single 실행 경로(1·2번 코드 협의), 버전별 Snapshot 인계와 평가 기록, 실제 Run으로 검증.
 - 실제 Run이 없으므로 합성 데이터 결과는 실험 결과로 쓰지 않는다.

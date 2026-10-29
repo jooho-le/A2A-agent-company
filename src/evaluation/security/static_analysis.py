@@ -26,9 +26,9 @@ import re  # 정규식(글자 모양 규칙) 도구
 
 PASS, FAIL, UNVERIFIED = 'PASS', 'FAIL', 'UNVERIFIED'  # 판정 결과 세 가지의 이름(오타를 막으려고 변수로 만들어 둠)
 MAX_OBSERVATIONS = 20  # 근거 기록을 한 판정에 최대 몇 개까지 남길지(너무 길어지지 않게)
+MIN_SALT_BYTES = 8  # Argon2(RFC 9106)가 허용하는 salt의 최소 길이(바이트). 이보다 짧게 지정하면 salt를 고유하게 만들 수 없다.
 # 값을 직접 보여 주지 않고 길이·형식만 알려 주는 함수들. 인자로 비밀번호 변수를 넣어도 "노출"로 보지 않는다.
 # 예: len(password)는 비밀번호의 길이만 알려 주고 비밀번호 자체는 드러내지 않는다.
-MIN_SALT_BYTES = 8  # Argon2(RFC 9106)가 허용하는 salt의 최소 길이(바이트). 이보다 짧게 지정하면 salt를 고유하게 만들 수 없다.
 SAFE_CALLS = frozenset({'len', 'bool', 'type', 'isinstance', 'id', 'hasattr'})
 # 객체가 가진 "모든 필드를 한꺼번에" 꺼내는 함수들. 비밀번호 필드가 있는 객체에 쓰면 비밀번호도 함께 나온다.
 DUMP_METHODS = frozenset({'model_dump', 'dict', 'json', 'model_dump_json', 'copy', 'model_copy'})
@@ -435,7 +435,10 @@ def check_password_storage(modules, criteria, policy):
     # 해시 경로를 판정할 때 쓰는 확인된 사실들: 믿을 수 있는 프로젝트 함수(재대입·데코레이터 등으로 바뀔 수 있는 함수는 뺀다),
     # 승인한 Argon2 해시 도구를 담은 변수 이름, 진짜 무작위 값을 만드는 호출 등
     ctx = _hash_context(modules, rules)
-    hashers = ctx.hashers
+    project_names = _project_names(modules)
+    passlib_using = {f'{handler}.using' for handler in rules.get('passlibHandlers', ())}
+    passlib_approved = tuple(f'{handler}.' for handler in rules.get('passlibHandlers', ()))  # passlib.hash.argon2.hash 등
+    bad_contexts = _unapproved_contexts(modules, rules)  # bcrypt 등을 기본으로 쓰는 CryptContext 이름들
     module_constants = {path: _module_constants(module.tree, module.bindings) for path, module in modules.items()}  # 파일별 상수표
     module_literals = {path: _module_literal_names(module.tree, module.bindings) for path, module in modules.items()}  # 파일별 "고정 글자" 상수표
     enclosing = {path: _enclosing_functions(module.tree) for path, module in modules.items()}  # 코드 조각 → 그것이 든 함수
@@ -453,14 +456,36 @@ def check_password_storage(modules, criteria, policy):
             configs.append((module, call, dict(rules['profiles'][profile]) if profile in rules['profiles'] else None))
         elif name in rules['defaultFactories']:
             configs.append((module, call, dict(defaults)))  # 라이브러리 기본 설정을 쓰는 호출
+        elif name in passlib_using and name.split('.')[0] not in project_names:
+            # passlib: argon2.using(memory_cost=..., rounds=...) 로 설정을 정한 Argon2 해시 도구
+            params, failed = _passlib_parameters(call, 'using', defaults, constants, module, rules)
+            configs.append((module, call, params))
+            fails.extend(failed)
+        elif name in rules.get('passlibContexts', ()) and name.split('.')[0] not in project_names \
+                and _passlib_scheme(call) == 'argon2':
+            # passlib: CryptContext(schemes=["argon2"], argon2__memory_cost=...) — 기본 방식이 argon2인 컨텍스트
+            params, failed = _passlib_parameters(call, 'context', defaults, constants, module, rules)
+            configs.append((module, call, params))
+            fails.extend(failed)
+        elif name.startswith(passlib_approved) and name.endswith('.hash') and isinstance(call.func, ast.Attribute) \
+                and isinstance(call.func.value, ast.Name) and _hasher_reference(call.func.value, ctx):
+            configs.append((module, call, dict(defaults)))  # from passlib.hash import argon2 → argon2.hash(...): 기본 설정
         elif name in rules['forbiddenHashCalls'] and sensitive_refs(call, matcher):
             # md5·sha256처럼 비밀번호 저장에 쓰면 안 되는 빠른 해시에 비밀번호를 넣었다 → 위반
             fails.append(_obs(module, call, 'WEAK_HASH_OF_PASSWORD', function=name))
-        elif name.startswith(tuple(rules['unapprovedHasherPrefixes'])) and sensitive_refs(call, matcher):
-            # 승인되지 않은 해시 라이브러리(예: bcrypt, passlib)에 비밀번호를 넣었다 → 위반
+        elif name.startswith(tuple(rules['unapprovedHasherPrefixes'])) and not name.startswith(passlib_approved) \
+                and sensitive_refs(call, matcher):
+            # 승인되지 않은 해시 라이브러리(예: bcrypt, passlib의 argon2 외 방식)에 비밀번호를 넣었다 → 위반
             fails.append(_obs(module, call, 'UNAPPROVED_HASHER', function=name))
+        if isinstance(call.func, ast.Attribute) and call.func.attr == 'hash' and sensitive_refs(call, matcher):
+            scheme = next((keyword.value for keyword in call.keywords if keyword.arg == 'scheme'), None)
+            if terminal_name(call.func.value) in bad_contexts:
+                # CryptContext(schemes=["bcrypt"]) 처럼 argon2가 아닌 방식이 기본인 컨텍스트로 비밀번호를 해시했다 → 위반
+                fails.append(_obs(module, call, 'UNAPPROVED_HASHER', function='passlib.context.CryptContext'))
+            elif _hasher_reference(call.func.value, ctx) and isinstance(scheme, ast.Constant) and scheme.value != 'argon2':
+                fails.append(_obs(module, call, 'UNAPPROVED_HASHER', function='scheme=' + str(scheme.value)))
         # 승인한 해시 도구의 hash()에 고정된 salt를 넘기면, 같은 비밀번호가 늘 같은 해시가 되어 salt의 의미가 없다 → 위반
-        if isinstance(call.func, ast.Attribute) and call.func.attr == 'hash' and terminal_name(call.func.value) in hashers:
+        if isinstance(call.func, ast.Attribute) and call.func.attr == 'hash' and _hasher_reference(call.func.value, ctx):
             salt = _salt_argument(call)
             if policy.get('uniqueSalt', True) and salt is not None and _is_fixed_value(salt, module_literals[module.path]):
                 fails.append(_obs(module, call, 'FIXED_SALT'))  # 시나리오 정책이 "고유 salt"(uniqueSalt)를 요구한다.
@@ -505,6 +530,7 @@ def check_password_storage(modules, criteria, policy):
                 elif keyword.arg and isinstance(keyword.value, (ast.Name, ast.Attribute, ast.Subscript)) \
                         and matcher.search(terminal_name(keyword.value) or '') and not _hash_like_name(terminal_name(keyword.value) or ''):
                     # 칸 이름이 password_hash 같은 알려진 이름이 아니어도(예: User(pw=payload.password)) 비밀번호 원문을 넣으면 평문 저장이다.
+                    # (넣는 값의 이름에 hash·digest가 들어 있으면 해시일 수 있어서 원문으로 단정하지 않는다.)
                     fails.append(_obs(module, keyword.value, 'PLAINTEXT_STORAGE', field=keyword.arg))
     # 객체의 칸에 값을 직접 대입하는 코드도 살펴본다. 예) user.password_hash = ...
     # 사전으로 칸 값을 정하는 코드도 같다. 예) row = {"password_hash": ...} / row["password_hash"] = ...
@@ -634,7 +660,7 @@ def _classify_storage(module, value, field_name, ctx, rules, matcher, fails, sto
         stored.append(_obs(module, value, 'STORED_VIA_HASH', field=field_name))
         return
     if isinstance(value, (ast.Name, ast.Attribute, ast.Subscript)):
-        # 변수나 항목을 그대로 저장하는 경우. 이름이 비밀번호처럼 보이는데 hash가 들어 있지 않으면 원문 저장이다.
+        # 변수나 항목을 그대로 저장하는 경우. 이름이 비밀번호처럼 보이는데 hash·digest가 들어 있지 않으면 원문 저장이다(_hash_like_name).
         name = terminal_name(value) or ''
         if matcher.search(name) and not _hash_like_name(name):
             fails.append(_obs(module, value, 'PLAINTEXT_STORAGE', field=field_name))
@@ -686,22 +712,153 @@ def _is_hashed_variable(name, scope, ctx, matcher):
     return True
 
 
-def _is_approved_hasher_factory(call, module, rules):
+def _is_approved_hasher_factory(call, module, rules, project_names=frozenset()):
     # 이 호출이 "승인한 Argon2 해시 도구를 만드는 호출"인가?
     #   - argon2.PasswordHasher(...), pwdlib의 Argon2Hasher(...) 같은 생성자
     #   - PasswordHasher.from_parameters(...), PasswordHash.recommended() 같은 기본 설정 도구
     #   - PasswordHash((Argon2Hasher(),)) 처럼 해시 도구를 감싸는 호출. 감싼 도구 중 "첫 번째"가 승인된 도구일 때만 인정한다.
     #     (pwdlib은 목록의 첫 번째 도구로 해시를 만들기 때문이다.)
+    #   - passlib: argon2.using(...), CryptContext(schemes=["argon2", ...]) 처럼 기본 방식이 argon2인 컨텍스트
+    # 프로젝트에 라이브러리와 같은 이름의 파일·폴더(argon2.py 등)가 있으면 진짜 라이브러리라고 믿을 수 없어 인정하지 않는다.
     name = qualname(call.func, module.aliases) or ''
+    if name.split('.')[0] in project_names:
+        return False
     if name in rules['constructors'] or name in rules['defaultFactories']:
         return True
     if name.endswith('PasswordHasher.from_parameters') and name.startswith('argon2'):
         return True
+    if name in {f'{handler}.using' for handler in rules.get('passlibHandlers', ())}:
+        return True
+    if name in rules.get('passlibContexts', ()):
+        return _passlib_scheme(call) == 'argon2'
     if name in rules.get('hasherWrappers', ()):
         first = call.args[0] if call.args else None
         if isinstance(first, (ast.Tuple, ast.List)) and first.elts and isinstance(first.elts[0], ast.Call):
-            return _is_approved_hasher_factory(first.elts[0], module, rules)
+            return _is_approved_hasher_factory(first.elts[0], module, rules, project_names)
     return False
+
+
+def _passlib_scheme(call):
+    # passlib CryptContext(...)가 새 해시에 쓰는 방식 이름. default=가 있으면 그것, 없으면 schemes의 첫 번째다
+    # (schemes는 목록이나 "argon2,bcrypt" 같은 쉼표 글자). 글자로 확정할 수 없으면 None.
+    if any(isinstance(arg, ast.Starred) for arg in call.args) or any(keyword.arg is None for keyword in call.keywords):
+        return None
+    keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+    chosen = keywords.get('default')
+    if chosen is None:
+        schemes = keywords.get('schemes', call.args[0] if call.args else None)
+        if isinstance(schemes, (ast.List, ast.Tuple)):
+            chosen = schemes.elts[0] if schemes.elts else None
+        elif isinstance(schemes, ast.Constant) and isinstance(schemes.value, str):
+            return schemes.value.split(',')[0].strip() or None
+    if isinstance(chosen, ast.Constant) and isinstance(chosen.value, str):
+        return chosen.value.strip() or None
+    return None
+
+
+def _passlib_parameters(call, kind, defaults, constants, module, rules):
+    # passlib Argon2의 설정 숫자를 읽는다. kind="using"이면 argon2.using(...)의 이름 붙은 인자,
+    # kind="context"이면 CryptContext(...)의 "argon2__설정" 인자를 읽는다. 돌려주는 값: (설정 사전 또는 None, 위반 목록)
+    #   rounds·time_cost·default_rounds → time_cost, memory_cost, parallelism (안 적으면 라이브러리 기본값)
+    #   type이 id가 아니면 위반, salt를 정하면(모든 해시가 같은 salt) 위반, salt_size가 8바이트 미만이면 위반
+    #   모르는 설정·숫자가 아닌 값·**설정·all__ 설정은 결과를 바꿀 수 있어서 확인 불가(None)
+    if (kind == 'using' and call.args) or any(keyword.arg is None for keyword in call.keywords):
+        return None, []  # 위치 인자·**설정은 어느 설정인지 확정할 수 없다.
+    mapping, ignored = rules['passlibParameters'], set(rules['passlibIgnoredSettings'])
+    given, failed = {}, []
+    for keyword in call.keywords:
+        key = keyword.arg
+        if kind == 'context':
+            if key.startswith('all__') or key.count('__') > 1:
+                # category별 설정은 기본 argon2 설정을 덮어쓴다. 지원하지 않는 정책은 증명 불가다.
+                return None, failed
+            if not key.startswith('argon2__'):
+                continue  # schemes·default·deprecated·다른 방식의 설정
+            key = key[len('argon2__'):]
+        if key in ('salt_size', 'salt_len'):
+            size = _int_value(keyword.value, constants)
+            if size is None:
+                return None, failed
+            if size < MIN_SALT_BYTES:
+                failed.append(_obs(module, call, 'SALT_TOO_SHORT', actual=size, required=MIN_SALT_BYTES))
+        elif key == 'salt':
+            failed.append(_obs(module, call, 'FIXED_SALT'))  # 설정에 넣은 salt는 모든 비밀번호에 같은 값으로 쓰인다.
+        elif key == 'type':
+            value = keyword.value
+            if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                return None, failed
+            if value.value not in rules['passlibArgon2idTypes']:
+                failed.append(_obs(module, call, 'NOT_ARGON2ID_TYPE'))
+        elif key in mapping:
+            if mapping[key] in given:
+                return None, failed  # 같은 설정을 두 이름으로 적으면 어느 값이 쓰이는지 단정하지 않는다.
+            value = _int_value(keyword.value, constants)
+            if value is None:
+                return None, failed
+            given[mapping[key]] = value
+        elif key not in ignored:
+            return None, failed
+    return {key: given.get(key, defaults[key]) for key in ('time_cost', 'memory_cost', 'parallelism')}, failed
+
+
+def _hasher_reference(node, ctx):
+    # X.hash(...)의 X가 승인한 해시 도구인가? 이름 하나(X)이면 클래스 속성을 뺀 묶임으로, 속성(self.X 등)이면 모든 묶임으로 따진다.
+    if isinstance(node, ast.Name):
+        return node.id in ctx.name_hashers
+    return terminal_name(node) in ctx.hashers
+
+
+def _approved_hash_call(call, ctx):
+    # call이 승인한 해시 도구의 hash() 호출인가? passlib 컨텍스트에 scheme=으로 다른 방식을 고르면 아니다.
+    if not (isinstance(call.func, ast.Attribute) and call.func.attr == 'hash' and _hasher_reference(call.func.value, ctx)):
+        return False
+    # category 또는 펼친 키워드가 실제 정책을 바꿀 수 있으므로 기본 정책으로 승인하지 않는다.
+    if any(keyword.arg in (None, 'category') for keyword in call.keywords):
+        return False
+    scheme = next((keyword.value for keyword in call.keywords if keyword.arg == 'scheme'), None)
+    return scheme is None or (isinstance(scheme, ast.Constant) and scheme.value == 'argon2')
+
+
+def _hashed_argument(call):
+    # hash() 호출에서 해시하는 값. 첫 번째 인자 또는 password=(argon2·pwdlib)·secret=(passlib)으로 넘긴 값.
+    if call.args:
+        return call.args[0]
+    return next((keyword.value for keyword in call.keywords if keyword.arg in ('password', 'secret')), None)
+
+
+def _unapproved_contexts(modules, rules):
+    # 묶이는 곳이 모두 "argon2가 아닌 방식(bcrypt 등)을 기본으로 쓰는 passlib CryptContext"인 이름들.
+    # 이런 이름의 hash()에 비밀번호를 넣으면 승인하지 않은 해시로 저장하는 것이다.
+    contexts = set(rules.get('passlibContexts', ()))
+    flags = {}
+    for module in modules.values():
+        for node in ast.walk(module.tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and getattr(node, 'value', None) is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                value = node.value
+                bad = (isinstance(value, ast.Call) and qualname(value.func, module.aliases) in contexts
+                       and _passlib_scheme(value) not in (None, 'argon2'))
+                for target in targets:
+                    if isinstance(target, (ast.Name, ast.Attribute)):
+                        flags.setdefault(terminal_name(target), []).append(bad)
+            elif isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Store):
+                flags.setdefault(terminal_name(node), [])
+    # 대입이 아닌 묶임(for·with·매개변수 등)이 있으면 무엇을 가리킬지 몰라서 위반으로 단정하지 않는다.
+    return {name for name, values in flags.items() if values and all(values)
+            and _store_count(modules, name) == len(values)}
+
+
+def _store_count(modules, name):
+    # 모든 파일에서 name(또는 .name)에 값이 묶이는 곳의 수(대입·for·with 등의 Store, 매개변수, 정의).
+    count = 0
+    for module in modules.values():
+        for node in ast.walk(module.tree):
+            if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Store) and terminal_name(node) == name:
+                count += 1
+            elif (isinstance(node, ast.arg) and node.arg == name) or (
+                    isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name):
+                count += 1
+    return count
 
 
 TAMPER_DUNDERS = frozenset({'__class__', '__dict__', '__getattribute__', '__getattr__', '__setattr__', '__bases__'})  # 이 속성에 대입하면 객체의 동작이 통째로 바뀐다
@@ -791,8 +948,9 @@ def _tampering(modules, names):
 def _library_patched(modules, rules):
     # 해시 라이브러리의 클래스·메서드를 소스 안에서 덮어쓰는지 확인한다. 예) PasswordHasher.hash = lambda self, v: v
     # 덮어썼다면 PasswordHasher(...)로 만든 객체라도 .hash()가 진짜 해시를 만든다고 믿을 수 없다.
-    symbols = {'hash', 'from_parameters'} | {
-        name.rsplit('.', 1)[-1] for name in [*rules['constructors'], *rules['defaultFactories'], *rules.get('hasherWrappers', ())]}
+    symbols = {'hash', 'from_parameters', 'using'} | {
+        name.rsplit('.', 1)[-1] for name in [*rules['constructors'], *rules['defaultFactories'], *rules.get('hasherWrappers', ()),
+                                             *rules.get('passlibHandlers', ()), *rules.get('passlibContexts', ())]}
     return _tampering(modules, symbols)
 
 
@@ -802,55 +960,101 @@ def _known_hashers(modules, rules):
     #   - 승인하지 않은 값을 대입하거나, 함수 매개변수로 받거나(def f(HASHER=...)), for·with·import as 등으로 다시 묶으면
     #     그 이름이 어떤 객체를 가리키는지 알 수 없으므로 믿지 않는다.
     #   - 라이브러리 자체를 덮어쓴 흔적이 있으면 아무 이름도 믿지 않는다.
-    # (이름만 보는 방식이라 범위(scope)는 구분하지 않는다. 같은 이름이 다른 곳에서 다른 값으로 쓰이면 믿지 않는 쪽으로 기운다.)
+    # (이름만 보는 방식이라 파일은 구분하지 않는다. 같은 이름이 다른 곳에서 다른 값으로 쓰이면 믿지 않는 쪽으로 기운다.)
+    # 돌려주는 값: (속성으로 부를 때 믿는 이름들, 이름 하나로 부를 때 믿는 이름들)
+    #   클래스 본문에서 바로 정한 이름(클래스 속성, 예: SQLAlchemy 모델의 password_hash = Column(...))은 함수 안의
+    #   `password_hash.hash(...)`가 가리킬 수 없다(함수 안에서 이름 하나는 클래스 속성을 찾지 않는다). 그래서 이름 하나로
+    #   부르는 경우에는 클래스 속성 정의를 빼고 따진다. self.hasher처럼 속성으로 부르면 클래스 속성도 그대로 따진다.
+    #   passlib의 Argon2(from passlib.hash import argon2)는 import 자체가 승인 해시 도구를 묶는 것으로 본다.
     if _library_patched(modules, rules):
-        return set()
-    flags = {}  # {이름: [묶일 때마다 "승인 해시 도구를 만든 대입인가"]}
+        return set(), set()
+    project_names = _project_names(modules)
+    handlers = {name.rsplit('.', 1)[0]: name.rsplit('.', 1)[1] for name in rules.get('passlibHandlers', ())}
+    flags, name_flags = {}, {}  # {이름: [묶일 때마다 "승인 해시 도구를 만든 대입인가"]}
+    class_level = set()
+    for module in modules.values():
+        class_level |= _class_level_nodes(module.tree)
 
-    def mark(name, approved):
+    def mark(node, name, approved):
         flags.setdefault(name, []).append(approved)
+        if id(node) not in class_level:
+            name_flags.setdefault(name, []).append(approved)
 
     for module in modules.values():
         covered = set()  # 승인 여부를 이미 따진 대입 대상 노드
         for node in ast.walk(module.tree):
+            if isinstance(node, ast.ImportFrom) and not node.level and node.module in handlers \
+                    and node.module.split('.')[0] not in project_names:
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    if alias.name == handlers[node.module] and module.aliases.get(bound) == f'{node.module}.{alias.name}':
+                        covered.add(id(alias))
+                        mark(alias, bound, True)  # from passlib.hash import argon2: 기본 설정의 Argon2 해시 도구
+                continue
             if isinstance(node, ast.Assign):
                 targets, value = node.targets, node.value
             elif isinstance(node, ast.AnnAssign) and node.value is not None:
                 targets, value = [node.target], node.value
             else:
                 continue
-            approved = isinstance(value, ast.Call) and _is_approved_hasher_factory(value, module, rules)
+            approved = isinstance(value, ast.Call) and _is_approved_hasher_factory(value, module, rules, project_names)
             for target in targets:
                 if isinstance(target, (ast.Name, ast.Attribute)):
                     covered.add(id(target))
-                    mark(terminal_name(target), approved)
+                    mark(target, terminal_name(target), approved)
         for node in ast.walk(module.tree):
             # 위에서 따지지 않은 나머지 모든 "이름이 묶이는 곳"은 승인 도구를 만든 것이 아니다.
             if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Store) and id(node) not in covered:
-                mark(terminal_name(node), False)          # +=, 튜플 풀기, for·with 변수, := 등
+                mark(node, terminal_name(node), False)    # +=, 튜플 풀기, for·with 변수, := 등
             elif isinstance(node, ast.arg):
-                mark(node.arg, False)                     # 함수·람다의 매개변수
+                mark(node, node.arg, False)               # 함수·람다의 매개변수
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                mark(node.name, False)                    # 같은 이름의 함수·클래스 정의
+                mark(node, node.name, False)              # 같은 이름의 함수·클래스 정의
             elif isinstance(node, ast.ExceptHandler) and node.name:
-                mark(node.name, False)
-            elif isinstance(node, ast.alias) and node.asname and node.asname != node.name:
-                mark(node.asname, False)                  # import ... as 이름 (같은 이름으로 가져오는 것은 정의한 쪽의 값과 같다)
-    return {name for name, values in flags.items() if all(values)}
+                mark(node, node.name, False)
+            elif isinstance(node, ast.alias) and node.asname and node.asname != node.name and id(node) not in covered:
+                mark(node, node.asname, False)            # import ... as 이름 (같은 이름으로 가져오는 것은 정의한 쪽의 값과 같다)
+    return ({name for name, values in flags.items() if all(values)},
+            {name for name, values in name_flags.items() if all(values)})
+
+
+def _class_level_nodes(tree):
+    # 클래스 본문에서 바로 이름을 묶는 노드들(클래스 속성 대입, 메서드·안쪽 클래스 정의, 클래스 안의 import)의 id.
+    # 안쪽 함수·람다·내포(comprehension)의 내부는 클래스 속성이 아니므로 들어가지 않는다.
+    # 클래스 본문에서 global·nonlocal로 선언한 이름은 바깥 이름을 바꾸므로 클래스 속성으로 치지 않는다.
+    found = set()
+    for cls in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        body, stack = [], list(cls.body)
+        while stack:
+            node = stack.pop()
+            body.append(node)
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+                                     ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                stack.extend(ast.iter_child_nodes(node))
+        declared = {name for node in body if isinstance(node, (ast.Global, ast.Nonlocal)) for name in node.names}
+        for node in body:
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id not in declared:
+                found.add(id(node))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name not in declared:
+                found.add(id(node))
+            elif isinstance(node, ast.alias) and (node.asname or node.name.split('.')[0]) not in declared:
+                found.add(id(node))
+    return found
 
 
 @dataclass
 class HashContext:
     # 해시 경로를 판정하는 여러 함수가 함께 쓰는 "코드를 읽어서 확인한 사실"들을 한데 묶은 상자이다.
     functions: dict          # 이름이 다른 것으로 바뀔 염려가 없는 프로젝트 함수들 {이름: [(파일, 정의), ...]}
-    hashers: set             # 승인한 해시 도구를 담은 변수 이름들
+    hashers: set             # 승인한 해시 도구를 담은 이름들(self.hasher 같은 속성으로 부를 때. 모든 묶임으로 따짐)
     random_calls: set        # 진짜 운영체제 무작위 값(os.urandom 등)을 만드는 것으로 확인된 호출 조각의 id
     preserving_calls: dict   # 입력을 통째로 간직한 채 모양만 바꾸는 것으로 확인된 호출 조각의 id → 값이 들어 있는 인자의 위치
     defined_names: set       # 프로젝트가 직접 정의한 함수·메서드 이름들 (strip 같은 이름을 직접 만들었다면 그 메서드를 믿지 않는다)
     mutations: dict = field(default_factory=dict)  # 함수 → 그 함수가 바꾸는 입력 필드 (같은 함수를 반복해서 훑지 않으려고 기록)
     memo: dict = field(default_factory=dict)       # 이미 계산한 결과 기록. 같은 계산을 되풀이하면 시간이 지수로 늘 수 있어서 한 번만 계산한다.
     cycle_hits: set = field(default_factory=set)   # 계산 도중 "바깥에서 이미 계산 중인 이름"을 다시 만난 기록(순환 때문에 달라지는 결과는 기록하지 않으려고 쓴다)
-    work: int = 0                                  # 지금까지 한 계산의 횟수(너무 복잡한 코드를 만나면 멈추기 위한 계수기)
+    work: int = 0                                  # 지금까지 한 계산량(큰 식을 훑을 때는 식의 크기만큼 센다). 너무 복잡한 코드를 만나면 멈추기 위한 계수기
+    name_hashers: set = field(default_factory=set)  # 이름 하나(HASHER.hash의 HASHER)로 부를 때 믿는 해시 도구 이름들(클래스 속성 정의는 빼고 따짐)
 
 
 class AnalysisTooComplex(Exception):
@@ -858,8 +1062,9 @@ class AnalysisTooComplex(Exception):
     pass
 
 
-WORK_LIMIT = 100_000  # 한 번의 판정에서 허용하는 계산량. 측정값: 정상 예제와 저장소 코드 389묶음은 53 이하(364묶음은 0),
+WORK_LIMIT = 100_000  # 한 번의 판정에서 허용하는 계산량. 측정값(2026-10-17): 정상 예제와 저장소 코드 391묶음은 53 이하(366묶음은 0),
 #                    가장 무거운 인공 입력(같은 이름에 2000번 재대입)도 약 24,000이다. 한도에 닿기까지 걸리는 시간은 몇 초이다.
+#                    REQ-003의 이메일 정리 따라가기·검증기 분석·로거 별칭 분석은 같은 크기의 한도를 따로 센다.
 
 
 def _tick(ctx, cost=1):
@@ -877,15 +1082,17 @@ LOSSY_ERROR_HANDLERS = frozenset({'ignore', 'replace', 'xmlcharrefreplace', 'bac
 
 
 def _hash_context(modules, rules):
-    # 해시 경로 판정에 필요한 사실들을 모아 HashContext로 돌려준다. REQ-005와 REQ-006이 함께 쓰므로 한 번만 계산해 둔다.
+    # 해시 경로 판정에 필요한 사실들을 모아 HashContext로 돌려준다. REQ-005·REQ-006과 REQ-003의 이메일 정리 따라가기가 함께 쓰므로
+    # 한 번만 계산해 둔다(작업량 계수 work도 함께 쓴다).
     cache = getattr(modules, 'cache', None)
     if cache is not None and 'hash_context' in cache:
         return cache['hash_context']
     untrusted = _untrusted_function_names(modules)  # 다른 것으로 바뀔 수 있어서 믿을 수 없는 함수 이름들
     every = _functions(modules)
     random_calls, preserving = _verified_calls(modules)
+    hashers, name_hashers = _known_hashers(modules, rules)
     context = HashContext({name: found for name, found in every.items() if name not in untrusted},
-                          _known_hashers(modules, rules), random_calls, preserving, set(every))
+                          hashers, random_calls, preserving, set(every), name_hashers=name_hashers)
     if cache is not None:
         cache['hash_context'] = context
     return context
@@ -974,9 +1181,8 @@ def _is_hash_call(call, ctx, depth=0, scope=None, password_matcher=None):
         return bool(origins) and (password_matcher is None or any(_is_password_origin(item, password_matcher) for item in origins))
 
     if isinstance(call.func, ast.Attribute) and call.func.attr == 'hash':
-        hashed_value = call.args[0] if call.args else next(
-            (keyword.value for keyword in call.keywords if keyword.arg == 'password'), None)
-        if hashed_value is None or terminal_name(call.func.value) not in ctx.hashers:
+        hashed_value = _hashed_argument(call)
+        if hashed_value is None or not _approved_hash_call(call, ctx):
             return False
         salt = _salt_argument(call)
         if salt is not None and id(salt) not in ctx.random_calls:
@@ -1094,7 +1300,7 @@ def _call_sources(call, scope, ctx, visiting, depth):
     return frozenset()  # 모르는 함수의 결과는 입력을 버렸을 수도 있어서 입력에서 나왔다고 말할 수 없다.
 
 
-MUTATING_METHODS = frozenset({'update', 'pop', 'setdefault', 'clear', 'popitem', 'append', 'extend', 'insert', 'remove'})
+MUTATING_METHODS = frozenset({'update', 'pop', 'setdefault', 'clear', 'popitem', 'append', 'extend', 'insert', 'remove'})  # 받는 객체를 그 자리에서 바꾸는 메서드
 OBJECT_WRITERS = frozenset({'__setattr__', '__delattr__', '__setitem__', '__delitem__', '__ior__'})  # obj.__setattr__(...) / object.__setattr__(obj, ...)
 FUNCTION_WRITERS = frozenset({'setattr', 'delattr', 'setitem', 'delitem'})                           # setattr(obj, ...) / operator.setitem(obj, ...)
 KEYED_GETTERS = frozenset({'get', 'pop', 'setdefault'})                                              # d.get("k")는 d["k"]와 같은 항목을 가리킨다
@@ -1349,7 +1555,8 @@ def _updated_keys(call, shift=0):
 def _mutated_fields(scope, ctx, depth=0):
     # 이 함수가 입력 객체의 어느 필드를 바꾸는지 {매개변수 이름: {필드 경로, ...}}로 돌려준다. 경로 ()는 객체 전체가 바뀐다는 뜻이다.
     #   · p.x = ..., p["x"] = ..., del p.x, p.x += ...           → (p, ("x",))
-    #   · p.tags.append(...), p.update(...), vars(p).update(...)  → (p, ("tags",)), (p, ()), (p, ())
+    #   · p.tags.append(...) → (p, ("tags",)) / p.update({"k": v}), p.update(k=v), p.pop("k") → (p, ("k",))
+    #   · p.update(다른_사전), p.clear(), vars(p).update(다른_사전) → (p, ()) (어느 항목이 바뀌는지 알 수 없다)
     #   · p.__dict__["x"] = ..., p.__dict__.update(...), object.__setattr__(p, "x", ...), p.__setattr__("x", ...) → p.x 를 바꾼 것과 같다
     #   · setattr(p, "x", ...)                                    → (p, ("x",)),  setattr(p, 이름, ...) → (p, ())
     #   · q = p.profile 처럼 별칭을 만들어 q.x = ... 로 바꾸는 경우 → (p, ("profile", "x")). 별칭을 만드는 방식은 _alias_places 가 따진다.
@@ -1589,8 +1796,8 @@ def _returned_hash_origins(expr, function, ctx, depth, seen):
     if isinstance(expr, ast.Await):
         expr = expr.value
     if isinstance(expr, ast.Call):
-        if isinstance(expr.func, ast.Attribute) and expr.func.attr == 'hash' and terminal_name(expr.func.value) in ctx.hashers:
-            value = expr.args[0] if expr.args else next((k.value for k in expr.keywords if k.arg == 'password'), None)
+        if _approved_hash_call(expr, ctx):
+            value = _hashed_argument(expr)
             return (_scope_sources(value, function, ctx) or frozenset()) if value is not None else frozenset()
         if depth < 3:
             parts = [_compose(expr, helper, _hashed_origins(helper, ctx, depth + 1),
@@ -1742,8 +1949,10 @@ def check_duplicate_email(modules, criteria):
     # REQ-003: 같은 이메일로 두 번 가입할 수 없게 막혀 있는가?
     # 확인하는 것 두 가지:
     #   ① 가입으로 사용자를 저장하는 표의 이메일 칸에 UNIQUE(중복 금지) 설정이 있는가
-    #   ② 이메일을 비교하기 전에 정리(앞뒤 공백 제거 strip, 소문자로 바꾸기 lower)하는가
-    # ①이 없으면 FAIL, ①은 있는데 ②가 빠졌으면 FAIL, 이메일 칸 자체를 못 찾거나 어느 표의 것인지 확신할 수 없으면 UNVERIFIED, 모두 있으면 PASS.
+    #   ② 저장되는 이메일 값이 정리(앞뒤 공백 제거 strip, 소문자로 바꾸기 lower)를 거쳤는가
+    #      근거: 이메일 필드에 등록된 검증기의 모든 반환 경로, pydantic 정규화 설정, 저장하는 곳마다 값을 거슬러 따라간 결과(_email_flow)
+    # ①이 없으면 FAIL. 이메일 칸을 못 찾거나 어느 표의 것인지 확신할 수 없으면 UNVERIFIED.
+    # ②는 증명되면 PASS, 정리하지 않았다고 증명되면 FAIL(아래 세 경우), 정리 코드는 있지만 저장 값과 연결되는지 모르면 UNVERIFIED.
     rules = criteria['duplicateEmail']
     email = _email_names(criteria)
     normalized = set()  # 확인한 정리 방법("strip", "lower")
@@ -1788,7 +1997,7 @@ def check_duplicate_email(modules, criteria):
                 if (terminal_name(node.func) or '') == 'Table' and _stores_password(node, is_password):
                     evidence.user_owners.add(('table', _table_call_name(node)))  # Table("users", metadata, Column(...), ...)
             # 비밀번호 칸이 없는 클래스·표 안의 선언(칸 정의·제약·인덱스)은 사용자 표에 대한 것이 아니므로 근거로 쓰지 않는다.
-            # (strip·lower 같은 정리 방법은 표와 상관없이 이메일 값에 적용된 것이면 인정한다.)
+            # (strip·lower 같은 정리는 표와 상관없이 따로 본다: 검증기의 반환 경로·pydantic 설정·저장 값 따라가기로만 인정한다.)
             owner = (_declaring_owner(node, parents, is_password, owner_cache, orm_classes)
                      if isinstance(node, (ast.Assign, ast.AnnAssign, ast.Call)) else SKIP)
             if owner is not SKIP:
@@ -1833,7 +2042,9 @@ def check_duplicate_email(modules, criteria):
                             else:
                                 bucket['plain'].append(_obs(module, node, 'COMPOSITE_UNIQUE_NOT_EMAIL_ONLY'))
             if isinstance(node, ast.Call):
-                # something.strip() / .lower() / .casefold() 호출이 이메일 값에 적용되었고, 그 결과가 실제로 쓰이는지 확인한다.
+                # something.strip() / .lower() / .casefold() 호출이 이메일 값에 적용되었는지 본다.
+                #   · touched: 프로젝트 어딘가에서 쓰인 정리 종류(결과를 쓰는지와 상관없음). "정리가 어디에도 없다"고 FAIL로 단정할 때만 쓴다.
+                #   · 이메일 필드 검증기 안의 호출이면 그 검증기의 모든 반환 경로를 확인해 정리 근거(normalized)로 삼는다.
                 if isinstance(node.func, ast.Attribute) and node.func.attr in ('strip', 'lower', 'casefold') \
                         and _touches_email(node, parents, email, email_helpers - {None}):
                     touched.add('lower' if node.func.attr == 'casefold' else node.func.attr)
@@ -1922,11 +2133,13 @@ def _email_flow(modules, ctx, route_methods=()):
     # 저장하는 이메일 값이 "확실히" 거친 정리 단계({"strip", "lower"})를 따라가는 함수를 돌려준다. PASS 근거로만 쓴다.
     # 모르면 빈 집합(정리를 증명하지 못함)이다. 그래서 틀리더라도 정리를 덜 인정하는 쪽(UNVERIFIED·FAIL 쪽)으로만 틀린다.
     #   · value.strip().lower()            → 앞의 값 + strip, lower
-    #   · 이름                              → 그 이름에 값이 묶이는 모든 곳(매개변수 포함)의 공통 단계
+    #   · 이름                              → 모든 대입이 함수 본문 바로 아래에 차례로 있으면 읽는 곳 바로 앞의 마지막 대입의 값,
+    #                                          그렇지 않으면 그 이름에 값이 묶이는 모든 곳(매개변수 포함)의 공통 단계
     #   · 매개변수                          → 프로젝트 안의 모든 호출에서 넘긴 값의 공통 단계 (프레임워크가 부르는 함수·값으로 넘겨진 함수는 정리되지 않은 입력)
     #   · 프로젝트 함수의 결과(normalize(x)) → 그 함수의 모든 반환 경로의 공통 단계(넘긴 값의 단계를 이어 받는다)
     #   · payload.email                    → 이 함수 본문 바로 아래에서 먼저 payload.email = 값 으로 한 번만 바꿨고 다른 쓰기가 없으면 그 값
     #   · 조건식·and·or                     → 모든 갈래의 공통 단계
+    #   · 프로젝트가 strip·lower·casefold라는 이름의 메서드를 직접 정의했으면 그 호출은 정리로 인정하지 않는다.
     enclosing, call_sites, references = {}, {}, {}
     for module in modules.values():
         table = _enclosing_functions(module.tree)
@@ -2109,14 +2322,16 @@ def _constraint_columns(args, email):
 
 
 def _email_validator(function, email):
-    # 이름이 normalize_email인 일반 함수와 실제 이메일 필드에 등록된 검증기를 구분한다.
+    # 이 함수가 이메일 필드에 등록된 pydantic 검증기인가? @field_validator("email")·@validator("email")처럼 데코레이터의 필드 이름으로
+    # 판단하고 함수 이름은 보지 않는다. (이름이 normalize_email이어도 등록되지 않은 함수는 검증기가 아니고, def clean(cls, v)도 등록되면 검증기다.)
     return any(isinstance(decorator, ast.Call) and terminal_name(decorator.func) in ('validator', 'field_validator')
                and any(isinstance(arg, ast.Constant) and isinstance(arg.value, str) and email.search(arg.value)
                        for arg in decorator.args) for decorator in function.decorator_list)
 
 
 def _used_normalization(call, parents, cache, email):
-    # 이메일 정리 함수는 실제 반환값의 모든 경로를 확인한다. 정리한 뒤 원문으로 되돌리거나 검사에만 쓴 값은 근거가 아니다.
+    # 이 정리 호출이 이메일 필드 검증기 안에 있으면, 그 검증기의 모든 반환 경로가 거친 정리 단계를 돌려준다(검증기마다 한 번만 계산).
+    # 정리한 뒤 원문으로 되돌리거나 검사에만 쓴 값은 근거가 아니다. 분석할 수 없는 모양이면 None(모름)이다.
     scope = parents.get(call)
     while scope is not None and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         scope = parents.get(scope)
@@ -2125,7 +2340,7 @@ def _used_normalization(call, parents, cache, email):
         if key not in cache:
             cache[key] = _returned_normalization(scope)
         return cache[key]
-    # 함수 이름이나 읽힌 변수만으로 가입에 쓰이는 값이라고 증명하지 않는다. 연결되지 않은 helper는 PASS 근거에서 뺀다.
+    # 검증기 밖의 정리는 여기서 세지 않는다. 경로 함수·도우미 함수의 정리는 저장 값을 따라가는 _email_flow에서 따로 확인한다.
     return set()
 
 
@@ -2504,7 +2719,7 @@ def _touches_email(call, parents, email, helpers=frozenset()):
 def check_exposure(modules, criteria):
     # REQ-006: 비밀번호나 그 해시가 밖으로 새어 나가는 길이 있는가?
     # 새어 나갈 수 있는 길 네 가지를 살펴본다.
-    #   ① 로그·출력(print, logger.info 등)에 찍는다   ② 오류 메시지(raise ...)에 넣는다
+    #   ① 로그·출력(print, logger.info, 파일 write, 응답 헤더·쿠키 등)에 찍는다   ② 오류 메시지(raise ...)에 넣는다
     #   ③ API 응답으로 돌려준다                        ④ 입력 검증 오류 응답에 입력값(비밀번호)이 그대로 실린다
     # 새는 길을 찾으면 FAIL, 확신할 수 없는 곳이 있으면 UNVERIFIED, 못 찾았으면 PASS.
     rules = criteria['exposure']
@@ -2623,7 +2838,8 @@ def check_exposure(modules, criteria):
 
 
 def _logger_bindings(module):
-    # 이름이 audit·sink여도 logging 팩터리에서 만든 객체와 그 별칭은 로그 출력이다. 재대입·순환 별칭은 확정하지 않는다.
+    # 이름이 audit·sink여도 logging 팩터리(getLogger·Logger·LoggerAdapter)에서 만든 객체와 그 별칭은 로그 출력이다.
+    # 돌려주는 값: (로거라고 확정한 이름들, 로거일 수도 있지만 재대입·순환 별칭 때문에 확정하지 못한 이름들)
     bindings, users, seeds = {}, {}, set()
     for node in ast.walk(module.tree):
         for target, value in _assignment_pairs(node):
@@ -2668,7 +2884,8 @@ def _is_output_call(call, name, rules, logger_names=frozenset()):
         return True  # 파일·응답에 쓰는 file.write(...), response.set_cookie(...) 같은 호출
     if isinstance(call.func, ast.Attribute) and call.func.attr in rules['logMethods']:
         # logger.info(...)처럼 로그 함수 이름(info, error 등)으로 부른 경우.
-        # 부르는 대상이 logging 모듈이거나, 이름에 log가 들어 있으면(logger, app_log 등) 로그 호출로 본다.
+        # 부르는 대상이 logging 모듈이거나, 이름에 log가 들어 있거나(logger, app_log 등), logging.getLogger 등으로 만든
+        # 객체와 그 별칭(logger_names, 예: audit = logging.getLogger(...))이면 로그 호출로 본다.
         base = qualname(call.func.value, {}) or ''
         return name.startswith('logging.') or 'log' in base.lower() or base in logger_names
     return False
@@ -2776,6 +2993,7 @@ def _assignment_pairs(node):
     # 값이 어떤 이름(들)에 담기는 문장 하나를 (담기는 곳, 담는 값) 쌍들로 풀어 돌려준다. 해당하지 않는 문장이면 빈 목록이다.
     #   a = v / a: T = v / a += v / (a := v) / for a in v  →  (a, v)
     #   a, b = x, y  →  (a, x), (b, y)  (개수가 같은 튜플이면 하나씩 짝짓고, 아니면 모든 이름에 값 전체를 짝짓는다)
+    #   for k in d.keys() → 없음(키만 꺼낸다) / for k, v in d.items() → (v, d.items()) (값 쪽에만 내용이 담긴다)
     if isinstance(node, ast.Assign):
         pairs = [(target, node.value) for target in node.targets]
     elif isinstance(node, ast.AnnAssign) and node.value is not None:

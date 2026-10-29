@@ -4,6 +4,7 @@ signup_examples.py의 정상·결함 예제를 판정기에 넣어서 "답을 �
 또한 팀 시스템(dev)이 실제로 쓰는 요청·응답 타입(SecurityAssessmentRequest, SecurityAssessment)으로 시험해서
 시스템의 규칙(허용된 증거 주소만 인용, 근거 없는 PASS 금지 등)과 어긋나지 않는지도 확인한다.
 """
+import ast  # 이 파이썬 버전이 아주 긴 식을 읽을 수 있는지 확인
 import json
 import re
 from pathlib import Path
@@ -288,10 +289,18 @@ def test_extra_code_shapes(label, change, changed):
 def test_unparseable_deep_file_marks_only_that_file_not_the_whole_assessment():
     # 너무 길어서 파이썬이 읽다가 재귀 한도를 넘는 파일은, 문법 오류 파일처럼 "읽지 못한 파일"로 기록하고 평가는 계속한다.
     # 단, 읽지 못한 파일이 있으므로 PASS는 만들지 않는다.
-    files = dict(GOOD, **{'deep.py': 'x = ' + ' + '.join(['1'] * 20000) + '\n'})
-    result, assessment = outcomes(files)
-    assert set(result.values()) == {'UNVERIFIED'}
-    assert json.loads(assessment.evidence_json)['parseErrors'] == ['deep.py']
+    # Python 3.10은 이 파일을 읽을 수 있다(새 버전은 AST를 만들 때 재귀 한도에 걸린다). 그때는 평범한 파일이므로
+    # 판정기도 멈추지 않고 정상 예제와 같은 결과(PASS)를 내야 한다.
+    deep = 'x = ' + ' + '.join(['1'] * 20000) + '\n'
+    result, assessment = outcomes(dict(GOOD, **{'deep.py': deep}))
+    try:
+        ast.parse(deep)
+    except RecursionError:
+        assert set(result.values()) == {'UNVERIFIED'}
+        assert json.loads(assessment.evidence_json)['parseErrors'] == ['deep.py']
+    else:
+        assert set(result.values()) == {'PASS'}
+        assert json.loads(assessment.evidence_json)['parseErrors'] == []
 
 
 # ---------------------------------------------------------------------------------------------
@@ -721,7 +730,7 @@ THIRD_REVIEW_CASES = [
         'from sqlalchemy import Column, String\n\n\nclass EmailMixin:\n    email = Column(String, unique=True)\n\n\n'
         'class User(EmailMixin, Base):\n    __tablename__ = "users"\n    password_hash = Column(String)\n'),
         {'REQ-003': 'UNVERIFIED'}),
-    # --- 같은 점검의 연장: 정리(strip·lower)는 결과가 실제로 쓰일 때만 인정한다 ---
+    # --- 같은 점검의 연장: 이메일 검증기 안의 정리(strip·lower)는 그 결과를 실제로 돌려줄 때만 인정한다 ---
     ('normalization result is thrown away', _replace('schemas.py', 'value = value.strip().lower()', 'value.strip().lower()'),
         {'REQ-003': 'FAIL'}),
     ('normalization result is never read', _replace('schemas.py', 'value = value.strip().lower()',
@@ -1511,8 +1520,8 @@ def test_full_review_cases(label, change, changed):
 
 # ---------------------------------------------------------------------------------------------
 # REQ-003 이메일 정리: 검증기·pydantic 설정이 없어도, 저장되는 이메일 값이 실제로 정리를 거쳤으면 인정한다(2026-10-17 결정 A).
-# 반대로 strip이나 lower가 프로젝트 어디에서도 이메일에 쓰이지 않으면 FAIL이다. 정리 코드는 있지만 저장 값과 연결되는지
-# 증명하지 못하면 UNVERIFIED이다. 아래 사례는 모두 schemas.py의 이메일 검증기를 지운 상태에서 시작한다.
+# 반대로 strip이나 lower가 프로젝트 어디에서도 이메일에 쓰이지 않거나, 가입 경로 함수가 받은 입력을 바꾸지 않고 그대로 저장하면 FAIL이다.
+# 정리 코드는 있지만 저장 값과 연결되는지 증명하지 못하면 UNVERIFIED이다. 아래 사례는 모두 schemas.py의 이메일 검증기를 지운 상태에서 시작한다.
 # ---------------------------------------------------------------------------------------------
 def _without_email_validator(*changes):
     return _both(_email_validator_as(''), *changes)
