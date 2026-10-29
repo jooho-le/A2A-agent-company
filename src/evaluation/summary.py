@@ -100,6 +100,27 @@ def _check_same_sources(report, metrics, run_bundle, trace, runner, regression=N
         raise ValueError('Regression results differ from the evaluated Run or protected suite')
 
 
+def _exposure_line(exposure: Optional[Mapping]) -> str:
+    # REQ-006(노출 금지) 전체 출력의 검증이 끝났는지 한 줄로 적는다. 보호 테스트·정적 판정이 모두 PASS여도
+    # Run 기록에서 노출을 찾았거나, 기록 검사가 없거나, 보지 못한 출력이 있으면 "완료"라고 쓰지 않는다.
+    if not exposure:
+        return '- REQ-006 전체 출력의 노출 검증: 미완료(Run 기록 노출 검사 결과 없음)'
+    if exposure.get('status') == 'FAIL':
+        return '- **REQ-006 충족하지 않음**: Run 기록에서 비밀번호·해시 노출 발견(위 판정과 별개)'
+    coverage = exposure.get('coverage') or {}
+    gaps = [] if exposure.get('status') == 'PASS' else [f"Run 기록 노출 검사 {_cell(exposure.get('status'))}"]
+    if not coverage:
+        # 검사 범위를 모르면 무엇을 보지 못했는지도 모르므로 완료라고 쓰지 않는다.
+        gaps.append('검사 범위 정보 없음')
+    if coverage.get('notCollectedOutputs'):
+        gaps.append('보지 못한 출력 ' + '·'.join(OUTPUT_NAMES.get(name, name) for name in coverage['notCollectedOutputs']))
+    if coverage.get('missingDocuments') or coverage.get('incompleteDocuments'):
+        gaps.append('받지 못한 기록 ' + '·'.join(coverage.get('missingDocuments', []) + coverage.get('incompleteDocuments', [])))
+    if gaps:
+        return f"- REQ-006 전체 출력의 노출 검증: 미완료({', '.join(gaps)})"
+    return '- REQ-006 Run 기록 노출 검사: PASS(보지 못한 출력·받지 못한 기록 없음)'
+
+
 def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = None, metrics: Optional[Mapping] = None,
                    run_bundle: Optional[Mapping] = None, trace: Optional[Mapping] = None,
                    runner: Optional[Mapping] = None, regression: Optional[Mapping] = None) -> str:
@@ -112,13 +133,20 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
     keys = _requirement_keys(scenario_contract)
     source = report.get('sourceRun') or {}
     manifest = report.get('manifestCheck') or {}
+    exposure = (trace or {}).get('exposure')
+    traceability = (trace or {}).get('traceability')
     # 1) 머리 부분: 평가·Run 번호, 판정, 놓친 결함, 신분 확인 결과
+    #    판정은 보호 테스트·정적 판정만의 결과이므로 검사 수를 함께 적고, 판정에 들어가지 않는 Run 기록 검사와
+    #    REQ-006 전체 출력의 노출 검증 상태를 바로 아래에 따로 적는다(PASS 판정이 기록 속 노출을 가리지 않게).
     lines = ['# 독립 평가 요약', '',
              f"- 평가 번호 `{report.get('evaluationId')}` · 대상 Run `{report.get('sourceRunId')}` · 구조 {report.get('architecture')}"
              f" · 평가 시각 {report.get('createdAt')}",
-             f"- **독립 평가 판정: {report.get('evaluationVerdict')}**"
+             f"- **독립 평가 판정(보호 테스트·정적 판정 {len(report.get('checks', []))}개): {report.get('evaluationVerdict')}**"
              + (f" · Orchestrator 판정 {_cell(source.get('finalVerdict'))}, 수정 {_cell(source.get('fixAttempt'))}회, "
                 f"최종 코드 버전 {_cell(source.get('codeVersion'))}" if source else ''),
+             f"- 위 판정에 들어가지 않는 Run 기록 검사: 노출(REQ-006 기록) {_cell((exposure or {}).get('status') or '결과 없음')}, "
+             f"추적(REQ-008) {_cell((traceability or {}).get('status') or '결과 없음')}",
+             _exposure_line(exposure),
              ]
     if source.get('missedDefect'):
         lines.append('- **놓친 결함**: Orchestrator는 SUCCESS였지만 독립 평가에서 필수 검사 FAIL이 확인됨')
@@ -135,7 +163,11 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
         # 검사 제목 "QA-SIGNUP-001 유효한 ..."에서 첫 단어(검사 번호)만 꺼내 쓴다.
         checks = ', '.join(f"{titles.get(check_id, check_id).split(' ', 1)[0]} {statuses.get(check_id)}"
                            for check_id in requirement.get('checkIds', []))
-        lines.append(f"| {_cell(key)} | {_cell(requirement.get('validationVerdict'))} | {_cell(checks)} |")
+        verdict = _cell(requirement.get('validationVerdict'))
+        # REQ-006 줄은 보호 테스트·정적 판정 결과다. Run 기록 노출 검사가 PASS가 아니면 같은 칸에 덧붙여 가려지지 않게 한다.
+        if key == 'REQ-006' and exposure and exposure.get('status') != 'PASS':
+            verdict += f" · Run 기록 노출 {_cell(exposure.get('status'))}"
+        lines.append(f"| {_cell(key)} | {verdict} | {_cell(checks)} |")
     # 3) 검사별 결과
     lines += ['', '## 검사별 결과', '', '| 검사 | 관점 | 결과 | 근거 코드 |', '|---|---|---|---|']
     for check in report.get('checks', []):

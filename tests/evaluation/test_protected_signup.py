@@ -5,7 +5,7 @@
   - dev가 보호 파일 설정(UnitTestScope)과 보호 QA 케이스(QACaseBinding)를 받아 주는가?
   - unittest 보고서·정적 판정 결과가 검사 결과로 옮겨질 때 근거 없는 PASS가 생기지 않는가?
   - 독립 평가 보고서까지 이어지는가?
-  - (실행) 최소 회원가입 서비스와 변형 20개(결함 15·연결 실패 2·공백 이메일 거부 1·시작할 때 테이블을 만드는 앱 2)를
+  - (실행) 최소 회원가입 서비스와 변형 23개(결함 18·연결 실패 2·공백 이메일 거부 1·시작할 때 테이블을 만드는 앱 2)를
     컨테이너처럼 읽기 전용 Snapshot으로 두고 dev unittest 실행기로 돌렸을 때 결함마다 해당 검사만 FAIL이 되고,
     연결이 안 되면(시작 실패 포함) 모두 UNVERIFIED가 되는가?
 실행 시험은 sqlalchemy·argon2-cffi가 있어야 돈다(없으면 건너뜀):
@@ -277,6 +277,11 @@ EXPECTED_FAILURES = {
     'isolated_logger': {'SEC-SIGNUP-005'},
     # 모든 가입이 422가 되는 서비스: 정상 가입 실패가 FAIL이고, 거부 검사·전제 조건이 필요한 검사는 미검증이다.
     'different_request_field': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-006'},
+    # 동시 요청이 모두 실패해 계정이 없어도, 응답을 받았고 단독 가입은 되므로 미검증이 아니라 FAIL이다.
+    'concurrent_server_error': {'QA-SIGNUP-005'},
+    'concurrent_rejected': {'QA-SIGNUP-005'},
+    # 모든 가입이 500: 서버 오류를 관찰한 검사는 FAIL이고, 정상 가입이 전제인 검사는 미검증이다.
+    'signup_server_error': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
     'app_missing': None,
     'wrong_signup_path': None,
     # 시작할 때 테이블을 만드는 앱: DB 위치를 DATABASE_URL로 받으면 정상, 소스 폴더 옆에 고정하면 읽기 전용
@@ -289,7 +294,8 @@ UNVERIFIED_CODES = {'app_missing': {'APP_IMPORT_FAILED'}, 'wrong_signup_path': {
                     'lifespan_source_database': {'SERVICE_SETUP_FAILED'}}
 # FAIL도 PASS도 아닌(미검증) 검사가 있는 변형
 EXPECTED_UNVERIFIED = {'different_request_field': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'QA-SIGNUP-005',
-                                                   'SEC-SIGNUP-002', 'SEC-SIGNUP-005'}}
+                                                   'SEC-SIGNUP-002', 'SEC-SIGNUP-005'},
+                       'signup_server_error': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'SEC-SIGNUP-002', 'SEC-SIGNUP-005'}}
 
 
 def _set_read_only(folder, read_only):

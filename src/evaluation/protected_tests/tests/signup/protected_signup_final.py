@@ -41,7 +41,10 @@ class SignupFinalChecks(link.SignupCheck):
                     statuses = service.concurrent_signups(email, link.new_password())
                     created = service.count_canonical(email)
                     successes = sum(1 for status in statuses if status in link.SUCCESS)
-                    if created == 0 and successes == 0:
+                    # 아무도 생성되지 않았을 때: 5xx 응답은 관찰한 서버 오류라 FAIL(아래 검사)이다. 모두 4xx면
+                    # 단독 가입을 다시 해 보고, 단독 가입도 안 되면 요청 규격이 다른 것으로 보고 미검증이다.
+                    if (created == 0 and successes == 0 and all(status in link.REJECTED for status in statuses)
+                            and service.signup(link.new_email(), link.new_password()) not in link.SUCCESS):
                         raise link.Unverified("CONCURRENT_SIGNUP_NOT_CREATED")
                     self.assertEqual(created, 1, "동시 요청으로 같은 이메일 사용자가 1명이 아님")
                     self.assertEqual(successes, 1, "동시 요청 중 성공 응답이 정확히 1건이 아님")

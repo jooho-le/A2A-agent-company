@@ -6,6 +6,8 @@
   - Issue 제목·설명 같은 자유 글(비밀값이 섞일 수 있음)은 요약에 넣지 않는가?
   - 다른 Run·다른 코드 버전·다른 평가의 자료를 섞어 넣으면 요약을 만들지 않고 멈추는가? (외부 점검 2026-10-29 F4)
   - 버전별 독립 평가 보고서에서 Regression Count를 만들어 요약에 적는가? 노출 검사의 검사 범위(부분 검사)를 적는가?
+  - 판정이 검사 몇 개의 결과인지 적고, 판정에 들어가지 않는 Run 기록 노출 FAIL과 REQ-006 전체 검증 미완료를 드러내는가?
+    (외부 점검 2026-10-29 2차)
 """
 import copy
 import json
@@ -60,7 +62,7 @@ def test_summary_shows_results_flow_metrics_and_trace():
                                  'stepsByRole': {'QA': {'steps': 2, 'ms': 4447}}}}
     text = render_summary(report(), scenario_contract=CONTRACT, metrics=metrics, run_bundle=RUN,
                           trace={'runId': RUN['run']['runId'], 'traceability': check_traceability(RUN, CONTRACT).to_dict()})
-    assert '**독립 평가 판정: PASS**' in text and 'Orchestrator 판정 SUCCESS' in text
+    assert '**독립 평가 판정(보호 테스트·정적 판정 11개): PASS**' in text and 'Orchestrator 판정 SUCCESS' in text
     assert '| REQ-005 | PASS | SEC-SIGNUP-001 PASS, SEC-SIGNUP-002 PASS |' in text
     assert '| v1 | PASS | FAIL | 검증 종료·판정 미확인 | QA QA_ASSERTION_FAILURE(' in text and '수정 요청 → v2' in text
     assert '| v2 | PASS | 검증 종료·판정 미확인 | 검증 종료·판정 미확인 | - | 판정 SUCCESS |' in text
@@ -71,7 +73,7 @@ def test_summary_shows_results_flow_metrics_and_trace():
 def test_missed_defect_is_called_out():
     """Orchestrator는 SUCCESS인데 독립 평가에서 필수 검사 FAIL이 나오면 "놓친 결함"으로 드러내 적는다."""
     text = render_summary(report(fail_key='SEC-SIGNUP-002'), scenario_contract=CONTRACT)
-    assert '**놓친 결함**' in text and '**독립 평가 판정: FAIL**' in text
+    assert '**놓친 결함**' in text and '**독립 평가 판정(보호 테스트·정적 판정 11개): FAIL**' in text
 
 
 def test_free_text_from_agents_is_not_copied():
@@ -164,3 +166,43 @@ def test_exposure_coverage_is_shown_as_partial_check():
     text = render_summary(report(), scenario_contract=CONTRACT, trace={'runId': RUN['run']['runId'], 'exposure': exposure})
     assert ('검사 범위(부분 검사, REQ-006 전체 충족 아님): 읽은 기록 events·issues, 보지 못한 출력 A2A Message 본문, '
             '받지 못한 기록 telemetry, 알려 준 비밀값 2개') in text
+
+
+def test_record_exposure_failure_is_not_hidden_behind_a_passing_verdict():
+    """검사 11개가 모두 PASS여도 Run 기록에서 노출을 찾으면, 머리 부분과 REQ-006 줄에서 REQ-006을 충족하지 않는다고
+    드러낸다. 판정 줄에는 그 판정이 보호 테스트·정적 판정 몇 개의 결과인지 적는다(외부 점검 2026-10-29 2차)."""
+    exposure = {'status': 'FAIL', 'reasons': ['PASSWORD_FIELD_VALUE'], 'findings': [],
+                'coverage': {'checkedDocuments': ['events'], 'missingDocuments': [], 'incompleteDocuments': [],
+                             'notCollectedOutputs': ['A2A_MESSAGE_BODY'], 'knownValues': 0}}
+    text = render_summary(report(), scenario_contract=CONTRACT, trace={'runId': RUN['run']['runId'], 'exposure': exposure})
+    assert '**독립 평가 판정(보호 테스트·정적 판정 11개): PASS**' in text
+    assert '- 위 판정에 들어가지 않는 Run 기록 검사: 노출(REQ-006 기록) FAIL, 추적(REQ-008) 결과 없음' in text
+    assert '- **REQ-006 충족하지 않음**: Run 기록에서 비밀번호·해시 노출 발견(위 판정과 별개)' in text
+    assert '| REQ-006 | PASS · Run 기록 노출 FAIL | SEC-SIGNUP-004 PASS, SEC-SIGNUP-005 PASS |' in text
+
+
+@pytest.mark.parametrize('exposure, line, row', [
+    (None, '- REQ-006 전체 출력의 노출 검증: 미완료(Run 기록 노출 검사 결과 없음)', '| REQ-006 | PASS |'),
+    ({'status': 'PASS', 'reasons': [], 'findings': [],
+      'coverage': {'checkedDocuments': ['events'], 'missingDocuments': [], 'incompleteDocuments': [],
+                   'notCollectedOutputs': ['A2A_MESSAGE_BODY', 'AGENT_PROCESS_OUTPUT'], 'knownValues': 0}},
+     '- REQ-006 전체 출력의 노출 검증: 미완료(보지 못한 출력 A2A Message 본문·에이전트 프로세스 출력)', '| REQ-006 | PASS |'),
+    ({'status': 'UNVERIFIED', 'reasons': ['DOCUMENT_MISSING'], 'findings': [],
+      'coverage': {'checkedDocuments': [], 'missingDocuments': ['events'], 'incompleteDocuments': [],
+                   'notCollectedOutputs': [], 'knownValues': 0}},
+     '- REQ-006 전체 출력의 노출 검증: 미완료(Run 기록 노출 검사 UNVERIFIED, 받지 못한 기록 events)',
+     '| REQ-006 | PASS · Run 기록 노출 UNVERIFIED |'),
+    ({'status': 'PASS', 'reasons': [], 'findings': [],
+      'coverage': {'checkedDocuments': ['events'], 'missingDocuments': [], 'incompleteDocuments': [],
+                   'notCollectedOutputs': [], 'knownValues': 0}},
+     '- REQ-006 Run 기록 노출 검사: PASS(보지 못한 출력·받지 못한 기록 없음)', '| REQ-006 | PASS |'),
+    # 검사 범위(coverage)가 빠진 결과는 무엇을 보지 못했는지 모르므로 완료라고 쓰지 않는다.
+    ({'status': 'PASS', 'reasons': [], 'findings': []},
+     '- REQ-006 전체 출력의 노출 검증: 미완료(검사 범위 정보 없음)', '| REQ-006 | PASS |'),
+])
+def test_req006_completeness_is_stated_separately(exposure, line, row):
+    """11개 검사 결과와 별개로, REQ-006 전체 출력의 노출 검증이 끝났는지(기록 검사 결과·보지 못한 출력)를 한 줄로 적는다.
+    기록 검사가 PASS가 아니면 REQ-006 줄에도 덧붙인다."""
+    trace = {'runId': RUN['run']['runId']} if exposure is None else {'runId': RUN['run']['runId'], 'exposure': exposure}
+    text = render_summary(report(), scenario_contract=CONTRACT, trace=trace)
+    assert line in text and row in text

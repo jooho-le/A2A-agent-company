@@ -150,6 +150,26 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 '''
 
+
+
+def _concurrent_failure(error):
+    # 같은 이메일 요청이 동시에 처리 중이면 모두 error로 끝나는 가입(단독 요청은 정상). 0.2초 동안 동시 처리 수를 지켜본다.
+    return [('routers/auth.py', 'router = APIRouter(prefix="/api/auth")\n',
+             'router = APIRouter(prefix="/api/auth")\nimport threading, time\n_ACTIVE, _LOCK = {}, threading.Lock()\n'),
+            ('routers/auth.py', 'def signup(payload: SignupRequest, db: Session = Depends(get_db)):\n',
+             'def signup(payload: SignupRequest, db: Session = Depends(get_db)):\n'
+             '    with _LOCK:\n'
+             '        _ACTIVE[payload.email] = _ACTIVE.get(payload.email, 0) + 1\n'
+             '    peak = 0\n'
+             '    for _ in range(20):\n'
+             '        peak = max(peak, _ACTIVE[payload.email])\n'
+             '        time.sleep(0.01)\n'
+             '    with _LOCK:\n'
+             '        _ACTIVE[payload.email] -= 1\n'
+             '    if peak > 1:\n'
+             '        ' + error + '\n')]
+
+
 # 변형 이름: [(파일, 바꿀 글자, 새 글자)]. 바꿀 글자는 정상 서비스에 정확히 한 번 있어야 한다.
 VARIANTS = {
     'good': [],
@@ -202,6 +222,14 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     'lifespan_source_database': [('main.py', 'app = FastAPI()\n', _LIFESPAN_APP),
                                  ('database.py', 'DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./app.db")',
                                   'DATABASE_URL = "sqlite:///" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.db")')],
+    # 단독 가입은 되지만 같은 이메일 동시 요청은 모두 500(계정 없음). 응답을 받았으므로 미검증이 아니라 FAIL이다(Codex 2차).
+    'concurrent_server_error': _concurrent_failure('raise RuntimeError("concurrent signup failed")'),
+    # 단독 가입은 되지만 같은 이메일 동시 요청은 모두 4xx(계정 없음). 요청 규격 문제가 아니므로 FAIL이다.
+    'concurrent_rejected': _concurrent_failure('raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="busy")'),
+    # 모든 가입이 500(계정 없음). 정상 가입·동시 가입은 서버 오류를 관찰했으므로 FAIL, 거부 검사는 전제 조건이 안 돼 미검증이다.
+    'signup_server_error': [('routers/auth.py', 'def signup(payload: SignupRequest, db: Session = Depends(get_db)):\n',
+                             'def signup(payload: SignupRequest, db: Session = Depends(get_db)):\n'
+                             '    raise RuntimeError("signup failed")\n')],
     'app_missing': [('main.py', 'app.include_router(auth_router)\n', 'app.include_router(auth_router)\napplication = app\n'),
                     ('main.py', '    return JSONResponse(status_code=422, content={"detail": errors})\n',
                      '    return JSONResponse(status_code=422, content={"detail": errors})\n\n\ndel app\n')],
