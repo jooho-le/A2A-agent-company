@@ -500,6 +500,12 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(scopes=[scope.name for scope in scopes]), self.assertRaises(SecurityServicesError):
                 self.security_services(scopes, cases, verifier)
 
+    def test_measured_security_test_error_codes_are_preserved(self):
+        # Input, binding and evidence failures stay distinguishable; unknown codes still collapse.
+        for code in ("SECURITY_TEST_INPUT_INVALID", "SECURITY_TEST_BINDING_INVALID", "SECURITY_TEST_EVIDENCE_INVALID"):
+            self.assertEqual(SecurityServicesError(code).code, code)
+        self.assertEqual(SecurityServicesError("SOMETHING_ELSE").code, "SECURITY_SERVICES_INVALID")
+
     async def test_final_snapshot_exports_exact_bytes_for_independent_evaluation(self):
         from agents.platform.snapshot_export import SnapshotExportError, export_snapshots, main, write_export
         from evaluation.final_evaluation import read_snapshot

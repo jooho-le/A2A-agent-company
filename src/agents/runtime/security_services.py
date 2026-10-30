@@ -65,6 +65,8 @@ class SecurityServicesError(ValueError):
             "SECURITY_SERVICES_INVALID", "SECURITY_SCAN_EVIDENCE_INVALID",
             "SECURITY_CODE_REFERENCE_INVALID", "SECURITY_REVIEW_INVALID",
             "SECURITY_PROOF_INVALID", "SECURITY_ARTIFACT_INVALID",
+            # Measured Security test mode: input, ID binding and run evidence.
+            "SECURITY_TEST_INPUT_INVALID", "SECURITY_TEST_BINDING_INVALID", "SECURITY_TEST_EVIDENCE_INVALID",
         } else "SECURITY_SERVICES_INVALID"
         super().__init__(self.code)
 
