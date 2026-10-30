@@ -2,7 +2,7 @@
 import signup_link as link
 import signup_security_checks as sec
 
-T = "user{h}@example.com"
+T = "user.{h}@app.example.com"
 
 
 class PracticeSecurityChecks(link.SignupCheck):
@@ -10,8 +10,9 @@ class PracticeSecurityChecks(link.SignupCheck):
         sec.stored_hash(self, {"template": T, "length": 12, "accounts": 2})
 
     def test_sec_signup_003_email_unique_and_canonical(self):
-        sec.unique_and_canonical(self, {"template": T, "forms": ("upper", "pad")})
+        sec.unique_and_canonical(self, {"template": T, "forms": ("upper", "pad"), "aliases": (
+            ("news{h}+promo@example.com", "news{h}@example.com"), ("first.last{h}@gmail.com", "firstlast{h}@gmail.com"))})
 
     def test_sec_signup_005_password_and_hash_not_exposed(self):
         sec.not_exposed(self, {"template": T, "invalid": "plainaddress", "short": 7, "duplicate": "upper_pad",
-                               "malformed": "missing_email"})
+                               "malformed": ("missing_email", "list", "misspelled")})

@@ -2,12 +2,12 @@
 import signup_link as link
 import signup_qa_checks as qa
 
-T = "user{h}@example.com"
+T = "user.{h}@app.example.com"
 
 
 class PracticeQAChecks(link.SignupCheck):
     def test_qa_signup_001_valid_signup_creates_user(self):
-        qa.valid_signup(self, {"emails": (T, "member{h}@example.org"), "length": 12})
+        qa.valid_signup(self, {"emails": (T, "member{h}@example.io"), "length": 12})
 
     def test_qa_signup_002_invalid_email_is_rejected(self):
         qa.invalid_email(self, {"invalid": ("", "  ", "plainaddress", "@example.com", "user@", "user@@example.com",
@@ -17,7 +17,7 @@ class PracticeQAChecks(link.SignupCheck):
         qa.duplicate_email(self, {"template": T, "forms": ("same", "upper", "pad", "upper_pad")})
 
     def test_qa_signup_004_password_minimum_length_is_eight(self):
-        qa.password_length(self, {"reject": (7, 3), "accept": (8, 12)})
+        qa.password_length(self, {"reject": (7, 3), "accept": (8, 12), "kinds": (("lower", 9), ("digits", 8))})
 
     def test_qa_signup_005_concurrent_same_email_creates_one_user(self):
         qa.concurrent_signup(self, {"template": T, "workers": 5, "attempts": 3})

@@ -1,6 +1,8 @@
 # SCN-001 회원가입 Security 검사 내용(입력은 시험지 파일이 정한다). QA 검사와 같은 방식(실행 테스트)이다.
 # 해시 저장값(REQ-005), DB UNIQUE·이메일 정규화 저장(REQ-003), 비밀번호·해시 노출(REQ-006).
 import base64
+import binascii
+import itertools
 import re
 
 import signup_link as link
@@ -74,7 +76,8 @@ def stored_hash(test, data):
 
 def unique_and_canonical(test, data):
     # SEC-SIGNUP-003: 대소문자·공백 변형으로 가입하면 정리된(canonical) 값으로 저장되고, 앱의 사전 검사를 거치지 않고
-    # 같은 이메일 행을 DB에 직접 넣으면 DB가 이메일 칸 UNIQUE로 거부해야 한다.
+    # 같은 이메일 행을 DB에 직접 넣으면 DB가 이메일 칸 UNIQUE로 거부해야 한다. 정리는 앞뒤 공백 제거·소문자만이다
+    # (정책: Gmail 점 제거·+태그 제거 안 함). 그래서 점·+태그만 다른 두 주소(aliases)는 각각 가입되고 그대로 저장돼야 한다.
     def body(service):
         if service.signup(link.new_email(), link.new_password()) not in link.SUCCESS:
             raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
@@ -86,7 +89,54 @@ def unique_and_canonical(test, data):
                 test.assertEqual(service.stored_email(email), link.canonical(email),
                                  "저장된 이메일이 앞뒤 공백 제거·소문자 형태가 아님")
                 test.assertTrue(service.db_rejects_duplicate(email), "DB에 이메일 UNIQUE 제약이 없음")
+        for index, pair in enumerate(data["aliases"]):
+            with test.case(alias=index):
+                addresses = link.new_emails(*pair)
+                for address in addresses:
+                    test.assertIn(service.signup(address, link.new_password()), link.SUCCESS,
+                                  "점·+태그만 다른 주소를 같은 주소로 보고 거부함(정책상 다른 주소)")
+                stored = service.emails()
+                for address in addresses:
+                    test.assertTrue(stored.count(link.canonical(address)) == 1,
+                                    "점·+태그가 있는 주소가 정책대로(앞뒤 공백 제거·소문자만) 저장되지 않음")
     test.check(body)
+
+
+# 글 속에서 base64·16진수로 바꿔 쓴 값의 후보. 풀어서 해시 모양이 나오면 노출이다(실패·거부 요청에서 새로 만들어
+# 저장되지 않은 해시처럼 미리 알 수 없는 값). 후보 길이·개수에 상한을 두고 한 번만 푼다(중첩 풀기 없음).
+_BASE64_TOKEN = re.compile(r"[A-Za-z0-9+/_-]{40,4096}={0,2}")
+_HEX_TOKEN = re.compile(r"(?:[0-9a-fA-F]{2}){32,2048}")
+MAX_DECODED_TOKENS = 2000
+
+
+def _decoded_texts(text):
+    # text 안의 base64·16진수 후보를 풀어 글자(UTF-8로 읽히는 것만)로 돌려준다.
+    found = []
+    tokens = [match.group(0) for pattern in (_BASE64_TOKEN, _HEX_TOKEN)
+              for match in itertools.islice(pattern.finditer(text), MAX_DECODED_TOKENS)]
+    for token in tokens:
+        candidates = []
+        try:
+            candidates.append(bytes.fromhex(token))
+        except ValueError:
+            pass
+        padded = token.rstrip("=") + "=" * (-len(token.rstrip("=")) % 4)
+        for decode in (base64.b64decode, base64.urlsafe_b64decode):
+            try:
+                candidates.append(decode(padded))
+            except (binascii.Error, ValueError):
+                pass
+        for data in candidates:
+            try:
+                found.append(data.decode("utf-8"))
+            except UnicodeDecodeError:
+                pass
+    return found
+
+
+def _hash_shown(text):
+    # 글에 해시 값 모양이 그대로 있거나, base64·16진수로 바꾼 해시가 있는가
+    return bool(HASH_FORMAT.search(text)) or any(HASH_FORMAT.search(value) for value in _decoded_texts(text))
 
 
 def _forms(value):
@@ -98,12 +148,14 @@ def _forms(value):
 
 def not_exposed(test, data):
     # SEC-SIGNUP-005: 성공·형식 오류·짧은 비밀번호·중복·형식이 틀린 본문·DB 오류 요청의 응답(본문·헤더)과
-    # 서버 로그·출력에서 비밀번호와 해시를 찾는다(그대로·base64·16진수). 거부된 요청이나 DB 오류 때 계산한
-    # 해시도 있으므로 해시 모양 자체도 찾는다(예: 처리하지 못한 DB 오류의 traceback에 SQL 값으로 찍힌 해시).
+    # 앱 시작부터 종료까지의 서버 로그·출력에서 비밀번호와 해시를 찾는다(그대로·base64·16진수). 거부된 요청이나 DB 오류 때 계산한
+    # 해시도 있으므로 해시 모양 자체도 찾는다(예: 처리하지 못한 DB 오류의 traceback에 SQL 값으로 찍힌 해시). 그런 해시를
+    # base64·16진수로 바꿔 남긴 경우도 후보를 풀어서 찾는다.
     def body(service):
         email, used = link.new_email(data["template"]), []
 
         def attempt(address, password):
+            # 가입 요청을 보내고, 쓴 비밀번호를 찾을 값 목록에 넣는다.
             used.append(password)
             return service.signup(address, password)
 
@@ -113,9 +165,10 @@ def not_exposed(test, data):
         attempt(data["invalid"], link.new_password())
         attempt(link.new_email(), link.new_password(data["short"]))
         attempt(link.variant(email, data["duplicate"]), link.new_password())
-        password = link.new_password()
-        used.append(password)
-        service.send(MALFORMED[data["malformed"]](link.new_email(), password))
+        for kind in data["malformed"]:  # 형식이 틀린 본문 세 종류(필드 누락·목록 본문·필드 이름 오타)
+            password = link.new_password()
+            used.append(password)
+            service.send(MALFORMED[kind](link.new_email(), password))
         service.fail_next_insert()
         attempt(link.new_email(), link.new_password())
         secrets = list(used)
@@ -125,10 +178,11 @@ def not_exposed(test, data):
             if len(digest) >= 16:
                 secrets.append(digest)
         found = {form for value in secrets for form in _forms(value)}
+        service.stop()  # 종료할 때 남기는 로그까지 모은 뒤 판정한다.
         responses, logs = service.responses, service.log_text()
         test.assertFalse(any(value in text for value in found for text in responses)
-                         or any(HASH_FORMAT.search(text) for text in responses),
+                         or any(_hash_shown(text) for text in responses),
                          "응답에 비밀번호 또는 비밀번호 해시가 들어 있음")
-        test.assertFalse(any(value in logs for value in found) or bool(HASH_FORMAT.search(logs)),
+        test.assertFalse(any(value in logs for value in found) or _hash_shown(logs),
                          "서버 로그·출력에 비밀번호 또는 비밀번호 해시가 들어 있음")
     test.check(body)

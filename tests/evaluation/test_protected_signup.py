@@ -3,10 +3,10 @@
 확인하는 것:
   - 묶음 대응표(suite.json)가 실제 테스트 메서드·기준표 검사 ID와 정확히 맞는가? QA와 Security가 같은 방식(실행
     테스트)이고, 검사마다 시험지 세 벌(순환용·시범 최종용·공식 최종용)이 있는가?
-  - dev가 역할별 보호 파일 설정(UnitTestScope)과 보호 QA 케이스(QACaseBinding)를 받아 주는가?
+  - dev가 역할별 보호 파일 설정(UnitTestScope)과 보호 QA 케이스(QACaseBinding)를 받아 주는가? 보내는 사본은 주석만 뺀
+    같은 코드이고, 지문이 요구사항 연결까지 담는가? 시험지 세 벌이 같은 입력 종류를 쓰는가? 지원하지 않는 정책이면 멈추는가?
   - unittest 보고서가 검사 결과로 옮겨질 때 근거 없는 PASS가 생기지 않는가? 독립 평가 보고서까지 이어지는가?
-  - (실행) 최소 회원가입 서비스와 변형 27개(결함 21·연결 실패 2·비밀번호 없는 debug 로그 1·시작할 때 테이블을
-    만드는 앱 2·DB 오류 미처리 1)를 컨테이너처럼 읽기 전용 Snapshot으로 두고 dev unittest 실행기로 돌렸을 때,
+  - (실행) 최소 회원가입 서비스와 변형 47개(FAIL을 기대하는 결함 36·모두 미검증 3·정상 경계 8)를 컨테이너처럼 읽기 전용 Snapshot으로 두고 dev unittest 실행기로 돌렸을 때,
     시험지 세 벌 모두에서 결함마다 같은 검사만 FAIL이 되고(시험지 난이도가 같음), 연결이 안 되면 모두 UNVERIFIED인가?
 실행 시험은 sqlalchemy·argon2-cffi가 있어야 돈다(프로젝트 dev 그룹에 있음. 없는 환경에서는 건너뜀).
 """
@@ -106,12 +106,204 @@ def test_every_set_has_the_same_checks_with_different_inputs():
                     found.add(node.value)
         return found
     shared = {'invalid', 'template', 'emails', 'forms', 'steps', 'duplicate', 'malformed', 'db_error', 'length',
-              'reject', 'accept', 'workers', 'attempts', 'accounts', 'short'}
+              'reject', 'accept', 'workers', 'attempts', 'accounts', 'short', 'kinds', 'lower', 'digits', 'aliases',
+              # 입력 종류 이름(값이 아님. 실제 값은 실행할 때 무작위로 만든다): 형식이 틀린 본문 종류, 이메일 변형 종류
+              'missing_email', 'list', 'misspelled', 'upper', 'title', 'lead', 'trail', 'swap_lead', 'title_trail',
+              'upper_pad', 'swapcase', 'swap_pad'}
     practice = literals('practice_qa', 'practice_security') - shared
     for exam in ('exam_pilot', 'exam_final'):
         assert not (practice & (literals(exam) - shared) - {'same'}), exam
     assert not (literals('exam_pilot') & literals('exam_final')) - shared - {'same'}
 
+
+
+def test_delivered_copies_drop_only_comments():
+    """실행하러 보내는 보호 파일 사본은 주석만 뺀 것이다(AST가 저장소 파일과 같음). 문자열 안의 #은 남는다.
+    시험지 노출 확인은 주석 있는 원본과 주석 없는 사본을 모두 찾는다."""
+    for scope in pt.SCOPES:
+        for path, content in pt.protected_files(scope).items():
+            original = (pt.ROOT / path).read_text(encoding='utf-8')
+            assert ast.dump(ast.parse(content)) == ast.dump(ast.parse(original)), path
+            assert '\n#' not in '\n' + content, path
+    assert pt.without_comments('x = "a # b"  # note\n# only\ny = 1\n') == 'x = "a # b"\ny = 1\n'
+    for path in ('tests/signup/exam_final.py', 'tests/signup/signup_link.py'):
+        original = (pt.ROOT / path).read_text(encoding='utf-8')
+        for content in (original, pt.without_comments(original)):
+            assert [item['reason'] for item in pt.exam_exposure({'tests/copy.py': content.encode('utf-8')})] == \
+                ['SAME_AS_PROTECTED_FILE']
+
+
+def test_suite_fingerprint_covers_the_requirement_mapping():
+    """파일이 같아도 검사의 요구사항 연결(점수 계산에 쓰임)이 바뀌면 지문이 달라져 다른 시험지로 본다(Codex 10.30).
+    범위·시험지마다 지문이 다르다."""
+    import copy
+    changed = copy.deepcopy(SUITE)
+    next(check for check in changed['checks'] if check['key'] == 'QA-SIGNUP-003')['requirementKey'] = 'REQ-001'
+    for scope in ('final', 'pilot', 'practice', 'in-loop-qa'):
+        assert pt.suite_sha256(scope, changed) != pt.suite_sha256(scope, SUITE), scope
+    assert pt.suite_sha256('in-loop-security', changed) == pt.suite_sha256('in-loop-security', SUITE)  # QA 검사는 안 담음
+    assert len({pt.suite_sha256(scope) for scope in pt.SCOPES}) == len(pt.SCOPES)
+
+
+
+def _set_inputs(names):
+    """시험지 파일들(names)을 실행하지 않고 읽어 {검사 메서드: 입력 사전}을 만든다(T는 그 파일의 기본 이메일로 바꿈)."""
+    found = {}
+    for name in names:
+        tree = ast.parse((pt.ROOT / 'tests/signup' / (name + '.py')).read_text(encoding='utf-8'))
+        template = next(node.value.value for node in tree.body if isinstance(node, ast.Assign)
+                        and getattr(node.targets[0], 'id', None) == 'T')
+
+        class Resolve(ast.NodeTransformer):
+            # 입력 사전 안의 이름 T를 그 파일의 기본 이메일 글자로 바꾼다(실행하지 않고 literal_eval로 읽으려고).
+            def visit_Name(self, node):
+                return ast.copy_location(ast.Constant(template), node) if node.id == 'T' else node
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'):
+                call = node.body[0].value
+                found[node.name] = ast.literal_eval(Resolve().visit(call.args[1]))
+    return found
+
+
+def _email_kind(template):
+    """이메일 모양의 종류: (로컬에 점, 하위 도메인, 2글자 최상위 도메인, +태그, Gmail)"""
+    local, domain = template.format(h='0a1b2c').rsplit('@', 1)
+    return ('.' in local, domain.count('.') >= 2, len(domain.rsplit('.', 1)[-1]) == 2, '+' in local, domain == 'gmail.com')
+
+
+def _invalid_kind(value):
+    """형식 오류 이메일의 종류"""
+    text = value.strip()
+    return ('empty' if not value else 'blank' if not text else 'space' if ' ' in text else 'no_at' if '@' not in text
+            else 'many_at' if text.count('@') > 1 else 'no_local' if text.startswith('@') else 'no_domain'
+            if text.endswith('@') else 'other')
+
+
+def _input_kinds(data, form_kind):
+    """검사 입력 하나를 값이 아닌 종류로 바꾼다. 세 시험지에서 같아야 난이도가 같다. 변형 종류는 그 검사의 기본 이메일로
+    판단한다(같은 변형도 이메일 모양에 따라 대소문자가 안 바뀔 수 있음)."""
+    kinds, template = {}, data.get('template', 'ab.cd{h}@ex.example.com')
+    form_kind = (lambda form, base=template, kind=form_kind: kind(form, base))
+    for key, value in data.items():
+        if key == 'template':
+            kinds[key] = _email_kind(value)
+        elif key == 'emails':
+            kinds[key] = frozenset(_email_kind(item) for item in value)
+        elif key == 'forms':
+            marks = [form_kind(form) for form in value]
+            kinds[key] = ('same' in value, *(any(mark[index] for mark in marks) for index in range(4)))
+        elif key == 'duplicate':
+            kinds[key] = form_kind(value)
+        elif key == 'invalid':
+            kinds[key] = _invalid_kind(value) if isinstance(value, str) else frozenset(map(_invalid_kind, value))
+        elif key in ('reject', 'short'):
+            values = value if isinstance(value, tuple) else (value,)
+            kinds[key] = (7 in values or key == 'short', all(item <= 7 for item in values))
+        elif key in ('accept', 'length'):
+            values = value if isinstance(value, tuple) else (value,)
+            kinds[key] = (all(item >= 8 for item in values), 8 in values if key == 'accept' else None)
+        elif key == 'kinds':
+            kinds[key] = frozenset(kind for kind, length in value if length >= 8)
+        elif key == 'aliases':
+            kinds[key] = frozenset('plus' if '+' in first else 'dot' for first, _second in value)
+        elif key == 'malformed':
+            kinds[key] = frozenset(value)
+        elif key == 'steps':
+            names = {}
+            for step in value:
+                names.setdefault(step[1], []).append(step[0]) if step[0] != 'invalid' else None
+            kinds[key] = (tuple(sorted(step[0] for step in value)),
+                          any(seen[:2] == ['short', 'new'] for seen in names.values()),
+                          frozenset(_invalid_kind(step[1]) for step in value if step[0] == 'invalid'),
+                          frozenset(form_kind(step[2]) for step in value if step[0] == 'duplicate'))
+        else:
+            kinds[key] = value
+    return kinds
+
+
+def test_every_set_uses_the_same_input_kinds():
+    """시험지 세 벌은 값은 다르지만 입력 종류가 같아야 난이도가 같다(2026-10-30 정책 칸 대응 점검). 검사마다 이메일 모양,
+    변형의 대소문자·앞 공백·뒤 공백, 형식 오류 이메일 종류, 비밀번호 길이 경계·구성, 요청 순서 종류, 형식이 틀린 본문
+    종류를 뽑아 세 벌이 같은지 본다. 예전에는 시범은 앞 공백만·공식은 뒤 공백만, 2글자 최상위 도메인은 공식에만 있었다."""
+    spec = importlib.util.spec_from_file_location('signup_link_kinds', pt.ROOT / 'tests/signup/signup_link.py')
+    link = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(link)
+
+    def form_kind(form, template):
+        # (앞 공백, 뒤 공백, 로컬 대소문자 바뀜, 도메인 대소문자 바뀜). 무작위 값이 숫자로 시작하는 최악의 경우로 본다.
+        email = template.format(h='0a1b2c')
+        sample = link.variant(email, form).strip()
+        local, domain = sample.rsplit('@', 1)
+        original_local, original_domain = email.rsplit('@', 1)
+        return (link.variant(email, form)[:1].isspace(), link.variant(email, form)[-1:].isspace(),
+                local != original_local, domain != original_domain)
+
+    sets = {'practice': _set_inputs(('practice_qa', 'practice_security')), 'pilot': _set_inputs(('exam_pilot',)),
+            'final': _set_inputs(('exam_final',))}
+    assert len({frozenset(inputs) for inputs in sets.values()}) == 1
+    for method in sets['final']:
+        kinds = {name: _input_kinds(inputs[method], form_kind) for name, inputs in sets.items()}
+        assert kinds['practice'] == kinds['pilot'] == kinds['final'], (method, kinds)
+
+def test_suite_refuses_policies_its_checks_do_not_implement():
+    """검사 내용이 전제로 하는 정책(SUPPORTED_POLICY)은 실행 검사의 상수(Argon2 최소값)·dev 등록 정책과 같다. 받은 정책이
+    다르면(Argon2 메모리 기준을 올림, +태그 제거를 허용) 보호 케이스·평가 입력을 만들지 않는다(Codex 10.30 3차 5)."""
+    import copy
+    source = (pt.ROOT / 'tests/signup/signup_security_checks.py').read_text(encoding='utf-8')
+    constant = next(node.value for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                    and getattr(node.targets[0], 'id', None) == 'ARGON2_MINIMUM')
+    minimum = ast.literal_eval(constant)
+    supported = pt.SUPPORTED_POLICY['passwordHashPolicy']
+    assert minimum == {'m': supported['memoryKiB'], 't': supported['iterations'], 'p': supported['parallelism']}
+    pt.check_policy(CONTRACT)
+    stronger = copy.deepcopy(CONTRACT)
+    stronger['securityPolicy']['passwordHashPolicy']['memoryKiB'] = 65536
+    plus = copy.deepcopy(CONTRACT)
+    plus['emailPolicy']['plusTagRemoval'] = True
+    for contract in (stronger, plus):
+        with pytest.raises(ValueError):
+            pt.evaluation_inputs(contract, 'final')
+        with pytest.raises(ValueError):
+            pt.owned_cases(contract, 'SECURITY')
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason='필터가 기록 사본을 돌려주는 방식은 Python 3.12부터')
+def test_log_capture_uses_the_record_a_filter_returns():
+    """handler 필터가 가린 사본을 돌려주면(3.12부터) 실제로 나가는 것은 사본이므로, 모은 글에도 원문이 없다.
+    가리지 않은 로거의 원문은 그대로 모인다(실제 출력 기준 수집, Codex 10.30 3차 2의 연장)."""
+    import logging
+    import os
+    spec = importlib.util.spec_from_file_location('signup_link_probe', pt.ROOT / 'tests/signup/signup_link.py')
+    link = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(link)
+    secret = 'Probe' + 'Value' + '4821'
+
+    class MaskCopy(logging.Filter):
+        def filter(self, record):
+            copy = logging.makeLogRecord(record.__dict__)
+            copy.msg, copy.args = 'credential [REDACTED]', ()
+            return copy
+
+    loggers = []
+    for name, mask in (('probe.masked.copy', True), ('probe.plain', False)):
+        logger, handler = logging.getLogger(name), logging.FileHandler(os.devnull)
+        logger.propagate = False
+        if mask:
+            handler.addFilter(MaskCopy())
+        logger.addHandler(handler)
+        loggers.append((logger, handler))
+    service = link.Service()
+    try:
+        service._capture()
+        for logger, _handler in loggers:
+            logger.warning('credential %s', secret)
+    finally:
+        service.close()
+        for logger, handler in loggers:
+            logger.removeHandler(handler)
+            handler.close()
+    text = service.log_text()
+    assert 'credential [REDACTED]' in text and text.count(secret) == 1
 
 def test_in_loop_scopes_hold_only_their_role_requirements():
     """순환 안 보호 케이스는 dev가 그 역할 담당으로 정한 요구사항만 쓰고, 그 역할의 순환용 선택자에 묶인다."""
@@ -338,6 +530,34 @@ EXPECTED_FAILURES = {
     # Snapshot에서 시작이 실패해 모두 미검증이다(제품 결함으로 FAIL을 내지도, 시작 단계를 건너뛰어 PASS를 내지도 않는다).
     'lifespan_env_database': set(),
     'lifespan_source_database': None,
+    # Codex 10.30 재현: 시작할 때 만든 독립 로거·종료할 때 남긴 로그의 비밀번호도 노출이다(종료까지 모은 뒤 판정).
+    'startup_isolated_logger': {'SEC-SIGNUP-005'},
+    'shutdown_log_flush': {'SEC-SIGNUP-005'},
+    'shutdown_log_without_secret': set(),
+    # Codex 10.30 재현: lifespan 상태를 쓰는 정상 앱은 동시 요청에서도 정상, 종료할 때 엔진을 정리해도 다음 검사가 정상.
+    'lifespan_request_state': set(),
+    'lifespan_engine_dispose': set(),
+    # Codex 10.30 추가: 중복 가입을 거부하면서 기존 계정을 바꾸면, 거부된 요청이 상태를 바꾼 것이라 FAIL이다.
+    'duplicate_overwrites_password': {'QA-SIGNUP-003', 'QA-SIGNUP-006'},
+    # Codex 10.30 추가 점검: DB 실패 요청에서 새로 만든 해시를 base64로 로그에 남기면 노출이다(정상 경로의 base64 로그는 아님).
+    'db_error_new_hash_base64': {'SEC-SIGNUP-005'},
+    'base64_log_without_secret': set(),
+    # Codex 10.30 추가 점검: 8자 이상인데 소문자만·숫자만이라고 거부하면 REQ-004(8자 이상 정상 처리) 위반이다.
+    'password_complexity_required': {'QA-SIGNUP-004'},
+    # Codex 10.30 3차: 정책상 다른 주소(점·+태그만 다름)를 합치면 정규화 저장 위반이다. 가린 뒤 내보낸 로그는 노출이 아니다.
+    'email_alias_merged': {'SEC-SIGNUP-003'},
+    'masked_logger_filter': set(),
+    'masked_handler_filter': set(),
+    # 정책 칸·완료 조건 대응표(2026-10-30): 앞·뒤 공백 한쪽만 지우는 정리, 2글자 최상위 도메인 거부, Argon2 반복 미달·argon2i,
+    # 중복 가입에 성공 응답. 시험지 세 벌 모두에서 같은 검사만 FAIL이어야 한다(입력 종류가 같다는 확인).
+    'strip_leading_only': {'SEC-SIGNUP-003'},
+    'strip_trailing_only': {'SEC-SIGNUP-003'},
+    'email_tld_min3': {'QA-SIGNUP-001'},
+    'weak_argon2_iterations': {'SEC-SIGNUP-002'},
+    'argon2i_type': {'SEC-SIGNUP-002'},
+    'duplicate_success_response': {'QA-SIGNUP-003', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
+    'sha256_storage': {'SEC-SIGNUP-002'},
+    'local_case_kept': {'QA-SIGNUP-003', 'QA-SIGNUP-006', 'SEC-SIGNUP-003'},
 }
 # 모두 미검증이 되는 변형의 근거 코드
 UNVERIFIED_CODES = {'app_missing': {'APP_IMPORT_FAILED'}, 'wrong_signup_path': {'SIGNUP_ROUTE_NOT_FOUND'},

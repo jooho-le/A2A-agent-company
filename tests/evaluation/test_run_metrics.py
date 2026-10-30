@@ -6,7 +6,9 @@
   3) Single과 Multi를 "공정하게 비교해도 되는지" 올바르게 판정하는가?
   4) 협업 시간(전달·병렬 겹침·에이전트 밖 시간·사람 대기)을 병렬 구간을 두 번 세지 않고 계산하는가?
   5) Ver1(순환 안 보호 테스트 + 최종)과 Ver2(최종만)를 같은 Multi 구조에서 비교할 때, 의도한 차이(보호 테스트 참조)만
-     허용하고 이름표·쌍·시험지를 확인하는가? 정책별 점수와 연습 효과(차이의 차이)를 계산하는가?
+     허용하고 이름표·쌍·시험지를 확인하는가? 정책별 점수와 차이의 차이(보조 지표)를 계산하는가?
+  6) Run 기록을 받는 도중 Run이 바뀌면 다시 받는가? Run마다 가격표가 다르면 알리는가? 최종 독립 평가 PASS인 Run만
+     기준 달성 시간으로 세는가? 무작위로 만든 실험에서도 점수·차이의 차이·요약의 불변식이 지켜지는가?
 """
 import json
 from uuid import UUID
@@ -586,6 +588,8 @@ def test_fetch_page_error_is_propagated_instead_of_returning_partial_bundle():
     data = bundle()
 
     def get(path, query):
+        if query is None:
+            return data['run']
         if query['offset'] == 0:
             return {'events': data['events'][:1], 'total': len(data['events'])}
         raise RuntimeError('page request failed')
@@ -795,17 +799,21 @@ def test_unpaired_runs_are_flagged_as_a_warning():
     assert result['valid'] is True and {item['detail'] for item in result['warnings']} == {'RUN_IS_NOT_PAIRED'}
 
 
-def scored_report(run_id, statuses, *, code_version=2):
-    """점수 계산에 필요한 부분만 흉내 낸 독립 평가 보고서. statuses: 요구사항마다 검사 상태 목록."""
+def scored_report(run_id, statuses, *, code_version=2, suite='f' * 64):
+    """점수 계산에 필요한 부분만 흉내 낸 독립 평가 보고서. statuses: 요구사항마다 검사 상태 목록.
+    suite: 시험지 지문(순환용 참고 보고서는 최종 시험지와 다른 값을 준다)."""
     checks, requirements = [], []
     for index, row in enumerate(statuses):
         ids = [f'{index}-{number}' for number in range(len(row))]
         checks += [{'testId': check_id, 'required': True, 'status': status, 'perspective': 'QA', 'title': check_id}
                    for check_id, status in zip(ids, row)]
         requirements.append({'requirementId': uid(100 + index), 'checkIds': ids})
-    report = evaluation_report(run_id, code_version=code_version)
+    report = evaluation_report(run_id, code_version=code_version, suite=suite)
     report.update(manifestCheck={'metadataMatches': True, 'errorCode': None}, checks=checks, requirements=requirements)
     return report
+
+
+PRACTICE = 'e' * 64  # 순환용 참고 보고서의 시험지 지문(최종 'f' * 64와 다름)
 
 
 def test_summary_and_practice_effect_by_loop_policy():
@@ -817,7 +825,8 @@ def test_summary_and_practice_effect_by_loop_policy():
         item['configuration'] = configuration(run_id, protectedTestSuiteRef=ref)
         runs.append(run_metrics(item))
     finals = [scored_report(uid(1), [['PASS'], ['PASS', 'FAIL']]), scored_report(uid(2), [['PASS'], ['FAIL']])]
-    practices = [scored_report(uid(1), [['PASS'], ['PASS', 'PASS']]), scored_report(uid(2), [['PASS'], ['FAIL']])]
+    practices = [scored_report(uid(1), [['PASS'], ['PASS', 'PASS']], suite=PRACTICE),
+                 scored_report(uid(2), [['PASS'], ['FAIL']], suite=PRACTICE)]
     summary = experiment_summary(runs, {'IN_LOOP_AND_FINAL': 1, 'FINAL_ONLY': 1}, finals, group_by='loopPolicy')
     assert summary['IN_LOOP_AND_FINAL']['evaluation']['meanExamScore'] == 0.75
     assert summary['FINAL_ONLY']['evaluation']['meanExamScore'] == 0.5
@@ -826,6 +835,239 @@ def test_summary_and_practice_effect_by_loop_policy():
     assert effect['policies']['IN_LOOP_AND_FINAL']['meanGap'] == pytest.approx(0.25)
     assert effect['policies']['FINAL_ONLY']['meanGap'] == 0
     with pytest.raises(ValueError):  # 참고 보고서가 다른 코드 버전을 채점했으면 짝지을 수 없다.
-        loop_policy_effect(runs, finals, [practices[0], scored_report(uid(2), [['PASS']], code_version=1)])
+        loop_policy_effect(runs, finals, [practices[0], scored_report(uid(2), [['PASS']], code_version=1, suite=PRACTICE)])
+    with pytest.raises(ValueError):  # Run마다 다른 순환용 시험지로 참고 채점한 결과는 섞지 않는다(Codex 10.30 R6).
+        loop_policy_effect(runs, finals, [practices[0], scored_report(uid(2), [['PASS'], ['FAIL']], suite='a' * 64)])
+    with pytest.raises(ValueError):  # 참고 채점을 최종 시험지로 했으면 연습 효과가 아니다.
+        loop_policy_effect(runs, finals, [scored_report(uid(1), [['PASS']]), scored_report(uid(2), [['PASS']])])
     with pytest.raises(ValueError):  # 정책 기준 요약에 계획하지 않은 정책의 Run이 섞이면 거부한다.
         experiment_summary(runs, {'IN_LOOP_AND_FINAL': 2}, group_by='loopPolicy')
+
+
+def test_score_reads_saved_reports_strictly():
+    """저장된 보고서를 다시 읽을 때(Codex 10.30 R9): Manifest 확인 칸이 없으면 점수를 만들지 않고, 요구사항이 가리키는
+    검사의 결과 행이 빠졌으면 그 검사를 실행하지 않은 것(NOT_RUN)으로 세어 점수·완료율이 올라가지 않는다."""
+    from evaluation.scoring import exam_score
+    report = scored_report(uid(1), [['PASS', 'FAIL']])
+    assert exam_score(report)['score'] == 0.5 and exam_score(report)['completionRate'] == 1.0
+    no_manifest = {**report}
+    del no_manifest['manifestCheck']
+    assert exam_score(no_manifest)['score'] is None and exam_score(no_manifest)['reason'] == 'MANIFEST_NOT_CONFIRMED'
+    dropped = {**report, 'checks': [row for row in report['checks'] if row['status'] != 'FAIL']}
+    score = exam_score(dropped)
+    assert (score['score'], score['completionRate'], score['scoreIsLowerBound']) == (0.5, 0.5, True)
+    assert score['missingCheckIds'] == ['0-1'] and score['scoreUpperBound'] == 1.0
+
+
+def test_practice_effect_uses_only_completed_runs_and_reports_a_range():
+    """미검증으로 낮아진 점수(잠정 하한)로 확정 차이를 만들지 않는다(Codex 10.30 R5). Ver1 최종이 PASS+ERROR(하한 0.5),
+    순환용 1.0이고 Ver2가 양쪽 1.0이면 확정 값은 없고(뺀 Run 1, 사유 INCOMPLETE), 가능한 범위만 [0, 0.5]로 적는다.
+    짝지은 실험에서 한쪽이 빠지면 짝 Run도 확정 계산에서 뺀다."""
+    from evaluation.scoring import practice_effect
+    v1 = (scored_report(uid(1), [['PASS', 'ERROR']]), scored_report(uid(1), [['PASS', 'PASS']], suite=PRACTICE))
+    v2 = (scored_report(uid(2), [['PASS', 'PASS']]), scored_report(uid(2), [['PASS', 'PASS']], suite=PRACTICE))
+    effect = practice_effect({'IN_LOOP_AND_FINAL': [v1], 'FINAL_ONLY': [v2]})
+    assert effect['practiceEffect'] is None and effect['practiceEffectRange'] == [0.0, 0.5]
+    assert effect['policies']['IN_LOOP_AND_FINAL']['excludedRuns'] == {'INCOMPLETE': 1}
+    assert effect['policies']['IN_LOOP_AND_FINAL']['skippedRuns'] == 1
+    assert effect['policies']['FINAL_ONLY']['runs'] == 1
+    paired = practice_effect({'IN_LOOP_AND_FINAL': [v1], 'FINAL_ONLY': [v2]}, {uid(1): 'p1', uid(2): 'p1'})
+    assert paired['policies']['FINAL_ONLY']['excludedRuns'] == {'PAIR_PARTNER_EXCLUDED': 1}
+    complete = (scored_report(uid(1), [['PASS', 'FAIL']]), scored_report(uid(1), [['PASS', 'PASS']], suite=PRACTICE))
+    done = practice_effect({'IN_LOOP_AND_FINAL': [complete], 'FINAL_ONLY': [v2]}, {uid(1): 'p1', uid(2): 'p1'})
+    assert done['practiceEffect'] == 0.5 and done['practiceEffectRange'] == [0.5, 0.5]
+
+
+
+def test_fetch_retries_when_the_run_changes_and_times_need_matching_terminal_events():
+    """받는 도중에 Run이 바뀌면 다시 받는다(Codex 10.30 추가 점검 3). 사건을 받을 때는 30초 HUMAN_REVIEW 판정까지만 있고
+    상태를 받을 때는 50초에 SUCCESS로 끝난 Run이면, 예전에는 성공 시간이 30초로 집계됐다. 다시 받은 뒤에는 50초다.
+    끝내 같은 시점의 자료를 못 받거나, 최종 상태와 판정·종료 사건이 이어지지 않으면 시간을 계산하지 않는다."""
+    run_id = uid(1)
+    early = [event(run_id, 'RUN_STARTED', 0), event(run_id, 'BUILD_PASSED', 10),
+             event(run_id, 'VERDICT_CREATED', 30, workflowState='HUMAN_REVIEW', codeVersion=1)]
+    late = early + [event(run_id, 'VERDICT_CREATED', 50, workflowState='FINISHED', codeVersion=1),
+                    event(run_id, 'RUN_FINISHED', 51, workflowState='FINISHED', codeVersion=1)]
+    base = bundle(run_id, fixes=0)
+    waiting = {**base['run'], 'status': 'HUMAN_REVIEW', 'verdict': 'HUMAN_REVIEW', 'updatedAt': '2026-10-14T10:00:30+09:00'}
+    finished = {**base['run'], 'status': 'FINISHED', 'verdict': 'SUCCESS', 'updatedAt': '2026-10-14T10:00:51+09:00'}
+
+    def server(states, event_lists):
+        # 가짜 API: Run 상태는 states 순서대로, 사건 목록은 목록을 받을 때마다 event_lists의 다음 것을 돌려준다.
+        calls = {'run': 0, 'events': 0}
+
+        def get(path, query):
+            if path.endswith('/events'):
+                if query['limit'] != 1:  # 목록 받기(한 번 받을 때마다 다음 시점의 사건 목록). limit 1은 끝 확인용
+                    calls['events'] += 1
+                events = event_lists[min(calls['events'] - 1, len(event_lists) - 1)]
+                return {'events': events[query['offset']:query['offset'] + query['limit']], 'total': len(events)}
+            for suffix, key in (('/issues', 'issues'), ('/tool-attempts', 'attempts')):
+                if path.endswith(suffix):
+                    return {key: base['issues' if key == 'issues' else 'toolAttempts']}
+            if path.endswith('/usage'):
+                return base['usage']
+            if path.endswith('/configuration'):
+                return base['configuration']
+            state = states[min(calls['run'], len(states) - 1)]
+            calls['run'] += 1
+            return state
+        return get
+
+    # 1회차: 상태가 처음(HUMAN_REVIEW)과 끝(SUCCESS)에서 다름 → 다시 받음 → 2회차는 같은 시점(SUCCESS, 50초)
+    fetched = fetch_run_bundle(server([waiting, finished, finished, finished], [early, late]), run_id)
+    metrics = run_metrics(fetched)
+    assert fetched['snapshotConsistent'] is True and (metrics['verdictMs'], metrics['totalMs']) == (50000, 51000)
+    # 계속 바뀌면 시간을 계산하지 않는다.
+    unstable = fetch_run_bundle(server([waiting, finished] * 3, [early] * 6), run_id)
+    assert unstable['snapshotConsistent'] is False
+    assert 'RUN_CHANGED_DURING_FETCH' in run_metrics(unstable)['notes'] and run_metrics(unstable)['verdictMs'] is None
+    # 같은 시점이라고 해도 최종 상태(SUCCESS·FINISHED)와 사건 끝(HUMAN_REVIEW 판정, 종료 사건 없음)이 이어지지 않으면 시간 없음
+    mixed = {**base, 'run': finished, 'events': early, 'eventsTotal': len(early)}
+    assert 'TERMINAL_EVENTS_DO_NOT_MATCH_RUN' in run_metrics(mixed)['notes'] and run_metrics(mixed)['verdictMs'] is None
+
+
+def test_price_books_are_kept_and_differences_are_flagged():
+    """사용량 응답의 단가표(통화·ID·버전·SHA-256·계산 방식)를 지표에 남기고, Run마다 다르면 비교에 주의로 알린다
+    (비용 달러 차이에 단가 차이가 섞임, Codex 10.30 추가 점검 6). 정확도·시간 비교를 무효로 만들지는 않는다."""
+    entries, runs = [], []
+    for number, (policy_ref, book) in enumerate((('suite-1', 'a'), (None, 'b')), start=1):
+        item = bundle(uid(number))
+        item['usage']['summary'].update(currency='USD', priceBookId='prices', priceBookVersion=str(number),
+                                        priceBookSha256=book * 64, calculationVersion='cost-v1')
+        item['configuration'] = configuration(uid(number), protectedTestSuiteRef=policy_ref)
+        metrics = run_metrics(item)
+        runs.append(metrics)
+        entries.append({'architecture': 'MULTI_AGENT', 'loopPolicy': metrics['loopPolicy'], 'pairId': 'p1',
+                        'configuration': item['configuration'], 'evaluation': None, 'priceBook': metrics['priceBook']})
+    assert runs[0]['priceBook']['priceBookSha256'] == 'a' * 64
+    result = comparison_validity(entries, group_by='loopPolicy')
+    assert result['valid'] is True
+    assert any(item.get('detail') == 'PRICE_BOOK_DIFFERS' for item in result['warnings'])
+    summary = experiment_summary(runs, {'IN_LOOP_AND_FINAL': 1, 'FINAL_ONLY': 1}, group_by='loopPolicy')
+    assert summary['IN_LOOP_AND_FINAL']['priceBooks'][0]['priceBookVersion'] == '1'
+
+
+def test_practice_effect_range_uses_the_same_pairs_as_the_confirmed_value():
+    """짝 p1은 양쪽 모두 순환용·최종 만점, 짝 p2는 Ver1이 점수 없음(Manifest 미확인)이고 Ver2가 순환용 1·최종 0이면,
+    확정 값은 p1만으로 0이다. 범위도 같은 쌍 기준이어야 해서 p2의 Ver2를 빼고 [0, 0]이다(예전에는 Ver1은 1개, Ver2는 2개
+    Run으로 범위를 계산해 [-0.5, -0.5]가 나왔다, Codex 10.30 3차 3)."""
+    from evaluation.scoring import practice_effect
+    full = lambda run_id, suite='f' * 64: scored_report(run_id, [['PASS', 'PASS']], suite=suite)
+    no_manifest = {**full(uid(3)), 'manifestCheck': {'metadataMatches': False, 'errorCode': 'MANIFEST_MISMATCH'}}
+    groups = {'IN_LOOP_AND_FINAL': [(full(uid(1)), full(uid(1), PRACTICE)), (no_manifest, full(uid(3), PRACTICE))],
+              'FINAL_ONLY': [(full(uid(2)), full(uid(2), PRACTICE)),
+                             (scored_report(uid(4), [['FAIL', 'FAIL']]), full(uid(4), PRACTICE))]}
+    effect = practice_effect(groups, {uid(1): 'p1', uid(2): 'p1', uid(3): 'p2', uid(4): 'p2'})
+    assert effect['practiceEffect'] == 0 and effect['practiceEffectRange'] == [0.0, 0.0]
+    assert effect['policies']['IN_LOOP_AND_FINAL']['rangeExcludedRuns'] == {'NO_SCORE': 1}
+    assert effect['policies']['FINAL_ONLY']['rangeExcludedRuns'] == {'PAIR_PARTNER_NO_SCORE': 1}
+    assert effect['policies']['FINAL_ONLY']['rangeRuns'] == effect['policies']['IN_LOOP_AND_FINAL']['rangeRuns'] == 1
+
+
+
+def test_scoring_and_paired_effect_invariants_on_random_experiments():
+    """무작위 실험 300개에서 점수·차이의 차이 규칙이 늘 성립하는지 본다(사례를 하나씩 쓰는 대신 경계 조합을 많이 봄).
+      - 점수: 0 ≤ 점수 ≤ 위쪽 끝 ≤ 1, 미검증이 없으면 둘이 같고 하한 표시가 없다.
+      - 확정 계산·범위에 든 Run 수는 두 버전에서 같고(쌍 기준), 따로 다시 센 쌍 수와 같다. 든 Run + 뺀 Run = 전체.
+      - 범위에 미검증이 없으면 범위는 확정 값 한 점이다. 범위의 아래 끝 ≤ 위 끝."""
+    import random
+    from evaluation.scoring import exam_score, practice_effect
+    rng = random.Random(20261030)
+    statuses = ('PASS', 'FAIL', 'ERROR', 'NOT_RUN')
+    for case in range(300):
+        groups, pairs, unscored, state = {'IN_LOOP_AND_FINAL': [], 'FINAL_ONLY': []}, {}, [], {}
+        for pair in range(rng.randint(1, 4)):
+            for offset, policy in enumerate(groups):
+                run_id = uid(10000 + case * 20 + pair * 2 + offset)
+                pairs[run_id] = f'p{pair}'
+                if rng.random() < 0.15:
+                    unscored.append(run_id)
+                    state[run_id] = 'NO_SCORE'
+                    continue
+                reports = []
+                for suite in ('f' * 64, PRACTICE):
+                    rows = [[rng.choice(statuses) for _ in range(rng.randint(1, 3))] for _ in range(rng.randint(1, 3))]
+                    report = scored_report(run_id, rows, suite=suite)
+                    if rng.random() < 0.1:
+                        report['manifestCheck'] = {'metadataMatches': False, 'errorCode': 'MANIFEST_MISMATCH'}
+                    reports.append(report)
+                scores = [exam_score(report) for report in reports]
+                for score in scores:
+                    if score['score'] is not None:
+                        assert 0 <= score['score'] <= score['scoreUpperBound'] <= 1
+                        assert score['scoreIsLowerBound'] == (score['completionRate'] < 1)
+                        if score['completionRate'] == 1:
+                            assert score['score'] == score['scoreUpperBound']
+                state[run_id] = ('NO_SCORE' if any(score['score'] is None for score in scores)
+                                 else 'INCOMPLETE' if any(score['scoreIsLowerBound'] for score in scores) else 'OK')
+                groups[policy].append(tuple(reports))
+        effect = practice_effect(groups, pairs, unscored)
+        by_pair = {}
+        for run_id, pair in pairs.items():
+            by_pair.setdefault(pair, []).append(state[run_id])
+        confirmed = sum(1 for states in by_pair.values() if all(item == 'OK' for item in states))
+        ranged = sum(1 for states in by_pair.values() if 'NO_SCORE' not in states)
+        for policy, items in groups.items():
+            result = effect['policies'][policy]
+            assert result['runs'] == confirmed and result['rangeRuns'] == ranged, case
+            assert result['runs'] + result['skippedRuns'] == len(items) == result['rangeRuns'] + sum(
+                result['rangeExcludedRuns'].values()), case
+            if result['gapRange']:
+                assert result['gapRange'][0] <= result['gapRange'][1] + 1e-12
+        if effect['practiceEffectRange']:
+            low, high = effect['practiceEffectRange']
+            assert low <= high + 1e-12
+            if confirmed == ranged and confirmed:
+                assert low == pytest.approx(effect['practiceEffect']) == high
+
+
+def test_experiment_summary_invariants_on_random_runs():
+    """무작위 Run 묶음 200개에서 요약 규칙을 본다: 상태별 수의 합 = 기록된 Run, 시작 안 함 + 기록 = 계획, 성공률 분모 =
+    계획, 확인된 비용 합 = Run별 비용 합, 성공 시간 분포 개수 + 시간 모르는 성공 = 성공 수."""
+    import random
+    from decimal import Decimal
+    rng = random.Random(1030)
+    verdicts = (('SUCCESS', 'FINISHED'), ('FAIL', 'FINISHED'), ('UNVERIFIED', 'FINISHED'),
+                ('HUMAN_REVIEW', 'HUMAN_REVIEW'), (None, 'IMPLEMENTING'), (None, 'ABORTED'))
+    for case in range(200):
+        runs, planned, costs = [], {}, {}
+        for policy, ref in (('IN_LOOP_AND_FINAL', 'suite-1'), ('FINAL_ONLY', None)):
+            count = rng.randint(0, 4)
+            planned[policy] = count + rng.randint(0, 2) or 1
+            for index in range(count):
+                verdict, status = rng.choice(verdicts)
+                cost = str(rng.randint(1, 300) / 100)
+                item = bundle(uid(50000 + case * 20 + len(runs)), verdict=verdict, status=status, cost=cost,
+                              complete=rng.random() < 0.8)
+                item['configuration'] = configuration(item['run']['runId'], protectedTestSuiteRef=ref)
+                if rng.random() < 0.15:
+                    item['eventsTotal'] += 1  # 사건 일부만 받은 Run(시간 모름)
+                runs.append(run_metrics(item))
+                costs.setdefault(policy, []).append(Decimal(cost))
+        summary = experiment_summary(runs, planned, group_by='loopPolicy')
+        for policy, group in summary.items():
+            mine = [item for item in runs if item['loopPolicy'] == policy]
+            assert group['recordedRuns'] == len(mine) and group['notStarted'] + len(mine) == planned[policy]
+            assert (group['success'] + group['fail'] + group['unverified'] + group['humanReview']
+                    + group['inProgress'] + group['aborted']) == len(mine), case
+            assert group['successRate'] == group['success'] / planned[policy]
+            assert 0 <= group['verifiedRate'] <= 1
+            assert group['successVerdictMs']['n'] + group['successRunsWithUnknownTime'] == group['success']
+            assert (group['knownCostUsd'] is None) == (not mine)
+            if mine:
+                assert Decimal(group['knownCostUsd']) == sum(costs[policy])
+
+
+
+def test_time_to_the_common_quality_standard_counts_only_final_pass():
+    """같은 품질 기준을 만족한 결과에 도달한 시간(10.29 회의록 방안 1): Orchestrator는 SUCCESS(30초)라고 했지만 최종 독립
+    평가가 FAIL인 Run은 성공 시간(successVerdictMs)에는 들어가도 기준 달성 시간(qualifiedVerdictMs)에는 들어가지 않는다
+    (Codex 10.30 회의록 점검 B). 기준 달성 비율의 분모는 계획한 전체 Run이다."""
+    runs = [run_metrics(bundle(uid(1))), run_metrics(bundle(uid(2)))]
+    reports = [evaluation_report(uid(1)), evaluation_report(uid(2), verdict='FAIL', requirement_rate=0.5)]
+    summary = experiment_summary(runs, {'MULTI_AGENT': 3}, reports)['MULTI_AGENT']
+    assert summary['successVerdictMs']['n'] == 2
+    evaluation = summary['evaluation']
+    assert evaluation['qualifiedRuns'] == 1 and evaluation['qualifiedRate'] == 1 / 3
+    assert evaluation['qualifiedVerdictMs'] == {'n': 1, 'median': 30000, 'min': 30000, 'max': 30000}

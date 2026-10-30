@@ -16,25 +16,26 @@ class FinalExam(link.SignupCheck):
                                             "first@@sub.example.net", "first last@sub.example.net")})
 
     def test_qa_signup_003_same_canonical_email_is_rejected(self):
-        qa.duplicate_email(self, {"template": T, "forms": ("same", "swapcase", "trail", "title_trail")})
+        qa.duplicate_email(self, {"template": T, "forms": ("same", "swapcase", "trail", "swap_lead")})
 
     def test_qa_signup_004_password_minimum_length_is_eight(self):
-        qa.password_length(self, {"reject": (7, 5), "accept": (8, 16)})
+        qa.password_length(self, {"reject": (7, 5), "accept": (8, 16), "kinds": (("lower", 11), ("digits", 8))})
 
     def test_qa_signup_005_concurrent_same_email_creates_one_user(self):
         qa.concurrent_signup(self, {"template": T, "workers": 5, "attempts": 3})
 
     def test_qa_signup_006_response_matches_actual_result(self):
         qa.response_matches_result(self, {"template": T, "steps": (
-            ("new", "A"), ("duplicate", "A", "title_trail"), ("short", "B"), ("new", "B"),
-            ("invalid", "@sub.example.net"))})
+            ("new", "A"), ("duplicate", "A", "upper_pad"), ("short", "B"), ("new", "B"),
+            ("invalid", "firstlast"))})
 
     def test_sec_signup_002_password_stored_as_argon2id_hash(self):
         sec.stored_hash(self, {"template": T, "length": 16, "accounts": 2})
 
     def test_sec_signup_003_email_unique_and_canonical(self):
-        sec.unique_and_canonical(self, {"template": T, "forms": ("swapcase", "trail")})
+        sec.unique_and_canonical(self, {"template": T, "forms": ("swapcase", "trail", "swap_lead"), "aliases": (
+            ("box{h}+inbox@sub.example.net", "box{h}@sub.example.net"), ("a.b{h}@gmail.com", "ab{h}@gmail.com"))})
 
     def test_sec_signup_005_password_and_hash_not_exposed(self):
-        sec.not_exposed(self, {"template": T, "invalid": "first last@sub.example.net", "short": 3,
-                               "duplicate": "title_trail", "malformed": "misspelled"})
+        sec.not_exposed(self, {"template": T, "invalid": "firstlast", "short": 3,
+                               "duplicate": "upper_pad", "malformed": ("misspelled", "missing_email", "list")})

@@ -235,7 +235,7 @@ def test_reference_and_supplementary_checks_are_listed_apart():
                                                    'REQ-006': {'outcome': 'FAIL'}}}}
     text = render_summary(report(), scenario_contract=CONTRACT, reference_report=report(exam='practice'),
                           supplementary=supplementary)
-    assert '## 순환용 시험지 참고 채점(판정·점수와 별개, 연습 효과 계산용)' in text
+    assert '## 순환용 시험지 참고 채점(판정·점수와 별개, 차이의 차이 계산용 보조 지표)' in text
     assert '- 판정 PASS · 점수 1.000(요구사항별 같은 비중) · 검사 완료율 100.0%' in text
     assert ('- 테스트가 지나간 줄(테스트가 불러온 파일 2개 기준): 27/30줄(90.0%). '
             '지나가지 않은 줄: database.py 16·17; routers/auth.py 40') in text

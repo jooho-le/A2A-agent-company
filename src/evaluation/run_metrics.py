@@ -1,8 +1,9 @@
 # 팀 시스템(dev Orchestrator)이 알려 주는 "개발 실행(Run) 기록"을 평가용 숫자(지표)로 바꾸는 파일이다.
 # 또 두 실험 조건을 "공정하게 비교해도 되는지" 확인하고, 조건별로 요약한다. 비교 기준(group_by)은 두 가지다.
-#   - 'architecture': Single(에이전트 1개)과 Multi(에이전트 4개) 구조 비교(D6, 지금은 보류지만 기능은 유지)
+#   - 'architecture': Single(에이전트 1개)과 Multi(에이전트 4개) 구조 비교(D6, Single 실행기는 주호 개발). 보호 테스트
+#                     조건(protectedTestSuiteRef)이 같은 Run들, 즉 같은 방안 안에서만 비교한다.
 #   - 'loopPolicy'  : 같은 Multi 구조에서 Ver1(순환 안 보호 테스트 + 최종, IN_LOOP_AND_FINAL)과
-#                     Ver2(최종만, FINAL_ONLY) 비교(2026-10-29 팀 회의). 두 조건의 의도한 차이는 순환 안 보호 테스트
+#                     Ver2(최종만, FINAL_ONLY) 비교(10.29 회의록의 방안 1·2를 회의 뒤 방침으로 멀티에 적용). 두 조건의 의도한 차이는 순환 안 보호 테스트
 #                     (protectedTestSuiteRef) 하나뿐이고, 정책은 이름표가 아니라 동결 설정의 그 값으로 확인한다.
 #
 # 입력: 시스템 API가 돌려준 JSON(파이썬에서는 사전 dict)
@@ -40,8 +41,10 @@ CONTROLLED_FIELDS = (
     'environment.hardwareProfile', 'environment.networkPolicy', 'environment.allowedHosts',
     'protectedTestSuiteRef', 'scannerProfileRef',
 )
-# 값이 없어도 되는 선택 항목. (모델 버전·seed를 제공하지 않는 모델이 있고, 네트워크를 막은 환경은 허용 주소가 비어 있다.)
-OPTIONAL_FIELDS = frozenset({'model.modelRevision', 'model.seed', 'environment.allowedHosts'})
+# 값이 없어도 되는 선택 항목. (모델 버전·seed를 제공하지 않는 모델이 있고, 네트워크를 막은 환경은 허용 주소가 비어 있다.
+# 보호 테스트 참조가 없으면 "순환 안 보호 테스트 없음"이라는 분명한 조건이다(10.29 회의록 방안 2, Ver2). 선택 항목이어도
+# 비교하는 Run들 사이에서 같아야 한다는 규칙은 그대로라, 한쪽만 있으면 비교가 무효다.)
+OPTIONAL_FIELDS = frozenset({'model.modelRevision', 'model.seed', 'environment.allowedHosts', 'protectedTestSuiteRef'})
 # 아래 항목만 다를 때는 "비교 전체"가 무효가 아니라, 그 Run만 따로 표시하고 다시 실행한다
 # (개발정의서 11-A의 "환경 digest 불일치" 규칙).
 ENVIRONMENT_FIELDS = ('environment.containerImageDigest', 'environment.dependencyLockHash')
@@ -66,16 +69,52 @@ def fetch_run_bundle(get, run_id: str) -> dict:
             if offset >= page['total'] or not page[key]:
                 return items, page['total']
 
-    events, events_total = paged('events', 'events')
-    return {
-        'run': get(base, None),
-        'events': events, 'eventsTotal': events_total,
-        'issues': get(f'{base}/issues', None)['issues'],
-        'toolAttempts': get(f'{base}/tool-attempts', None)['attempts'],
-        # usage 요약은 "Run 전체"의 합계라서 기록 1건만 요청해도 요약값은 전체 기준으로 온다.
-        'usage': get(f'{base}/usage', {'limit': 1, 'offset': 0}),
-        'configuration': get(f'{base}/configuration', None),
-    }
+    # 받는 도중에 Run이 바뀌면(재개·종료) 예전 사건 목록과 새 상태가 섞인다. 그래서 Run 상태를 처음과 끝에 두 번 받고,
+    # 사건 전체 개수도 끝에 다시 확인한다. 셋이 같을 때만 한 시점의 자료로 본다. 다르면 FETCH_ATTEMPTS번까지 다시 받고,
+    # 끝내 같지 않으면 snapshotConsistent=False로 표시해 run_metrics가 시간을 계산하지 않게 한다.
+    for _attempt in range(FETCH_ATTEMPTS):
+        before = get(base, None)
+        events, events_total = paged('events', 'events')
+        collected = {
+            'issues': get(f'{base}/issues', None)['issues'],
+            'toolAttempts': get(f'{base}/tool-attempts', None)['attempts'],
+            # usage 요약은 "Run 전체"의 합계라서 기록 1건만 요청해도 요약값은 전체 기준으로 온다.
+            'usage': get(f'{base}/usage', {'limit': 1, 'offset': 0}),
+            'configuration': get(f'{base}/configuration', None),
+        }
+        after = get(base, None)
+        tail = get(f'{base}/events', {'limit': 1, 'offset': 0})['total']
+        consistent = _run_state(before) == _run_state(after) and tail == events_total
+        if consistent:
+            break
+    return {'run': after, 'events': events, 'eventsTotal': events_total, **collected, 'snapshotConsistent': consistent}
+
+
+FETCH_ATTEMPTS = 3  # Run이 받는 도중에 바뀌었을 때 다시 받는 최대 횟수
+# 사용량 응답에서 비용 계산 조건(단가표·계산 방식·통화)을 나타내는 항목
+PRICE_BOOK_KEYS = ('currency', 'priceBookId', 'priceBookVersion', 'priceBookSha256', 'calculationVersion')
+
+
+def _run_state(run):
+    # 받는 도중에 바뀌었는지 비교할 Run 상태 값들
+    return tuple(run.get(key) for key in ('status', 'verdict', 'codeVersion', 'fixAttempt', 'updatedAt'))
+
+
+def _terminal_events_match(run, events):
+    # Run의 최종 상태가 받은 사건 목록의 끝과 이어지는지 본다(다른 시점의 상태와 사건이 섞이지 않았는지).
+    #   - 판정이 있으면 마지막 VERDICT_CREATED 사건이 있고, 그 사건의 코드 버전·상태(사건에 적혀 있으면)가 Run과 같다.
+    #   - Run이 FINISHED면 그 판정 사건 뒤에 RUN_FINISHED 사건이 있다.
+    if run.get('verdict') is None:
+        return True
+    positions = [index for index, event in enumerate(events) if event.get('eventType') == 'VERDICT_CREATED']
+    if not positions:
+        return False
+    last = events[positions[-1]]
+    for field, value in (('codeVersion', run.get('codeVersion')), ('workflowState', run.get('status'))):
+        if last.get(field) is not None and last[field] != value:
+            return False
+    return run.get('status') != 'FINISHED' or any(
+        event.get('eventType') == 'RUN_FINISHED' for event in events[positions[-1] + 1:])
 
 
 def _millis(start, end):
@@ -130,6 +169,12 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
     start = started[0] if started else None
     if total is None or total != len(events):
         start = None  # 사건이 일부만 왔거나 전체 개수를 모르면 시작·끝 사건이 모두 왔다고 확정하지 않는다.
+    if bundle.get('snapshotConsistent') is False:
+        notes.append('RUN_CHANGED_DURING_FETCH')  # 받는 도중에 Run이 바뀌어 한 시점의 자료가 아님
+        start = None
+    elif not _terminal_events_match(run, events):
+        notes.append('TERMINAL_EVENTS_DO_NOT_MATCH_RUN')  # 최종 상태와 판정·종료 사건이 이어지지 않음(다른 시점의 자료)
+        start = None
     builds, verdicts = times('BUILD_PASSED'), times('VERDICT_CREATED')   # 첫 빌드 성공 / 판정이 만들어진 사건들
     ends = sorted(times('RUN_FINISHED') + times('RUN_ABORTED'))          # 끝남 또는 중단 사건 (시간순 정렬)
     if start is None:
@@ -144,6 +189,9 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
     keys = ('modelCalls', 'toolCalls', 'knownTotalTokens', 'totalTokens', 'costUsd', 'knownCostUsd', 'costComplete')
     spent = {key: (summary or {}).get(key) for key in keys}
     spent['costComplete'] = bool(spent['costComplete'])  # "비용이 전부 확인됐는가"는 True/False로 확정한다.
+    # 비용을 계산한 단가표. 단가표가 다르면 같은 토큰도 비용이 달라지므로 비교 때 함께 본다(PRICE_BOOK_KEYS).
+    price_book = {key: (summary or {}).get(key) for key in PRICE_BOOK_KEYS}
+    spent['priceBook'] = price_book if any(value is not None for value in price_book.values()) else None
 
     attempts = bundle['toolAttempts']
     # attempt 번호가 1 이상인 기록 = "다시 시도한" 횟수(0번이 최초 호출이다)
@@ -263,6 +311,8 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
         requirement_rates = [r['requiredRequirementPassRate'] for r in reports if r['requiredRequirementPassRate'] is not None]
         check_rates = [r['requiredCheckPassRate'] for r in reports if r['requiredCheckPassRate'] is not None]
         scores = [exam_score(r) for r in reports]  # 요구사항별 같은 비중 점수(코드·환경 신분을 확인한 보고서만 점수가 있음)
+        qualified = [item for item in mine if item['runId'] in by_evaluation
+                     and by_evaluation[item['runId']]['evaluationVerdict'] == 'PASS']  # 최종 독립 평가 PASS인 Run
         result[group] = {
             'plannedRuns': planned, 'recordedRuns': len(mine), 'notStarted': planned - len(mine),
             'success': success, 'fail': failed, 'unverified': count('UNVERIFIED'), 'humanReview': count('HUMAN_REVIEW'),
@@ -273,6 +323,8 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
             # 성공한 Run들이 판정까지 걸린 시간의 분포(개수·중앙값·최소·최대)
             'successVerdictMs': _distribution([item['verdictMs'] for item in mine
                                                if item['verdict'] == 'SUCCESS' and item['verdictMs'] is not None]),
+            # 성공했지만 시간을 믿을 수 없는 Run 수(사건 일부 누락·받는 도중 변경 등). 위 분포에서 빠진 수다.
+            'successRunsWithUnknownTime': sum(1 for item in mine if item['verdict'] == 'SUCCESS' and item['verdictMs'] is None),
             'meanFixAttempts': _mean([item['fixAttempts'] for item in mine]),
             'meanToolRetries': _mean([item['toolRetries'] for item in mine]),
             'modelCalls': known_calls if calls_complete else None,
@@ -282,6 +334,9 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
             'costUsd': format(total_cost, 'f') if cost_complete and total_cost is not None else None,
             'knownCostUsd': format(total_cost, 'f') if total_cost is not None else None,
             'runsWithUnknownCost': sum(1 for item in mine if not item['costComplete']),
+            # 비용을 계산한 단가표들(다르면 비용 차이에 단가 차이가 섞인다. 토큰·호출 수는 단가와 무관하다).
+            'priceBooks': [dict(book) for book in sorted({tuple(sorted(item['priceBook'].items()))
+                                                          for item in mine if item.get('priceBook')})],
             'evaluation': {
                 'evaluatedRuns': len(reports), 'unevaluatedRuns': len(mine) - len(reports),
                 'meanRequirementPassRate': _mean(requirement_rates), 'meanCheckPassRate': _mean(check_rates),
@@ -300,6 +355,14 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
                 'unscoredRuns': sum(1 for s in scores if s['score'] is None),
                 'lowerBoundRuns': sum(1 for s in scores if s['scoreIsLowerBound']),
                 'securityViolationRuns': sum(1 for s in scores if s['securityViolations']),
+                # 같은 품질 기준을 만족한 결과에 도달한 시간(10.29 회의록 방안 1의 비교 지표). 기준은 최종 독립 평가 PASS
+                # (채점 시험지의 필수 검사 모두 통과·코드·환경 신분 확인)이고, 공식 비교 전에 고정해 두고 바꾸지 않는다.
+                # 위 successVerdictMs(Orchestrator가 SUCCESS라고 한 Run)와 달리, 최종 평가에서 FAIL·미검증인 Run의 시간은
+                # 넣지 않는다. 비율의 분모는 계획한 전체 Run이다(시작 못 함·채점 못 함·FAIL·미검증 모두 기준 미달로 셈).
+                'qualifiedRuns': len(qualified),
+                'qualifiedRate': len(qualified) / planned,
+                'qualifiedVerdictMs': _distribution([item['verdictMs'] for item in qualified if item['verdictMs'] is not None]),
+                'qualifiedRunsWithUnknownTime': sum(1 for item in qualified if item['verdictMs'] is None),
             },
         }
     return result
@@ -438,7 +501,8 @@ def regression_from_reports(reports) -> dict:
     # 버전은 보고서의 expectedManifest.codeVersion(채점한 Snapshot의 코드 버전)이고, 검사 상태는 보고서의 checks에서 읽는다.
     # 보고서들은 같은 Run·같은 보호 묶음(suite 지문)이어야 하고 버전마다 하나여야 한다. 어기면 ValueError로 멈춘다
     # (다른 묶음으로 채점한 버전끼리 비교하면 Regression이 아니라 시험 변경이 섞인다).
-    # 돌려주는 값: regression_count 결과 + runId·suiteSha256(요약에서 다른 Run의 결과와 섞이지 않았는지 대조용)
+    # 돌려주는 값: regression_count 결과 + runId·suiteSha256·finalCodeVersion(요약·비교에서 다른 Run·시험지·버전의 결과와
+    #             섞이지 않았는지 대조용)
     results, run_ids, suites = {}, set(), set()
     for report in reports:
         version = (report.get('expectedManifest') or {}).get('codeVersion')
@@ -449,7 +513,8 @@ def regression_from_reports(reports) -> dict:
         results[version] = {check['testId']: check['status'] for check in report.get('checks', [])}
     if len(run_ids) != 1 or len(suites) != 1 or None in run_ids | suites:
         raise ValueError('Reports must come from one Run and one protected suite')
-    return {**regression_count(results), 'runId': run_ids.pop(), 'suiteSha256': suites.pop()}
+    return {**regression_count(results), 'runId': run_ids.pop(), 'suiteSha256': suites.pop(),
+            'finalCodeVersion': max(results)}
 
 
 def _lookup(document, dotted):
@@ -460,11 +525,20 @@ def _lookup(document, dotted):
     return value
 
 
-def loop_policy_effect(runs, evaluations, references) -> dict:
-    # Ver1·Ver2의 연습 효과를 계산한다(scoring.practice_effect). Run마다 최종 시험지 보고서(evaluations)와 같은 코드를
+def loop_policy_effect(runs, evaluations, references, pairs=None, unscored=()) -> dict:
+    # Ver1·Ver2의 차이의 차이를 계산한다(scoring.practice_effect). Run마다 최종 시험지 보고서(evaluations)와 같은 코드를
     # 순환용 시험지로 참고 채점한 보고서(references, D5 결과의 referenceReport)를 짝지어 정책별로 모은다.
-    # runs: run_metrics 결과 목록(loopPolicy가 있어야 한다).
+    # runs: run_metrics 결과 목록(loopPolicy가 있어야 한다). pairs: {Run 번호: 쌍 번호}(선택).
+    # unscored: 채점하지 못한 Run 번호들(짝지은 실험이면 그 짝 Run도 확정 계산에서 뺀다).
+    # 모든 최종 보고서는 같은 시험지(suite 지문), 모든 참고 보고서도 같은 시험지여야 하고 둘은 서로 달라야 한다
+    # (다른 날의 다른 순환용 시험지로 채점한 결과가 섞이거나, 두 보고서를 바꿔 넣으면 거부).
     policies = {item['runId']: item.get('loopPolicy') for item in runs}
+    exam_suites = {(report.get('suite') or {}).get('sha256') for report in evaluations}
+    reference_suites = {(reference.get('suite') or {}).get('sha256') for reference in references}
+    if len(exam_suites) > 1 or len(reference_suites) > 1 or None in exam_suites | reference_suites:
+        raise ValueError('evaluations and references must each use one protected suite')
+    if exam_suites & reference_suites:
+        raise ValueError('reference reports must use the practice suite, not the scored exam')
     reference_by_run = {}
     for reference in references:
         if reference['sourceRunId'] in reference_by_run:
@@ -478,7 +552,7 @@ def loop_policy_effect(runs, evaluations, references) -> dict:
         if reference.get('expectedManifest') != report.get('expectedManifest'):
             raise ValueError('reference report scored different code than the evaluation')
         groups[policy].append((report, reference))
-    return practice_effect(groups)
+    return practice_effect(groups, pairs, unscored)
 
 
 def comparison_validity(entries, *, group_by: str = 'architecture') -> dict:
@@ -622,6 +696,12 @@ def comparison_validity(entries, *, group_by: str = 'architecture') -> dict:
              'INVALID_COMPARISON')
     distinct('experimentId', lambda item: settings(item).get('experimentId'), 'INVALID_COMPARISON')
 
+    # 비용 계산 단가표가 Run마다 다르면 비용(달러) 비교에 단가 차이가 섞인다. 비교 전체를 막지는 않고 주의로 알린다
+    # (정확도·시간·토큰 비교에는 영향이 없다). 항목에 priceBook(run_metrics 결과의 값)을 넣었을 때만 본다.
+    books = {json.dumps(item.get('priceBook'), sort_keys=True) for item in entries if item.get('priceBook')}
+    if len(books) > 1:
+        warnings.append({'field': 'priceBook', 'detail': 'PRICE_BOOK_DIFFERS',
+                         'values': [json.loads(book) for book in sorted(books)]})
     # 평가 보고서가 있는 Run들만 따로 모아서 시험지(suite) 해시와 환경 지문을 비교한다.
     evaluated = [item for item in entries if item.get('evaluation') is not None]
     if len(evaluated) != len(entries):

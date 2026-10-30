@@ -5,6 +5,7 @@
 #   1) Snapshot 확인: 받은 압축 파일(dev canonical tar)의 SHA-256이 기준 Manifest의 snapshotSha256과 같은지,
 #      기준 Manifest의 dependencyLockHash와 같은 파일이 안에 있는지 확인한다.
 #   2) 안전하게 풀기: 일반 파일만, 상대 경로만(../·절대 경로·링크·장치 파일 거부), 크기 한도 안에서 푼다.
+#      풀린 파일에 시험지·평가 코드·결과 파일이 섞였으면(protected_tests.exam_exposure) 실행·점수를 만들지 않는다(EXAM_EXPOSED).
 #   3) 보호 테스트(검사 9개, QA·Security 모두 실행 검사): dev의 신뢰된 unittest 실행기(unit_runner.py)로
 #      a) 채점 시험지(exam: 시범 최종용 pilot 또는 공식 최종용 final), b) 순환용 시험지(practice, 참고 채점) 순서로 돌린다.
 #      실제 생성 코드는 반드시 컨테이너(DockerRunner)에서 실행한다. LocalRunner는 합성 표본 시험용이다.
@@ -13,10 +14,10 @@
 #      해서 실행 검사가 못 본 곳의 문제를 따로 적는다.
 #   5) 보고서: 결과 어댑터로 검사 결과를 만들고 build_evaluation_report로 묶는다. 실제로 확인한 Snapshot·lock·이미지가
 #      기준과 다르면 Manifest 불일치로 결과를 쓰지 않는다(UNVERIFIED). 이미지를 확인할 수 없는 실행(로컬)도 결과를 쓰지 않는다.
-#      점수(scoring.exam_score)는 요구사항별 같은 비중이고, 순환용 참고 보고서는 연습 효과 계산에만 쓴다.
-#   6) (선택) Run 기록이 있으면 trace_checks로 노출(REQ-006 Orchestrator 부분)과 추적(REQ-008)을 함께 본다.
+#      점수(scoring.exam_score)는 요구사항별 같은 비중이고, 순환용 참고 보고서는 차이의 차이(보조 지표) 계산에만 쓴다.
+#   6) (선택) Run 기록이 있으면 trace_checks로 노출(REQ-006 중 Run 기록, A2A 본문 문서를 주면 그것까지)과 추적(REQ-008)을 함께 본다.
 #
-# 이 모듈이 하지 않는 일: Snapshot을 시스템에서 받아 오는 일(인계 방법은 팀장 결정 대기), 증거 저장, A2A 전송.
+# 이 모듈이 하지 않는 일: Snapshot을 시스템에서 받아 오는 일(dev snapshot_export가 꺼내고 experiment score가 넘김), 결과 보관(experiment score), A2A 전송.
 #
 # [처음 읽는 분을 위한 용어]
 # - Snapshot: 개발 실행이 고정(동결)한 코드 묶음. dev는 이것을 압축하지 않은 tar 파일 하나로 만들고, 그 파일 전체의
@@ -360,7 +361,7 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     # known_values   : (선택) 이 Run에서 쓴 것으로 알려진 시험 비밀번호 등. 노출 검사가 자유 글에서도 찾는다.
     #                  결과에는 값이 아니라 개수와 찾은 위치만 남는다. 값을 받는 경로(Host가 안전하게 넘김)는 팀과 정한다.
     # 돌려주는 값: {'exam', 'report': 독립 평가 보고서, 'score': 점수, 'referenceReport'·'referenceScore': 순환용 시험지
-    #              참고 채점(연습 효과용), 'supplementary': {'coverage', 'static'} 보조 점검(점수·판정 제외),
+    #              참고 채점(차이의 차이용), 'supplementary': {'coverage', 'static'} 보조 점검(점수·판정 제외),
     #              'evidence': {증거 번호: 증거 문서}, 'snapshot': 확인 결과, 'runner': 실행 정보(+evaluationId),
     #              'trace': Trace 검사 결과(+runId) 또는 None}
     #   runner·trace에 출처(평가 번호·Run 번호)를 붙여 summary.render_summary가 다른 실행 자료와 섞이지 않았는지 대조한다.
@@ -467,7 +468,10 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     }
     score, reference_score = exam_score(report), exam_score(reference)
     if snapshot_info.get('examExposure'):
-        score = reference_score = {**score, 'score': None, 'scoreIsLowerBound': None, 'reason': 'EXAM_EXPOSED'}
+        # 점수에 관한 값은 모두 비운다(실행하지 않았으므로 "미검증을 모두 통과로 볼 때의 위쪽 끝"도 의미가 없다).
+        score = reference_score = {'score': None, 'scoreUpperBound': None, 'completionRate': None,
+                                   'scoreIsLowerBound': None, 'requirementShares': {}, 'securityViolations': [],
+                                   'missingCheckIds': [], 'reason': 'EXAM_EXPOSED'}
     return {'exam': exam, 'report': report, 'score': score,
             'referenceReport': reference, 'referenceScore': reference_score,
             'supplementary': supplementary, 'evidence': evidence, 'snapshot': snapshot_info,

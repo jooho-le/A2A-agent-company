@@ -8,7 +8,7 @@
 #   - (trace가 있으면) Run 기록의 노출 검사·추적 검사 결과
 #   - (regression이 있으면) 버전별 보호 테스트 결과에서 계산한 Regression Count(run_metrics.regression_from_reports)
 #   - 최종 시험 점수(scoring.exam_score: 요구사항별 같은 비중, 검사 완료율, 확인된 보안 위반)
-#   - (reference_report가 있으면) 순환용 시험지 참고 채점(연습 효과 계산용, 판정·점수와 별개)
+#   - (reference_report가 있으면) 순환용 시험지 참고 채점(차이의 차이 계산용 보조 지표, 판정·점수와 별개)
 #   - (supplementary가 있으면) 보조 점검: 테스트가 지나가지 않은 줄, 정적 판정(판정·점수에 넣지 않음)
 # 에이전트가 쓴 자유 글(Issue 제목·설명, 실패 상세)은 비밀값이 섞일 수 있어서 넣지 않는다. 검사 제목·상태·근거 코드,
 # Issue의 종류·보고 역할·요구사항 이름만 쓴다. 모르는 값은 0이 아니라 "미확인"으로 적는다.
@@ -24,7 +24,8 @@ from .scoring import exam_score  # 요구사항별 같은 비중 점수
 
 UNKNOWN = '미확인'  # 모르는 값을 적는 글자(0으로 바꾸지 않는다)
 OUTPUT_NAMES = {'A2A_MESSAGE_BODY': 'A2A Message 본문', 'ARTIFACT_FILE_CONTENT': 'Artifact 파일 내용',
-                'AGENT_PROCESS_OUTPUT': '에이전트 프로세스 출력'}  # 노출 검사가 보지 못하는 출력의 표시 이름
+                'AGENT_PROCESS_OUTPUT': '에이전트 프로세스 출력',
+                'A2A_MESSAGE_BODY_BEFORE_REDACTION': '가리기 전 A2A 송수신 본문(저장된 기록은 가린 값)'}  # 노출 검사가 보지 못하는 출력의 표시 이름
 
 
 def _cell(value) -> str:
@@ -134,7 +135,8 @@ def _percent(value) -> str:
 def _score_line(score: Mapping) -> str:
     # 점수 한 줄: 점수(요구사항별 같은 비중)·검사 완료율. 미검증이 있으면 잠정 하한이라고 적는다.
     if score['score'] is None:
-        return '점수 없음(코드·환경 신분 미확인)' if score.get('reason') else '점수 없음'
+        return {'MANIFEST_NOT_CONFIRMED': '점수 없음(코드·환경 신분 미확인)',
+                'EXAM_EXPOSED': '점수 없음(시험지 노출)'}.get(score.get('reason'), '점수 없음')
     return (f"{score['score']:.3f}(요구사항별 같은 비중){' 잠정 하한' if score['scoreIsLowerBound'] else ''}"
             f" · 검사 완료율 {_percent(score['completionRate'])}")
 
@@ -242,9 +244,9 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
         lines += [f"  - v{item['fromVersion']} → v{item['toVersion']}: {_cell(titles.get(item['checkId'], item['checkId']).split(' ', 1)[0])}"
                   for item in regression.get('regressions', [])]
     if reference_report is not None:
-        # 순환용 시험지는 Ver1이 개발 중에 결과를 본 시험지다. 최종 점수와 섞지 않고 연습 효과 계산에만 쓴다.
+        # 순환용 시험지는 Ver1이 개발 중에 결과를 본 시험지다. 최종 점수와 섞지 않고 차이의 차이(보조 지표) 계산에만 쓴다.
         reference = exam_score(reference_report)
-        lines += ['', '## 순환용 시험지 참고 채점(판정·점수와 별개, 연습 효과 계산용)', '',
+        lines += ['', '## 순환용 시험지 참고 채점(판정·점수와 별개, 차이의 차이 계산용 보조 지표)', '',
                   f"- 판정 {_cell(reference_report.get('evaluationVerdict'))} · 점수 {_score_line(reference)}"]
     if supplementary:
         lines += ['', '## 보조 점검(판정·점수에 넣지 않음)', '']

@@ -225,6 +225,7 @@ def test_snapshot_with_exam_files_is_not_run_or_scored():
     assert [item['path'] for item in output['snapshot']['examExposure']] == ['tests/test_exam_copy.py']
     assert output['report']['evaluationVerdict'] == 'UNVERIFIED'
     assert output['score']['score'] is None and output['score']['reason'] == 'EXAM_EXPOSED'
+    assert output['score']['scoreUpperBound'] is None and output['score']['completionRate'] is None
     assert output['referenceScore']['reason'] == 'EXAM_EXPOSED'
     text = render_summary(output['report'], scenario_contract=CONTRACT, supplementary=output['supplementary'])
     assert '**시험지 노출**' in text and 'tests/test_exam_copy.py' in text
@@ -320,9 +321,9 @@ def test_good_service_passes_end_to_end_with_verified_image():
                    source_run_id=bundle['run']['runId'], run_bundle=bundle)
     assert output['exam'] == 'final' and output['report']['evaluationVerdict'] == 'PASS', statuses(output)
     assert len(output['report']['checks']) == 9 and set(statuses(output).values()) == {'PASS'}
-    assert output['score'] == {'score': 1.0, 'completionRate': 1.0, 'scoreIsLowerBound': False,
+    assert output['score'] == {'score': 1.0, 'scoreUpperBound': 1.0, 'completionRate': 1.0, 'scoreIsLowerBound': False,
                                'requirementShares': output['score']['requirementShares'],
-                               'securityViolations': [], 'reason': None}
+                               'securityViolations': [], 'missingCheckIds': [], 'reason': None}
     assert len(output['score']['requirementShares']) == 7
     assert output['referenceReport']['evaluationVerdict'] == 'PASS' and output['referenceScore']['score'] == 1.0
     assert output['referenceReport']['evaluationId'] != output['report']['evaluationId']

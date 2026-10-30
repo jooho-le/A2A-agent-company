@@ -12,17 +12,23 @@
 #   - 정적 판정(security/assess.py)은 점수에 넣지 않고 최종 평가의 보조 점검으로만 쓴다(final_evaluation).
 # 순환 안 보호 케이스는 그 역할의 요구사항에만 연결할 수 있다(QA: REQ-001·002·003·004·007, Security: REQ-003·005·006).
 # 이 모듈은 테스트를 실행하지 않는다. 실행은 dev run_unit_tests(컨테이너) 또는 D5 채점기가 한다.
+# 그 밖에: 보호 테스트가 전제로 하는 정책 확인(SUPPORTED_POLICY·check_policy), Ver1 Run 설정에 적는 순환용 suite 참조
+# (loop_suite_ref), 시작 코드·채점 Snapshot의 시험지 섞임 확인(exam_exposure). dev가 Unit 설정 전체를 64KiB로 받으므로
+# 보내는 파일은 주석을 뺀 사본(without_comments, 코드는 같음)이다.
 #
 # [처음 읽는 분을 위한 용어]
 # - 보호 테스트(PROTECTED): 개발 에이전트가 읽거나 고칠 수 없게 따로 넣어 실행하는 테스트. 에이전트가 테스트를 바꿔
 #   통과시키는 일을 막는다.
 # - 범위(scope): dev 설정에서 한 번에 실행하는 파일 묶음. in-loop-qa·in-loop-security(순환 안), practice·pilot·final(최종 평가).
 # - 선택자(selector): dev 설정에서 보호 범위를 부르는 이름. 패턴(pattern): 그 범위에서 실행할 테스트 파일 이름 규칙.
-# - 지문(suite SHA-256): 파일 내용으로 만든 해시. 한 글자라도 바뀌면 값이 달라져서 "같은 묶음"인지 확인할 수 있다.
+# - 지문(suite SHA-256): 범위에 담긴 실행 파일(주석을 뺀 사본)과 그 범위의 검사 정의(요구사항 연결 포함)로 만든 해시.
+#   코드나 검사 정의가 바뀌면 값이 달라져서 "같은 묶음"인지 확인할 수 있다(주석만 바뀌면 같다).
 import ast  # 보호 파일을 실행하지 않고 읽어 시험 메서드 목록 만들기
 import hashlib  # SHA-256 지문 계산
+import io  # 주석을 뺄 때 글자를 줄 단위로 읽기
 import json  # suite.json 읽기, 지문 계산용 canonical JSON 만들기
 import re  # 선택자·패턴·요구사항 이름 모양 검사(정규식)
+import tokenize  # 파이썬 주석 위치 찾기(코드는 그대로 두고 주석만 뺌)
 from pathlib import Path  # 파일 경로 다루기
 from typing import Mapping, Optional  # 자료형 이름표(실행에는 영향 없음)
 
@@ -138,35 +144,77 @@ def _scope(scope: str, suite: Optional[dict]):
     return suite, suite['scopes'][scope]
 
 
+def without_comments(source: str) -> str:
+    # 파이썬 소스에서 주석(#)만 뺀다. 주석만 있던 줄은 지우고, 코드 뒤 주석은 잘라 낸다. 문자열 안의 #은 그대로다.
+    # 저장소 파일은 설명 주석을 그대로 두고, 실행하러 보내는 사본만 줄인다(dev Unit 설정 전체 64KiB 한도 때문).
+    lines = source.splitlines(keepends=True)
+    comment_only, cut = set(), {}
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type == tokenize.COMMENT:
+            row, column = token.start
+            if lines[row - 1][:column].strip():
+                cut[row] = column
+            else:
+                comment_only.add(row)
+    kept = []
+    for number, line in enumerate(lines, 1):
+        if number in comment_only:
+            continue
+        kept.append(line[:cut[number]].rstrip() + '\n' if number in cut else line)
+    return ''.join(kept)
+
+
 def protected_files(scope: str, suite: Optional[dict] = None) -> dict[str, str]:
-    # {"tests/signup/...py": 파일 내용} 사전. dev 보호 파일 설정(protected_files)에 그대로 넣는다.
+    # {"tests/signup/...py": 파일 내용} 사전. dev 보호 파일 설정(protected_files)과 D5 채점에 그대로 넣는다.
+    # 주석을 뺀 사본이다(코드는 저장소 파일과 같음, 시험으로 AST를 대조).
     _suite, entry = _scope(scope, suite)
-    return {file: (ROOT / file).read_text(encoding='utf-8') for file in sorted(entry['files'])}
+    return {file: without_comments((ROOT / file).read_text(encoding='utf-8')) for file in sorted(entry['files'])}
 
 
 def suite_sha256(scope: str, suite: Optional[dict] = None) -> str:
-    # 묶음의 지문. 정렬한 [{path, sha256, sizeBytes}] 목록을 canonical JSON으로 만들어 SHA-256을 구한다
-    # (dev unittest 도구의 Input Manifest와 같은 방식). 독립 평가 보고서의 suite_sha256에 쓴다.
-    entries = []
+    # 묶음의 지문. 실행 파일 목록([{path, sha256, sizeBytes}], dev unittest 도구의 Input Manifest와 같은 모양)과
+    # 그 범위가 채점하는 검사 정의(suite.json의 검사 Key·요구사항 연결·관점·메서드·실행 클래스)를 canonical JSON으로
+    # 묶어 SHA-256을 구한다. 파일이 같아도 요구사항 연결이 바뀌면 점수가 달라지므로 다른 시험지로 본다.
+    suite, entry = _scope(scope, suite)
+    files = []
     for path, content in protected_files(scope, suite).items():
         data = content.encode('utf-8')
-        entries.append({'path': path, 'sha256': hashlib.sha256(data).hexdigest(), 'sizeBytes': len(data)})
-    canonical = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        files.append({'path': path, 'sha256': hashlib.sha256(data).hexdigest(), 'sizeBytes': len(data)})
+    role = entry.get('role')
+    checks = [{**check, 'testId': unit_test_id(check, entry['set'], suite)} for check in suite['checks']
+              if role in (None, check['perspective'])]
+    canonical = json.dumps({'files': files, 'checks': checks, 'scope': scope, 'set': entry['set'],
+                            'suiteId': suite['suiteId'], 'suiteVersion': suite['suiteVersion'],
+                            'scenarioKey': suite['scenarioKey']},
+                           ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
+
+
+def loop_suite_ref(suite: Optional[dict] = None) -> str:
+    # Ver1 Run 설정(protectedTestSuiteRef)에 적는 보호 테스트 참조. 순환용 시험지(practice) 지문을 담아, 최종 때 순환용
+    # 참고 채점에 쓴 시험지가 개발 중에 실제로 준 시험지와 같은지 Run 기록만으로 대조할 수 있게 한다.
+    suite = suite or load_suite()
+    return (f"artifact://protected-tests/{suite['scenarioKey'].lower()}/signup-{suite['suiteVersion']}"
+            f"/practice-{suite_sha256('practice', suite)}")
 
 def exam_exposure(files: Mapping[str, bytes], suite: Optional[dict] = None) -> list[dict]:
     # 코드 묶음(시작 코드·채점할 Snapshot, {경로: 바이트})에 시험지가 섞였는지 찾는다. 에이전트가 시험지를 볼 수 있었다는
     # 뜻이므로 그 묶음으로는 점수를 내지 않는다. 찾는 것:
-    #   SAME_AS_PROTECTED_FILE: 보호 파일(모든 시험지·검사 내용·연결부) 중 하나와 내용이 같음(줄바꿈 CRLF/LF 차이 무시)
+    #   SAME_AS_PROTECTED_FILE: 보호 파일(모든 시험지·검사 내용·연결부, 주석 있는 원본·주석 없는 사본) 중 하나와
+    #                           내용이 같음(줄바꿈 CRLF/LF 차이 무시)
     #   EVALUATION_PATH       : 경로에 src/evaluation 또는 protected_tests가 들어 있음
     #   RESULTS_PATH          : 저장소의 실험 결과 폴더(experiments/) 아래 결과 파일(이전 Run의 채점 결과)
     # 일부만 베끼거나 바꿔 쓴 경우는 찾지 못한다(한계).
     def digest(data):
         return hashlib.sha256(data.replace(b'\r\n', b'\n')).hexdigest()
     suite = suite or load_suite()
-    known = {digest(content.encode('utf-8')): path for scope in SCOPES
-             for path, content in protected_files(scope, suite).items()}
+    known = {}
+    for scope in SCOPES:
+        for path in protected_files(scope, suite):
+            original = (ROOT / path).read_text(encoding='utf-8')  # 저장소 파일(주석 있음)과 보내는 사본(주석 없음) 모두
+            for content in (original, without_comments(original)):
+                known[digest(content.encode('utf-8'))] = path
     found = []
     for path, data in sorted(files.items()):
         parts = path.split('/')
@@ -191,10 +239,31 @@ def unit_test_scope(scope: str, *, suite_ref: str, suite: Optional[dict] = None)
     return config
 
 
+# 보호 테스트 검사 내용이 전제로 하는 시나리오 정책. 검사 파일의 상수·규칙과 같다(signup_security_checks.ARGON2_MINIMUM,
+# signup_link.canonical = 앞뒤 공백 제거·소문자만). 받은 시나리오 정책이 이와 다르면 이 시험지로는 맞게 판정할 수 없으므로
+# 설정·채점을 만들지 않는다(정책을 바꾸려면 검사 내용과 이 값을 함께 고친다, 2026-10-30 외부 점검 3차).
+SUPPORTED_POLICY = {
+    'passwordHashPolicy': {'algorithm': 'argon2id', 'memoryKiB': 19456, 'iterations': 2, 'parallelism': 1,
+                           'uniqueSalt': True},
+    'emailPolicy': {'trimWhitespace': True, 'domainCase': 'lowercase', 'localPartCase': 'lowercase',
+                    'gmailDotRemoval': False, 'plusTagRemoval': False, 'canonicalEmailUniqueConstraint': True},
+}
+
+
+def check_policy(scenario_contract: Mapping):
+    # 받은 시나리오 정책의 비밀번호 해시·이메일 정책이 SUPPORTED_POLICY와 같은지 본다. 다르면 ValueError.
+    actual = {'passwordHashPolicy': ((scenario_contract.get('securityPolicy') or {}).get('passwordHashPolicy') or {}),
+              'emailPolicy': scenario_contract.get('emailPolicy') or {}}
+    for section, expected in SUPPORTED_POLICY.items():
+        if any(actual[section].get(key) != value for key, value in expected.items()):
+            raise ValueError('Scenario contract policy is not supported by the protected suite')
+
+
 def _requirement_ids(scenario_contract: Mapping, suite: dict) -> dict[str, str]:
-    # 동결 시나리오 정책에서 {REQ-001: 요구사항 UUID} 표를 만든다.
+    # 동결 시나리오 정책에서 {REQ-001: 요구사항 UUID} 표를 만든다. 검사 내용이 전제로 하는 정책과 다르면 거부한다.
     if not isinstance(scenario_contract, Mapping) or scenario_contract.get('scenarioKey') != suite['scenarioKey']:
         raise ValueError('Scenario contract does not match the protected suite')
+    check_policy(scenario_contract)
     ids = {}
     for item in scenario_contract.get('requirements', []):
         key, requirement_id = item.get('key'), str(item.get('requirementId'))
@@ -209,7 +278,8 @@ def _requirement_ids(scenario_contract: Mapping, suite: dict) -> dict[str, str]:
 
 
 def owned_cases(scenario_contract: Mapping, role: str, suite: Optional[dict] = None) -> dict:
-    # 그 역할(QA·SECURITY)의 순환 안 PROTECTED 케이스(dev owned-qa-cases·owned-security-cases 파일 내용).
+    # 그 역할(QA·SECURITY)의 순환 안 PROTECTED 케이스. 두 역할의 케이스는 dev 보호 케이스 파일 하나
+    # (owned-protected-cases.local.json)에 함께 넣고, Host가 범위의 역할대로 QA·Security에 나눈다.
     # 보고서의 모든 테스트가 여기 묶여야 한다. 순환용(practice) 시험지만 넣는다.
     if role not in ROLES:
         raise ValueError('Unknown role')

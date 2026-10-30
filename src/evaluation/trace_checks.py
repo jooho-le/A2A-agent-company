@@ -1,6 +1,6 @@
 # D4: 개발 실행(Run)이 남긴 기록을 독립적으로 다시 읽어 확인하는 검사 두 가지다.
 #
-#   check_trace_exposure(documents, criteria)  REQ-006 중 Orchestrator 기록 부분.
+#   check_trace_exposure(documents, criteria)  REQ-006 중 Run 기록 부분(A2A 본문 문서를 주면 그것까지).
 #       Trace 사건·Issue·프로젝트 Artifact·도구 시도·telemetry에 비밀번호나 비밀번호 해시가 남았는가?
 #   check_traceability(bundle, scenario_contract)  REQ-008.
 #       요구사항 → 개발(코드 버전) → 검증 → Issue → 수정 → 재검증 → 판정의 연결을 기록만으로 복원할 수 있는가?
@@ -42,8 +42,15 @@ EXPOSURE_DOCUMENTS = ('events', 'issues', 'artifacts', 'toolAttempts', 'telemetr
 #   A2A_MESSAGE_BODY      : 에이전트 사이 A2A Message 본문(Run 조회 API 없음. a2aMessages 문서를 주면 본 것으로 셈)
 #   ARTIFACT_FILE_CONTENT : Artifact 조회는 등록된 JSON 기록만 준다(원본 파일·Snapshot 내용은 아님)
 #   AGENT_PROCESS_OUTPUT  : 에이전트·Orchestrator 서버 프로세스의 로그·출력 스트림
+#   A2A_MESSAGE_BODY_BEFORE_REDACTION: a2aMessages 문서를 주면 대신 들어감. 저장된 기록은 저장할 때 이미 가린 값이라
+#                         가리기 전 송수신 본문은 보지 못한다
 NOT_COLLECTED_OUTPUTS = ('A2A_MESSAGE_BODY', 'ARTIFACT_FILE_CONTENT', 'AGENT_PROCESS_OUTPUT')
 A2A_DOCUMENT = 'a2aMessages'  # (선택) dev a2a_export가 꺼낸 A2A Message 본문 문서. 주면 A2A_MESSAGE_BODY를 본 것으로 센다
+A2A_ROLES = ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')  # A2A 본문 문서의 역할(에이전트 작업 저장소 하나씩)
+A2A_ROWS = ('contexts', 'tasks', 'history', 'receipts', 'events')  # 역할마다 있어야 하는 목록
+# A2A 본문 문서는 에이전트 저장소에 저장된 기록이고, 저장할 때 이미 가린(마스킹) 값이다. 그래서 문서를 보더라도
+# "가리기 전 송수신 본문"은 보지 못한 출력으로 남긴다(PASS를 송수신 경계의 증거로 넓히지 않게).
+A2A_BEFORE_REDACTION = 'A2A_MESSAGE_BODY_BEFORE_REDACTION'
 MAX_DEPTH = 64     # JSON을 파고드는 최대 깊이(지나치게 깊은 문서가 검사기를 멈추지 않게)
 
 
@@ -139,20 +146,26 @@ def check_trace_exposure(documents: Mapping, criteria: Mapping, *, known_values:
         if any(secret in value for secret in secrets):
             add(document, path, 'KNOWN_SECRET_VALUE')
 
+    def sensitive(value):
+        # 글자에 해시 값 모양이나 알려 준 값이 들어 있는가
+        return bool(HASH_FORMAT.search(value)) or any(secret in value for secret in secrets)
+
     def walk(document, path, value, depth):
         # JSON을 끝까지 파고들며(사전 → 목록 → 글자) 모든 이름과 값을 본다. 너무 깊으면 멈추고 그 사실을 기록한다.
+        # 위치(path)에는 이름을 그대로 적되, 비밀값이 든 이름은 SENSITIVE_KEY로 바꿔 적는다(결과에 원문을 다시 남기지 않게).
         if depth > MAX_DEPTH:
             add(document, path, 'DOCUMENT_TOO_DEEP')
             return
         if isinstance(value, Mapping):
             for key, item in value.items():
+                step = '[SENSITIVE_KEY]' if isinstance(key, str) and sensitive(key) else key
                 if isinstance(key, str):
-                    text(document, path + [key], key)  # 이름 자체에 값이 들어간 경우도 본다.
+                    text(document, path + [step], key)  # 이름 자체에 값이 들어간 경우도 본다.
                 # 비밀번호 이름(단어 단위, "policy"·"length" 같은 설명 단어 제외)에 가리지 않은 글자 값이 있으면 노출이다.
                 if (isinstance(key, str) and names.search(key) and isinstance(item, str)
                         and item.strip() and not _REDACTED.fullmatch(item)):
-                    add(document, path + [key], 'PASSWORD_FIELD_VALUE')
-                walk(document, path + [key], item, depth + 1)
+                    add(document, path + [step], 'PASSWORD_FIELD_VALUE')
+                walk(document, path + [step], item, depth + 1)
         elif isinstance(value, (list, tuple)):
             for index, item in enumerate(value):  # enumerate: (순서 번호, 값)을 함께 꺼낸다.
                 walk(document, path + [index], item, depth + 1)
@@ -169,18 +182,25 @@ def check_trace_exposure(documents: Mapping, criteria: Mapping, *, known_values:
     # 페이지로 받는 기록은 받은 개수가 전체 개수와 같아야 "다 봤다"고 할 수 있다.
     incomplete = [name for name, total in (('events', 'eventsTotal'), ('telemetry', 'telemetryTotal'))
                   if documents.get(name) is not None and documents.get(total) != len(documents[name])]
-    # (선택) A2A Message 본문. 같은 Run의 문서여야 하고, 네 역할 중 빠진 저장소가 있으면 일부만 본 것이다.
+    # (선택) A2A Message 본문. 같은 Run의 문서여야 하고 모양(네 역할 = 받은 저장소 + 빠진 저장소)이 맞아야 한다.
+    # 빠진 저장소가 있거나, Run 기록상 일을 한 역할의 저장소에 이 Run의 기록이 없으면(엉뚱한 저장소를 연결한 경우 등)
+    # 일부만 본 것이다(emptyRoles).
     a2a, not_collected = documents.get(A2A_DOCUMENT), list(NOT_COLLECTED_OUTPUTS)
     checked = [name for name in EXPOSURE_DOCUMENTS if name not in missing and name not in incomplete]
+    empty_roles = []
     if a2a is not None:
-        if not isinstance(a2a, Mapping) or a2a.get('runId') != documents.get('runId') or not isinstance(a2a.get('roles'), Mapping):
-            raise ValueError('A2A message document belongs to another Run or is malformed')
+        _check_a2a_shape(a2a, documents.get('runId'))
         walk(A2A_DOCUMENT, [], a2a['roles'], 0)
         not_collected.remove('A2A_MESSAGE_BODY')
-        (incomplete if a2a.get('missingRoles') else checked).append(A2A_DOCUMENT)
+        not_collected.append(A2A_BEFORE_REDACTION)
+        empty_roles = sorted(role for role in _working_roles(documents.get('events'))
+                             if role in a2a['roles'] and not (a2a['roles'][role]['contexts'] and a2a['roles'][role]['tasks']))
+        (incomplete if a2a['missingRoles'] or empty_roles else checked).append(A2A_DOCUMENT)
     # 검사 범위: 끝까지 읽은 기록, 못 받았거나 일부만 받은 기록, 수집 경로가 없어 보지 못하는 출력, 알려 준 값 개수(값은 남기지 않음)
     coverage = {'checkedDocuments': checked, 'missingDocuments': missing, 'incompleteDocuments': incomplete,
                 'notCollectedOutputs': not_collected, 'knownValues': len(secrets)}
+    if a2a is not None:
+        coverage['a2aEmptyRoles'] = empty_roles
     # 판정 순서: 실제로 찾은 노출이 있으면 기록이 모자라도 FAIL(확인된 위반) → 기록이 모자라면 UNVERIFIED → 아니면 PASS.
     if reasons - {'DOCUMENT_TOO_DEEP'}:
         return TraceCheck('FAIL', tuple(sorted(reasons)), tuple(findings), coverage)
@@ -191,6 +211,32 @@ def check_trace_exposure(documents: Mapping, criteria: Mapping, *, known_values:
                           + tuple({'document': name, 'kind': 'INCOMPLETE'} for name in incomplete) + tuple(findings),
                           coverage)
     return TraceCheck('PASS', coverage=coverage)
+
+
+def _check_a2a_shape(a2a, run_id):
+    # dev a2a_export 문서 모양 확인. 다른 Run의 문서이거나 모양이 틀리면 ValueError(무엇을 봤는지 알 수 없으므로).
+    if not isinstance(a2a, Mapping) or a2a.get('runId') != run_id:
+        raise ValueError('A2A message document belongs to another Run or is malformed')
+    roles, missing = a2a.get('roles'), a2a.get('missingRoles')
+    if (not isinstance(roles, Mapping) or not isinstance(missing, list) or set(roles) & set(missing)
+            or sorted([*roles, *missing]) != sorted(A2A_ROLES)
+            or any(not isinstance(rows, Mapping) or any(not isinstance(rows.get(name), list) for name in A2A_ROWS)
+                   for rows in roles.values())):
+        raise ValueError('A2A message document belongs to another Run or is malformed')
+
+
+def _working_roles(events):
+    # Run 기록(사건)으로 보아 이 Run에서 일을 받은 역할. 사건을 못 받았으면 네 역할 모두로 본다.
+    if not isinstance(events, list):
+        return set(A2A_ROLES)
+    kinds = {(event.get('eventType'), event.get('actor')) for event in events if isinstance(event, Mapping)}
+    found = set()
+    if any(kind == 'PLANNER_OUTPUT_VALIDATED' for kind, _actor in kinds):
+        found.add('PLANNER')
+    if any(kind in ('SNAPSHOT_FROZEN', 'DEVELOPER_ARTIFACTS_VALIDATED', 'FIX_COMPLETED') for kind, _actor in kinds):
+        found.add('DEVELOPER')
+    found |= {actor for kind, actor in kinds if kind == 'VALIDATION_FINISHED' and actor in ('QA', 'SECURITY')}
+    return found
 
 
 # ---------------------------------------------------------------- REQ-008: 추적 가능성

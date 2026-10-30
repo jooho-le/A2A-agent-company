@@ -7,6 +7,8 @@
 #   handoff.json                     묶음 이름·버전·범위별 지문(suite SHA-256)과 suite 참조. RunConfiguration의
 #                                    protected_test_suite_ref를 이 값과 맞춘다
 # 시나리오 정책을 따로 주지 않으면 dev에 등록된 SCN-001 정책(scenario_registry)을 쓴다. 이미 있는 파일은 --force 없이 덮어쓰지 않는다.
+# --suite-ref를 주지 않으면 순환용 시험지 지문을 담은 기본 참조(loop_suite_ref)를 쓴다. 다른 참조를 주면 개발 중에 준 시험지와
+# 최종 때 참고 채점한 시험지가 같은지 Run 설정으로 대조할 수 없어 experiment compare가 비교를 무효로 표시한다.
 #
 # [처음 읽는 분을 위한 용어]
 # - suite 참조(suite_ref): 보호 테스트 묶음을 가리키는 이름표. Run 설정(RunConfiguration)에 같은 값을 적어 두어야
@@ -17,9 +19,8 @@ import json  # 설정 파일을 JSON으로 쓰기·읽기
 import sys  # 종료 코드 돌려주기
 from pathlib import Path  # 파일 경로 다루기
 
-from . import LOOP_SCOPES, SCOPES, load_suite, owned_cases, suite_sha256, unit_test_scope  # 같은 폴더 __init__.py의 함수들
+from . import LOOP_SCOPES, SCOPES, load_suite, loop_suite_ref, owned_cases, suite_sha256, unit_test_scope  # 같은 폴더 __init__.py의 함수들
 
-DEFAULT_SUITE_REF = 'artifact://protected-tests/scn-001/signup-{version}'  # --suite-ref가 없을 때 쓰는 기본 참조({version}은 묶음 버전)
 
 
 def _contract(path):
@@ -34,7 +35,7 @@ def _contract(path):
 def export(out: Path, *, suite_ref=None, contract=None, force=False) -> dict:
     # 세 파일을 out 폴더에 쓰고 {파일 이름: 경로}를 돌려준다. 내용 확인(dev 검증기 통과)은 tests/evaluation에서 한다.
     suite = load_suite()
-    suite_ref = suite_ref or DEFAULT_SUITE_REF.format(version=suite['suiteVersion'])
+    suite_ref = suite_ref or loop_suite_ref(suite)  # 기본 참조: 묶음 버전 + 순환용 시험지 지문
     documents = {
         'owned-protected-cases.local.json': {'schemaVersion': 1, 'cases': [
             case for role in ('QA', 'SECURITY') for case in owned_cases(contract, role, suite)['cases']]},

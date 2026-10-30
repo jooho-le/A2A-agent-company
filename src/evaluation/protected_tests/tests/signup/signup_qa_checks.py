@@ -1,5 +1,7 @@
 # SCN-001 회원가입 QA 검사 내용(입력은 시험지 파일이 정한다). 순환용·시범 최종용·공식 최종용이 같은 검사를
 # 서로 다른 입력·순서로 부른다. 잘못된 입력은 4xx로 거부해야 하고, 5xx는 처리하지 못한 서버 오류로 본다.
+# 거부된 요청은 사용자 표를 바꾸지 않아야 한다(새 계정도, 기존 계정의 값 변경도 없음). 행 비교는 assertTrue로 해서
+# 실패 메시지에 저장값(해시)이 실리지 않게 한다.
 import signup_link as link
 
 
@@ -28,41 +30,52 @@ def invalid_email(test, data):
         _signup_first(service)
         for index, email in enumerate(data["invalid"]):
             with test.case(email_case=index):
-                before = service.count()
+                before, rows = service.count(), service.rows()
                 status = service.signup(email, link.new_password())
                 test.assertIn(status, link.REJECTED, "형식 오류 이메일이 4xx로 거부되지 않음")
                 test.assertEqual(service.count(), before, "형식 오류 이메일로 사용자가 생성됨")
+                test.assertTrue(service.rows() == rows, "거부된 요청이 사용자 표를 바꿈")
     test.check(body)
 
 
 def duplicate_email(test, data):
-    # QA-SIGNUP-003: 대소문자·공백만 다른 이메일 재가입 → 4xx 거부, 사용자 1명 유지
+    # QA-SIGNUP-003: 대소문자·공백만 다른 이메일 재가입 → 4xx 거부, 사용자 1명 유지, 기존 계정(비밀번호 해시 등) 그대로
     def body(service):
         email = link.new_email(data["template"])
         if service.signup(email, link.new_password()) not in link.SUCCESS:
             raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
         for form in data["forms"]:
             with test.case(variant=form):
+                rows = service.rows()
                 status = service.signup(link.variant(email, form), link.new_password())
                 test.assertIn(status, link.REJECTED, "같은 canonical 이메일 재가입이 4xx로 거부되지 않음")
+                test.assertTrue(service.rows() == rows, "거부된 재가입이 기존 계정을 바꾸거나 계정을 만듦")
         test.assertEqual(service.count_canonical(email), 1, "같은 canonical 이메일의 사용자가 1명이 아님")
     test.check(body)
 
 
 def password_length(test, data):
-    # QA-SIGNUP-004: 7자 이하는 거부, 8자 이상은 가입
+    # QA-SIGNUP-004: 7자 이하는 거부, 8자 이상은 가입. 계약은 길이만 정하므로 문자 구성(소문자만·숫자만)이 달라도
+    # 8자 이상이면 가입돼야 한다(kinds: (구성, 길이) 목록, 승인되지 않은 복잡성 조건을 찾음).
     def body(service):
         for length in data["reject"]:
             with test.case(length=length):
-                before = service.count()
+                before, rows = service.count(), service.rows()
                 status = service.signup(link.new_email(), link.new_password(length))
                 test.assertIn(status, link.REJECTED, "7자 이하 비밀번호가 4xx로 거부되지 않음")
                 test.assertEqual(service.count(), before, "7자 이하 비밀번호로 사용자가 생성됨")
+                test.assertTrue(service.rows() == rows, "거부된 요청이 사용자 표를 바꿈")
         for length in data["accept"]:
             with test.case(length=length):
                 before = service.count()
                 status = service.signup(link.new_email(), link.new_password(length))
                 test.assertIn(status, link.SUCCESS, "8자 이상 비밀번호가 정상 처리되지 않음")
+                test.assertEqual(service.count(), before + 1, "8자 이상 비밀번호로 사용자가 1명 생성되지 않음")
+        for kind, length in data["kinds"]:
+            with test.case(kind=kind, length=length):
+                before = service.count()
+                status = service.signup(link.new_email(), link.new_password(length, kind))
+                test.assertIn(status, link.SUCCESS, "8자 이상 비밀번호를 문자 구성 때문에 거부함(계약에 없는 조건)")
                 test.assertEqual(service.count(), before + 1, "8자 이상 비밀번호로 사용자가 1명 생성되지 않음")
     test.check(body)
 
@@ -104,7 +117,7 @@ def response_matches_result(test, data):
                 address = link.variant(address, step[2]) if kind == "duplicate" else address
                 password = link.new_password(7 if kind == "short" else 12)
             with test.case(step=index, request=kind):
-                before = service.count()
+                before, rows = service.count(), service.rows()
                 status = service.signup(address, password)
                 created = service.count() - before
                 test.assertEqual(status in link.SUCCESS, created == 1, "응답과 실제 가입 결과가 다름")
@@ -113,4 +126,5 @@ def response_matches_result(test, data):
                 else:
                     test.assertIn(status, link.REJECTED, "실패해야 할 요청이 4xx 실패 응답을 받지 못함")
                     test.assertEqual(created, 0, "실패해야 할 요청으로 사용자가 생성됨")
+                    test.assertTrue(service.rows() == rows, "실패해야 할 요청이 기존 계정을 바꿈")
     test.check(body)
