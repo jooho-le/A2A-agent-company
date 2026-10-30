@@ -35,8 +35,11 @@ _LIMIT_FIELDS = (
     "max_stdout_bytes", "max_stderr_bytes", "control_timeout_seconds",
 )
 _SCOPE_FIELDS = frozenset({
-    "name", "kind", "pattern", "source_directory", "protected_files", "protected_suite_ref",
+    "name", "kind", "pattern", "source_directory", "protected_files", "protected_suite_ref", "role",
 })
+# Validator roles that may own a QA_TESTS/PROTECTED scope. None keeps the
+# original QA-only meaning, so existing configurations hash and behave alike.
+_SCOPE_ROLES = frozenset({"SECURITY"})
 
 
 class UnitTestConfigurationError(ValueError):
@@ -137,6 +140,7 @@ class UnitTestScope:
     source_directory: str = field(default="tests", repr=False)
     protected_files: Mapping[str, str] | None = field(default=None, repr=False)
     protected_suite_ref: str | None = field(default=None, repr=False)
+    role: str | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if not isinstance(self.name, str) or _NAME.fullmatch(self.name) is None:
@@ -152,10 +156,14 @@ class UnitTestScope:
             object.__setattr__(self, "protected_suite_ref", _suite_reference(self.protected_suite_ref))
         elif self.protected_files is not None or self.protected_suite_ref is not None:
             raise UnitTestConfigurationError()
+        if self.role is not None and (self.role not in _SCOPE_ROLES or self.kind == "SNAPSHOT"):
+            raise UnitTestConfigurationError()
 
     @property
     def roles(self):
-        return (AgentRole.DEVELOPER,) if self.kind == "SNAPSHOT" else (AgentRole.QA,)
+        if self.kind == "SNAPSHOT":
+            return (AgentRole.DEVELOPER,)
+        return (AgentRole.SECURITY,) if self.role == "SECURITY" else (AgentRole.QA,)
 
 
 def _copy_scope(value):
@@ -164,21 +172,26 @@ def _copy_scope(value):
     return UnitTestScope(
         name=value.name, kind=value.kind, pattern=value.pattern,
         source_directory=value.source_directory, protected_files=value.protected_files,
-        protected_suite_ref=value.protected_suite_ref,
+        protected_suite_ref=value.protected_suite_ref, role=value.role,
     )
+
+
+def scope_payload(scope):
+    """Canonical JSON-ready scope; the role key appears only when set."""
+    payload = {
+        "name": scope.name, "kind": scope.kind, "pattern": scope.pattern,
+        "source_directory": scope.source_directory,
+        "protected_files": None if scope.protected_files is None else dict(scope.protected_files),
+        "protected_suite_ref": scope.protected_suite_ref,
+    }
+    if scope.role is not None:
+        payload["role"] = scope.role
+    return payload
 
 
 def _payload(configuration):
     return {
-        "scopes": [
-            {
-                "name": scope.name, "kind": scope.kind, "pattern": scope.pattern,
-                "source_directory": scope.source_directory,
-                "protected_files": None if scope.protected_files is None else dict(scope.protected_files),
-                "protected_suite_ref": scope.protected_suite_ref,
-            }
-            for scope in configuration.scopes
-        ],
+        "scopes": [scope_payload(scope) for scope in configuration.scopes],
         "python_executable": configuration.python_executable,
         "limits": {name: getattr(configuration.limits, name) for name in _LIMIT_FIELDS},
         "image_reference": configuration.image_reference,

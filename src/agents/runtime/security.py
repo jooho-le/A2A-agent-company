@@ -46,6 +46,7 @@ _PROTECTED = frozenset({
     "projectArtifactIds", "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion",
     "fixRequest", "scannerProfiles", "measuredSecurity", "securityRequirements", "userRequest", "sourcePaths",
     "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest", "sourceAccess",
+    "testSelectors", "testTargets",
 })
 
 
@@ -105,6 +106,28 @@ def _prepare_input(context, execution):
         raise _SecurityInputError() from None
 
 
+_TEST_INSTRUCTIONS = (
+    "Inspect the measured scanner reports and read the exact frozen Source using the offered tools. "
+    "Write Python unittest tests only under outputs/security using write_test_file and the Host testTargets, "
+    "exercising the assigned security requirements against the running product (for example stored password "
+    "values, database constraints, and responses or logs that must not carry secrets). "
+    "Return a bounded READY review covering every assigned requirement and Host finding ID exactly once, and "
+    "testCases binding every assigned requirement to at least one of your tests by exact runner test ID. "
+    "Do not submit report IDs, manifests, hashes, tool receipts, final verdicts, commands, new policies or source "
+    "writes. The Host executes your tests and all configured protected Security tests; only those measured results "
+    "decide requirement outcomes. Scanner warnings stay SUSPECTED unless proven. Questions cannot change frozen policies."
+)
+
+
+def _test_targets(services):
+    """Only generated Security test paths; never disclose protected suite bytes/bindings."""
+    unit = services.configuration.unit_test_configuration
+    return [{"toolName": "run_unit_tests", "selector": scope.name,
+             "directory": "outputs/security/" + scope.source_directory,
+             "pattern": scope.pattern, "format": "python-unittest"}
+            for scope in unit.scopes if scope.kind == "QA_TESTS"]
+
+
 class _SecurityReadExecutor:
     """Only measured read capabilities; the model cannot launch or omit scans."""
 
@@ -121,6 +144,7 @@ class _SecurityReadExecutor:
                     or workspace_uuid(context.workspace_id) != binding.workspace_id
                     or context.deadline_monotonic != self._execution.budget.deadline_monotonic
                     or call.name not in {"read_project_file", "read_security_report"}
+                    | ({"write_test_file"} if self._services.test_selectors else set())
                     or type(call.call_id) is not str or not 1 <= len(call.call_id.encode("utf-8")) <= 4096
                     or call.call_id in self._call_ids or len(self._call_ids) >= 1000
                     or parse_json(call.arguments_json) != arguments):
@@ -213,19 +237,27 @@ class SecurityAgentExecutor(AgentExecutor):
                 measured = await services.scan(execution, tracked)
                 task_input["measuredSecurity"] = measured.analysis_input
                 task_input["sourcePaths"] = list(measured.source_paths)
-                tools = tuple(tool for tool in tracked.list_tools()
-                              if tool.name in {"read_project_file", "read_security_report"})
-                if {tool.name for tool in tools} != {"read_project_file", "read_security_report"}:
+                wanted = {"read_project_file", "read_security_report"}
+                if services.test_selectors:
+                    # Same shape as QA: the model writes and binds its own tests; the Host runs them.
+                    wanted.add("write_test_file")
+                    task_input["testSelectors"] = {"run_unit_tests": list(services.test_selectors)}
+                    task_input["testTargets"] = _test_targets(services)
+                    task_input["runtimeInstructions"] = _TEST_INSTRUCTIONS
+                tools = tuple(tool for tool in tracked.list_tools() if tool.name in wanted)
+                if {tool.name for tool in tools} != wanted:
                     raise SecurityServicesError()
                 engine = LLMEngine(role=AgentRole.SECURITY, provider=self._provider, tools=tools,
                     tool_executor=_SecurityReadExecutor(services, tracked, execution, measured))
                 result = await engine.run(prompt=prepare_role_prompt(
                     AgentRole.SECURITY, task_input=task_input, metadata=execution.metadata),
                     model=execution.model,
-                    output=build_security_output_contract(execution.metadata.requirement_ids, measured.finding_ids, measured.source_paths),
+                    output=build_security_output_contract(execution.metadata.requirement_ids, measured.finding_ids,
+                                                          measured.source_paths, services.test_selectors or None),
                     budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
                     usage_sink=usage_sink, call_started_sink=call_started_sink)
-                decision = validate_security_decision(result.data, execution.metadata.requirement_ids, measured.finding_ids, measured.source_paths)
+                decision = validate_security_decision(result.data, execution.metadata.requirement_ids, measured.finding_ids,
+                                                      measured.source_paths, services.test_selectors or None)
                 execution.budget.check()
                 if decision.kind == "READY":
                     artifacts = await services.finalize(execution, decision, tracked, measured,

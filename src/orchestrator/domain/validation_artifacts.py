@@ -212,7 +212,9 @@ class SecurityReportArtifact(_ValidationArtifact):
         for result in self.requirement_results:
             if result.tool_evidence is not None and (
                 result.tool_evidence.execution_manifest != self.execution_manifest
-                or result.tool_evidence.tool_name != "run_security_scan"
+                # Scanner evidence, or measured Security unit-test receipts when
+                # the Host runs Security on the same test path as QA.
+                or result.tool_evidence.tool_name not in {"run_security_scan", "run_unit_tests"}
                 or result.tool_evidence.outcome != (ValidationOutcome.UNVERIFIED if result.outcome == ValidationOutcome.UNVERIFIED else ValidationOutcome.PASS)
             ):
                 raise ValueError("Security Tool evidence must match the role, execution and Snapshot")

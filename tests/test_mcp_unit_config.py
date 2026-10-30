@@ -186,3 +186,18 @@ class UnitTestConfigurationTests(unittest.TestCase):
         object.__setattr__(selected.scopes[0], "kind", "HOST")
         self.assert_invalid(lambda: encode_unit_configuration(selected))
         self.assert_invalid(lambda: encode_unit_configuration({"scopes": []}))
+
+    def test_validator_role_is_optional_and_only_security_can_be_named(self):
+        files = {"tests/signup/practice_security.py": "import unittest\n"}
+        security = scope(name="protected-security", kind="PROTECTED", source_directory="tests/signup",
+                         protected_files=files, protected_suite_ref="artifact://suite/one", role="SECURITY")
+        self.assertEqual(security.roles, (AgentRole.SECURITY,))
+        self.assertEqual(scope(name="security-tests", kind="QA_TESTS", role="SECURITY").roles, (AgentRole.SECURITY,))
+        self.assertEqual(scope(name="qa", kind="QA_TESTS").roles, (AgentRole.QA,))
+        for kind, role in (("SNAPSHOT", "SECURITY"), ("QA_TESTS", "QA"), ("QA_TESTS", "DEVELOPER"), ("QA_TESTS", "security")):
+            self.assert_invalid(lambda: scope(name="x", kind=kind, role=role))
+        selected = UnitTestConfiguration(scopes=(scope(), security))
+        encoded = json.loads(encode_unit_configuration(selected))
+        self.assertNotIn("role", encoded["scopes"][0])
+        self.assertEqual(encoded["scopes"][1]["role"], "SECURITY")
+        self.assertEqual(decode_unit_configuration(encode_unit_configuration(selected)), selected)

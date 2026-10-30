@@ -87,7 +87,7 @@ def _parts(workspace: BoundWorkspace, path: str, access: WorkspaceAccess):
         if not isinstance(workspace, BoundWorkspace):
             raise ValueError
         if access is WorkspaceAccess.WRITE and workspace.role not in (
-            AgentRole.DEVELOPER, AgentRole.QA,
+            AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY,
         ):
             raise ValueError
         parts = authorize_path(workspace.role, path, access)

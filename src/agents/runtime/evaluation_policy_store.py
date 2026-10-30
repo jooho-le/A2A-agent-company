@@ -102,12 +102,25 @@ def qa_policy_sha256(configuration, protected_cases):
         "maxCallSeconds": configuration.max_call_seconds})
 
 
-def security_policy_sha256(configuration):
-    """Hash scanner version/rules/profile plus the approved execution policy."""
-    return _digest({"version": 1,
+def security_policy_sha256(configuration, protected_cases=()):
+    """Hash scanner version/rules/profile plus the approved execution policy.
+
+    When Security has unit-test scopes, their protected bytes, bindings and the
+    unit runner join the hash exactly as for QA; the scanner-only form is unchanged.
+    """
+    payload = {"version": 1,
         "scanner": _policy(encode_security_configuration(configuration.security_scan_configuration), None),
         "runners": _runner_hashes(("security_runner.py", "security_contract.py")),
-        "maxCallSeconds": configuration.max_call_seconds})
+        "maxCallSeconds": configuration.max_call_seconds}
+    unit = configuration.unit_test_configuration
+    if unit is not None:
+        cases = [{"toolName": case.tool_name, "selector": case.selector, "testId": case.test_id,
+                  "requirementId": str(case.requirement_id), "title": case.title,
+                  "expectedResult": case.expected_result} for case in protected_cases]
+        cases.sort(key=lambda item: (item["toolName"], item["selector"], item["testId"]))
+        payload.update(unit=_policy(encode_unit_configuration(unit), "scopes"), protectedCases=cases,
+                       unitRunners=_runner_hashes(("unit_runner.py",)))
+    return _digest(payload)
 
 
 class EvaluationPolicyStore:

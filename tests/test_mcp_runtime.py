@@ -143,10 +143,14 @@ class MCPDispatcherTests(unittest.IsolatedAsyncioTestCase):
             dispatcher = self.dispatcher(role)
             for name in ROLE_TOOL_NAMES[role]:
                 with self.subTest(role=role, name=name):
-                    result = await dispatcher.call_tool(name, values[name])
+                    arguments = values[name]
+                    if name == "write_test_file" and role is AgentRole.SECURITY:
+                        arguments = self.arguments(path="outputs/security/test_signup.py", content="# test\n")
+                    result = await dispatcher.call_tool(name, arguments)
                     self.assertEqual(result.error_code, "TOOL_NOT_IMPLEMENTED")
         self.assertFalse((self.root / "source/signup.py").exists())
         self.assertFalse((self.root / "outputs/qa/test_signup.py").exists())
+        self.assertFalse((self.root / "outputs/security/test_signup.py").exists())
 
     async def test_direct_forbidden_tool_calls_are_rejected_despite_unknown_discovery(self):
         for role, name in ((AgentRole.QA, "write_source_file"), (AgentRole.SECURITY, "apply_patch"), (AgentRole.PLANNER, "read_project_file")):

@@ -17,7 +17,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -27,7 +27,8 @@ from agents.llm.contracts import ToolCall
 from agents.platform.composition import create_platform
 from agents.runtime.developer_services import DeveloperRuntimeServices
 from agents.runtime.qa_services import QARuntimeServices
-from agents.runtime.security_services import SecurityRuntimeServices
+from agents.roles.qa_contract import QACaseBinding
+from agents.runtime.security_services import SecurityRuntimeServices, SecurityServicesError
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration
 from mcp_tools.runtime import MCPBinding, MCPDispatcher
 from mcp_tools.tools.build import BuildTools
@@ -120,6 +121,8 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.service_contexts, self.sessions, self.dockers = [], [], {}
         self.preparations, self.http_requests, self.http_clients = [], [], []
         self.qa_failure = False
+        # Security on the same measured unit-test path as QA (10.29 Ver1·Ver2 design).
+        self.security_tests, self.security_failure = False, False
         self.platform = None
 
     def git(self, *arguments):
@@ -172,10 +175,24 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                     "rationale": "독립 검증이 필요합니다.", "references": []}
                     for profile in measured["profiles"] for finding in profile["findings"]]}, ensure_ascii=False))
 
+        def security_write(request):
+            return tool_response(ToolCall(call_id="security-write", name="write_test_file",
+                arguments_json=json.dumps({"workspaceId": _workspace_id(request),
+                    "path": "outputs/security/tests/test_security.py", "content": "# inert fixture; not executed on Host\n"})))
+
+        def security_ready_with_tests(request):
+            data = json.loads(security_ready(request).output_text)
+            data["testCases"] = [{"selector": "security-unit", "testId": f"test_security.Security.test_req_{index}",
+                "requirementId": str(requirement), "title": f"보안 실행 기준 {index}", "expectedResult": "동결 기준을 충족한다."}
+                for index, requirement in enumerate(self.scenario.requirement_ids_for(RequirementValidator.SECURITY), 1)]
+            return text_response(json.dumps(data, ensure_ascii=False))
+
+        security = (FakeProvider(security_write, security_ready_with_tests) if self.security_tests
+                    else FakeProvider(security_ready))
         return {AgentRole.PLANNER: FakeProvider(planner),
             AgentRole.DEVELOPER: FakeProvider(developer_write,
                 text_response(json.dumps({"kind": "READY", "summary": "동결 기준 구현 후보입니다.", "questions": []}, ensure_ascii=False))),
-            AgentRole.QA: FakeProvider(qa_write, qa_ready), AgentRole.SECURITY: FakeProvider(security_ready)}
+            AgentRole.QA: FakeProvider(qa_write, qa_ready), AgentRole.SECURITY: security}
 
     @asynccontextmanager
     async def peer_client(self, configuration):
@@ -213,6 +230,21 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             scans = SecurityScanTools(self.artifacts, sandbox, SecurityScanOutputStore(self.repository),
                 configuration=configuration.security_scan_configuration, max_call_seconds=configuration.max_call_seconds)
             handlers = {**handlers, **scans.handlers(role)}
+            if configuration.unit_test_configuration is not None:
+                case_ids = [f"test_security.Security.test_req_{index}" for index in range(
+                    1, len(self.scenario.requirement_ids_for(RequirementValidator.SECURITY)) + 1)]
+                failed = int(self.security_failure)
+                tests = FakeDocker()
+                self.dockers.setdefault(role, []).append(tests)
+                tests.exit_code = failed
+                tests.start_result = CLIResult(returncode=failed, stdout=json.dumps({"format": "unittest-v1",
+                    "total": len(case_ids), "passed": len(case_ids) - failed, "failed": failed, "skipped": 0,
+                    "tests": [{"testId": identity, "outcome": "FAIL" if failed and index == 0 else "PASS"}
+                              for index, identity in enumerate(case_ids)]}).encode(), stderr=b"")
+                unit = UnitTestTools(self.artifacts, SandboxRuntime(self.repository, self.registry, self.artifacts,
+                    docker=tests), UnitTestOutputStore(self.repository),
+                    configuration=configuration.unit_test_configuration, max_call_seconds=configuration.max_call_seconds)
+                handlers = {**handlers, **unit.handlers(role)}
         dispatcher = MCPDispatcher(configuration.binding, self.registry, handlers=handlers,
             max_call_seconds=configuration.max_call_seconds)
         session = DispatcherSession(dispatcher)
@@ -247,6 +279,10 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         values["security_scan_configuration"] = SecurityScanConfiguration(
             profiles=(SecurityScannerProfile(name="python-security", scanner_version="1.8.6",
                 rule_ids=("B101", "B307"), profile_ref=_SCANNER_REF),), limits=limits, image_reference=IMAGE_ID)
+        if self.security_tests:
+            values["unit_test_configuration"] = UnitTestConfiguration(
+                scopes=(UnitTestScope(name="security-unit", kind="QA_TESTS", role="SECURITY"),), limits=limits,
+                image_reference=IMAGE_ID)
         return SecurityRuntimeServices(self.repository, self.registry, self.artifacts,
             mcp_configuration=MCPChildConfiguration(**values), client_factory=self.peer_client)
 
@@ -399,6 +435,86 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             artifacts = self.repository.list_project_artifacts(run_id)
             self.assertEqual(len([item for item in artifacts if item.artifact_type == "SOURCE"]), 1)
             self.assertFalse([item for item in artifacts if item.artifact_type in {"QA_REPORT", "SECURITY_REPORT"}])
+
+    async def test_security_tests_decide_requirements_like_qa_and_the_run_can_succeed(self):
+        # Security writes and binds its own tests; the Host runs them through the same unit-test
+        # path as QA and only measured receipts decide the Security Requirements (no proof verifier).
+        self.security_tests = True
+        async with self.running_platform() as (client, providers):
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            self.assertEqual(response.status_code, 201, response.text)
+            run_id = UUID(response.json()["run"]["runId"])
+            run = self.repository.get_run(run_id)
+            self.assertEqual((run.status, getattr(run.verdict, "value", None)), (WorkflowStatus.FINISHED, "SUCCESS"))
+            artifacts = self.repository.list_project_artifacts(run_id)
+            source = next(item for item in artifacts if item.artifact_type == "SOURCE")
+            security = next(item for item in artifacts if item.artifact_type == "SECURITY_REPORT")
+            self.assertFalse(security.has_unverified)
+            self.assertTrue(all(item.outcome is ValidationOutcome.PASS and item.tool_evidence is not None
+                                for item in security.requirement_results))
+            self.assertEqual({item.requirement_id for item in security.requirement_results},
+                             set(self.scenario.requirement_ids_for(RequirementValidator.SECURITY)))
+            with self.repository._connection() as connection:
+                manifests = [UUID(row["execution_manifest_id"]) for row in connection.execute(
+                    "SELECT execution_manifest_id FROM unit_test_execution_records WHERE run_id=?", (str(run_id),)).fetchall()]
+            receipts = [UnitTestOutputStore(self.repository).get(run_id, manifest) for manifest in manifests]
+            self.assertEqual(sorted(receipt.role.value for receipt in receipts), ["QA", "SECURITY"])
+            tools = [name for session_role, session in self.sessions if session_role is AgentRole.SECURITY
+                     for name, _arguments, _options in session.calls]
+            self.assertEqual(tools, ["run_security_scan", "write_test_file", "run_unit_tests"])
+            self.assertEqual(security.execution_manifest, source.execution_manifest())
+
+    def security_services(self, scopes, cases=(), verifier=None):
+        binding = MCPBinding(role=AgentRole.SECURITY, agent_role=AgentRole.SECURITY, run_id=uuid4(), workspace_id=uuid4())
+        limits = SandboxLimits(timeout_seconds=2, control_timeout_seconds=.5)
+        configuration = MCPChildConfiguration(binding=binding, database_path=self.repository.database_path,
+            workspace_root=self.registry.base_path, max_call_seconds=5,
+            frozen_source=FrozenSourceSelection(project_artifact_id=uuid4(), snapshot_sha256="a" * 64),
+            security_scan_configuration=SecurityScanConfiguration(profiles=(SecurityScannerProfile(
+                name="python-security", scanner_version="1.8.6", rule_ids=("B101",), profile_ref=_SCANNER_REF),),
+                limits=limits, image_reference=IMAGE_ID),
+            unit_test_configuration=UnitTestConfiguration(scopes=scopes, limits=limits, image_reference=IMAGE_ID)
+            if scopes else None)
+        return SecurityRuntimeServices(self.repository, self.registry, self.artifacts, mcp_configuration=configuration,
+            protected_cases=cases, proof_verifier=verifier, client_factory=self.peer_client)
+
+    def test_security_test_scopes_and_protected_cases_are_checked_at_construction(self):
+        generated = UnitTestScope(name="security-unit", kind="QA_TESTS", role="SECURITY")
+        protected = UnitTestScope(name="protected-security", kind="PROTECTED", role="SECURITY",
+            source_directory="tests/signup", protected_files={"tests/signup/practice_security.py": "import unittest\n"},
+            protected_suite_ref="artifact://protected-tests/scn-001/signup")
+        requirement = next(iter(self.scenario.requirement_ids_for(RequirementValidator.SECURITY)))
+        case = QACaseBinding(tool_name="run_unit_tests", selector="protected-security",
+            test_id="practice_security.PracticeSecurityChecks.test_sec_signup_002", requirement_id=requirement,
+            title="해시 저장값", expected_result="Argon2id로 저장한다.")
+        self.assertEqual(self.security_services(()).test_selectors, ())  # no scopes: scanner-plus-proof path
+        self.assertEqual(self.security_services((generated,)).test_selectors, ("security-unit",))
+        self.assertEqual(self.security_services((generated, protected), (case,)).test_selectors, ("security-unit",))
+        for scopes, cases, verifier in (
+                ((generated, protected), (), None),                     # protected scope without its cases
+                ((generated,), (case,), None),                         # cases without their protected scope
+                ((protected,), (case,), None),                         # no generated Security test scope
+                ((UnitTestScope(name="qa-unit", kind="QA_TESTS"),), (), None),  # a QA scope is not Security's
+                ((generated,), (), lambda *args: None)):               # proof verifier and tests never combine
+            with self.subTest(scopes=[scope.name for scope in scopes]), self.assertRaises(SecurityServicesError):
+                self.security_services(scopes, cases, verifier)
+
+    async def test_measured_security_test_failure_is_a_security_failure(self):
+        self.security_tests = self.security_failure = True
+        async with self.running_platform() as (client, _providers):
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            self.assertEqual(response.status_code, 201, response.text)
+            run_id = UUID(response.json()["run"]["runId"])
+            run = self.repository.get_run(run_id)
+            self.assertNotEqual(getattr(run.verdict, "value", None), "SUCCESS")
+            security = next(item for item in self.repository.list_project_artifacts(run_id)
+                            if item.artifact_type == "SECURITY_REPORT" and item.code_version == 1)
+            failed = [item for item in security.requirement_results if item.outcome is ValidationOutcome.FAIL]
+            self.assertEqual(len(failed), 1)
+            self.assertIsNotNone(failed[0].tool_evidence)
+            issues = [issue for issue in self.repository.list_issue_records(run_id) if issue.reporter is AgentRole.SECURITY]
+            self.assertTrue(issues)
+            self.assertEqual(issues[0].requirement_ids, [failed[0].requirement_id])
 
     async def test_measured_qa_failure_and_unverified_security_keep_issue_without_starting_fix(self):
         self.qa_failure = True
