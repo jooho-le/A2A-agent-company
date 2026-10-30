@@ -8,8 +8,7 @@
   - (실행) 최소 회원가입 서비스와 변형 27개(결함 21·연결 실패 2·비밀번호 없는 debug 로그 1·시작할 때 테이블을
     만드는 앱 2·DB 오류 미처리 1)를 컨테이너처럼 읽기 전용 Snapshot으로 두고 dev unittest 실행기로 돌렸을 때,
     시험지 세 벌 모두에서 결함마다 같은 검사만 FAIL이 되고(시험지 난이도가 같음), 연결이 안 되면 모두 UNVERIFIED인가?
-실행 시험은 sqlalchemy·argon2-cffi가 있어야 돈다(없으면 건너뜀):
-  uv run --with sqlalchemy --with argon2-cffi python -m pytest tests/evaluation/test_protected_signup.py
+실행 시험은 sqlalchemy·argon2-cffi가 있어야 돈다(프로젝트 dev 그룹에 있음. 없는 환경에서는 건너뜀).
 """
 import ast
 import importlib.util
@@ -453,3 +452,25 @@ def test_export_writes_dev_ready_files(tmp_path):
     assert main(['export', '--out', str(tmp_path), '--force', '--suite-ref', 'artifact://protected-tests/x']) == 0
     assert {scope['protected_suite_ref'] for scope in json.loads(
         written['unit-protected-scopes.json'].read_text(encoding='utf-8'))} == {'artifact://protected-tests/x'}
+
+
+# ---------------------------------------------------------------- 시험지 노출 확인
+
+
+def test_exam_exposure_finds_copied_exams_and_evaluation_paths():
+    """코드 묶음에 시험지가 이름만 바뀌어(또는 줄바꿈만 바뀌어) 들어 있거나 평가 코드 경로가 있으면 찾는다.
+    정상 서비스 코드에서는 아무것도 찾지 않는다."""
+    final_exam = pt.protected_files('final')['tests/signup/exam_final.py'].encode('utf-8')
+    practice = pt.protected_files('in-loop-qa')['tests/signup/practice_qa.py'].encode('utf-8')
+    clean = {path: text.encode('utf-8') for path, text in signup_service.build('good').items()}
+    assert pt.exam_exposure(clean) == []
+    found = pt.exam_exposure({**clean, 'tests/test_copy.py': final_exam,
+                              'notes/practice.py': practice.replace(b'\n', b'\r\n'),
+                              'src/evaluation/README.md': b'x', 'vendor/protected_tests/a.py': b'y',
+                              'experiments/scn001/final/day1/run/output.json': b'{}', 'experiments/notes.txt': b'z'})
+    assert {(item['path'], item['reason']) for item in found} == {
+        ('tests/test_copy.py', 'SAME_AS_PROTECTED_FILE'), ('notes/practice.py', 'SAME_AS_PROTECTED_FILE'),
+        ('src/evaluation/README.md', 'EVALUATION_PATH'), ('vendor/protected_tests/a.py', 'EVALUATION_PATH'),
+        ('experiments/scn001/final/day1/run/output.json', 'RESULTS_PATH')}
+    assert next(item for item in found if item['path'] == 'tests/test_copy.py')['protectedFile'] == \
+        'tests/signup/exam_final.py'

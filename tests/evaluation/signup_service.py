@@ -1,9 +1,7 @@
 # D2 보호 테스트를 실제로 실행해 보기 위한 최소 회원가입 서비스와 결함 변형이다(합성 코드, 실제 생성물 아님).
 # 구조는 세화 backend와 같다: main.app, database.get_db, models.User(email, password_hash),
 # POST /api/auth/signup. 결함 변형은 정상 서비스의 글자 일부를 바꿔 만든다.
-# 실행 검사는 fastapi·httpx·sqlalchemy·argon2-cffi가 필요하다. 프로젝트 환경에는 sqlalchemy·argon2가 없으므로
-#   uv run --with sqlalchemy --with argon2-cffi python -m pytest tests/evaluation/test_protected_signup.py
-# 처럼 임시로 설치해서 돌린다(팀 공유 파일 pyproject.toml은 바꾸지 않음).
+# 실행 검사는 fastapi·httpx·sqlalchemy·argon2-cffi가 필요하다(프로젝트 dev 그룹에 있음, 2026-10-30).
 
 GOOD = {
     'main.py': '''\

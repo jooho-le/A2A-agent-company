@@ -36,6 +36,8 @@ SCOPES = ('in-loop-qa', 'in-loop-security', 'practice', 'pilot', 'final')  # 쓸
 SETS = ('practice', 'pilot', 'final')  # 시험지 세 벌(최종 평가는 이 중 하나로 채점하고 practice는 참고로도 돈다)
 ROLES = ('QA', 'SECURITY')  # 검사 관점이자 순환 안에서 그 검사를 실행하는 에이전트 역할
 LOOP_SCOPES = {'QA': 'in-loop-qa', 'SECURITY': 'in-loop-security'}  # 역할별 순환 안 범위
+RESULT_FILES = frozenset({'output.json', 'meta.json', 'summary.md', 'bundle.json', 'regression.json',
+                          'comparison.json'})  # 실험 결과 폴더(experiments/)에 보관하는 파일 이름(evaluation.experiment)
 _SELECTOR = re.compile(r'[a-z][a-z0-9_-]{0,63}\Z')           # dev qa_contract.py와 같은 규칙
 _PATTERN = re.compile(r'[A-Za-z0-9_*?\[\].-]{1,128}\.py\Z')   # dev unit_runner.py와 같은 규칙
 _REQUIREMENT = re.compile(r'REQ-\d{3}\Z')  # 요구사항 이름 모양(예: REQ-001)
@@ -151,6 +153,30 @@ def suite_sha256(scope: str, suite: Optional[dict] = None) -> str:
         entries.append({'path': path, 'sha256': hashlib.sha256(data).hexdigest(), 'sizeBytes': len(data)})
     canonical = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def exam_exposure(files: Mapping[str, bytes], suite: Optional[dict] = None) -> list[dict]:
+    # 코드 묶음(시작 코드·채점할 Snapshot, {경로: 바이트})에 시험지가 섞였는지 찾는다. 에이전트가 시험지를 볼 수 있었다는
+    # 뜻이므로 그 묶음으로는 점수를 내지 않는다. 찾는 것:
+    #   SAME_AS_PROTECTED_FILE: 보호 파일(모든 시험지·검사 내용·연결부) 중 하나와 내용이 같음(줄바꿈 CRLF/LF 차이 무시)
+    #   EVALUATION_PATH       : 경로에 src/evaluation 또는 protected_tests가 들어 있음
+    #   RESULTS_PATH          : 저장소의 실험 결과 폴더(experiments/) 아래 결과 파일(이전 Run의 채점 결과)
+    # 일부만 베끼거나 바꿔 쓴 경우는 찾지 못한다(한계).
+    def digest(data):
+        return hashlib.sha256(data.replace(b'\r\n', b'\n')).hexdigest()
+    suite = suite or load_suite()
+    known = {digest(content.encode('utf-8')): path for scope in SCOPES
+             for path, content in protected_files(scope, suite).items()}
+    found = []
+    for path, data in sorted(files.items()):
+        parts = path.split('/')
+        if digest(bytes(data)) in known:
+            found.append({'path': path, 'reason': 'SAME_AS_PROTECTED_FILE', 'protectedFile': known[digest(bytes(data))]})
+        elif 'protected_tests' in parts or any(parts[i:i + 2] == ['src', 'evaluation'] for i in range(len(parts))):
+            found.append({'path': path, 'reason': 'EVALUATION_PATH'})
+        elif parts[0] == 'experiments' and parts[-1] in RESULT_FILES:
+            found.append({'path': path, 'reason': 'RESULTS_PATH'})
+    return found
 
 
 def unit_test_scope(scope: str, *, suite_ref: str, suite: Optional[dict] = None) -> dict:

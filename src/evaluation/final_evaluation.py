@@ -384,7 +384,7 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     created_at = created_at or datetime.now(timezone.utc).isoformat()
     snapshot_sha256 = _sha256(bytes(archive)) if isinstance(archive, (bytes, bytearray)) else None
     snapshot_info = {'sha256': snapshot_sha256, 'matchesExpected': snapshot_sha256 == expected.snapshot_sha256,
-                     'lockFound': False, 'files': 0, 'error': None}
+                     'lockFound': False, 'files': 0, 'error': None, 'examExposure': []}
     kind = getattr(runner, 'kind', 'unknown')
     outcomes = {name: RunnerOutcome(None, None, 'NOT_RUN', None, kind) for name in (exam, 'practice', 'coverage')}
     static_requirements = static_evidence = static_error = None
@@ -399,6 +399,12 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
         # 받은 코드가 채점하기로 한 Snapshot이 아니다. 실행하지 않고 모든 검사를 미검증으로 남긴다.
         files, snapshot_info['error'] = None, 'SNAPSHOT_HASH_MISMATCH'
         runner_error = 'SNAPSHOT_HASH_MISMATCH'
+    if files is not None:
+        # 시험지가 Snapshot에 섞였으면 에이전트가 시험지를 볼 수 있었다는 뜻이다. 실행하지 않고 점수도 만들지 않는다.
+        snapshot_info['examExposure'] = protected_tests.exam_exposure(files, suite)
+        if snapshot_info['examExposure']:
+            files, snapshot_info['error'] = None, 'EXAM_EXPOSED'
+            runner_error = 'EXAM_EXPOSED'
     # 3)·4) 실행: 임시 폴더에 소스(snapshot/)와 실행기·시험지(inputs/)를 쓰고 채점 시험지·순환용 시험지·줄 기록 순서로
     #       돌린다. 이어서 정적 판정(보조).
     if files is not None:
@@ -454,12 +460,16 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     if static_evidence is not None or static_error is not None:
         evidence[evidence_ids['static']] = {'kind': 'STATIC_ASSESSMENT', 'error': static_error, 'evidence': static_evidence}
     supplementary = {
+        'examExposure': snapshot_info['examExposure'],
         'coverage': {'evidenceId': evidence_ids['coverage'], 'error': outcomes['coverage'].error, **(coverage or {})},
         'static': {'evidenceId': evidence_ids['static'], 'error': static_error,
                    'requirements': static_requirements if static_requirements is not None else None},
     }
-    return {'exam': exam, 'report': report, 'score': exam_score(report),
-            'referenceReport': reference, 'referenceScore': exam_score(reference),
+    score, reference_score = exam_score(report), exam_score(reference)
+    if snapshot_info.get('examExposure'):
+        score = reference_score = {**score, 'score': None, 'scoreIsLowerBound': None, 'reason': 'EXAM_EXPOSED'}
+    return {'exam': exam, 'report': report, 'score': score,
+            'referenceReport': reference, 'referenceScore': reference_score,
             'supplementary': supplementary, 'evidence': evidence, 'snapshot': snapshot_info,
             'runner': {**outcomes[exam].to_dict(), 'evaluationId': evaluation_id}, 'trace': trace}
 

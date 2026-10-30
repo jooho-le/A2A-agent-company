@@ -238,7 +238,7 @@ MVP scenario_key는 SCN-001이다. 내부 scenario_id와 requirement_id는 Regis
 
 모든 검사는 실행 검사이고 QA와 Security가 같은 방식이다(2026-10-30). 검사마다 시험지 세 벌(순환용·시범 최종용·공식 최종용)이 있고, Ver1은 순환 안에서 QA·Security 에이전트가 각자 순환용 시험지를 실행하며(dev 보호 범위에 역할 표시), Ver2는 최종에서만 평가한다. 정적 판정(`security/assess.py`)은 점수·판정에 넣지 않고 최종 평가의 보조 점검(`STATIC-REQ-003·005·006`)으로만 쓴다. 예전 정적 검사 SEC-SIGNUP-001·004는 실행 검사 002·005에 합쳤다. 세부는 [기준표](scn001_criteria.md) 2절.
 
-REQ-006 중 Orchestrator 기록(Trace·Issue·Artifact·도구 시도·telemetry)의 노출은 위 표 밖에서 D4 `trace_checks.check_trace_exposure`가, REQ-008의 요구→개발→검증→수정→재검증 연결은 `check_traceability`가 확인한다. A2A Message 본문은 조회 API가 없어 보지 못한다.
+REQ-006 중 Orchestrator 기록(Trace·Issue·Artifact·도구 시도·telemetry)의 노출은 위 표 밖에서 D4 `trace_checks.check_trace_exposure`가, REQ-008의 요구→개발→검증→수정→재검증 연결은 `check_traceability`가 확인한다. A2A Message 본문은 Run 조회 API로 볼 수 없어 Host가 dev `agents.platform.a2a_export`로 에이전트 작업 저장소에서 꺼내 함께 넘기면 본문까지 찾는다(2026-10-30).
 
 해시 세부 권장안은 Argon2id, m=19456 KiB, t=2, p=1, 라이브러리가 생성한 고유 salt와 encoded hash다(registry 값). 수치 규칙은 "이상"(AT_LEAST)으로 정했다(2026-10-28, 정의서 "최소 19 MiB"·"파라미터 충족"). 원문과 저장값이 다르다는 이유만으로 안전 판정하지 않는다.
 

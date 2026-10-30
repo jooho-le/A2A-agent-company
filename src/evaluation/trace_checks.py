@@ -8,7 +8,8 @@
 # 판정: FAIL = 기록에서 위반을 실제로 찾음, UNVERIFIED = 기록이 모자라 확인을 끝내지 못함, PASS = 둘 다 아님.
 # 결과에는 위치(문서 이름·JSON 경로·사건 종류)와 근거 코드만 담고 비밀번호·해시 값은 담지 않는다.
 #
-# 한계: A2A Message 본문은 조회 API가 없어 보지 못한다. 노출 검사는 알려 준 값(known_values), 비밀번호 해시 형식,
+# 한계: A2A Message 본문은 Run 조회 API로는 보지 못한다. Host가 dev `agents.platform.a2a_export`로 에이전트 작업 저장소에서
+#   꺼낸 문서를 documents['a2aMessages']로 함께 주면 본문(받은 요청·대화 기록·Task·Artifact·상태 사건)까지 찾는다. 노출 검사는 알려 준 값(known_values), 비밀번호 해시 형식,
 # 비밀번호 이름의 필드 값만 찾으며 base64·암호화 등으로 바뀐 값은 찾지 못한다. 추적 검사의 규칙은 dev 파이프라인
 # 테스트가 만든 실제 Run 기록(SUCCESS·FAIL·HUMAN_REVIEW·빌드 실패 경로)의 사건 흐름에 맞췄다.
 #
@@ -38,10 +39,11 @@ _REDACTED = re.compile(r'\s*(\[|<)?\s*(redacted|masked|hidden|removed)\s*(\]|>)?
 MAX_FINDINGS = 64  # 결과에 남기는 위치 정보의 최대 개수(문서가 아주 커도 결과가 끝없이 커지지 않게)
 EXPOSURE_DOCUMENTS = ('events', 'issues', 'artifacts', 'toolAttempts', 'telemetry')  # 노출 검사가 읽는 기록 다섯 가지
 # 지금 수집 경로로는 받을 수 없어 노출 검사가 보지 못하는 출력. 그래서 이 검사의 PASS는 REQ-006 전체 충족이 아니다.
-#   A2A_MESSAGE_BODY      : 에이전트 사이 A2A Message 본문(조회 API 없음)
+#   A2A_MESSAGE_BODY      : 에이전트 사이 A2A Message 본문(Run 조회 API 없음. a2aMessages 문서를 주면 본 것으로 셈)
 #   ARTIFACT_FILE_CONTENT : Artifact 조회는 등록된 JSON 기록만 준다(원본 파일·Snapshot 내용은 아님)
 #   AGENT_PROCESS_OUTPUT  : 에이전트·Orchestrator 서버 프로세스의 로그·출력 스트림
 NOT_COLLECTED_OUTPUTS = ('A2A_MESSAGE_BODY', 'ARTIFACT_FILE_CONTENT', 'AGENT_PROCESS_OUTPUT')
+A2A_DOCUMENT = 'a2aMessages'  # (선택) dev a2a_export가 꺼낸 A2A Message 본문 문서. 주면 A2A_MESSAGE_BODY를 본 것으로 센다
 MAX_DEPTH = 64     # JSON을 파고드는 최대 깊이(지나치게 깊은 문서가 검사기를 멈추지 않게)
 
 
@@ -167,10 +169,18 @@ def check_trace_exposure(documents: Mapping, criteria: Mapping, *, known_values:
     # 페이지로 받는 기록은 받은 개수가 전체 개수와 같아야 "다 봤다"고 할 수 있다.
     incomplete = [name for name, total in (('events', 'eventsTotal'), ('telemetry', 'telemetryTotal'))
                   if documents.get(name) is not None and documents.get(total) != len(documents[name])]
+    # (선택) A2A Message 본문. 같은 Run의 문서여야 하고, 네 역할 중 빠진 저장소가 있으면 일부만 본 것이다.
+    a2a, not_collected = documents.get(A2A_DOCUMENT), list(NOT_COLLECTED_OUTPUTS)
+    checked = [name for name in EXPOSURE_DOCUMENTS if name not in missing and name not in incomplete]
+    if a2a is not None:
+        if not isinstance(a2a, Mapping) or a2a.get('runId') != documents.get('runId') or not isinstance(a2a.get('roles'), Mapping):
+            raise ValueError('A2A message document belongs to another Run or is malformed')
+        walk(A2A_DOCUMENT, [], a2a['roles'], 0)
+        not_collected.remove('A2A_MESSAGE_BODY')
+        (incomplete if a2a.get('missingRoles') else checked).append(A2A_DOCUMENT)
     # 검사 범위: 끝까지 읽은 기록, 못 받았거나 일부만 받은 기록, 수집 경로가 없어 보지 못하는 출력, 알려 준 값 개수(값은 남기지 않음)
-    coverage = {'checkedDocuments': [name for name in EXPOSURE_DOCUMENTS if name not in missing and name not in incomplete],
-                'missingDocuments': missing, 'incompleteDocuments': incomplete,
-                'notCollectedOutputs': list(NOT_COLLECTED_OUTPUTS), 'knownValues': len(secrets)}
+    coverage = {'checkedDocuments': checked, 'missingDocuments': missing, 'incompleteDocuments': incomplete,
+                'notCollectedOutputs': not_collected, 'knownValues': len(secrets)}
     # 판정 순서: 실제로 찾은 노출이 있으면 기록이 모자라도 FAIL(확인된 위반) → 기록이 모자라면 UNVERIFIED → 아니면 PASS.
     if reasons - {'DOCUMENT_TOO_DEEP'}:
         return TraceCheck('FAIL', tuple(sorted(reasons)), tuple(findings), coverage)

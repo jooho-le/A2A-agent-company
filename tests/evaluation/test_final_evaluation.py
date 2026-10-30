@@ -211,6 +211,25 @@ def test_exam_must_be_a_scored_set(exam):
         final(archive, manifest(archive), RecordingRunner(), exam=exam)
 
 
+def test_snapshot_with_exam_files_is_not_run_or_scored():
+    """채점할 Snapshot에 시험지가 섞여 있으면(에이전트가 시험지를 볼 수 있었음) 실행하지 않고 점수도 만들지 않는다.
+    요약에는 "시험지 노출"로 드러낸다."""
+    from evaluation import protected_tests
+    from evaluation.summary import render_summary
+    files = {path: text.encode('utf-8') for path, text in signup_service.build('good').items()}
+    files['requirements.lock'] = LOCK
+    files['tests/test_exam_copy.py'] = protected_tests.protected_files('final')['tests/signup/exam_final.py'].encode('utf-8')
+    archive, runner = canonical_tar(files), RecordingRunner()
+    output = final(archive, manifest(archive), runner)
+    assert runner.calls == 0 and output['snapshot']['error'] == 'EXAM_EXPOSED'
+    assert [item['path'] for item in output['snapshot']['examExposure']] == ['tests/test_exam_copy.py']
+    assert output['report']['evaluationVerdict'] == 'UNVERIFIED'
+    assert output['score']['score'] is None and output['score']['reason'] == 'EXAM_EXPOSED'
+    assert output['referenceScore']['reason'] == 'EXAM_EXPOSED'
+    text = render_summary(output['report'], scenario_contract=CONTRACT, supplementary=output['supplementary'])
+    assert '**시험지 노출**' in text and 'tests/test_exam_copy.py' in text
+
+
 def test_local_runner_requires_explicit_trust():
     """LocalRunner는 trusted=True를 명시하지 않으면 만들 수 없다(생성 코드를 호스트에서 돌리지 않게)."""
     with pytest.raises(ValueError):

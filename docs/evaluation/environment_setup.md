@@ -2,7 +2,7 @@
 
 최종 갱신: 2026-10-28. Python 3.13을 사용한다(설치할 때 `--python 3.13`으로 직접 지정). dev의 공통 프로젝트 설정을 사용한다.
 
-팀 선언은 `requires-python = ">=3.10"`이다(팀 공유 파일이라 바꾸지 않음). 평가 코드·보호 테스트는 3.10에서도 동작하지만 dev 승인 함수가 3.11 전용 `co_qualname`을 써서 3.10에서 실패하고, 3.14는 dev 보안 승인 테스트 6개가 실패했다. 그래서 내 개발 환경은 3.13이다. 실행 시험(D2 보호 테스트 변형, D5 합성 서비스)은 sqlalchemy·argon2-cffi가 필요해 `uv run --with sqlalchemy --with argon2-cffi python -m pytest tests/evaluation`으로 돌린다. 실제 컨테이너 시험은 Docker를 켜고 `EVAL_DOCKER_IMAGE`(해시로 고정한 이미지)를 주면 돈다.
+팀 선언은 `requires-python = ">=3.10"`이다. 평가 코드·보호 테스트와 dev 승인 함수가 3.10에서도 동작한다(승인 함수의 3.11 전용 속성은 2026-10-30에 고침). 3.14는 dev 보안 승인 테스트 6개가 실패했다. 내 개발 환경은 3.13이다. 실행 시험(D2 보호 테스트 변형, D5 합성 서비스)에 필요한 sqlalchemy·argon2-cffi는 dev 그룹에 있어 `uv run python -m pytest tests/evaluation`이 함께 돌린다. 실제 컨테이너 시험은 Docker를 켜고 `EVAL_DOCKER_IMAGE`(해시로 고정한 이미지)를 주면 돈다.
 
 내 컴퓨터 루트에는 `.python-version`(내용 3.13) 파일이 있지만 **Git에는 올리지 않았다.** 이 파일은 저장소를 쓰는 모두의 uv가 고르는 Python 버전을 바꾸기 때문이다. 그래서 다른 컴퓨터에서는 아래처럼 `--python 3.13`을 직접 적어야 3.13이 선택된다. 팀이 3.13으로 통일하기로 하면 팀장 승인을 받아 이 파일을 올리거나 `pyproject.toml`을 고친다.
 
@@ -32,8 +32,7 @@ PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 ```
 
 기본 pytest는 `tests/`만 수집한다. 테스트 수와 결과는 수정 시점에 따라 달라지므로 [개발진행사항 7절](development_progress.md#7-검증-기록)에서 날짜·검증 대상과 함께 확인한다. 저장소 전체는 dev 테스트가 많아 20분 넘게 걸리고, dev의 `test_planner_developer_continuation`에는 수정 전 커밋에서도 재현된 간헐 실패가 있으므로 새 실패는 원인과 변경 범위를 다시 확인한다.
-평가 테스트만 실행하려면 `uv run --frozen python -m pytest tests/evaluation`(보호 테스트·D5 실행 시험은 건너뜀),
-실행 시험까지 돌리려면 `uv run --frozen --with sqlalchemy --with argon2-cffi python -m pytest tests/evaluation`,
+평가 테스트만 실행하려면 `uv run --frozen python -m pytest tests/evaluation`(dev 그룹에 sqlalchemy·argon2-cffi가 있어 보호 테스트·D5 실행 시험도 함께 돈다, 2026-10-30),
 환경 확인은 `uv run --frozen python -m pytest checks`로 따로 실행한다.
 평가 자체 테스트와 보고서 모델 호환 검사는 실제 A2A/MCP/회원가입 서비스 통합 검증이 아니다.
 보고서 데모는 mock이다.
@@ -48,7 +47,7 @@ PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 - 공통 계약 변경 시 사본과 보고서 모델 호환 검사도 함께 갱신한다.
 - Agent URL과 토큰은 루트 `.env.example`을 참고한다.
 - 실행환경 lock은 루트 `uv.lock`이며 실제 검사 대상 서비스의 lock과 구분한다.
-- 평가 공통 스키마는 package-data로 wheel에 포함한다. `security/scn001_security_criteria.json`은 아직 wheel에 들어가지 않는다(루트 `pyproject.toml`은 팀 공유 파일이라 주호 님 승인 후 반영). 보안 판정 구현을 변경하면 코드 동결 후 승인 해시를 다시 생성해야 한다.
+- 평가 공통 스키마, `security/scn001_security_criteria.json`, 보호 테스트 묶음(`protected_tests/suite.json`, `tests/signup/*.py`)을 package-data로 wheel에 포함한다(2026-10-30, 10.29 회의 결정에 따라 4번이 `pyproject.toml` 수정). 보안 판정 구현을 변경하면 코드 동결 후 승인 해시를 다시 생성해야 한다.
 
 ## 문제 확인
 

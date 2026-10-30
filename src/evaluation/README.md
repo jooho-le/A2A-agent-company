@@ -105,7 +105,7 @@ REQ-003(UNIQUE·정규화), REQ-005(Argon2id 수치·평문/일반 해시 저장
 기준은 `security/scn001_security_criteria.json`, 수치는 동결 Scenario 정책에서 읽는다. 모르는 구조·근거 참조 없음·
 문법 오류는 PASS 대신 UNVERIFIED다. 코드가 너무 복잡해 분석 한도(작업량·재귀)를 넘어도 PASS를 만들지 않고 해당 요구사항만 UNVERIFIED(`ANALYSIS_TOO_COMPLEX`)로 답한다. 승인 등록 시 논리 이름은 영문자로 시작해야 한다(`__init__.py` → `security_init.py`).
 Host 증거는 UTF-8 65,536바이트 한도에 맞춥니다. 한도를 넘는 경고 판정과 관측 근거는 함께 생략하고 `omittedFindings`에 개수를 남겨 미확인임을 표시합니다. 요구사항 근거만으로도 한도를 넘으면 모든 요구사항을 UNVERIFIED로 내리고 `EVIDENCE_LIMIT_EXCEEDED`를 기록합니다.
-기준 JSON은 아직 wheel에 포함되지 않습니다(루트 `pyproject.toml` 변경은 팀장 승인 후). 검사 기준표는 [SCN-001 기준표](../../docs/evaluation/scn001_criteria.md).
+기준 JSON과 보호 테스트 묶음은 wheel에 포함됩니다(2026-10-30). 검사 기준표는 [SCN-001 기준표](../../docs/evaluation/scn001_criteria.md).
 
 ## 회원가입 보호 테스트 (D2)와 결과 어댑터
 
@@ -119,7 +119,7 @@ Host 증거는 UTF-8 65,536바이트 한도에 맞춥니다. 한도를 넘는 �
 - 연결부 `tests/signup/signup_link.py`만 생성물 규격에 맞춰 고칩니다(지금은 세화 backend 구조: `main.app`, `database.get_db`, `models.User(email, password_hash)`, `POST /api/auth/signup`). 테스트마다 임시 SQLite DB를 만들고 `get_db`를 바꿔 끼우며, 로그는 앱의 로그 설정을 바꾸지 않고 루트·독립 로거와 stdout·stderr에서 모읍니다.
 - 연결·전제 조건을 확인하지 못하면(앱 import 실패, 경로 404·405, 정상 가입 실패 등) FAIL이 아니라 SKIP `UNVERIFIED:코드`이고, 결과 어댑터가 ERROR(미검증)로 옮깁니다. 실패 메시지에는 비밀번호·해시·salt 값을 넣지 않습니다. 비밀번호는 실행할 때 만듭니다.
 - 잘못된 입력은 4xx로 거부해야 합니다(5xx는 처리하지 못한 서버 오류). 처리하지 못한 예외는 실제 서버처럼 500으로 보고 traceback을 서버 로그에 남겨 노출 검사에 포함합니다.
-- 필요 라이브러리: fastapi(TestClient)·httpx·sqlalchemy·argon2-cffi. 컨테이너 이미지에 있어야 하고, 프로젝트 환경에는 sqlalchemy·argon2가 없어 실행 시험은 `uv run --with sqlalchemy --with argon2-cffi python -m pytest tests/evaluation/test_protected_signup.py`로 돌립니다.
+- 필요 라이브러리: fastapi(TestClient)·httpx·sqlalchemy·argon2-cffi. 컨테이너 이미지에 있어야 합니다. 프로젝트 dev 그룹에도 들어 있어 `uv run python -m pytest tests/evaluation`이 실행 시험까지 돌립니다.
 
 ```python
 from evaluation import protected_tests as pt
@@ -157,6 +157,22 @@ output['supplementary']    # 보조 점검: 테스트가 지나가지 않은 줄
 - `known_values=[...]`로 이 Run에서 쓴 시험 비밀값을 넘기면 Run 기록 노출 검사가 자유 글에서도 찾습니다(결과에는 개수·위치만 남음). 노출 결과의 `coverage`에 읽은 기록과 보지 못한 출력(A2A Message 본문·Artifact 파일 내용·에이전트 프로세스 출력)을 적어, PASS가 REQ-006 전체 충족이 아니라 부분 검사임을 드러냅니다.
 - 팀장 전달 파일(Ver1에만): `python -m evaluation.protected_tests export --out <폴더>`가 `owned-protected-cases.local.json`(QA·Security 보호 케이스, Host가 범위의 역할대로 나눔), `unit-protected-scopes.json`(owned-tools의 unit.scopes에 추가할 두 범위), `handoff.json`(범위별 suite 지문·참조)을 만듭니다. Ver2는 셋 다 넣지 않습니다.
 
+## Ver1·Ver2 실험 도구
+
+```bash
+python -m evaluation.experiment configure --tools configs/owned-tools.local.json --source configs/owned-source.local.json --out <폴더>
+python -m agents.platform.snapshot_export --database <Host DB> --run-id <Run> --out <export 폴더>
+python -m evaluation.experiment fetch --api http://127.0.0.1:8000 --run-id <Run> --out <bundle.json>
+python -m evaluation.experiment score --export <export 폴더> --exam final --image <repo@sha256:...> --results experiments/scn001/final/<날짜-이름> --bundle <bundle.json> --pair-id p1 [--all-versions]
+python -m evaluation.experiment compare --results <결과 폴더>
+```
+
+- `configure`: Host 도구 설정에 Security 자체 테스트 범위(`security-tests`, role SECURITY)를 두고, Ver1에는 순환용 보호 범위 두 개와 보호 케이스 파일을 더한 설정 쌍(`ver1/`·`ver2/`)을 만듭니다. `--source`를 주면 시작 코드 커밋을 dev와 같은 방식으로 꺼내 시험지·평가 코드가 섞였는지 먼저 확인하고, 섞였으면 만들지 않습니다.
+- `score`: 내보낸 최종 Snapshot을 D5로 채점해 `<결과 폴더>/<Run>/`에 `output.json`·`summary.md`·`meta.json`(시험지·쌍 번호)·`bundle.json`을 보관합니다. 채점할 Snapshot에 시험지가 섞였으면 실행·점수를 만들지 않습니다(`EXAM_EXPOSED`).
+- `compare`: 보관한 Run들로 Ver1·Ver2 비교 가능 여부, 정책별 점수·시간·토큰, 연습 효과, Regression 합계를 `comparison.json`에 씁니다. 시범(pilot)과 공식(final) 채점을 섞으면 거부합니다.
+- `--all-versions`: 중간 코드 버전도 같은 시험지로 채점해 `versions/v<N>.json`과 `regression.json`(수정으로 새로 생긴 실패 수)을 남깁니다. 내보내기도 `snapshot_export --all-versions`로 해야 합니다. 버전별 결과는 개발 순환에 전달하지 않습니다.
+- 결과 보관: 저장소의 `experiments/scn001/<시험지>/<날짜-이름>/`에 커밋합니다(에이전트는 시작 코드 커밋만 보므로 결과도 보지 못함). 내보낸 Snapshot tar는 `experiments/**/export/`에 두면 `.gitignore`로 빠집니다. 시험지 노출 확인(`exam_exposure`)은 결과 폴더의 결과 파일도 찾아, 시작 코드나 채점 Snapshot에 섞이면 거부합니다.
+
 ## 결과 지표와 시연 자료 (D4)
 
 `evaluation.run_metrics`: dev Run 조회 JSON(`/runs/{id}`, `/events`, `/issues`, `/tool-attempts`, `/usage`, `/configuration`)을
@@ -173,7 +189,7 @@ API 페이지 요청에 실패하면 수집을 중단합니다. 빈 페이지 �
 `check_trace_exposure`가 비밀번호 필드 값(정적 판정과 같은 단어 단위 이름 규칙)·실제 해시 값 모양·알려 준 값을 찾고,
 `check_traceability`가 요구사항 → 코드 버전별 Snapshot → QA·Security 검증 → Issue → 수정 요청·완료 → 재검증 → 판정 사건이 이어지는지 봅니다.
 결과에는 위치와 근거 코드만 남깁니다. 추적 규칙은 dev 파이프라인 테스트가 만든 실제 Run 6개(SUCCESS·FAIL·HUMAN_REVIEW·빌드 실패 경로)로 확인했습니다.
-A2A Message 본문은 조회 API가 없어 보지 못합니다.
+A2A Message 본문은 Run 조회 API로 볼 수 없어, dev `python -m agents.platform.a2a_export --run-id <Run> --out a2a.json --store QA=<QA 작업 저장소> ...`로 꺼내 `experiment score --trace trace.json --a2a a2a.json`에 넘기면 노출 검사가 본문까지 찾습니다. 네 역할 중 빠진 저장소가 있으면 미검증입니다.
 `collaboration_metrics(events)`(run_metrics의 `collaboration`)는 `/events`의 사건 시각으로 역할별 LLM·도구 시간, 일을 넘기는 전달 지연, 에이전트가 일한 시간(병렬 구간은 한 번만), 병렬로 겹친 시간, 에이전트 밖 시간, 사람 대기(`humanWaitMs`, HUMAN_REVIEW·WAITING_INPUT에서 벗어난 구간의 합)를 계산합니다. 상태 변화 사건이 없거나 사건이 모자라면 None입니다.
 
 `evaluation.demo_index.build_demo_index(root, run_id=..., created_at=...)`: `logs`·`source`·`screens`·`reports` 폴더의 파일을

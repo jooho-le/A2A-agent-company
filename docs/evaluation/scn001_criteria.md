@@ -36,7 +36,7 @@
 - 정의서 REQ-003 PASS 기준은 "DB UNIQUE 제약 존재, 동시 요청에서도 중복 생성 불가"다. 무결성 오류(IntegrityError) 처리 여부는 PASS 조건에 없어 정적 검사에서 뺐고, 동시 요청 확인은 QA-SIGNUP-005가 한다.
 - **QA와 Security는 같은 방식(실행 테스트)이다**(2026-10-29 회의 뒤 결정). 검사마다 시험지 세 벌(순환용 practice·시범 최종용 pilot·공식 최종용 final)이 있다. Ver1은 순환 안에서 QA·Security 에이전트가 각자 자기 요구사항의 순환용 시험지를 실행하고(dev 보호 범위에 역할을 적음, QA: REQ-001·002·003·004·007, Security: REQ-003·005·006), Ver2는 순환 안에 평가 시험지를 넣지 않는다. 두 버전 모두 같은 최종 시험지로 채점한다(아래 "시험지 세 벌과 점수").
 - 정적 판정(D1 `assess()`)은 점수·판정에 넣지 않는다. 최종 평가에서 보조 점검(`STATIC-REQ-003·005·006`)으로만 돌려, 실행 검사가 지나가지 않은 코드 경로의 문제를 따로 적는다. 예전 정적 검사 SEC-SIGNUP-001(해시 설정)은 SEC-SIGNUP-002에, SEC-SIGNUP-004(노출 경로)는 SEC-SIGNUP-005에 합쳤고, SEC-SIGNUP-003은 실행 검사(정규화 저장·DB UNIQUE)로 바꿨다.
-- REQ-006의 Orchestrator 기록 부분은 이 표 밖에서 D4 `trace_checks.check_trace_exposure`가 Trace 사건·Issue·프로젝트 Artifact·도구 시도·telemetry에서 비밀번호 이름 필드의 값, 실제 해시 값 모양, 알려 준 값을 찾는다. A2A Message 본문은 조회 API가 없어 보지 못한다. dev 파이프라인 실제 Run 6개(약 1.2MB)에서 오탐은 없었다.
+- REQ-006의 Orchestrator 기록 부분은 이 표 밖에서 D4 `trace_checks.check_trace_exposure`가 Trace 사건·Issue·프로젝트 Artifact·도구 시도·telemetry에서 비밀번호 이름 필드의 값, 실제 해시 값 모양, 알려 준 값을 찾는다. A2A Message 본문은 Run 조회 API로는 볼 수 없어, Host가 dev `python -m agents.platform.a2a_export`로 에이전트 작업 저장소에서 꺼낸 문서를 함께 주면 본문(받은 요청·대화 기록·Task·Artifact·상태 사건)까지 찾는다(2026-10-30). 네 역할 중 빠진 저장소가 있으면 미검증. dev 파이프라인 실제 Run 6개(약 1.2MB)에서 오탐은 없었다.
 - 범위 축소(2차 기업미팅): SQL Injection·XSS 등 추가 보안 항목, 다수 화면 테스트는 이번 범위 밖.
 
 ### 시험지 세 벌과 점수

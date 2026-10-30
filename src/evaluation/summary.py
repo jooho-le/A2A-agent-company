@@ -176,6 +176,11 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
              f"- 최종 시험 점수: {_score_line(score)}",
              _exposure_line(exposure),
              ]
+    exposure_found = (supplementary or {}).get('examExposure')
+    if exposure_found:
+        # 채점할 코드에 시험지가 섞였다. 에이전트가 시험지를 볼 수 있었으므로 이 Run은 점수 비교에서 뺀다.
+        lines.append(f"- **시험지 노출**: 채점할 Snapshot에 시험지·평가 코드가 들어 있어 실행·점수를 만들지 않음 "
+                     f"({', '.join(_cell(item['path']) for item in exposure_found[:10])})")
     if score['securityViolations']:
         lines.append(f"- **확인된 보안 위반**(점수와 별개): {', '.join(score['securityViolations'])}")
     if source.get('missedDefect'):

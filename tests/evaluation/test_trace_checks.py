@@ -213,3 +213,33 @@ def test_regression_reports_uncompared_checks_and_rejects_gaps():
     for broken in ({}, {1: {}, 3: {}}, {2: {}}):
         with pytest.raises(ValueError):
             regression_count(broken)
+
+
+def a2a_document(run_id, **roles):
+    """dev a2a_export 모양의 A2A Message 본문 문서. roles에 없는 역할은 빠진 저장소(missingRoles)로 둔다."""
+    every = ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')
+    empty = {'contexts': [], 'tasks': [], 'history': [], 'receipts': [], 'events': []}
+    return {'runId': run_id, 'roles': {role: roles.get(role, empty) for role in every if role in roles or not roles},
+            'missingRoles': [] if not roles else sorted(set(every) - set(roles))}
+
+
+def test_a2a_message_bodies_are_searched_when_given():
+    """A2A Message 본문 문서를 주면 그 안의 비밀번호 칸 값도 찾아 FAIL이고, 본문을 본 것으로 검사 범위에 적는다.
+    깨끗한 본문이면 PASS이고 "보지 못한 출력"에서 A2A Message 본문이 빠진다. 네 역할 중 빠진 저장소가 있으면
+    일부만 본 것이라 미검증이다. 다른 Run의 문서는 받지 않는다."""
+    run_id = RUNS[QA_FIX]['run']['runId']
+    base = documents(runId=run_id)
+    clean = check_trace_exposure({**base, 'a2aMessages': a2a_document(run_id)}, CRITERIA)
+    assert clean.status == 'PASS' and 'a2aMessages' in clean.coverage['checkedDocuments']
+    assert 'A2A_MESSAGE_BODY' not in clean.coverage['notCollectedOutputs']
+    leaked = {'contexts': ['c'], 'tasks': [], 'events': [], 'receipts': [],
+              'history': [{'taskId': 't', 'position': 0, 'message': {'parts': [{'data': {'password': SECRET}}]}}]}
+    every = {role: leaked if role == 'QA' else a2a_document(run_id)['roles'][role]
+             for role in ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')}
+    found = check_trace_exposure({**base, 'a2aMessages': a2a_document(run_id, **every)}, CRITERIA)
+    assert found.status == 'FAIL' and {item['document'] for item in found.findings} == {'a2aMessages'}
+    assert SECRET not in json.dumps(found.to_dict(), ensure_ascii=False)
+    partial = check_trace_exposure({**base, 'a2aMessages': a2a_document(run_id, QA=every['QA'] | {'history': []})}, CRITERIA)
+    assert partial.status == 'UNVERIFIED' and 'a2aMessages' in partial.coverage['incompleteDocuments']
+    with pytest.raises(ValueError):
+        check_trace_exposure({**base, 'a2aMessages': a2a_document('00000000-0000-4000-8000-000000000099')}, CRITERIA)
