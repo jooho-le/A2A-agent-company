@@ -25,7 +25,8 @@
   "unit": {
     "scopes": [
       {"name": "developer-unit", "kind": "SNAPSHOT", "source_directory": "tests", "pattern": "test_*.py"},
-      {"name": "qa-unit", "kind": "QA_TESTS", "source_directory": "tests", "pattern": "test_*.py"}
+      {"name": "qa-unit", "kind": "QA_TESTS", "source_directory": "tests", "pattern": "test_*.py"},
+      {"name": "security-tests", "kind": "QA_TESTS", "source_directory": "tests", "pattern": "test_*.py", "role": "SECURITY"}
     ],
     "python_executable": "/usr/local/bin/python",
     "limits": {

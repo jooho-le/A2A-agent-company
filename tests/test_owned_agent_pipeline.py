@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
@@ -498,6 +499,73 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                 ((generated,), (), lambda *args: None)):               # proof verifier and tests never combine
             with self.subTest(scopes=[scope.name for scope in scopes]), self.assertRaises(SecurityServicesError):
                 self.security_services(scopes, cases, verifier)
+
+    async def test_final_snapshot_exports_exact_bytes_for_independent_evaluation(self):
+        from agents.platform.snapshot_export import SnapshotExportError, export_snapshots, main, write_export
+        from evaluation.final_evaluation import read_snapshot
+        from evaluation.manifest import ExecutionManifest
+        self.security_tests = True
+        async with self.running_platform() as (client, _providers):
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            run_id = UUID(response.json()["run"]["runId"])
+        source = next(item for item in self.repository.list_project_artifacts(run_id) if item.artifact_type == "SOURCE")
+        (exported,) = export_snapshots(self.repository, run_id)
+        self.assertEqual(exported.code_version, self.repository.get_run(run_id).code_version)
+        self.assertEqual(hashlib.sha256(exported.archive).hexdigest(), exported.manifest["snapshotSha256"])
+        self.assertEqual(ExecutionManifest.from_payload(exported.manifest).project_artifact_id, str(source.artifact_id))
+        self.assertIn("signup.py", read_snapshot(exported.archive))  # the evaluator reads the same tar safely
+        out = self.directory / "export"
+        written = write_export(self.repository, run_id, out)
+        self.assertEqual((out / "v1/source.tar").read_bytes(), exported.archive)
+        self.assertEqual(json.loads((out / "run.json").read_text())["exportedCodeVersions"], [1])
+        with self.assertRaises(SnapshotExportError):
+            write_export(self.repository, run_id, out)  # never overwrite without force
+        self.assertEqual(set(written), {"run.json", "v1/source.tar", "v1/manifest.json"})
+        self.assertEqual(main(["--database", str(self.repository.database_path), "--run-id", str(run_id),
+                               "--out", str(out), "--force", "--all-versions"]), 0)
+        with self.assertRaises(SnapshotExportError) as caught:
+            export_snapshots(self.repository, uuid4())
+        self.assertEqual(caught.exception.code, "RUN_NOT_FOUND")
+
+    async def test_a2a_message_bodies_export_for_exposure_checks(self):
+        from agents.platform.a2a_export import A2AExportError, export_a2a_messages
+        from evaluation.final_evaluation import CRITERIA_FILE
+        from evaluation.trace_checks import check_trace_exposure
+        async with self.running_platform() as (client, _providers):
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            run_id = UUID(response.json()["run"]["runId"])
+        stores = {role: settings.database_path for role, settings in self.settings.items()}
+        exported = export_a2a_messages(stores, run_id)
+        self.assertEqual(exported["missingRoles"], [])
+        for role in AgentRole:
+            rows = exported["roles"][role.value]
+            self.assertTrue(rows["tasks"] and rows["receipts"], role)
+        criteria = json.loads(CRITERIA_FILE.read_text(encoding="utf-8"))
+        documents = {"runId": str(run_id), "events": [], "eventsTotal": 0, "telemetry": [], "telemetryTotal": 0,
+                     "issues": [], "artifacts": [], "toolAttempts": [], "a2aMessages": exported}
+        clean = check_trace_exposure(documents, criteria)
+        self.assertEqual(clean.status, "PASS", clean.reasons)  # real A2A bodies of a clean Run: no false positive
+        self.assertIn("a2aMessages", clean.coverage["checkedDocuments"])
+        self.assertNotIn("A2A_MESSAGE_BODY", clean.coverage["notCollectedOutputs"])
+        # The user request travels in A2A bodies only; finding it proves the bodies are really searched.
+        found = check_trace_exposure(documents, criteria, known_values=["보호된 회원가입 요구사항을 구현해줘."])
+        self.assertEqual(found.status, "FAIL")
+        self.assertTrue(all(item["document"] == "a2aMessages" for item in found.findings))
+        partial = export_a2a_messages({AgentRole.QA: stores[AgentRole.QA]}, run_id)
+        self.assertEqual(check_trace_exposure({**documents, "a2aMessages": partial}, criteria).status, "UNVERIFIED")
+        with self.assertRaises(A2AExportError) as caught:
+            export_a2a_messages({AgentRole.SECURITY: stores[AgentRole.QA]}, run_id)
+        self.assertEqual(caught.exception.code, "STORE_ROLE_MISMATCH")
+        # A directory name with URI characters ('?', '#', '%') must not change which file is opened.
+        odd = self.directory / "store ?mode=rw#x%20" / "qa.sqlite3"
+        odd.parent.mkdir()
+        source, target = sqlite3.connect(stores[AgentRole.QA]), sqlite3.connect(odd)
+        try:
+            source.backup(target)
+        finally:
+            source.close()
+            target.close()
+        self.assertEqual(export_a2a_messages({AgentRole.QA: odd}, run_id)["roles"]["QA"], exported["roles"]["QA"])
 
     async def test_measured_security_test_failure_is_a_security_failure(self):
         self.security_tests = self.security_failure = True

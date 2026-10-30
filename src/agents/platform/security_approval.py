@@ -181,7 +181,9 @@ def _function(assessor):
     if (type(assessor) is not FunctionType or type(assessor.__name__) is not str
             or assessor.__name__ == "<lambda>" or assessor.__qualname__ != assessor.__name__
             or assessor.__code__.co_name != assessor.__name__
-            or assessor.__code__.co_qualname != assessor.__qualname__
+            # co_qualname exists from Python 3.11; the declared minimum is 3.10,
+            # where __qualname__ == __name__ above already pins the same identity.
+            or getattr(assessor.__code__, "co_qualname", assessor.__qualname__) != assessor.__qualname__
             or assessor.__defaults__ is not None or assessor.__kwdefaults__ is not None
             or assessor.__closure__ is not None or assessor.__code__.co_freevars
             or assessor.__code__.co_argcount != 1 or assessor.__code__.co_kwonlyargcount != 0
@@ -190,6 +192,10 @@ def _function(assessor):
         raise ValueError
     module = sys.modules.get(assessor.__module__)
     if type(module) is not ModuleType or assessor.__globals__ is not vars(module):
+        raise ValueError
+    if not hasattr(assessor.__code__, "co_qualname") and assessor.__code__.co_flags & inspect.CO_NESTED:
+        # Python 3.10: without co_qualname a nested function could spoof
+        # __qualname__; the compiler's nested-code flag still identifies it.
         raise ValueError
     path = Path(module.__file__).absolute()
     if path.suffix != ".py":
@@ -210,9 +216,11 @@ def _code_value(value, *, depth=0, count=None):
         return {"kind": "code", "argcount": value.co_argcount, "posonly": value.co_posonlyargcount,
             "kwonly": value.co_kwonlyargcount, "nlocals": value.co_nlocals, "stacksize": value.co_stacksize,
             "flags": value.co_flags, "bytecode": value.co_code.hex(),
-            "exceptiontable": value.co_exceptiontable.hex(), "names": list(value.co_names),
+            # Python 3.10 has no exception table/qualname; 3.11+ values are unchanged.
+            "exceptiontable": getattr(value, "co_exceptiontable", b"").hex(), "names": list(value.co_names),
             "varnames": list(value.co_varnames), "freevars": list(value.co_freevars),
-            "cellvars": list(value.co_cellvars), "name": value.co_name, "qualname": value.co_qualname,
+            "cellvars": list(value.co_cellvars), "name": value.co_name,
+            "qualname": getattr(value, "co_qualname", value.co_name),
             "constants": [_code_value(item, depth=depth + 1, count=count) for item in value.co_consts]}
     if value is None or type(value) in (bool, int, str):
         return {"kind": type(value).__name__, "value": value}

@@ -238,7 +238,11 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             "unit": parse_json(tools._unit_json), "browser": parse_json(tools._browser_json),
             "security": parse_json(tools._security_json), "maxCallSeconds": tools.max_call_seconds,
             "protectedCases": [_case_data(case) for case in cases],
-            "semanticProof": "UNVERIFIED" if proof_verifier is None else proof_verifier.descriptor,
+            # Security Requirements come from an approved proof, from measured
+            # Security unit tests (role SECURITY scopes), or stay UNVERIFIED.
+            "semanticProof": (proof_verifier.descriptor if proof_verifier is not None
+                              else "MEASURED_TESTS" if tools.unit_configuration_for(AgentRole.SECURITY) is not None
+                              else "UNVERIFIED"),
         }
         if price_book is not None:
             policy["pricing"] = price_book.descriptor
