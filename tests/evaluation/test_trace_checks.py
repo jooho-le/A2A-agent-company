@@ -135,7 +135,7 @@ def test_protected_test_uses_the_same_hash_shape():
     import ast
     from evaluation import protected_tests
     from evaluation.trace_checks import HASH_FORMAT
-    source = protected_tests.protected_files('final')['tests/signup/protected_signup_final.py']
+    source = protected_tests.protected_files('final')['tests/signup/signup_security_checks.py']
     assign = next(node for node in ast.parse(source).body if isinstance(node, ast.Assign)
                   and getattr(node.targets[0], 'id', None) == 'HASH_FORMAT')
     assert ast.literal_eval(assign.value.args[0]) == HASH_FORMAT.pattern

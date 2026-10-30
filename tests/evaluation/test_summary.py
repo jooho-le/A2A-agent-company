@@ -8,6 +8,8 @@
   - 버전별 독립 평가 보고서에서 Regression Count를 만들어 요약에 적는가? 노출 검사의 검사 범위(부분 검사)를 적는가?
   - 판정이 검사 몇 개의 결과인지 적고, 판정에 들어가지 않는 Run 기록 노출 FAIL과 REQ-006 전체 검증 미완료를 드러내는가?
     (외부 점검 2026-10-29 2차)
+  - 최종 시험 점수(요구사항별 같은 비중·검사 완료율)와 확인된 보안 위반, 순환용 시험지 참고 채점, 보조 점검(지나가지 않은
+    줄·정적 판정)을 판정과 따로 적는가? 다른 Run의 참고 보고서는 받지 않는가?
 """
 import copy
 import json
@@ -31,12 +33,12 @@ RUN = json.loads((FIXTURES / 'dev_pipeline_runs.json').read_text(encoding='utf-8
 SECRET = 'Zq7' + 'uX2pLm9'
 
 
-def report(fail_key=None, version=2):
-    """SCN-001 검사 11개로 독립 평가 보고서를 만든다. 모두 PASS이고, fail_key로 고른 검사 하나만 FAIL로 바꿀 수 있다.
+def report(fail_key=None, version=2, exam='final', status=None):
+    """SCN-001 실행 검사 9개(시험지 exam)로 독립 평가 보고서를 만든다. 모두 PASS이고, fail_key로 고른 검사 하나만 FAIL로 바꿀 수 있다.
     Orchestrator는 SUCCESS라고 한 Run(dev 파이프라인 표본)을 대상으로 두고, version은 채점한 코드 버전이다."""
-    inputs = pt.evaluation_inputs(CONTRACT)
+    inputs = pt.evaluation_inputs(CONTRACT, exam)
     names = {check['checkId']: check['key'] for check in pt.load_suite()['checks']}
-    results = [CheckResult(check.test_id, Status.FAIL if names[check.test_id] == fail_key else Status.PASS,
+    results = [CheckResult(check.test_id, (status or Status.FAIL) if names[check.test_id] == fail_key else Status.PASS,
                            ('6fa459ea-ee8a-4ca4-894e-db77e160355e',)) for check in inputs['plan']]
     manifest = ExecutionManifest('repo', version, '0c2c1b06-3d23-4c51-9a0c-6e1b4e7b7a11', 'sha1', 'a' * 40, 'b' * 40, 'c' * 64,
                                  'sha256:' + 'd' * 64, 'sha256:' + 'e' * 64)
@@ -62,8 +64,8 @@ def test_summary_shows_results_flow_metrics_and_trace():
                                  'stepsByRole': {'QA': {'steps': 2, 'ms': 4447}}}}
     text = render_summary(report(), scenario_contract=CONTRACT, metrics=metrics, run_bundle=RUN,
                           trace={'runId': RUN['run']['runId'], 'traceability': check_traceability(RUN, CONTRACT).to_dict()})
-    assert '**독립 평가 판정(보호 테스트·정적 판정 11개): PASS**' in text and 'Orchestrator 판정 SUCCESS' in text
-    assert '| REQ-005 | PASS | SEC-SIGNUP-001 PASS, SEC-SIGNUP-002 PASS |' in text
+    assert '**독립 평가 판정(실행 검사 9개): PASS**' in text and 'Orchestrator 판정 SUCCESS' in text
+    assert '| REQ-005 | PASS | SEC-SIGNUP-002 PASS |' in text
     assert '| v1 | PASS | FAIL | 검증 종료·판정 미확인 | QA QA_ASSERTION_FAILURE(' in text and '수정 요청 → v2' in text
     assert '| v2 | PASS | 검증 종료·판정 미확인 | 검증 종료·판정 미확인 | - | 판정 SUCCESS |' in text
     assert '토큰 미확인' in text and '비용 미확인(확인된 부분 $0.01)' in text
@@ -73,7 +75,7 @@ def test_summary_shows_results_flow_metrics_and_trace():
 def test_missed_defect_is_called_out():
     """Orchestrator는 SUCCESS인데 독립 평가에서 필수 검사 FAIL이 나오면 "놓친 결함"으로 드러내 적는다."""
     text = render_summary(report(fail_key='SEC-SIGNUP-002'), scenario_contract=CONTRACT)
-    assert '**놓친 결함**' in text and '**독립 평가 판정(보호 테스트·정적 판정 11개): FAIL**' in text
+    assert '**놓친 결함**' in text and '**독립 평가 판정(실행 검사 9개): FAIL**' in text
 
 
 def test_free_text_from_agents_is_not_copied():
@@ -175,10 +177,10 @@ def test_record_exposure_failure_is_not_hidden_behind_a_passing_verdict():
                 'coverage': {'checkedDocuments': ['events'], 'missingDocuments': [], 'incompleteDocuments': [],
                              'notCollectedOutputs': ['A2A_MESSAGE_BODY'], 'knownValues': 0}}
     text = render_summary(report(), scenario_contract=CONTRACT, trace={'runId': RUN['run']['runId'], 'exposure': exposure})
-    assert '**독립 평가 판정(보호 테스트·정적 판정 11개): PASS**' in text
+    assert '**독립 평가 판정(실행 검사 9개): PASS**' in text
     assert '- 위 판정에 들어가지 않는 Run 기록 검사: 노출(REQ-006 기록) FAIL, 추적(REQ-008) 결과 없음' in text
     assert '- **REQ-006 충족하지 않음**: Run 기록에서 비밀번호·해시 노출 발견(위 판정과 별개)' in text
-    assert '| REQ-006 | PASS · Run 기록 노출 FAIL | SEC-SIGNUP-004 PASS, SEC-SIGNUP-005 PASS |' in text
+    assert '| REQ-006 | PASS · Run 기록 노출 FAIL | SEC-SIGNUP-005 PASS |' in text
 
 
 @pytest.mark.parametrize('exposure, line, row', [
@@ -206,3 +208,38 @@ def test_req006_completeness_is_stated_separately(exposure, line, row):
     trace = {'runId': RUN['run']['runId']} if exposure is None else {'runId': RUN['run']['runId'], 'exposure': exposure}
     text = render_summary(report(), scenario_contract=CONTRACT, trace=trace)
     assert line in text and row in text
+
+
+def test_score_and_security_violation_are_shown_apart_from_the_verdict():
+    """점수는 요구사항별 같은 비중이다: REQ-005(검사 1개)의 FAIL과 REQ-003(검사 3개 중 1개)의 FAIL은 점수에서 다르게
+    깎인다. Security FAIL은 "확인된 보안 위반"으로 따로 적고, 미검증이 있으면 점수를 잠정 하한으로 적는다."""
+    text = render_summary(report(fail_key='SEC-SIGNUP-002'), scenario_contract=CONTRACT)
+    assert f'- 최종 시험 점수: {6 / 7:.3f}(요구사항별 같은 비중) · 검사 완료율 100.0%' in text
+    assert '- **확인된 보안 위반**(점수와 별개): SEC-SIGNUP-002' in text
+    text = render_summary(report(fail_key='QA-SIGNUP-005'), scenario_contract=CONTRACT)
+    assert f'- 최종 시험 점수: {(6 + 2 / 3) / 7:.3f}(요구사항별 같은 비중) · 검사 완료율 100.0%' in text
+    assert '확인된 보안 위반' not in text
+    text = render_summary(report(fail_key='QA-SIGNUP-001', status=Status.ERROR), scenario_contract=CONTRACT)
+    assert f'- 최종 시험 점수: {6 / 7:.3f}(요구사항별 같은 비중) 잠정 하한 · 검사 완료율 {8 / 9 * 100:.1f}%' in text
+
+
+def test_reference_and_supplementary_checks_are_listed_apart():
+    """순환용 시험지 참고 채점과 보조 점검(지나가지 않은 줄·정적 판정)은 판정·점수와 다른 절에 적는다.
+    다른 Run의 참고 보고서는 받지 않는다."""
+    supplementary = {
+        'coverage': {'error': None, 'loaded': {'files': 2, 'lines': 30, 'executed': 27, 'rate': 0.9},
+                     'files': {'database.py': {'lines': 12, 'executed': 10, 'missing': [16, 17]},
+                               'routers/auth.py': {'lines': 18, 'executed': 17, 'missing': [40]},
+                               'unused.py': {'lines': 5, 'executed': 0, 'missing': [1, 2, 3, 4, 5]}}},
+        'static': {'error': None, 'requirements': {'REQ-003': {'outcome': 'PASS'}, 'REQ-005': {'outcome': 'UNVERIFIED'},
+                                                   'REQ-006': {'outcome': 'FAIL'}}}}
+    text = render_summary(report(), scenario_contract=CONTRACT, reference_report=report(exam='practice'),
+                          supplementary=supplementary)
+    assert '## 순환용 시험지 참고 채점(판정·점수와 별개, 연습 효과 계산용)' in text
+    assert '- 판정 PASS · 점수 1.000(요구사항별 같은 비중) · 검사 완료율 100.0%' in text
+    assert ('- 테스트가 지나간 줄(테스트가 불러온 파일 2개 기준): 27/30줄(90.0%). '
+            '지나가지 않은 줄: database.py 16·17; routers/auth.py 40') in text
+    assert '- 정적 판정(실행 검사가 지나가지 않은 코드 경로까지 소스로 봄): REQ-003 PASS, REQ-005 UNVERIFIED, REQ-006 FAIL' in text
+    other = dict(report(exam='practice'), sourceRunId='5b6c1c56-37a7-4c33-9a7a-3a1d1a7e0b99')
+    with pytest.raises(ValueError):
+        render_summary(report(), scenario_contract=CONTRACT, reference_report=other)

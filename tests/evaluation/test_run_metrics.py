@@ -5,13 +5,16 @@
   2) 구조별 요약에서 성공률의 분모, 비용·토큰 합계를 올바르게 다루는가?
   3) Single과 Multi를 "공정하게 비교해도 되는지" 올바르게 판정하는가?
   4) 협업 시간(전달·병렬 겹침·에이전트 밖 시간·사람 대기)을 병렬 구간을 두 번 세지 않고 계산하는가?
+  5) Ver1(순환 안 보호 테스트 + 최종)과 Ver2(최종만)를 같은 Multi 구조에서 비교할 때, 의도한 차이(보호 테스트 참조)만
+     허용하고 이름표·쌍·시험지를 확인하는가? 정책별 점수와 연습 효과(차이의 차이)를 계산하는가?
 """
 import json
 from uuid import UUID
 
 import pytest
 
-from evaluation.run_metrics import (comparison_validity, experiment_summary, fetch_run_bundle, run_metrics)
+from evaluation.run_metrics import (comparison_validity, experiment_summary, fetch_run_bundle, loop_policy_effect,
+                                    run_metrics)
 
 
 def uid(number):
@@ -733,3 +736,96 @@ def test_work_observed_again_after_interrupt_reopens_the_step():
         a2a('qa', 'A2A_MESSAGE_SENT', 1, attempt=1), a2a('qa', 'A2A_TASK_STATE_CHANGED', 3, 'INPUT_REQUIRED', 1),
         a2a('qa', 'A2A_MESSAGE_SENT', 8, attempt=2), verdict=11))
     assert (unfinished['agentActiveMs'], unfinished['stepsWithoutEnd']) == (2000, 1)  # 끝나지 않은 재개 구간은 빼고 센다
+
+
+# ---------------------------------------------------------------- Ver1·Ver2(순환 안 테스트 정책) 비교
+
+
+def policy_entry(run_id, policy, pair, *, suite='f' * 64, **override):
+    """Ver1·Ver2 비교 입력 한 개. Ver1은 보호 테스트 참조가 있고 Ver2는 없다(override로 일부 설정만 바꿀 수 있다)."""
+    settings = {'protectedTestSuiteRef': 'suite-1' if policy == 'IN_LOOP_AND_FINAL' else None, **override}
+    return {'architecture': 'MULTI_AGENT', 'loopPolicy': policy, 'pairId': pair,
+            'configuration': configuration(run_id, **settings), 'evaluation': evaluation_report(run_id, suite=suite)}
+
+
+def policy_entries(**ver2_override):
+    """Ver1·Ver2 두 쌍(Run 4개). ver2_override로 Ver2 첫 Run의 설정만 다르게 만들 수 있다."""
+    return [policy_entry(uid(1), 'IN_LOOP_AND_FINAL', 'p1'), policy_entry(uid(2), 'FINAL_ONLY', 'p1', **ver2_override),
+            policy_entry(uid(3), 'IN_LOOP_AND_FINAL', 'p2'), policy_entry(uid(4), 'FINAL_ONLY', 'p2')]
+
+
+def test_run_metrics_reads_loop_policy_from_frozen_configuration():
+    """순환 안 테스트 정책은 동결 설정의 보호 테스트 참조로 정한다(있으면 Ver1, 없으면 Ver2)."""
+    ver1 = bundle(uid(1))
+    ver2 = bundle(uid(2))
+    ver2['configuration'] = configuration(uid(2), protectedTestSuiteRef=None)
+    assert run_metrics(ver1)['loopPolicy'] == 'IN_LOOP_AND_FINAL' and run_metrics(ver2)['loopPolicy'] == 'FINAL_ONLY'
+
+
+def test_ver1_and_ver2_with_only_the_protected_suite_different_are_comparable():
+    """같은 Multi 구조에서 보호 테스트 참조만 다르고 쌍이 맞으면 비교해도 된다. Single/Multi 기준으로는 비교할 수 없다."""
+    assert comparison_validity(policy_entries(), group_by='loopPolicy') == {'valid': True, 'violations': [], 'warnings': []}
+    with pytest.raises(ValueError):
+        comparison_validity(policy_entries())  # 구조 기준으로는 두 조건이 없다(둘 다 MULTI_AGENT)
+
+
+@pytest.mark.parametrize('change, field', [
+    (lambda data: data[1].update(loopPolicy='IN_LOOP_AND_FINAL'), 'pairId'),
+    (lambda data: data[1]['configuration']['configuration'].update(protectedTestSuiteRef='suite-1'), 'loopPolicy'),
+    (lambda data: data[2]['configuration']['configuration'].update(protectedTestSuiteRef='suite-2'), 'protectedTestSuiteRef'),
+    (lambda data: data[1]['configuration']['configuration']['model'].update(modelId='other'), 'model.modelId'),
+    (lambda data: data[3].update(evaluation=evaluation_report(uid(4), suite='a' * 64)), 'suite.sha256'),
+    (lambda data: data[3].update(pairId='p1'), 'pairId'),
+])
+def test_ver1_ver2_comparison_rejects_unintended_differences(change, field):
+    """의도하지 않은 차이는 비교를 무효로 만든다: 쌍이 맞지 않음(같은 정책 둘·세 Run), 이름표와 동결 설정이 다름,
+    Ver1끼리 다른 보호 묶음, 모델 차이, 다른 최종 시험지(예: pilot과 final 혼용)."""
+    data = policy_entries()
+    change(data)
+    result = comparison_validity(data, group_by='loopPolicy')
+    assert result['valid'] is False and field in {item['field'] for item in result['violations']}
+
+
+def test_unpaired_runs_are_flagged_as_a_warning():
+    """쌍 번호가 없는 Run은 비교를 막지 않지만 주의로 알린다(실행 순서·시간대 차이가 한쪽에 몰릴 수 있다)."""
+    data = policy_entries()
+    for item in data:
+        item.pop('pairId')
+    result = comparison_validity(data, group_by='loopPolicy')
+    assert result['valid'] is True and {item['detail'] for item in result['warnings']} == {'RUN_IS_NOT_PAIRED'}
+
+
+def scored_report(run_id, statuses, *, code_version=2):
+    """점수 계산에 필요한 부분만 흉내 낸 독립 평가 보고서. statuses: 요구사항마다 검사 상태 목록."""
+    checks, requirements = [], []
+    for index, row in enumerate(statuses):
+        ids = [f'{index}-{number}' for number in range(len(row))]
+        checks += [{'testId': check_id, 'required': True, 'status': status, 'perspective': 'QA', 'title': check_id}
+                   for check_id, status in zip(ids, row)]
+        requirements.append({'requirementId': uid(100 + index), 'checkIds': ids})
+    report = evaluation_report(run_id, code_version=code_version)
+    report.update(manifestCheck={'metadataMatches': True, 'errorCode': None}, checks=checks, requirements=requirements)
+    return report
+
+
+def test_summary_and_practice_effect_by_loop_policy():
+    """정책별로 요약하고 최종 시험 점수를 평균 낸다. 연습 효과는 (Ver1 순환용 − 최종) − (Ver2 순환용 − 최종)이다:
+    Ver1은 순환용 1.0·최종 0.75(차이 0.25), Ver2는 순환용 0.5·최종 0.5(차이 0, 두 시험지의 난이도 차이 없음) → 0.25."""
+    runs = []
+    for run_id, ref in ((uid(1), 'suite-1'), (uid(2), None)):
+        item = bundle(run_id)
+        item['configuration'] = configuration(run_id, protectedTestSuiteRef=ref)
+        runs.append(run_metrics(item))
+    finals = [scored_report(uid(1), [['PASS'], ['PASS', 'FAIL']]), scored_report(uid(2), [['PASS'], ['FAIL']])]
+    practices = [scored_report(uid(1), [['PASS'], ['PASS', 'PASS']]), scored_report(uid(2), [['PASS'], ['FAIL']])]
+    summary = experiment_summary(runs, {'IN_LOOP_AND_FINAL': 1, 'FINAL_ONLY': 1}, finals, group_by='loopPolicy')
+    assert summary['IN_LOOP_AND_FINAL']['evaluation']['meanExamScore'] == 0.75
+    assert summary['FINAL_ONLY']['evaluation']['meanExamScore'] == 0.5
+    effect = loop_policy_effect(runs, finals, practices)
+    assert effect['practiceEffect'] == pytest.approx(0.25)
+    assert effect['policies']['IN_LOOP_AND_FINAL']['meanGap'] == pytest.approx(0.25)
+    assert effect['policies']['FINAL_ONLY']['meanGap'] == 0
+    with pytest.raises(ValueError):  # 참고 보고서가 다른 코드 버전을 채점했으면 짝지을 수 없다.
+        loop_policy_effect(runs, finals, [practices[0], scored_report(uid(2), [['PASS']], code_version=1)])
+    with pytest.raises(ValueError):  # 정책 기준 요약에 계획하지 않은 정책의 Run이 섞이면 거부한다.
+        experiment_summary(runs, {'IN_LOOP_AND_FINAL': 2}, group_by='loopPolicy')

@@ -44,18 +44,27 @@ class Unverified(Exception):
 
 
 def new_password(length=12):
-    # 대문자·소문자·숫자를 하나씩 넣어 길이 말고 다른 규칙 때문에 거부되지 않게 한다.
+    # 대문자·소문자·숫자를 하나씩 넣어 길이 말고 다른 규칙 때문에 거부되지 않게 한다(3자 미만은 넣을 수 없어 그대로).
     alphabet = string.ascii_letters + string.digits
     while True:
         value = "".join(secrets.choice(alphabet) for _ in range(length))
-        if (any(c.islower() for c in value) and any(c.isupper() for c in value)
-                and any(c.isdigit() for c in value)):
+        if length < 3 or (any(c.islower() for c in value) and any(c.isupper() for c in value)
+                          and any(c.isdigit() for c in value)):
             return value
 
 
-def new_email():
-    # 매번 다른 가입용 이메일
-    return "user" + secrets.token_hex(6) + "@example.com"
+def new_email(template="user{h}@example.com"):
+    # 매번 다른 가입용 이메일. 시험지마다 모양(template, {h}는 무작위 16진수)을 다르게 쓴다.
+    return template.format(h=secrets.token_hex(6))
+
+
+def variant(email, form):
+    # 같은 canonical 이메일의 변형(대소문자·앞뒤 공백). 시험지마다 다른 변형을 고른다.
+    local, domain = email.split("@")
+    return {"same": email, "upper": email.upper(), "swapcase": email.swapcase(),
+            "title": local.capitalize() + "@" + domain.upper(), "lead": " " + email, "trail": email + " ",
+            "pad": "  " + email + "  ", "upper_pad": " " + email.upper() + " ",
+            "swap_lead": "  " + email.swapcase(), "title_trail": local.capitalize() + "@" + domain.upper() + "  "}[form]
 
 
 def canonical(email):
@@ -74,7 +83,7 @@ def _load(location, code):
 
 
 class _LogCapture(logging.Handler):
-    # 앱이 남긴 로그를 서버 로그로 모은다. 로그 수준은 앱 설정 그대로 두고 바꾸지 않는다.
+    # 앱이 남긴 로그를 서버 로그로 모은다(앱 코드가 부른 로그는 수준과 상관없이: Service._log_all).
     def __init__(self, sink):
         super().__init__(logging.NOTSET)
         self.sink = sink
@@ -128,6 +137,7 @@ class Service:
             raise Unverified("TEST_LIBRARY_UNAVAILABLE") from None
         # 생성물의 앱·DB 의존성·User 모델을 불러오고 규격에 맞는지 본다.
         app = _load(APP, "APP_IMPORT_FAILED")
+        self._log_all(getattr(sys.modules.get(APP[0]), "__file__", None))
         get_db = _load(DB_DEPENDENCY, "DB_DEPENDENCY_MISSING")
         self.User = _load(USER_MODEL, "USER_MODEL_MISSING")
         self._attach_isolated_loggers()  # import하면서 새로 생긴 로거도 모은다.
@@ -141,6 +151,7 @@ class Service:
             engine = create_engine(url, connect_args={"check_same_thread": False})
             self._undo.append(engine.dispose)
             self.User.metadata.create_all(engine)
+            self._engine = engine
         except Exception:
             raise Unverified("TEST_DATABASE_SETUP_FAILED") from None
         self.Session = sessionmaker(bind=engine, autoflush=False)
@@ -175,6 +186,26 @@ class Service:
             logger.addHandler(self._handler)
             self._undo.append(lambda: logger.removeHandler(self._handler))
 
+    def _log_all(self, path):
+        # 앱 폴더(path는 APP 모듈 파일) 안의 코드가 부른 로그는 수준·logging.disable과 상관없이 모은다.
+        # 기본 수준(WARNING)에 막힌 info·debug 로그도 노출로 본다. 라이브러리 로그는 원래 규칙대로 둔다
+        # (SQLAlchemy가 SQL과 해시 값을 로그로 남기지 않게).
+        if not path:
+            return
+        root = os.path.dirname(os.path.abspath(path))
+        for _ in range(APP[0].count(".")):
+            root = os.path.dirname(root)
+        root, original = root + os.sep, logging.Logger.isEnabledFor
+
+        def enabled(logger, level):
+            frame = sys._getframe(1)
+            while frame is not None and frame.f_code.co_filename == logging.__file__:
+                frame = frame.f_back
+            return (frame is not None and os.path.abspath(frame.f_code.co_filename).startswith(root)
+                    or original(logger, level))
+        logging.Logger.isEnabledFor = enabled
+        self._undo.append(lambda: setattr(logging.Logger, "isEnabledFor", original))
+
     def _attach_isolated_loggers(self):
         for item in list(logging.Logger.manager.loggerDict.values()):
             if isinstance(item, logging.Logger) and not item.propagate:
@@ -189,9 +220,12 @@ class Service:
                 pass
 
     def signup(self, email, password, client=None):
-        # 앱이 처리하지 못한 예외는 실제 서버처럼 500으로 보고 traceback을 서버 로그에 남긴다.
+        return self.send(signup_body(email, password), client)
+
+    def send(self, body, client=None):
+        # 가입 요청(본문은 JSON 값). 앱이 처리하지 못한 예외는 실제 서버처럼 500으로 보고 traceback을 서버 로그에 남긴다.
         try:
-            response = (client or self.client).post(SIGNUP_PATH, json=signup_body(email, password))
+            response = (client or self.client).post(SIGNUP_PATH, json=body)
         except Exception as error:
             if isinstance(error, Unverified):
                 raise
@@ -231,6 +265,69 @@ class Service:
         if len(found) != 1:
             raise Unverified("STORED_USER_NOT_FOUND")
         return found[0]
+
+    def stored_email(self, email):
+        # 그 canonical 이메일로 저장된 이메일 값 그대로. 정확히 1명이 아니면 Unverified.
+        found = [value for value in self.emails() if isinstance(value, str) and canonical(value) == canonical(email)]
+        if len(found) != 1:
+            raise Unverified("STORED_USER_NOT_FOUND")
+        return found[0]
+
+    def fail_next_insert(self):
+        # 다음 INSERT 한 번을 SQLite가 실제로 거부하게 한다(권한 함수 set_authorizer). DB 단계에서 난 오류라
+        # SQLAlchemy 버전과 상관없이 SQL·값을 담은 DB 오류로 감싸진다. 그다음 실행에서 권한 함수를 풀어 준다.
+        import sqlite3
+        from sqlalchemy import event
+        armed, denied = [True], []
+
+        def deny(action, *args):
+            return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_INSERT else sqlite3.SQLITE_OK
+
+        def release():
+            while denied:
+                denied.pop().set_authorizer(None)
+
+        def fail(conn, cursor, statement, parameters, context, many):
+            release()
+            if armed[0] and statement.lstrip().upper().startswith("INSERT"):
+                armed[0] = False
+                raw = conn.connection
+                raw = getattr(raw, "dbapi_connection", None) or getattr(raw, "connection", raw)
+                raw.set_authorizer(deny)
+                denied.append(raw)
+        event.listen(self._engine, "before_cursor_execute", fail)
+        self._undo.append(lambda: (release(), event.remove(self._engine, "before_cursor_execute", fail)))
+
+    def db_rejects_duplicate(self, email):
+        # 저장된 사용자 행을 복사해 DB에 직접 한 번 더 넣는다(앱의 사전 검사를 거치지 않음).
+        # 이메일 칸 UNIQUE로 거부되면 True, 들어가면 False. 다른 이유로 실패하거나 UNIQUE 대상이 이메일 칸 하나가
+        # 아니면 Unverified.
+        from sqlalchemy import inspect as sa_inspect
+        from sqlalchemy.exc import IntegrityError
+        try:
+            mapper = sa_inspect(self.User)
+            column = mapper.column_attrs[EMAIL_FIELD].columns[0]
+            with self.Session() as db:
+                rows = [row for row in db.query(self.User).all()
+                        if isinstance(getattr(row, EMAIL_FIELD), str) and canonical(getattr(row, EMAIL_FIELD)) == canonical(email)]
+                if len(rows) != 1:
+                    raise Unverified("STORED_USER_NOT_FOUND")
+                copy = mapper.class_manager.new_instance()
+                for attribute in mapper.column_attrs:
+                    if not attribute.columns[0].primary_key:
+                        setattr(copy, attribute.key, getattr(rows[0], attribute.key))
+                db.add(copy)
+                try:
+                    db.commit()
+                except IntegrityError as error:
+                    if str(error.orig).strip() == "UNIQUE constraint failed: " + column.table.name + "." + column.name:
+                        return True
+                    raise Unverified("UNIQUE_CONSTRAINT_UNCLEAR") from None
+                return False
+        except Unverified:
+            raise
+        except Exception:
+            raise Unverified("TEST_DATABASE_WRITE_FAILED") from None
 
     def log_text(self):
         # 서버 로그와 stdout·stderr 출력을 합친 글(노출 검사용)

@@ -123,11 +123,10 @@ Host 증거는 UTF-8 65,536바이트 한도에 맞춥니다. 한도를 넘는 �
 
 ```python
 from evaluation import protected_tests as pt
-pt.owned_qa_cases(scenario_contract)                       # dev configs/owned-qa-cases.local.json 내용
-pt.unit_test_scope('in-loop', suite_ref='artifact://...')   # dev UnitTestScope(PROTECTED) 설정 한 개
-inputs = pt.evaluation_inputs(scenario_contract)            # 최종 평가 계획·꼬리표·suite 해시(11개 검사, 요구사항 7개)
-results = pt.final_check_results(inputs, unit_report=report, unit_evidence_id=...,
-                                 assessment_requirements=static_json['requirements'], static_evidence_id=...)
+pt.owned_cases(scenario_contract, 'QA')                    # 순환 안(Ver1) QA 보호 케이스('SECURITY'면 Security)
+pt.unit_test_scope('in-loop-security', suite_ref='artifact://...')  # dev UnitTestScope(PROTECTED, role SECURITY) 한 개
+inputs = pt.evaluation_inputs(scenario_contract, 'final')   # 시험지(practice·pilot·final) 하나의 계획·꼬리표·suite 해시(검사 9개, 요구사항 7개)
+results = pt.final_check_results(inputs, unit_report=report, unit_evidence_id=...)
 ```
 
 `evaluation.check_adapters`는 unittest-v1 보고서와 정적 판정 결과를 `CheckResult`로 바꿉니다. 보고서가 없거나 형식이 틀리거나 대응표 밖의 줄(예: `setUpClass` 실패)이 섞이면 통과한 줄이 있어도 모든 검사를 미검증으로 둡니다.
@@ -141,18 +140,22 @@ output = evaluate_final_snapshot(
     expected=expected_manifest,              # 신뢰 경로로 받은 기준 Manifest
     scenario_contract=contract, source_run_id=run_id,
     runner=DockerRunner('repo@sha256:...'),  # 해시로 고정한 이미지만 받음
+    exam='final',                            # 채점 시험지: 'pilot'(시범·조정용) 또는 'final'(공식 비교용)
     run_bundle=bundle, trace_documents=documents)   # 선택: Run 기록 추적·노출 검사
-output['report']   # 독립 평가 보고서(11개 검사, 요구사항 7개)
+output['report']           # 독립 평가 보고서(실행 검사 9개, 요구사항 7개)
+output['score']            # 요구사항별 같은 비중 점수·검사 완료율·확인된 보안 위반(scoring.exam_score)
+output['referenceReport']  # 순환용 시험지 참고 채점(연습 효과 계산용, 점수 제외)
+output['supplementary']    # 보조 점검: 테스트가 지나가지 않은 줄(coverage), 정적 판정(static)
 ```
 
 - Snapshot tar의 SHA-256이 기준과 다르면 실행하지 않고, lock 파일(기준 lock 해시와 같은 파일)과 실행 이미지 해시를 실제로 확인했을 때만 결과를 판정에 씁니다. 확인할 수 없으면 Manifest 없음, 다르면 불일치로 UNVERIFIED입니다.
 - 압축 파일은 일반 파일·상대 경로만 받습니다(../·절대 경로·링크·폴더 항목·압축 tar·중복·크기 초과 거부).
 - `DockerRunner`는 dev 샌드박스와 같은 제한(네트워크 차단, 읽기 전용, 일반 사용자, 권한 제거, CPU·메모리·프로세스 제한)으로 dev의 `unit_runner.py`를 실행합니다. `LocalRunner(trusted=True)`는 합성 표본 시험용이며 이미지를 확인할 수 없어 결과가 판정에 쓰이지 않습니다. 생성 코드를 호스트에서 실행하지 않습니다.
-- 정적 판정은 같은 Snapshot 소스로 `security.assess.evaluate()`를 부릅니다(dev Host 없이). 소스를 읽기만 하므로 컨테이너 밖에서 돌며 생성 코드를 실행·import하지 않습니다.
+- 정적 판정은 같은 Snapshot 소스로 `security.assess.evaluate()`를 부르는 보조 점검입니다(점수·판정에 넣지 않음). 소스를 읽기만 하므로 컨테이너 밖에서 돌며 생성 코드를 실행·import하지 않습니다. 줄 기록은 채점 시험지를 `coverage_runner.py`로 한 번 더 돌려(컨테이너 안) 생성물 코드 중 테스트가 지나가지 않은 줄을 셉니다.
 - 지금까지는 합성 서비스와 실행기 대역(가짜 docker, `LocalRunner`)으로 이 경로를 확인했습니다. 실제 Docker와 에이전트 생성물로는 아직 돌리지 않았습니다.
 - `evaluation.summary.render_summary(output['report'], scenario_contract=..., metrics=..., run_bundle=..., trace=output['trace'], runner=output['runner'])`로 회의·발표용 요약을 만듭니다. 에이전트가 쓴 자유 글은 넣지 않습니다. `trace`(runId)·`runner`(evaluationId)·`metrics`·`run_bundle`이 보고서와 다른 Run·평가의 것이면 ValueError로 멈춥니다. 판정 줄에는 그 판정이 보호 테스트·정적 판정 몇 개의 결과인지 적고, 바로 아래에 판정에 들어가지 않는 Run 기록 검사(노출·추적) 결과와 REQ-006 전체 출력의 노출 검증 상태(기록에서 노출 발견, 기록 검사 없음, 보지 못한 출력 있음이면 "충족하지 않음"·"미완료")를 따로 적습니다. Run 기록 노출이 PASS가 아니면 요구사항별 표의 REQ-006 줄에도 덧붙입니다.
 - `known_values=[...]`로 이 Run에서 쓴 시험 비밀값을 넘기면 Run 기록 노출 검사가 자유 글에서도 찾습니다(결과에는 개수·위치만 남음). 노출 결과의 `coverage`에 읽은 기록과 보지 못한 출력(A2A Message 본문·Artifact 파일 내용·에이전트 프로세스 출력)을 적어, PASS가 REQ-006 전체 충족이 아니라 부분 검사임을 드러냅니다.
-- 팀장 전달 파일: `python -m evaluation.protected_tests export --out <폴더>`가 `owned-qa-cases.local.json`, `unit-protected-scope.json`(owned-tools의 unit.scopes에 추가), `handoff.json`(suite 지문·참조)을 만듭니다.
+- 팀장 전달 파일(Ver1에만): `python -m evaluation.protected_tests export --out <폴더>`가 `owned-protected-cases.local.json`(QA·Security 보호 케이스, Host가 범위의 역할대로 나눔), `unit-protected-scopes.json`(owned-tools의 unit.scopes에 추가할 두 범위), `handoff.json`(범위별 suite 지문·참조)을 만듭니다. Ver2는 셋 다 넣지 않습니다.
 
 ## 결과 지표와 시연 자료 (D4)
 

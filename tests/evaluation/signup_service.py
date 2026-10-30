@@ -96,7 +96,7 @@ def hash_password(password: str) -> str:
     'routers/auth.py': '''\
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -118,6 +118,9 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="duplicate email") from None
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="try again later") from None
     return {"success": True}
 ''',
 }
@@ -126,13 +129,18 @@ _PRECHECK = '''\
     if db.scalar(select(User.id).where(User.email == payload.email)) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="duplicate email")
 '''
+_DB_ERROR_HANDLER = '''\
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="try again later") from None
+'''
 _HANDLED_COMMIT = '''\
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="duplicate email") from None
-'''
+''' + _DB_ERROR_HANDLER
 # 앱이 시작할 때(lifespan) 자기 엔진으로 테이블을 만드는 구조(세화 backend와 같은 방식)
 _LIFESPAN_APP = '''\
 from contextlib import asynccontextmanager
@@ -200,6 +208,19 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
                           'return {"success": True, "hash": user.password_hash}')],
     'unhandled_duplicate': [('routers/auth.py', _PRECHECK, ''),
                             ('routers/auth.py', _HANDLED_COMMIT, '    db.commit()\n')],
+    # 기본 수준(WARNING)에서는 남지 않는 info·debug 로그의 비밀번호(정적 판정이 잡던 것, 2026-10-30 자체 점검)
+    'password_logged_info': [('routers/auth.py', '    user = User(',
+                              '    __import__("logging").getLogger("signup").info("signup %s", payload.password)\n'
+                              '    user = User(')],
+    'password_logged_debug': [('routers/auth.py', '    user = User(',
+                               '    __import__("logging").getLogger("signup").debug("signup %s", payload.password)\n'
+                               '    user = User(')],
+    # 비밀번호가 없는 debug 로그는 모아도 노출이 아니다(로그를 더 모아도 정상 앱이 FAIL이 되지 않는지 확인).
+    'debug_log_without_secret': [('routers/auth.py', '    user = User(',
+                                  '    __import__("logging").getLogger("signup").debug("signup %s", payload.email)\n'
+                                  '    user = User(')],
+    # DB 오류(저장 실패)를 처리하지 않아 서버 traceback에 SQL 값(해시)이 찍힘. 오류 주입으로 찾는다(2026-10-30).
+    'db_error_unhandled': [('routers/auth.py', _DB_ERROR_HANDLER, '')],
     'password_printed': [('routers/auth.py', '    user = User(', '    print("signup", payload.password)\n    user = User(')],
     # 루트로 올려 보내지 않는 로거(자체 handler)에 남긴 비밀번호. 앱 import 때 만들어진 로거도 수집해야 찾는다.
     'isolated_logger': [('routers/auth.py', 'router = APIRouter(prefix="/api/auth")\n',

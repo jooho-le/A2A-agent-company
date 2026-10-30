@@ -138,8 +138,8 @@ def check_results_from_assessment(requirements: Mapping[str, dict], cases: Mappi
                                   expected: Optional[Mapping[str, str]] = None) -> tuple[CheckResult, ...]:
     # Security 정적 판정 결과를 검사 결과 목록으로 바꾼다.
     # requirements : 정적 판정 증거 JSON의 "requirements" 부분.
-    #                {요구사항 표시 이름: {checkId: "SEC-SIGNUP-001", outcome, basis, observations}}
-    # cases        : {검사 표시 이름(SEC-SIGNUP-001 등): 검사 번호(UUIDv4)}
+    #                {요구사항 표시 이름: {checkId: "STATIC-REQ-005", outcome, basis, observations}}
+    # cases        : {검사 표시 이름(STATIC-REQ-005 등): 검사 번호(UUIDv4)}
     # evidence_id  : 그 증거 JSON을 보관한 증거 번호(UUIDv4)
     # PASS·FAIL은 그대로(증거 번호를 단다), UNVERIFIED는 ERROR(근거 코드 basis를 오류 코드로)로 옮긴다.
     # 판정에 없는 검사는 결과를 만들지 않아 집계에서 RESULT_MISSING(미검증)이 된다.

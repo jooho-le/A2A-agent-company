@@ -23,7 +23,7 @@
 | 관점 | 요구사항 | 검사 (기준표) |
 |---|---|---|
 | QA | REQ-001·002·003·004·007 | QA-SIGNUP-001~006 (실행) |
-| SECURITY | REQ-003·005·006 | SEC-SIGNUP-001·003·004 (정적), SEC-SIGNUP-002·005 (실행) |
+| SECURITY | REQ-003·005·006 | SEC-SIGNUP-002·003·005 (실행, QA와 같은 방식). 정적 판정 `STATIC-REQ-003·005·006`은 최종 보조 점검(점수 제외) |
 | Orchestrator | REQ-008 | 독립 평가 보고서 밖. D4 `trace_checks`가 Run 기록으로 요구→개발→검증→수정→재검증 연결을 확인 |
 
 관점별 요구사항은 dev `scenario_registry.py`의 SCN-001 등록 정보와 같다.
@@ -36,17 +36,18 @@
 | Manifest | 구현 | manifest.py | 형식 검사, 기준·관측 불일치 시 결과 미사용·UNVERIFIED·통과율 null |
 | 독립 평가 보고서 | 구현 | independent.py | 평가 ID·대상 Run 분리, suite 해시, 요구사항 범위 검사, 요구사항별·관점별 요약, 검사·요구사항 통과율 분리, 대상 Run 기록(`sourceRun`), 스키마 검증 |
 | 에이전트 호환 보고서 | 구현(보조) | reporting.py | dev QA_REPORT/SECURITY_REPORT 변환, ID 대응표·도구 실행 근거·재시도 규칙·스키마 검사 |
-| 보안 판정(D1) | 구현 | security/ | 기준 JSON + `assess()`, REQ-003·005·006 정적 판정, Bandit 지원 규칙 판정, dev 승인 로더 통과. 분석이 작업량 한도(100,000)나 재귀 한도를 넘으면 그 요구사항만 `ANALYSIS_TOO_COMPLEX`로 UNVERIFIED. 승인 등록·Host 연결은 주호(팀장) |
+| 보안 판정(D1) | 구현, 보조 점검으로 전환(10.30) | security/ | 기준 JSON + `assess()`, REQ-003·005·006 정적 판정. 점수·판정에는 넣지 않고 D5 최종 평가의 보조 점검(`STATIC-REQ-*`, 실행 검사가 지나가지 않은 코드 경로)으로만 쓴다. 순환 안 Security는 실행 테스트로 판정(dev 수정, 아래 dev 행). 작업량·재귀 한도 초과는 `ANALYSIS_TOO_COMPLEX` UNVERIFIED |
 | 정상·결함 예제(D3) | 구현 | tests/evaluation/signup_examples.py | 정상 1 + 결함 18 + 정상 변형 9. 합성 소스이며 실제 생성물이 아님 |
 | 기준표(D0) | 결정 반영 | scn001_criteria.md | 요구사항별 검사·증거·판정 조건. 2026-10-28 정의서·dev 정책·회의 기록을 대조해 결정 사항(Argon2 "이상", 정규화, 정적 PASS 범위 등)과 D2 판정 세부를 기록. 생성물 규격 채택·MEDIUM 추가 차단만 팀 결정 대기 |
 | 결과 수집·지표(D4) | 구현(합성 입력) | run_metrics.py | dev `/runs/{id}`·events·issues·tool-attempts·usage·configuration JSON → 지표(사건 시각 차이로 시간, 비용·토큰 미확인은 None), 구조별 요약(성공률 분모=전체 계획 Run), 비교 가능 여부 검사(모든 Run 대조, 환경 digest 불일치는 해당 Run 재실행, 평가 보고서의 환경 지문도 그 Run의 동결 환경과 대조, warm-up 차이는 주의). 문제 해결 수는 재검증 PASS만 세고, 평가 보고서의 코드 버전이 Run의 최종 코드 버전과 다르면 요약에서 거부. 실제 Run으로 검증하지 않음 |
 | 시연 자료 정리(D4) | 구현 | demo_index.py | 로그·생성 파일·화면·보고서 목록과 파일별 SHA-256(청크 단위), 빈 분류 표시, 심볼릭 링크·특수 파일(FIFO·소켓)·알 수 없는 폴더 거부. 256MiB 이하 텍스트의 알려진 비밀값을 끝까지 검색하고 `sensitiveScan`에 완료·생략 및 이유를 기록 |
 | 공유 문서 | 작성 | share_security_criteria.md, single_baseline.md | 팀장 논의용(보안 판정 기준, Single 비교 기준선) |
-| 회원가입 실행 검사(D2) | 구현(합성 서비스로 검증) | protected_tests/ | unittest 보호 테스트 8개(순환 안 QA 5개 + 최종 전용 3개)와 검사 대응표(suite.json, 정적 3개 포함 11개). 연결부 한 파일(`signup_link.py`)만 생성물 규격에 맞춰 고침. dev `UnitTestScope`·`QACaseBinding`이 그대로 받음(순환 안 설정 약 22KB, 최종 범위 약 31KB). 최소 회원가입 서비스와 변형 23개를 읽기 전용 Snapshot(컨테이너와 같은 조건)으로 dev unittest 실행기에서 돌려 결함마다 해당 검사만 FAIL, 연결·시작 실패는 모두 미검증 확인. Python 3.10.2·3.13 확인. 실제 생성물로는 아직 안 돌림 |
-| 결과 어댑터 | 구현 | check_adapters.py | unittest-v1 보고서·정적 판정 결과 → CheckResult. 보고서 없음·형식 오류·대응표 밖 줄은 모두 미검증. `protected_tests.final_check_results`로 독립 평가 보고서까지 연결 |
+| 회원가입 실행 검사(D2) | 구현(합성 서비스로 검증) | protected_tests/ | 실행 검사 9개(QA 6·Security 3)와 시험지 세 벌(순환용 practice·시범 최종용 pilot·공식 최종용 final, 같은 검사·같은 입력 종류, 다른 값·모양·순서). 검사 내용은 `signup_qa_checks.py`·`signup_security_checks.py`, 연결부는 `signup_link.py`. 정적 판정이 보던 곳을 보완: 앱 코드의 info·debug 로그 수집, DB 오류 주입, 형식이 틀린 본문, base64·16진수 노출 검색, 거부 뒤 정상 가입 순서, DB 직접 쓰기로 UNIQUE 확인. 순환 안 범위는 역할별 두 개(dev 설정 크기 약 20KB씩). 합성 서비스와 변형 27개를 읽기 전용 Snapshot으로 세 벌 모두 돌려 같은 검사만 FAIL(난이도 확인). 실제 생성물로는 아직 안 돌림 |
+| 결과 어댑터 | 구현 | check_adapters.py | unittest-v1 보고서 → CheckResult. 보고서 없음·형식 오류·대응표 밖 줄은 모두 미검증. `protected_tests.final_check_results`로 독립 평가 보고서까지 연결(정적 판정 변환 함수는 남겨 둠) |
 | Trace 검사·세부 지표(D4) | 구현(실제 연결 남음) | trace_checks.py, run_metrics.py | Run 기록의 비밀번호·해시 노출(REQ-006 Orchestrator 부분, 검사 범위 `coverage` 표시), 요구→개발→검증→Issue→수정→재검증→판정 연결(REQ-008), Regression 계산(버전별 보고서 연결 `regression_from_reports`), 협업 시간(역할별 LLM·도구 시간, 전달 지연, 시도·재개 구간별 에이전트 활동·병렬 겹침·에이전트 밖 시간, 사람 대기). dev 파이프라인 테스트의 실제 Run 6개로 확인. 남음: A2A Message 본문은 조회 API가 없어 못 봄, 알려 준 비밀값을 넘길 경로, 버전별 평가에서 Regression 자동 산출 |
-| 최종 독립 채점기(D5) | 구현(인계·실행·보관 연결 대기) | final_evaluation.py, summary.py | Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → 보호 테스트 8개를 컨테이너(`DockerRunner`, dev 샌드박스와 같은 제한)에서 실행 + 정적 판정 3개(소스만 읽음, 컨테이너 밖) → 독립 평가 보고서, Run 기록 검사, 회의·발표용 요약(다른 Run·평가 자료가 섞이면 거부). 가짜 docker·합성 서비스로 검증, 실제 컨테이너 시험은 Docker를 켜고 이미지를 주면 돈다. 남음: 최종 Snapshot tar·Manifest 인계(팀장 결정), 실제 생성물·컨테이너 실행, 결과·증거 영속 보관(정적 판정 근거 `source.tar#path=` 참조를 실제로 조회할 수 있게) |
-| Ver1·Ver2 비교(10.29 결정) | 미구현 | run_metrics.py | `comparison_validity`·`experiment_summary`는 Single/Multi 구조 기준이다. Ver1·Ver2는 둘 다 `MULTI_AGENT`이고 `protectedTestSuiteRef`만 달라야 하므로(Ver2는 없음) 지금 코드에 넣으면 "구조가 하나뿐" 오류나 INVALID_COMPARISON이 된다. 버전 이름표로 나누고 `protectedTestSuiteRef`를 의도한 차이로 두게 고쳐야 한다. dev는 보호 케이스 파일 없이 Host를 만들면 `protectedTestSuiteRef`가 비어 Ver2가 된다(`host.py` `inspect_host_configuration`) |
+| 최종 독립 채점기(D5) | 구현(인계·실행·보관 연결 대기) | final_evaluation.py, coverage_runner.py, scoring.py, summary.py | Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → 채점 시험지(pilot·final 중 선택) 9개를 컨테이너(`DockerRunner`)에서 실행 + 순환용 시험지 참고 채점(연습 효과용) + 보조 점검(지나간 줄 기록, 정적 판정) → 독립 평가 보고서·점수(요구사항별 같은 비중·검사 완료율·확인된 보안 위반), Run 기록 검사, 회의·발표용 요약. 가짜 docker·합성 서비스로 검증. 남음: 최종 Snapshot tar·Manifest 인계, 실제 컨테이너 실행, 결과·증거 영속 보관 |
+| Ver1·Ver2 비교(10.29 결정) | 구현(합성 입력) | run_metrics.py, scoring.py | `comparison_validity(..., group_by='loopPolicy')`·`experiment_summary(..., group_by='loopPolicy')`: 같은 Multi 구조에서 보호 테스트 참조(`protectedTestSuiteRef`)만 달라야 하고(이름표는 동결 설정과 대조), 쌍(`pairId`)마다 Ver1·Ver2가 하나씩, 같은 최종 시험지. 정책별 평균 점수·완료율·보안 위반 Run 수, `loop_policy_effect`로 연습 효과(차이의 차이). Single/Multi 비교 기능은 그대로 유지 |
+| dev: Security 실행 테스트(10.30, 4번이 dev 수정) | 구현(dev 시험으로 검증) | mcp_tools, agents/runtime, agents/platform, orchestrator | 테스트 범위에 역할(`role: "SECURITY"`) 표시, Security에 `write_test_file`(`outputs/security/tests`)·`run_unit_tests`, Security 단위 테스트 실행 기록·Snapshot 읽기 권한, Security 출력 계약의 `testCases`, Host가 Security 자체·보호 테스트를 QA와 같은 방식으로 실행하고 측정 결과로 요구사항 판정(정적 증명과 함께 쓰지 않음), 보호 케이스 파일 하나를 범위의 역할대로 QA·Security에 나눔, Security 보고서·Orchestrator가 `run_unit_tests` 증거를 받음. Security 범위가 없으면 예전 정적 증명 방식 그대로. dev 파이프라인 시험에서 Security 테스트 통과로 Run SUCCESS, 실패로 Security Issue 확인 |
 | Single 비교 실험(D6) | 설계만, 보류(10.29) | single_baseline.md | 담당은 4번. 10.29 회의에서 멀티에이전트 완성에 집중하기로 해 보류. Single 실행 경로는 `architecture`가 `MULTI_AGENT`만 허용하므로 dev 코드 수정 필요 |
 
 ## 3. 모듈별 입력과 출력
@@ -85,7 +86,7 @@ Run 조회 JSON 수집(페이지 이어 받기), 한 Run의 지표 계산, 구�
 API 오류는 즉시 수집 중단, 선언된 사건 수 불일치는 `EVENTS_INCOMPLETE`, 전체 수 미확인은 `EVENTS_COMPLETENESS_UNKNOWN`이다. 뒤의 두 경우 사건 기반 시간은 None이다. 실행 시간은 RUN_STARTED 사건부터 계산하며 Run 생성 시각 기준과 구분한다.
 
 **`protected_tests` (D2)**
-`suite.json`(검사 11개 대응표)과 보호 테스트 파일을 읽어 dev 설정(`unit_test_scope`, `owned_qa_cases`)과 최종 평가 입력(`evaluation_inputs`, `final_check_results`)을 만든다. `python -m evaluation.protected_tests export`가 팀장 전달 파일 세 개를 만든다.
+`suite.json`(검사 9개·시험지 세 벌·범위 다섯 개)과 보호 테스트 파일을 읽어 dev 설정(역할별 `unit_test_scope`, `owned_cases(contract, role)`)과 최종 평가 입력(`evaluation_inputs(contract, exam)`, `final_check_results`)을 만든다. `python -m evaluation.protected_tests export`가 Ver1용 파일 세 개(보호 케이스 하나, 보호 범위 두 개, 인계 정보)를 만든다.
 
 **`check_adapters.check_results_from_unit_report(report, cases, *, evidence_id)` / `check_results_from_assessment(...)`**
 unittest-v1 보고서·정적 판정 결과를 CheckResult로 바꾼다. SKIP("UNVERIFIED:코드")·누락·형식 오류·대응표 밖 줄은 미검증이다.
@@ -96,8 +97,8 @@ Run 기록의 비밀번호·해시 노출(REQ-006 Orchestrator 부분)과 요구
 **`run_metrics.collaboration_metrics(events)` / `regression_count(version_results)` / `regression_from_reports(reports)`**
 역할별 LLM·도구 시간, 전달 지연, 에이전트 활동(병렬 구간은 한 번, 시도·재개 구간별로 끊어 사람 대기는 제외)·병렬 겹침·에이전트 밖 시간, 사람 대기. 버전별 결과의 PASS→FAIL Regression(같은 Run·같은 보호 묶음의 버전별 보고서에서 바로 계산).
 
-**`final_evaluation.evaluate_final_snapshot(*, archive, expected, scenario_contract, source_run_id, runner, ...)`** (D5)
-Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → 보호 테스트(`DockerRunner`, dev 샌드박스와 같은 제한) + 정적 판정 → 독립 평가 보고서·증거·Trace 검사. 신분을 하나라도 확인하지 못하면 결과를 판정에 쓰지 않는다. `LocalRunner(trusted=True)`는 합성 표본 시험용이다. `known_values`는 노출 검사로 넘기고, 결과의 `trace`에는 Run 번호, `runner`에는 평가 번호를 붙인다.
+**`final_evaluation.evaluate_final_snapshot(*, archive, expected, scenario_contract, source_run_id, runner, exam, ...)`** (D5)
+Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → 채점 시험지(`exam`: pilot·final 중 반드시 선택) 실행 + 순환용 시험지 참고 실행 + 줄 기록 실행(`DockerRunner`, dev 샌드박스와 같은 제한) + 정적 판정(보조) → 독립 평가 보고서·점수(`score`)·참고 보고서(`referenceReport`)·보조 점검(`supplementary`)·증거·Trace 검사. 신분을 하나라도 확인하지 못하면 결과를 판정·점수에 쓰지 않는다. `LocalRunner(trusted=True)`는 합성 표본 시험용이다. `known_values`는 노출 검사로 넘기고, 결과의 `trace`에는 Run 번호, `runner`에는 평가 번호를 붙인다.
 
 **`summary.render_summary(report, ...)`**
 독립 평가 결과·실패→수정→재검증 흐름·지표·Regression·노출 검사 범위를 회의·발표용 Markdown으로 만든다. 에이전트가 쓴 자유 글은 넣지 않는다. 함께 넣는 자료가 보고서와 다른 Run·코드 버전·구조·평가의 것이거나 출처가 없으면 만들지 않는다.
@@ -151,7 +152,7 @@ Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → �
 | 참고 | dev 테스트 `test_auth_after_source_write_preserves_bytes_and_blocks_model_replay`가 간헐적으로 실패한다(수정 전 커밋에서도 재현). 평가 코드와 무관한 1·2번 담당 영역이라 고치지 않았다 | 1·2번 담당에게 전달 |
 | 참고 | `tests/evaluation/fixtures/reference_backend`는 서비스 웹페이지(세화) backend 복사본으로 정적 판정 오탐 확인용이다(생성물 정답·규격 아님). `dev_pipeline_runs.json`·`dev_pipeline_timing.json`은 dev 파이프라인 테스트가 만든 실제 Run에서 추적·시간 계산에 쓰는 사건만 남긴 표본이다. | 필요하면 표본 갱신 |
 | 참고 | D2 한계: 생성물이 `get_db`를 거치지 않고 다른 DB에 쓰면 임시 DB에서 사용자를 볼 수 없어 FAIL처럼 보일 수 있다(시작 코드 규격에 "DB 접근은 `get_db`로"를 넣어야 함). 컨테이너의 `/snapshot`은 읽기 전용이라, 시작할 때(lifespan) DB 파일을 소스 폴더 옆에 만드는 앱(세화 backend 방식)은 시작 실패로 8개 모두 미검증이다(시작 코드 규격에 "DB 위치는 `DATABASE_URL`로"를 넣어야 함). 동시 가입 시험은 확률적이라 PASS는 "이번 시도에서 중복 없음"이다. 노출 검사는 base64 등으로 바꾼 값을 찾지 못한다. pepper를 섞은 해시는 가입 비밀번호로 검증되지 않아 FAIL이다. | 시작 코드 규격에 반영 |
-| 참고 | 실행 시험(D2 정상 서비스와 변형 23개, D5 합성 서비스)은 sqlalchemy·argon2-cffi가 필요하다. 프로젝트 환경에 없어서(팀 공유 `pyproject.toml`) 기본 pytest에서는 건너뛰고 `uv run --with sqlalchemy --with argon2-cffi python -m pytest ...`로 돌린다. | 10.29 회의: 4번이 dev 수정(8절 2번) |
+| 참고 | 실행 시험(D2 정상 서비스와 변형 27개, D5 합성 서비스)은 sqlalchemy·argon2-cffi가 필요하다. 프로젝트 환경에 없어서(팀 공유 `pyproject.toml`) 기본 pytest에서는 건너뛰고 `uv run --with sqlalchemy --with argon2-cffi python -m pytest ...`로 돌린다. | 10.29 회의: 4번이 dev 수정(8절 2번) |
 | 참고 | D5는 가짜 docker와 합성 서비스로만 검증했고 실제 컨테이너로는 아직 돌리지 않았다(Docker Desktop 꺼짐). 평가 이미지에 fastapi·httpx·sqlalchemy·argon2-cffi가 있어야 한다. `LocalRunner` 결과는 이미지를 확인할 수 없어 판정에 쓰지 않는다. | Docker를 켜고 `EVAL_DOCKER_IMAGE`로 시험 |
 
 ## 5. 팀원 정보 상태
@@ -178,6 +179,7 @@ Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → �
 
 | 날짜 | 결과 |
 |---|---|
+| 2026-10-30 (QA·Security 실행 방식 통일, Ver1·Ver2) | 평가: 검사 9개 × 시험지 세 벌을 합성 서비스와 변형 27개로 세 벌 모두 돌려 결함마다 같은 검사만 FAIL(난이도 확인). info·debug 비밀번호 로그(수정 전 SEC-SIGNUP-005 PASS로 재현)·DB 오류 미처리(정상 합성 서비스도 해시가 traceback에 남던 것을 오류 주입으로 찾음) 변형을 추가. 오류 주입은 처음 방식이 SQLAlchemy 버전에 따라 감싸지지 않아(3.10 환경에서 재현) SQLite 권한 함수로 바꿈. 평가·환경 검사 3.13 `uv run --with sqlalchemy --with argon2-cffi`로 1077개 통과·1개 건너뜀(실제 Docker), 3.10에서 1076개 통과·1개 실패(dev 승인 함수의 3.11 전용 속성), 기본 환경 1040개 통과·38개 건너뜀. dev 수정: Security 실행 테스트 경로를 dev 파이프라인 시험(Security 테스트 통과로 Run SUCCESS, 실패로 Security Issue)과 생성 규칙 시험으로 확인, dev 전체 시험(평가 제외) 3316개 통과(21분). 순환 안 설정 크기는 QA 약 20KB·Security 약 19KB(dev 한도 64KiB, 둘 합쳐 56KiB 미만 시험). 실제 LLM·Docker 실행은 하지 않음 |
 | 2026-10-29 (외부 점검 2차 뒤 자체 점검) | 미커밋 변경을 다시 읽고 문서·코드를 대조. 고친 것: ① 요약 문서가 검사 범위(`coverage`)가 빠진 노출 결과를 "보지 못한 출력·받지 못한 기록 없음"으로 적던 것 → "미완료(검사 범위 정보 없음)"(시험 1개, 수정 전 코드로 재현) ② 기준표 QA-SIGNUP-005 행의 FAIL·미검증 조건을 2차 규칙에 맞춤 ③ 4절의 실행 시험 변형 수(19 → 23). 순환 안 보호 테스트 지문은 커밋 `33e163f`와 같고 최종 범위 지문만 바뀜. 보호 설정 크기는 순환 안 22,076바이트·최종 31,867바이트(시험 한도 32KiB). `origin/dev`(`81623d6`)의 트리는 `33e163f`와 같음. 문서 로컬 링크 24개 정상, diff 공백 검사 통과. 평가·환경 검사 3.13 `uv run --with sqlalchemy --with argon2-cffi`로 1044개 통과·1개 건너뜀(실제 Docker, Docker 꺼짐), 기본 환경 1012개 통과·33개 건너뜀, 3.10에서 1043개 통과·1개 실패(dev 승인 함수의 3.11 전용 속성) |
 | 2026-10-29 (외부 점검 2차) | 평가 문서(PDF) 점검에서 나온 판정 2건·보고 1건을 고침. ① 동시 가입(QA-SIGNUP-005)에서 아무 계정도 생기지 않으면 응답과 상관없이 미검증이던 것 → 5xx 응답이 있으면 FAIL, 모두 4xx면 단독 가입을 다시 해 보고 되면 FAIL·안 되면 미검증(합성 변형 3개 추가: 동시 요청만 모두 500, 동시 요청만 모두 409, 모든 가입 500. 앞의 둘은 수정 전 코드에서 미검증으로 재현) ② 요약 문서가 검사 11개 PASS 아래에 Run 기록 노출 FAIL을 맨 끝 절에만 적던 것 → 판정 줄에 검사 수를 적고, 바로 아래에 판정에 들어가지 않는 Run 기록 검사와 REQ-006 전체 노출 검증 상태(충족하지 않음·미완료)를 적고 REQ-006 줄에도 덧붙임(시험 5개, 수정 전 코드에서 실패 확인) ③ QA-006은 정상 가입 거부를 이미 FAIL로 처리하고 있어 코드 문제가 아니라 PDF 설명 오류였고, 정적 판정이 컨테이너 밖에서 돈다는 점·실제 Docker 미실행을 문서에 분명히 함. 평가·환경 검사 3.13 `uv run --with sqlalchemy --with argon2-cffi`로 1043개 통과·1개 건너뜀(실제 Docker), 기본 환경 1011개 통과·33개 건너뜀, 3.10.2에서 1042개 통과·1개 실패(dev 승인 함수의 3.11 전용 속성). 최종 범위 보호 설정 31,827바이트 |
 | 2026-10-29 (푸시 전 전체 점검 + 외부 점검) | 담당 코드 전체를 dev API·실행기와 다시 대조. 사건·Issue·Telemetry·Artifact·도구 시도 응답 모양과 runId 필드, 보호 테스트 실행 인자, 기록의 가린 값(`[REDACTED]`)이 평가 코드와 맞음을 확인. 찾아서 고친 것: ① 로컬 실행 시험이 쓰기 가능한 Snapshot에서 돌아, 컨테이너(읽기 전용)에서 DB 파일을 소스 폴더 옆에 만드는 앱이 시작 실패로 모두 미검증이 되는 것을 못 잡음 → 시험도 읽기 전용으로 돌리고 변형 2개 추가(기존 변형 18개는 결과 같음) ② D5가 Docker에 넘기는 파일 권한이 umask를 따라 077이면 컨테이너 사용자가 못 읽음(수정 전 코드로 재현) → 폴더 755·파일 644로 고정 ③ Python 3.10에서 아주 긴 식 파일 시험의 전제가 틀림(3.10은 그 파일을 읽을 수 있음) → 버전별 기대값으로 고침. 평가·환경 검사 3.13 `uv run --with sqlalchemy --with argon2-cffi`로 1002개 통과·1개 건너뜀(실제 Docker), 기본 환경 975개 통과·28개 건너뜀, 3.10.2에서 1001개 통과·1개 실패(dev 승인 함수의 3.11 전용 속성, 4절 참고). dev 보고서 모델이 합성 보고서 8개 수용, 문서 로컬 링크 정상 |
@@ -201,12 +203,12 @@ Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → �
 
 ## 8. 다음 작업
 
-1. 생성 코드 규격: 시나리오마다 달라질 수 있어 "시작 코드 규격을 정의하는 에이전트"를 둘지 기업 팀장님과 논의한다(11월 2일 텔로스 회의). 정해지기 전까지 `signup_link.py`는 서비스 웹페이지 backend 구조를 임시로 가정하고, 연결 조건(DB 접근은 `get_db`로, DB 위치는 `DATABASE_URL` 환경 변수로)은 어느 방식이든 규격에 들어가야 한다.
-2. 테스트 경로 완성(10.29 회의, 4번이 dev 코드 수정): 최종 Snapshot tar·Manifest 인계, Host에 순환 안 보호 테스트(`owned_qa_cases`·`unit_test_scope`)와 승인 판정 등록(코드 고정 후 해시 재생성), 실행 의존성(sqlalchemy·argon2-cffi)과 평가 이미지, wheel 포함, dev 승인 함수의 3.10 호환(`co_qualname`). 평가 커밋과 dev 수정 커밋은 나눈다.
-3. Ver1·Ver2 실행과 비교: Ver1은 Host에 보호 범위·보호 QA 케이스를 넣고(`protectedTestSuiteRef` 있음), Ver2는 둘 다 빼고 나머지 조건(시작 코드·모델·한도·환경·도구)은 같게 둔다. 두 버전 모두 같은 최종 시험지(최종 범위 8개 + 정적 3개)로 D5 채점한다. `run_metrics`의 비교·요약을 버전 기준으로 고친다. Ver1의 순환 안 QA 5개는 최종과 같은 시험지라 Ver1의 최종 점수는 그 5개에서 높게 나올 수 있다(최종 전용 3개만 처음 보는 검사). 그래서 Ver1은 속도(시간·수정 횟수·토큰), Ver2는 정확성(독립 평가 통과율·놓친 결함)을 중심으로 본다.
+1. 생성 코드 규격: 시나리오마다 달라질 수 있어 "시작 코드 규격을 정의하는 에이전트"를 둘지 기업 팀장님과 논의한다(11월 2일 텔로스 회의). 어느 방식이든 연결 조건(DB 접근은 `get_db`로, DB 위치는 `DATABASE_URL` 환경 변수로)과 "시작 코드에 평가 코드(`src/evaluation`, 최종 시험지) 미포함"이 들어가야 한다.
+2. 남은 dev 수정(10.29 회의, 4번 담당): 최종 Snapshot tar·Manifest 내보내기, 실행 의존성(sqlalchemy·argon2-cffi)과 평가 이미지, wheel 포함, dev 승인 함수의 3.10 호환(`co_qualname`). Security 실행 테스트 경로(역할 표시·도구·실행 기록·Host 분배·Orchestrator 증거)는 2026-10-30에 구현했다.
+3. Ver1·Ver2 실행: Ver1은 Host에 순환용 보호 범위 두 개와 보호 케이스 파일을 넣고(`protectedTestSuiteRef` 있음), Ver2는 넣지 않는다. 두 버전 모두 QA·Security 자체 테스트 범위(`qa-tests`, `security-tests`, role SECURITY)를 두고 나머지 조건(시작 코드·모델·한도·환경·도구)은 같게 둔다. 시범 실행은 pilot 시험지로 채점하고, 공식 비교는 final 시험지로 쌍(`pairId`)·순서를 기록하며 채점한다. 결과는 `run_metrics`(group_by=loopPolicy)와 `loop_policy_effect`로 요약한다.
 4. D5 실제 연결: Docker를 켜고 실제 컨테이너로 한 번 돌리고, 보고서·증거(정적 판정 근거가 가리키는 `source.tar` 포함)를 보관할 곳을 정한다. 버전별 Snapshot도 받으면 `regression_from_reports`로 Regression을 실제 결과에서 산출한다.
 5. 실제 Run으로 D4(`run_metrics`·`trace_checks`)를 검증하고 `summary`로 요약, 시연 자료를 `demo_index`로 정리(12월 발표). 노출 검사에 쓸 시험 비밀값(`known_values`)을 Host가 넘길 경로와 A2A Message 본문·에이전트 출력 수집 범위를 정한다(못 정하면 REQ-006은 부분 검사로 표시).
-6. 보류(10.29): Single 실행 경로와 Single/Multi 비교(D6).
+6. 보류(10.29): Single 실행 경로와 Single/Multi 비교(D6). 비교 코드(group_by=architecture)는 유지한다.
 
 일정은 팀장 카톡·회의비 신청서 기준(11월 2일 텔로스 회의, 12월 최종 발표)이며 납기 확정이 아니다. 10월 22일 자문(텔로스)에 따라 설계 문서 추가는 줄이고 실제 동작하는 연결을 우선한다.
 
@@ -221,6 +223,7 @@ Snapshot tar 해시·lock·이미지 해시 확인 → 안전하게 풀기 → �
 | 2026-10-29 | 푸시 전 전체 점검: 보호 실행 시험을 읽기 전용 Snapshot으로(시작할 때 DB를 만드는 앱 변형 2개 추가), D5 파일 권한 고정, 3.10 시험 전제 수정, 쓰지 않는 import 정리, 평가 코드·시험에 한글 주석·설명 보강. 시작 코드 규격에 "DB 위치는 `DATABASE_URL`로"를 팀 결정 항목에 추가. 외부 점검 4건 수정(중복 4xx 판정, A2A 즉시 완료·재개 구간, 요약 출처 대조)과 `known_values`·노출 검사 범위·버전별 Regression 연결, 문서의 "구현"과 "실제 연결 완료" 구분 |
 | 2026-10-29 | 외부 점검 2차: 동시 가입에서 계정이 하나도 생기지 않을 때 5xx·단독 가입 가능 여부로 FAIL/미검증을 나누고, 요약 문서가 검사 11개 판정과 Run 기록 노출·REQ-006 전체 검증 상태를 구분해 적도록 고침. 기준표·공유 문서·README에 정적 판정 위치(컨테이너 밖)와 실제 Docker 미실행을 분명히 적음 |
 | 2026-10-29 | 10.29 팀 회의 결정 반영: 멀티에이전트 완성 집중(Single 비교 보류), Ver1(순환 안 보호 테스트 + 최종, 속도 중심)·Ver2(최종만, 정확성 중심) 테스트, 테스트에 필요한 dev 수정(Snapshot 인계 등)은 4번이 직접, 생성 코드 규격 정의 에이전트는 기업 팀장님과 논의. 다음 작업과 승인 대기 항목을 이에 맞게 바꾸고, 현재 비교 코드가 Ver1·Ver2를 받지 못한다는 점을 기록 |
+| 2026-10-30 | QA·Security를 같은 실행 방식으로 통일: 검사 9개 × 시험지 세 벌(순환용·시범 최종용·공식 최종용, 난이도를 변형 27개로 확인), 정적 판정은 최종 보조 점검으로, 정적 판정이 보던 곳은 실행 검사 보완(로그 수준·오류 주입·형식이 틀린 본문·인코딩 검색·DB 직접 쓰기). D5에 시험지 선택·순환용 참고 채점·줄 기록·점수(요구사항별 같은 비중)·연습 효과, run_metrics에 Ver1·Ver2 비교. dev 수정(4번 담당): Security도 QA처럼 자기 테스트를 쓰고 Host가 자체·보호 테스트를 실행해 측정 결과로 판정(역할 표시 범위, MCP 도구·실행 기록, Security 계약 `testCases`, Host의 보호 케이스 분배, Orchestrator의 `run_unit_tests` 증거 허용). Security 범위가 없으면 예전 정적 증명 방식 그대로 |
 | 2026-10-04 | 초기 집계·Manifest 비교, dev 호환 해시 형식 검사, 문서 구조 정리, 공통 보고서 어댑터·합성 예시, 패키지·lock·스키마 동봉 |
 | 2026-10-05 | 최신 dev `2b4fc60`에서 `seokmin`을 새로 만들고 평가 코드를 `src/evaluation/`로 이동. 루트 pyproject·uv.lock·.venv 하나로 통일 |
 | 2026-10-06 | 독립 평가 보고서(`independent.py`), 검사별 진단 정보·민감값 치환, 필수·선택 목록 분리, 주석 정리, 문서를 독립 평가 구조와 명세 0.3에 맞게 재구성 |

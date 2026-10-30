@@ -1,9 +1,11 @@
 # 팀장(Host 운영자)에게 넘길 보호 테스트 설정 파일을 만든다.
 #   python -m evaluation.protected_tests export --out <폴더> [--suite-ref <참조>] [--contract <시나리오 JSON>] [--force]
-# 만드는 파일
-#   owned-qa-cases.local.json  dev configs/owned-qa-cases.local.json에 그대로 쓰는 순환 안 보호 QA 케이스(5개)
-#   unit-protected-scope.json  dev configs/owned-tools.local.json의 "unit" → "scopes" 목록에 추가할 PROTECTED 범위 한 개
-#   handoff.json               묶음 이름·버전·지문(suite SHA-256)과 suite 참조. RunConfiguration의 protected_test_suite_ref를 이 값과 맞춘다
+# 만드는 파일(Ver1에만 쓴다. Ver2는 보호 케이스·보호 범위 없이 Host를 만든다)
+#   owned-protected-cases.local.json 순환 안 보호 케이스(QA-SIGNUP-001~006 + SEC-SIGNUP-002·003·005, 순환용 시험지).
+#                                    Host가 파일 하나로 받아 보호 범위에 적힌 역할(QA·SECURITY)대로 나눈다
+#   unit-protected-scopes.json       dev configs/owned-tools.local.json의 "unit" → "scopes" 목록에 추가할 PROTECTED 범위 두 개
+#   handoff.json                     묶음 이름·버전·범위별 지문(suite SHA-256)과 suite 참조. RunConfiguration의
+#                                    protected_test_suite_ref를 이 값과 맞춘다
 # 시나리오 정책을 따로 주지 않으면 dev에 등록된 SCN-001 정책(scenario_registry)을 쓴다. 이미 있는 파일은 --force 없이 덮어쓰지 않는다.
 #
 # [처음 읽는 분을 위한 용어]
@@ -15,7 +17,7 @@ import json  # 설정 파일을 JSON으로 쓰기·읽기
 import sys  # 종료 코드 돌려주기
 from pathlib import Path  # 파일 경로 다루기
 
-from . import load_suite, owned_qa_cases, suite_sha256, unit_test_scope  # 같은 폴더 __init__.py의 함수들
+from . import LOOP_SCOPES, SCOPES, load_suite, owned_cases, suite_sha256, unit_test_scope  # 같은 폴더 __init__.py의 함수들
 
 DEFAULT_SUITE_REF = 'artifact://protected-tests/scn-001/signup-{version}'  # --suite-ref가 없을 때 쓰는 기본 참조({version}은 묶음 버전)
 
@@ -34,13 +36,17 @@ def export(out: Path, *, suite_ref=None, contract=None, force=False) -> dict:
     suite = load_suite()
     suite_ref = suite_ref or DEFAULT_SUITE_REF.format(version=suite['suiteVersion'])
     documents = {
-        'owned-qa-cases.local.json': owned_qa_cases(contract, suite),
-        'unit-protected-scope.json': unit_test_scope('in-loop', suite_ref=suite_ref, suite=suite),
+        'owned-protected-cases.local.json': {'schemaVersion': 1, 'cases': [
+            case for role in ('QA', 'SECURITY') for case in owned_cases(contract, role, suite)['cases']]},
+        'unit-protected-scopes.json': [unit_test_scope(LOOP_SCOPES[role], suite_ref=suite_ref, suite=suite)
+                                       for role in ('QA', 'SECURITY')],
         'handoff.json': {'suiteId': suite['suiteId'], 'suiteVersion': suite['suiteVersion'],
-                         'inLoopSuiteSha256': suite_sha256('in-loop', suite),
-                         'finalSuiteSha256': suite_sha256('final', suite), 'protectedSuiteRef': suite_ref,
-                         'note': 'unit-protected-scope.json을 owned-tools.local.json의 unit.scopes에 추가하고, '
-                                 'RunConfiguration의 protected_test_suite_ref를 protectedSuiteRef와 같게 둔다.'},
+                         'suiteSha256': {scope: suite_sha256(scope, suite) for scope in SCOPES},
+                         'protectedSuiteRef': suite_ref,
+                         'note': 'Ver1(순환 안 테스트 + 최종): unit-protected-scopes.json의 두 범위를 owned-tools.local.json의 '
+                                 'unit.scopes에 추가하고 보호 케이스 파일을 Host에 넘기며(Security 자체 테스트 범위 '
+                                 'security-tests도 함께 둔다), RunConfiguration의 '
+                                 'protected_test_suite_ref를 protectedSuiteRef와 같게 둔다. Ver2(최종만): 셋 다 넣지 않는다.'},
     }
     # 폴더를 만들고 파일을 쓴다. 같은 이름 파일이 있으면 --force 없이는 멈춘다(실수로 덮어쓰지 않게).
     out.mkdir(parents=True, exist_ok=True)

@@ -1,15 +1,19 @@
-# D5 최종 독립 채점기. 개발 실행(Run)이 끝난 뒤 최종 코드 Snapshot을 받아 같은 보호 테스트로 채점하고
-# 독립 평가 보고서(INDEPENDENT_EVALUATION)를 만든다.
+# D5 최종 독립 채점기. 개발 실행(Run)이 끝난 뒤 최종 코드 Snapshot을 받아 최종 시험지로 채점하고
+# 독립 평가 보고서(INDEPENDENT_EVALUATION)를 만든다. Ver1(순환 안 테스트 + 최종)·Ver2(최종만) 모두 같은 방식이다.
 #
 # 순서
 #   1) Snapshot 확인: 받은 압축 파일(dev canonical tar)의 SHA-256이 기준 Manifest의 snapshotSha256과 같은지,
 #      기준 Manifest의 dependencyLockHash와 같은 파일이 안에 있는지 확인한다.
 #   2) 안전하게 풀기: 일반 파일만, 상대 경로만(../·절대 경로·링크·장치 파일 거부), 크기 한도 안에서 푼다.
-#   3) 보호 테스트(최종 범위 8개): dev의 신뢰된 unittest 실행기(unit_runner.py)로 실행한다.
+#   3) 보호 테스트(검사 9개, QA·Security 모두 실행 검사): dev의 신뢰된 unittest 실행기(unit_runner.py)로
+#      a) 채점 시험지(exam: 시범 최종용 pilot 또는 공식 최종용 final), b) 순환용 시험지(practice, 참고 채점) 순서로 돌린다.
 #      실제 생성 코드는 반드시 컨테이너(DockerRunner)에서 실행한다. LocalRunner는 합성 표본 시험용이다.
-#   4) 정적 판정(SEC-SIGNUP-001·003·004): 같은 소스로 security.assess.evaluate()를 부른다(생성 코드를 실행하지 않음).
+#   4) 보조 점검(점수·판정에 넣지 않음): c) 채점 시험지를 줄 기록 실행기(coverage_runner.py)로 한 번 더 돌려 생성물 코드 중
+#      테스트가 지나가지 않은 줄을 센다. d) 같은 소스로 정적 판정(security.assess.evaluate, 생성 코드를 실행하지 않음)을
+#      해서 실행 검사가 못 본 곳의 문제를 따로 적는다.
 #   5) 보고서: 결과 어댑터로 검사 결과를 만들고 build_evaluation_report로 묶는다. 실제로 확인한 Snapshot·lock·이미지가
 #      기준과 다르면 Manifest 불일치로 결과를 쓰지 않는다(UNVERIFIED). 이미지를 확인할 수 없는 실행(로컬)도 결과를 쓰지 않는다.
+#      점수(scoring.exam_score)는 요구사항별 같은 비중이고, 순환용 참고 보고서는 연습 효과 계산에만 쓴다.
 #   6) (선택) Run 기록이 있으면 trace_checks로 노출(REQ-006 Orchestrator 부분)과 추적(REQ-008)을 함께 본다.
 #
 # 이 모듈이 하지 않는 일: Snapshot을 시스템에서 받아 오는 일(인계 방법은 팀장 결정 대기), 증거 저장, A2A 전송.
@@ -41,6 +45,7 @@ from . import protected_tests                                  # 보호 테스�
 from .check_adapters import _valid_report                      # unittest-v1 보고서 모양 검사
 from .independent import SourceRunSummary, build_evaluation_report  # 독립 평가 보고서 만들기
 from .manifest import ExecutionManifest                        # 코드·환경 신분증
+from .scoring import exam_score                                # 요구사항별 같은 비중 점수
 from .security.assess import evaluate as evaluate_static       # Security 정적 판정(D1)
 from .trace_checks import check_trace_exposure, check_traceability  # Run 기록 검사(D4)
 
@@ -50,6 +55,8 @@ MAX_ARCHIVE_FILES = 4096              # tar 안 파일 수의 최대값
 MAX_FILE_BYTES = 8 * 1024 * 1024      # 파일 하나의 최대 크기(8MiB)
 MAX_STATIC_BYTES = 4 * 1024 * 1024   # dev Security 승인 함수에 넘기는 구현 크기 한도와 같은 값
 RUNNER_FILE = '_unit_runner.py'      # dev가 컨테이너에 읽기 전용으로 넣는 실행기 이름과 같다
+COVERAGE_FILE = '_coverage_runner.py'  # 줄 기록 실행기(coverage_runner.py)를 넣는 이름
+EXAMS = ('pilot', 'final')           # 채점에 쓸 수 있는 시험지(순환용 practice는 참고 채점에만)
 
 
 class ArchiveError(ValueError):
@@ -65,6 +72,7 @@ class RunnerOutcome:
     error: Optional[str]              # 실행 자체의 오류 코드(TIMEOUT, DOCKER_UNAVAILABLE, IMAGE_DIGEST_MISMATCH 등)
     image_digest: Optional[str]       # 실제로 쓴 컨테이너 이미지 해시. 확인할 수 없는 실행(로컬)은 None
     kind: str                         # 'docker' 또는 'local'
+    coverage: Optional[dict] = None   # (줄 기록 실행기만) 파일별 실행 가능한 줄·지나간 줄·지나가지 않은 줄
 
     def to_dict(self):
         # 증거·결과에 남길 실행 정보(보고서 본문은 따로 담는다).
@@ -103,6 +111,19 @@ def _parse_runner_output(stdout: str):
     return None, 'TEST_RUNNER_ERROR'
 
 
+def _parse_coverage(stdout: str) -> Optional[dict]:
+    # 줄 기록 실행기는 보고서 앞 줄에 {"coverage-v1": {...}}를 쓴다. 없거나 모양이 다르면 None.
+    for line in reversed([line for line in stdout.splitlines() if line.strip()][:-1]):
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and set(payload) == {'coverage-v1'}:
+            value = payload['coverage-v1']
+            return value if isinstance(value, dict) and isinstance(value.get('files'), dict) else None
+    return None
+
+
 class LocalRunner:
     # 합성 표본(우리가 만든 회원가입 서비스) 시험용 실행기. 같은 컴퓨터의 새 파이썬 프로세스에서 dev 실행기를 돌린다.
     # 실제 생성 코드를 호스트에서 실행하면 안 되므로 trusted=True를 명시해야만 쓸 수 있다.
@@ -116,26 +137,33 @@ class LocalRunner:
             raise ValueError('LocalRunner runs code on this host; use it only for trusted synthetic fixtures')
         self.python, self.timeout = python, timeout
 
-    def run(self, snapshot: Path, inputs: Path, directory: str, pattern: str) -> RunnerOutcome:
+    def run(self, snapshot: Path, inputs: Path, directory: str, pattern: str,
+            script: str = RUNNER_FILE) -> RunnerOutcome:
         # snapshot: 풀어 둔 소스 폴더, inputs: 실행기와 보호 테스트를 넣은 폴더,
-        # directory·pattern: 보호 테스트 폴더(tests/signup)와 파일 이름 패턴(protected_signup_*.py)
-        # 새 파이썬 프로세스(-I: 바깥 환경 무시, -B: 캐시 파일 안 만듦)에서 dev 실행기의 run_tests를 부르는 짧은 스크립트다.
-        script = ('import importlib.util, json, sys\n'
-                  'spec = importlib.util.spec_from_file_location("trusted_unit_runner", sys.argv[1])\n'
-                  'runner = importlib.util.module_from_spec(spec)\n'
-                  'spec.loader.exec_module(runner)\n'
-                  'report, code = runner.run_tests(sys.argv[2], sys.argv[3], sys.argv[4])\n'
-                  'sys.__stdout__.write(json.dumps(report if report is not None else {"error": "TEST_RUNNER_ERROR"}) + "\\n")\n'
-                  'raise SystemExit(code)\n')
+        # directory·pattern: 보호 테스트 폴더(tests/signup)와 파일 이름 패턴(exam_final.py 등)
+        # script: inputs 안의 실행기 파일(dev 실행기 또는 줄 기록 실행기)
+        # 새 파이썬 프로세스(-I: 바깥 환경 무시, -B: 캐시 파일 안 만듦)에서 실행기의 함수를 부르는 짧은 스크립트다.
+        code = ('import importlib.util, json, sys\n'
+                'spec = importlib.util.spec_from_file_location("trusted_runner", sys.argv[1])\n'
+                'runner = importlib.util.module_from_spec(spec)\n'
+                'spec.loader.exec_module(runner)\n'
+                'if hasattr(runner, "run_tests_with_coverage"):\n'
+                '    report, code, coverage = runner.run_tests_with_coverage(sys.argv[2], sys.argv[3], sys.argv[4])\n'
+                '    sys.__stdout__.write(json.dumps({"coverage-v1": coverage}) + "\\n")\n'
+                'else:\n'
+                '    report, code = runner.run_tests(sys.argv[2], sys.argv[3], sys.argv[4])\n'
+                'sys.__stdout__.write(json.dumps(report if report is not None else {"error": "TEST_RUNNER_ERROR"}) + "\\n")\n'
+                'raise SystemExit(code)\n')
         with tempfile.TemporaryDirectory(prefix='eval-local-') as work:  # 작업 폴더는 끝나면 지워진다
             try:
-                done = subprocess.run([self.python, '-I', '-B', '-c', script, str(inputs / RUNNER_FILE),
+                done = subprocess.run([self.python, '-I', '-B', '-c', code, str(inputs / script),
                                        str(inputs / directory), str(snapshot), pattern],
                                       capture_output=True, text=True, timeout=self.timeout, cwd=work)
             except subprocess.TimeoutExpired:
                 return RunnerOutcome(None, None, 'TIMEOUT', None, self.kind)
         report, error = _parse_runner_output(done.stdout)
-        return _checked_outcome(RunnerOutcome(report, done.returncode, error, None, self.kind))
+        return _checked_outcome(RunnerOutcome(report, done.returncode, error, None, self.kind,
+                                              _parse_coverage(done.stdout)))
 
 
 class DockerRunner:
@@ -173,7 +201,8 @@ class DockerRunner:
             return self.image if image.get('Id') == self.image else None
         return self.image.rsplit('@', 1)[1] if self.image in (image.get('RepoDigests') or []) else None
 
-    def command(self, name: str, snapshot: Path, inputs: Path, directory: str, pattern: str) -> list:
+    def command(self, name: str, snapshot: Path, inputs: Path, directory: str, pattern: str,
+                script: str = RUNNER_FILE) -> list:
         # 컨테이너를 띄우는 docker run 명령(인자 목록)을 만든다. 시험에서 제한이 빠지지 않았는지 확인할 수 있게 따로 둔다.
         #   --network none: 인터넷 차단, --read-only: 루트 파일 시스템 읽기 전용, --user 10001: 관리자 아닌 사용자,
         #   --cap-drop ALL·no-new-privileges: 특수 권한 제거, --pull never: 이미지를 새로 받아 오지 않음,
@@ -189,18 +218,21 @@ class DockerRunner:
             if any(char in str(source) for char in (',', '\n', '\r', '"')):
                 raise ValueError('Mount path contains separator characters')
             args += ['--mount', f'type=bind,src={source},dst={target},readonly']
-        args += ['--entrypoint', self.python, self.image, '-I', '-B', f'/inputs/{RUNNER_FILE}',
+        if script not in (RUNNER_FILE, COVERAGE_FILE):
+            raise ValueError('Unknown runner script')
+        args += ['--entrypoint', self.python, self.image, '-I', '-B', f'/inputs/{script}',
                  '--kind', 'PROTECTED', '--directory', directory, '--pattern', pattern]
         return args
 
-    def run(self, snapshot: Path, inputs: Path, directory: str, pattern: str) -> RunnerOutcome:
+    def run(self, snapshot: Path, inputs: Path, directory: str, pattern: str,
+            script: str = RUNNER_FILE) -> RunnerOutcome:
         # 1) 이미지를 확인하고 2) 이름을 붙인 컨테이너로 실행한다. 시간을 넘기면 그 이름의 컨테이너를 강제로 지운다.
         digest = self.image_digest()
         if digest is None:
             return RunnerOutcome(None, None, 'IMAGE_UNAVAILABLE_OR_MISMATCH', None, self.kind)
         name = f'eval-protected-{uuid.uuid4().hex[:12]}'
         try:
-            done = self._call(self.command(name, snapshot, inputs, directory, pattern), self.timeout)
+            done = self._call(self.command(name, snapshot, inputs, directory, pattern, script), self.timeout)
         except subprocess.TimeoutExpired:
             try:
                 self._call(('rm', '-f', name), 60)
@@ -210,7 +242,8 @@ class DockerRunner:
         except OSError:
             return RunnerOutcome(None, None, 'DOCKER_UNAVAILABLE', None, self.kind)
         report, error = _parse_runner_output(done.stdout)
-        return _checked_outcome(RunnerOutcome(report, done.returncode, error, digest, self.kind))
+        return _checked_outcome(RunnerOutcome(report, done.returncode, error, digest, self.kind,
+                                              _parse_coverage(done.stdout)))
 
 
 def _sha256(data: bytes) -> str:
@@ -298,8 +331,22 @@ def _static_assessment(files: Mapping[str, bytes], criteria: dict, contract: dic
     return evidence.get('requirements'), evidence, None
 
 
+def _coverage_summary(coverage: Optional[dict]) -> Optional[dict]:
+    # 줄 기록을 요약한다: 전체·테스트가 불러온 파일의 실행 가능한 줄 수와 지나간 줄 수, 파일별 지나가지 않은 줄.
+    if not coverage:
+        return None
+    files = coverage['files']
+    loaded = {path: item for path, item in files.items() if item['executed']}  # 테스트 중에 한 줄이라도 지나간 파일
+
+    def rate(group):
+        lines = sum(item['lines'] for item in group.values())
+        return {'files': len(group), 'lines': lines, 'executed': sum(item['executed'] for item in group.values()),
+                'rate': sum(item['executed'] for item in group.values()) / lines if lines else None}
+    return {'all': rate(files), 'loaded': rate(loaded), 'files': files}
+
+
 def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scenario_contract: Mapping,
-                            source_run_id: str, runner, architecture: str = 'MULTI_AGENT',
+                            source_run_id: str, runner, exam: str, architecture: str = 'MULTI_AGENT',
                             criteria: Optional[dict] = None, evaluation_id: Optional[str] = None,
                             created_at: Optional[str] = None, source_run: Optional[SourceRunSummary] = None,
                             run_bundle: Optional[Mapping] = None, trace_documents: Optional[Mapping] = None,
@@ -307,13 +354,18 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     # archive        : 최종 Snapshot의 dev canonical tar 바이트
     # expected       : 신뢰할 수 있는 경로로 받은 기준 Manifest(어떤 코드·환경을 채점해야 하는지)
     # runner         : DockerRunner(실제 평가) 또는 LocalRunner(trusted=True, 합성 표본 시험)
+    # exam           : 채점 시험지. 'pilot'(시범 실행·조정용) 또는 'final'(Ver1·Ver2 공식 비교용). 반드시 고른다.
     # run_bundle     : (선택) run_metrics.fetch_run_bundle 결과. 있으면 REQ-008 추적 검사를 함께 한다.
     # trace_documents: (선택) trace_checks.fetch_trace_documents 결과. 있으면 Run 기록 노출 검사를 함께 한다.
     # known_values   : (선택) 이 Run에서 쓴 것으로 알려진 시험 비밀번호 등. 노출 검사가 자유 글에서도 찾는다.
     #                  결과에는 값이 아니라 개수와 찾은 위치만 남는다. 값을 받는 경로(Host가 안전하게 넘김)는 팀과 정한다.
-    # 돌려주는 값: {'report': 독립 평가 보고서, 'evidence': {증거 번호: 증거 문서}, 'snapshot': 확인 결과,
-    #              'runner': 실행 정보(+evaluationId), 'trace': Trace 검사 결과(+runId) 또는 None}
+    # 돌려주는 값: {'exam', 'report': 독립 평가 보고서, 'score': 점수, 'referenceReport'·'referenceScore': 순환용 시험지
+    #              참고 채점(연습 효과용), 'supplementary': {'coverage', 'static'} 보조 점검(점수·판정 제외),
+    #              'evidence': {증거 번호: 증거 문서}, 'snapshot': 확인 결과, 'runner': 실행 정보(+evaluationId),
+    #              'trace': Trace 검사 결과(+runId) 또는 None}
     #   runner·trace에 출처(평가 번호·Run 번호)를 붙여 summary.render_summary가 다른 실행 자료와 섞이지 않았는지 대조한다.
+    if exam not in EXAMS:
+        raise ValueError('exam must be pilot or final')
     # 0) 함께 넘긴 Run 기록이 채점 대상 Run·최종 코드 버전의 것인지 확인한다(다른 Run 기록을 섞지 않게).
     if run_bundle is not None:
         run = run_bundle.get('run', {})
@@ -323,16 +375,19 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
         raise ValueError('Trace documents differ from the evaluated Run')
     # 1) 준비: 기준·검사 계획·증거 번호·평가 시각
     criteria = criteria if criteria is not None else json.loads(CRITERIA_FILE.read_text(encoding='utf-8'))
-    inputs = protected_tests.evaluation_inputs(scenario_contract)
-    unit_evidence_id, static_evidence_id = str(uuid.uuid4()), str(uuid.uuid4())
+    suite = protected_tests.load_suite()
+    sets = {exam: protected_tests.evaluation_inputs(scenario_contract, exam, suite),
+            'practice': protected_tests.evaluation_inputs(scenario_contract, 'practice', suite)}
+    evidence_ids = {name: str(uuid.uuid4()) for name in (exam, 'practice', 'coverage', 'static')}
     evaluation_id = evaluation_id or str(uuid.uuid4())
+    reference_id = str(uuid.uuid4())
     created_at = created_at or datetime.now(timezone.utc).isoformat()
     snapshot_sha256 = _sha256(bytes(archive)) if isinstance(archive, (bytes, bytearray)) else None
     snapshot_info = {'sha256': snapshot_sha256, 'matchesExpected': snapshot_sha256 == expected.snapshot_sha256,
                      'lockFound': False, 'files': 0, 'error': None}
-    unit_report = static_requirements = None
-    static_evidence, static_error = None, None
-    outcome = RunnerOutcome(None, None, 'NOT_RUN', None, getattr(runner, 'kind', 'unknown'))  # 실행 전 기본값
+    kind = getattr(runner, 'kind', 'unknown')
+    outcomes = {name: RunnerOutcome(None, None, 'NOT_RUN', None, kind) for name in (exam, 'practice', 'coverage')}
+    static_requirements = static_evidence = static_error = None
     runner_error = 'TEST_RUNNER_ERROR'
     # 2) Snapshot 확인과 안전한 읽기
     try:
@@ -344,53 +399,69 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
         # 받은 코드가 채점하기로 한 Snapshot이 아니다. 실행하지 않고 모든 검사를 미검증으로 남긴다.
         files, snapshot_info['error'] = None, 'SNAPSHOT_HASH_MISMATCH'
         runner_error = 'SNAPSHOT_HASH_MISMATCH'
-    # 3) 실행: 임시 폴더에 소스(snapshot/)와 실행기·보호 테스트(inputs/)를 쓰고 실행기로 돌린다. 이어서 정적 판정.
+    # 3)·4) 실행: 임시 폴더에 소스(snapshot/)와 실행기·시험지(inputs/)를 쓰고 채점 시험지·순환용 시험지·줄 기록 순서로
+    #       돌린다. 이어서 정적 판정(보조).
     if files is not None:
         snapshot_info['files'] = len(files)
         snapshot_info['lockFound'] = any('sha256:' + _sha256(data) == expected.dependency_lock_hash for data in files.values())
         with tempfile.TemporaryDirectory(prefix='eval-final-') as directory:
             root = Path(directory)
             _write_tree(root / 'snapshot', files)
-            protected = {path: content.encode('utf-8') for path, content in protected_tests.protected_files('final').items()}
+            protected = {path: content.encode('utf-8') for scope in (exam, 'practice')
+                         for path, content in protected_tests.protected_files(scope, suite).items()}
             protected[RUNNER_FILE] = _runner_source()
+            protected[COVERAGE_FILE] = (Path(__file__).resolve().parent / 'coverage_runner.py').read_bytes()
             _write_tree(root / 'inputs', protected)
             os.chmod(root, 0o755)  # 컨테이너 안 일반 사용자(10001)도 읽을 수 있게 임시 폴더 권한을 연다
-            suite = protected_tests.load_suite()
-            outcome = runner.run(root / 'snapshot', root / 'inputs', suite['sourceDirectory'],
-                                 suite['scopes']['final']['pattern'])
-        outcome = _checked_outcome(outcome)  # 사용자가 넘긴 실행기도 같은 규칙으로 확인한다.
-        unit_report = outcome.report
-        runner_error = outcome.error or 'TEST_RUNNER_ERROR'
-        static_requirements, static_evidence, static_error = _static_assessment(files, criteria, dict(scenario_contract),
-                                                                                static_evidence_id)
-    # 4) 검사 결과 만들기(실행 테스트 8개 + 정적 판정 3개)
-    results = protected_tests.final_check_results(
-        inputs, unit_report=unit_report, unit_evidence_id=unit_evidence_id,
-        assessment_requirements=static_requirements, static_evidence_id=static_evidence_id, runner_error=runner_error)
-    # 실제로 확인한 신분: Snapshot 해시(계산값, 기준과 같을 때만 실행), lock(같은 해시의 파일이 들어 있음),
-    # 이미지(실행기가 확인한 해시). 하나라도 확인할 수 없으면 Manifest 없음으로 두어 결과를 쓰지 않는다.
-    # 이미지 해시가 기준과 다르면 불일치로 결과를 쓰지 않는다. 확인하지 않은 값을 기준값으로 채우지 않는다.
-    observed = None
-    if files is not None and snapshot_info['lockFound'] and outcome.image_digest is not None:
-        observed = replace(expected, snapshot_sha256=snapshot_sha256, container_image_digest=outcome.image_digest)
-    report = build_evaluation_report(
-        evaluation_id=evaluation_id, source_run_id=source_run_id, architecture=architecture,
-        suite_id=inputs['suite_id'], suite_version=inputs['suite_version'], suite_sha256=inputs['suite_sha256'],
-        created_at=created_at, required_requirement_ids=inputs['required_requirement_ids'],
-        expected=expected, observed=observed, plan=inputs['plan'], results=results, bindings=inputs['bindings'],
-        source_run=source_run)
-    # 5) (선택) Run 기록 검사와 증거 문서 정리
+            for name, scope, script in ((exam, exam, RUNNER_FILE), ('practice', 'practice', RUNNER_FILE),
+                                        ('coverage', exam, COVERAGE_FILE)):
+                outcomes[name] = _checked_outcome(runner.run(  # 사용자가 넘긴 실행기도 같은 규칙으로 확인한다.
+                    root / 'snapshot', root / 'inputs', suite['sourceDirectory'], suite['scopes'][scope]['pattern'],
+                    script=script))
+        runner_error = outcomes[exam].error or 'TEST_RUNNER_ERROR'
+        static_requirements, static_evidence, static_error = _static_assessment(
+            files, criteria, dict(scenario_contract), evidence_ids['static'])
+
+    # 5) 보고서: 채점 시험지 보고서와 순환용 시험지 참고 보고서. 실제로 확인한 신분(Snapshot 해시·lock·이미지)이
+    #    하나라도 없으면 Manifest 없음으로 두어 결과를 쓰지 않는다. 확인하지 않은 값을 기준값으로 채우지 않는다.
+    def build(name, report_id):
+        inputs, outcome = sets[name], outcomes[name]
+        results = protected_tests.final_check_results(
+            inputs, unit_report=outcome.report, unit_evidence_id=evidence_ids[name],
+            runner_error=(outcome.error or 'TEST_RUNNER_ERROR') if files is not None else runner_error)
+        observed = None
+        if files is not None and snapshot_info['lockFound'] and outcome.image_digest is not None:
+            observed = replace(expected, snapshot_sha256=snapshot_sha256, container_image_digest=outcome.image_digest)
+        return build_evaluation_report(
+            evaluation_id=report_id, source_run_id=source_run_id, architecture=architecture,
+            suite_id=inputs['suite_id'], suite_version=inputs['suite_version'], suite_sha256=inputs['suite_sha256'],
+            created_at=created_at, required_requirement_ids=inputs['required_requirement_ids'],
+            expected=expected, observed=observed, plan=inputs['plan'], results=results, bindings=inputs['bindings'],
+            source_run=source_run)
+    report, reference = build(exam, evaluation_id), build('practice', reference_id)
+    # 6) (선택) Run 기록 검사와 증거 문서 정리
     trace = None
     if run_bundle is not None or trace_documents is not None:
         trace = {'runId': source_run_id,
                  'traceability': check_traceability(run_bundle, scenario_contract).to_dict() if run_bundle is not None else None,
                  'exposure': (check_trace_exposure(trace_documents, criteria, known_values=known_values).to_dict()
                               if trace_documents is not None else None)}
-    evidence = {unit_evidence_id: {'kind': 'UNIT_TEST_REPORT', 'runner': outcome.to_dict(), 'report': unit_report}}
+    evidence = {evidence_ids[name]: {'kind': 'UNIT_TEST_REPORT', 'exam': name, 'runner': outcomes[name].to_dict(),
+                                     'report': outcomes[name].report} for name in (exam, 'practice')}
+    coverage = _coverage_summary(outcomes['coverage'].coverage)
+    evidence[evidence_ids['coverage']] = {'kind': 'LINE_COVERAGE', 'runner': outcomes['coverage'].to_dict(),
+                                          'coverage': outcomes['coverage'].coverage}
     if static_evidence is not None or static_error is not None:
-        evidence[static_evidence_id] = {'kind': 'STATIC_ASSESSMENT', 'error': static_error, 'evidence': static_evidence}
-    return {'report': report, 'evidence': evidence, 'snapshot': snapshot_info,
-            'runner': {**outcome.to_dict(), 'evaluationId': evaluation_id}, 'trace': trace}
+        evidence[evidence_ids['static']] = {'kind': 'STATIC_ASSESSMENT', 'error': static_error, 'evidence': static_evidence}
+    supplementary = {
+        'coverage': {'evidenceId': evidence_ids['coverage'], 'error': outcomes['coverage'].error, **(coverage or {})},
+        'static': {'evidenceId': evidence_ids['static'], 'error': static_error,
+                   'requirements': static_requirements if static_requirements is not None else None},
+    }
+    return {'exam': exam, 'report': report, 'score': exam_score(report),
+            'referenceReport': reference, 'referenceScore': exam_score(reference),
+            'supplementary': supplementary, 'evidence': evidence, 'snapshot': snapshot_info,
+            'runner': {**outcomes[exam].to_dict(), 'evaluationId': evaluation_id}, 'trace': trace}
 
 
 def _runner_source() -> bytes:

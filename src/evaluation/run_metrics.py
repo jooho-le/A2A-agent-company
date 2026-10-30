@@ -1,5 +1,9 @@
 # 팀 시스템(dev Orchestrator)이 알려 주는 "개발 실행(Run) 기록"을 평가용 숫자(지표)로 바꾸는 파일이다.
-# 또 Single(에이전트 1개)과 Multi(에이전트 4개) 두 구조를 "공정하게 비교해도 되는지" 확인하고, 구조별로 요약한다.
+# 또 두 실험 조건을 "공정하게 비교해도 되는지" 확인하고, 조건별로 요약한다. 비교 기준(group_by)은 두 가지다.
+#   - 'architecture': Single(에이전트 1개)과 Multi(에이전트 4개) 구조 비교(D6, 지금은 보류지만 기능은 유지)
+#   - 'loopPolicy'  : 같은 Multi 구조에서 Ver1(순환 안 보호 테스트 + 최종, IN_LOOP_AND_FINAL)과
+#                     Ver2(최종만, FINAL_ONLY) 비교(2026-10-29 팀 회의). 두 조건의 의도한 차이는 순환 안 보호 테스트
+#                     (protectedTestSuiteRef) 하나뿐이고, 정책은 이름표가 아니라 동결 설정의 그 값으로 확인한다.
 #
 # 입력: 시스템 API가 돌려준 JSON(파이썬에서는 사전 dict)
 #       /api/v1/runs/{id}, 그리고 그 아래 /events, /issues, /tool-attempts, /usage, /configuration
@@ -16,6 +20,15 @@ from statistics import median  # 중앙값(가운데 값)을 구하는 도구
 
 from .aggregation import _uuid4
 from .common import ARCHITECTURES, aware_time
+from .scoring import exam_score, practice_effect
+
+LOOP_POLICIES = ('IN_LOOP_AND_FINAL', 'FINAL_ONLY')  # Ver1(순환 안 보호 테스트 + 최종), Ver2(최종만)
+GROUPINGS = {'architecture': ARCHITECTURES, 'loopPolicy': LOOP_POLICIES}  # 비교 기준별로 허용하는 이름표
+
+
+def loop_policy(settings) -> str:
+    # 동결 Run 설정(configuration)에서 순환 안 테스트 정책을 읽는다. 보호 테스트 참조가 있으면 Ver1, 없으면 Ver2.
+    return 'IN_LOOP_AND_FINAL' if (settings or {}).get('protectedTestSuiteRef') else 'FINAL_ONLY'
 
 PAGE_LIMIT = 500  # 시스템 API가 한 번에 돌려주는 최대 개수(그보다 많으면 여러 번에 나눠 받아야 한다)
 # 두 구조가 "똑같아야 하는" Run Configuration 항목들. 하나라도 다르면 공정한 비교가 아니다(개발정의서 11-A).
@@ -150,6 +163,8 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
     return {
         'runId': run_id, 'scenarioId': run.get('scenarioId'), 'experimentId': settings.get('experimentId'),
         'architecture': architecture,
+        # 순환 안 테스트 정책(Ver1·Ver2). 동결 설정을 받지 못했으면 모른다(None).
+        'loopPolicy': loop_policy(settings) if configuration is not None else None,
         'workflowStatus': run['status'], 'verdict': run.get('verdict'), 'codeVersion': run.get('codeVersion'),
         'terminationReason': run.get('terminationReason'),
         'fixAttempts': run['fixAttempt'], 'toolRetries': retries, 'toolAttemptRecords': len(attempts),
@@ -181,18 +196,22 @@ def _mean(values):
     return sum(values) / len(values) if values else None
 
 
-def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
-    # 구조(SINGLE_AGENT / MULTI_AGENT)별로 실험 결과를 요약한다.
+def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: str = 'architecture') -> dict:
+    # 실험 조건별로 결과를 요약한다. group_by='architecture'면 구조(SINGLE_AGENT / MULTI_AGENT)별,
+    # 'loopPolicy'면 순환 안 테스트 정책(IN_LOOP_AND_FINAL=Ver1 / FINAL_ONLY=Ver2)별이다.
     # 성공률의 분모는 "시작하지 못한 Run까지 포함한 계획한 전체 Run 수"이다.
     #   (성공한 것만 세면 성공률이 부풀려지기 때문이다.)
     # 입력:
     #   runs         : run_metrics가 돌려준 결과들의 목록
-    #   planned_runs : 구조별 계획한 Run 수. 예) {"SINGLE_AGENT": 5, "MULTI_AGENT": 5}
-    #   evaluations  : 독립 평가 보고서 목록. sourceRunId로 해당 Run과 연결한다.
+    #   planned_runs : 조건별 계획한 Run 수. 예) {"SINGLE_AGENT": 5, "MULTI_AGENT": 5} 또는 {"IN_LOOP_AND_FINAL": 5, "FINAL_ONLY": 5}
+    #   evaluations  : 독립 평가 보고서 목록(최종 시험지 채점). sourceRunId로 해당 Run과 연결한다.
     runs = list(runs)
-    if set(planned_runs) - set(ARCHITECTURES) or any(type(n) is not int or n < 1 for n in planned_runs.values()):
-        raise ValueError('planned_runs must map architectures to positive integers')
-    unplanned = {item['architecture'] for item in runs} - set(planned_runs)
+    if group_by not in GROUPINGS:
+        raise ValueError('group_by must be architecture or loopPolicy')
+    if (set(planned_runs) - set(GROUPINGS[group_by])
+            or any(type(n) is not int or n < 1 for n in planned_runs.values())):
+        raise ValueError('planned_runs must map experiment groups to positive integers')
+    unplanned = {item.get(group_by) for item in runs} - set(planned_runs)
     if unplanned:
         # 계획에 적지 않은 구조의 Run이 섞여 있으면 요약에서 조용히 빠지게 된다(성공·실패·비용이 사라진다). 그래서 거부한다.
         raise ValueError(f'runs belong to architectures that are not planned: {sorted(unplanned)}')
@@ -218,8 +237,8 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
         by_evaluation[report['sourceRunId']] = report
 
     result = {}
-    for architecture, planned in planned_runs.items():
-        mine = [item for item in runs if item['architecture'] == architecture]  # 이 구조의 Run들
+    for group, planned in planned_runs.items():
+        mine = [item for item in runs if item.get(group_by) == group]  # 이 조건의 Run들
         if len(mine) > planned:
             raise ValueError('more runs than planned')
         # count("SUCCESS")처럼 부르면 "판정이 SUCCESS인 Run이 몇 개인지" 센다.
@@ -243,7 +262,8 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
         # 통과율이 None(측정 못 함)인 보고서는 평균에서 뺀다. 0%로 취급하면 평균이 낮아지기 때문이다.
         requirement_rates = [r['requiredRequirementPassRate'] for r in reports if r['requiredRequirementPassRate'] is not None]
         check_rates = [r['requiredCheckPassRate'] for r in reports if r['requiredCheckPassRate'] is not None]
-        result[architecture] = {
+        scores = [exam_score(r) for r in reports]  # 요구사항별 같은 비중 점수(코드·환경 신분을 확인한 보고서만 점수가 있음)
+        result[group] = {
             'plannedRuns': planned, 'recordedRuns': len(mine), 'notStarted': planned - len(mine),
             'success': success, 'fail': failed, 'unverified': count('UNVERIFIED'), 'humanReview': count('HUMAN_REVIEW'),
             'aborted': aborted, 'inProgress': in_progress,
@@ -273,6 +293,13 @@ def experiment_summary(runs, planned_runs: dict, evaluations=()) -> dict:
                 'missedDefects': sum(1 for r in reports
                                      if by_run[r['sourceRunId']]['verdict'] == 'SUCCESS'
                                      and r.get('confirmedFailureIds')),
+                # 최종 시험 점수의 평균(점수를 못 낸 보고서는 빼고 그 수를 따로 적는다). 미검증이 있던 Run의 점수는
+                # 잠정 하한이라 lowerBoundRuns로 함께 보인다. 보안 위반이 확인된 Run 수는 점수와 따로 센다.
+                'meanExamScore': _mean([s['score'] for s in scores if s['score'] is not None]),
+                'meanCompletionRate': _mean([s['completionRate'] for s in scores if s['completionRate'] is not None]),
+                'unscoredRuns': sum(1 for s in scores if s['score'] is None),
+                'lowerBoundRuns': sum(1 for s in scores if s['scoreIsLowerBound']),
+                'securityViolationRuns': sum(1 for s in scores if s['securityViolations']),
             },
         }
     return result
@@ -433,9 +460,33 @@ def _lookup(document, dotted):
     return value
 
 
-def comparison_validity(entries) -> dict:
-    # Single과 Multi 결과를 나란히 놓고 비교해도 되는지 확인한다.
-    # entries: 목록. 각 항목 = {"architecture": 구조 이름,
+def loop_policy_effect(runs, evaluations, references) -> dict:
+    # Ver1·Ver2의 연습 효과를 계산한다(scoring.practice_effect). Run마다 최종 시험지 보고서(evaluations)와 같은 코드를
+    # 순환용 시험지로 참고 채점한 보고서(references, D5 결과의 referenceReport)를 짝지어 정책별로 모은다.
+    # runs: run_metrics 결과 목록(loopPolicy가 있어야 한다).
+    policies = {item['runId']: item.get('loopPolicy') for item in runs}
+    reference_by_run = {}
+    for reference in references:
+        if reference['sourceRunId'] in reference_by_run:
+            raise ValueError('more than one reference report for the same run')
+        reference_by_run[reference['sourceRunId']] = reference
+    groups = {policy: [] for policy in LOOP_POLICIES}
+    for report in evaluations:
+        policy, reference = policies.get(report['sourceRunId']), reference_by_run.get(report['sourceRunId'])
+        if policy not in groups or reference is None:
+            raise ValueError('every evaluation needs a run with a loop policy and its reference report')
+        if reference.get('expectedManifest') != report.get('expectedManifest'):
+            raise ValueError('reference report scored different code than the evaluation')
+        groups[policy].append((report, reference))
+    return practice_effect(groups)
+
+
+def comparison_validity(entries, *, group_by: str = 'architecture') -> dict:
+    # 두 실험 조건의 결과를 나란히 놓고 비교해도 되는지 확인한다.
+    #   group_by='architecture': Single과 Multi 비교(조건은 구조 하나만 달라야 한다)
+    #   group_by='loopPolicy'  : Ver1과 Ver2 비교(같은 구조, 순환 안 보호 테스트 참조 하나만 달라야 한다)
+    # entries: 목록. 각 항목 = {"architecture": 구조 이름, ("loopPolicy": Ver1·Ver2 이름표,)
+    #                          ("pairId": 같은 조건으로 함께 실행한 Ver1·Ver2 한 쌍의 번호,)
     #                          "configuration": GET .../configuration 응답,
     #                          "evaluation": 독립 평가 보고서 또는 None}
     #
@@ -447,17 +498,22 @@ def comparison_validity(entries) -> dict:
     #   RERUN_RUN          = 환경 digest만 다르거나, 평가 보고서가 그 Run이 동결한 환경이 아닌 곳에서 채점되었다.
     #                        비교 전체가 아니라 그 Run만 따로 표시하고 다시 실행해야 한다.
     entries = list(entries)
-    if len({item['architecture'] for item in entries}) < 2:
-        raise ValueError('comparison needs both architectures')
+    if group_by not in GROUPINGS:
+        raise ValueError('group_by must be architecture or loopPolicy')
+    if len({item.get(group_by) for item in entries}) < 2:
+        raise ValueError('comparison needs both groups')
     violations, warnings = [], []  # violations = 위반 목록, warnings = 주의 목록
+    # Ver1·Ver2 비교에서 보호 테스트 참조는 의도한 차이라서 "같아야 하는 조건"과 "빠지면 안 되는 조건"에서 뺀다.
+    controlled = tuple(field for field in CONTROLLED_FIELDS
+                       if not (group_by == 'loopPolicy' and field == 'protectedTestSuiteRef'))
 
     def distinct(label, read, severity, subset=entries):
         # subset의 모든 Run에서 read(항목)로 값을 읽어 모은다. 서로 다른 값이 둘 이상이면 위반으로 기록한다.
         # 구조별로 어떤 값들이 나왔는지 함께 적는다. (입력 순서가 달라도 결과가 같다.)
-        seen = {}  # {구조: {값의 JSON 글자: 값}}
+        seen = {}  # {조건: {값의 JSON 글자: 값}}
         for item in subset:
             value = read(item)
-            seen.setdefault(item['architecture'], {})[json.dumps(value, sort_keys=True, default=str)] = value
+            seen.setdefault(item.get(group_by), {})[json.dumps(value, sort_keys=True, default=str)] = value
         if len({key for values in seen.values() for key in values}) > 1:
             violations.append({'field': label, 'severity': severity, 'values': {
                 architecture: (list(values.values())[0] if len(values) == 1
@@ -482,6 +538,13 @@ def comparison_validity(entries) -> dict:
         label = item['architecture']
         if label not in ARCHITECTURES:
             raise ValueError('entry architecture must be SINGLE_AGENT or MULTI_AGENT')
+        if group_by == 'loopPolicy':
+            # Ver1·Ver2 이름표는 동결 설정의 보호 테스트 참조와 맞아야 한다(이름표만 바꿔 붙이지 못하게).
+            if item.get('loopPolicy') not in LOOP_POLICIES:
+                raise ValueError('entry loopPolicy must be IN_LOOP_AND_FINAL or FINAL_ONLY')
+            if item['loopPolicy'] != loop_policy(settings(item)):
+                flag('loopPolicy', 'INVALID_COMPARISON', {str(item['configuration'].get('runId')): {
+                    'label': item['loopPolicy'], 'frozen': loop_policy(settings(item))}})
         run_id = item['configuration'].get('runId')
         frozen = settings(item).get('architecture')
         if frozen is None:
@@ -522,7 +585,7 @@ def comparison_validity(entries) -> dict:
     # (양쪽이 모두 비어 있다고 해서 같은 조건은 아니다. 확인된 것이 없을 뿐이다.)
     for item in entries:
         run_id = item['configuration'].get('runId')
-        missing = [field for field in CONTROLLED_FIELDS + ENVIRONMENT_FIELDS
+        missing = [field for field in controlled + ENVIRONMENT_FIELDS
                    if field not in OPTIONAL_FIELDS
                    and (item['configuration'].get('scenarioId') if field == 'scenarioId'
                         else _lookup(settings(item), field)) is None]
@@ -531,7 +594,23 @@ def comparison_validity(entries) -> dict:
         if missing:
             flag('missing required conditions', 'INVALID_COMPARISON', {str(run_id): missing})
 
-    for field in CONTROLLED_FIELDS:
+    if group_by == 'loopPolicy':
+        # 구조는 두 조건이 같아야 한다. Ver1 Run끼리는 같은 보호 테스트 묶음을 써야 한다.
+        distinct('architecture', lambda item: item['architecture'], 'INVALID_COMPARISON')
+        distinct('protectedTestSuiteRef', lambda item: settings(item).get('protectedTestSuiteRef'), 'INVALID_COMPARISON',
+                 [item for item in entries if item['loopPolicy'] == 'IN_LOOP_AND_FINAL'])
+        # 같은 조건으로 함께 실행한 쌍(pairId)마다 Ver1·Ver2가 하나씩 있어야 한다(시간대·순서 차이가 한쪽에 몰리지 않게).
+        pairs = {}
+        for item in entries:
+            if item.get('pairId') is None:
+                warnings.append({'field': 'pairId', 'detail': 'RUN_IS_NOT_PAIRED',
+                                 'runId': item['configuration'].get('runId')})
+            else:
+                pairs.setdefault(item['pairId'], []).append(item['loopPolicy'])
+        broken = {str(pair): sorted(policies) for pair, policies in pairs.items() if sorted(policies) != sorted(LOOP_POLICIES)}
+        if broken:
+            flag('pairId', 'INVALID_COMPARISON', broken)
+    for field in controlled:
         if field == 'scenarioId':
             distinct(field, lambda item: item['configuration'].get('scenarioId'), 'INVALID_COMPARISON')
         else:
@@ -556,7 +635,7 @@ def comparison_validity(entries) -> dict:
     for item in entries:
         state = settings(item).get('warmupState')
         if state is not None:
-            states.setdefault(item['architecture'], set()).add(state)
+            states.setdefault(item.get(group_by), set()).add(state)
     if len(set().union(*states.values()) if states else ()) > 1:
         warnings.append({'field': 'warmupState', 'detail': 'WARMUP_STATE_DIFFERS',
                          'values': {architecture: sorted(values) for architecture, values in sorted(states.items())}})

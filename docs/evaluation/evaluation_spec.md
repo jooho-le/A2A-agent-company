@@ -204,19 +204,19 @@ MVP scenario_key는 SCN-001이다. 내부 scenario_id와 requirement_id는 Regis
 | REQ-002 | 합의된 이메일 파서의 invalid 입력 거부 | QA-SIGNUP-002 |
 | REQ-003 | canonical email 중복 금지, DB UNIQUE 및 동시 요청 보호 | QA-SIGNUP-003, QA-SIGNUP-005, SEC-SIGNUP-003 |
 | REQ-004 | 비밀번호 최소 8자 | QA-SIGNUP-004 |
-| REQ-005 | 승인된 Password Hash 알고리즘·파라미터 | SEC-SIGNUP-001(정적), SEC-SIGNUP-002(실행) |
-| REQ-006 | 비밀번호·저장 해시가 API/A2A/로그/Trace에 미노출 | SEC-SIGNUP-004(정적), SEC-SIGNUP-005(실행) |
+| REQ-005 | 승인된 Password Hash 알고리즘·파라미터 | SEC-SIGNUP-002(실행) |
+| REQ-006 | 비밀번호·저장 해시가 API/A2A/로그/Trace에 미노출 | SEC-SIGNUP-005(실행). Orchestrator 기록 부분은 D4 Trace 검사 |
 | REQ-007 | 실제 가입 결과와 사용자 응답 일치 | QA-SIGNUP-006 |
 | REQ-008 | 요구→개발→검증→Issue→수정→재검증 추적 | registry상 검증자가 Orchestrator라 독립 평가 범위 밖. PIPE-016과 D4의 Trace 확인 |
 
 | 검사 Key | 입력·절차 | 기대 결과 |
 |---|---|---|
-| QA-SIGNUP-001 | 미가입 유효 이메일 + 8자 이상 비밀번호로 가입, DB/응답 확인 | 성공 응답, 사용자 1명 생성 |
-| QA-SIGNUP-002 | 형식 오류 이메일(@ 없음, 도메인 없음, 빈 값 등), 요청 전후 사용자 수 비교 | 실패 응답, DB 변화 없음 |
-| QA-SIGNUP-003 | 가입한 이메일을 대소문자·앞뒤 공백만 바꿔 재가입 | 4xx 거부, 사용자 1명 유지 |
-| QA-SIGNUP-004 | 7자 비밀번호 / 8자 비밀번호(시험용으로 실행 때 생성) | 7자 거부·미생성, 8자 성공 |
+| QA-SIGNUP-001 | 모양이 다른 유효 이메일 2개 + 8자 이상 비밀번호로 가입, DB/응답 확인 | 가입마다 성공 응답, 사용자 1명 생성 |
+| QA-SIGNUP-002 | 형식 오류 이메일 7종류, 요청 전후 사용자 수 비교 | 4xx 거부, DB 변화 없음 |
+| QA-SIGNUP-003 | 가입한 이메일을 같게·대소문자·앞뒤 공백·둘 다 바꿔 재가입 | 4xx 거부, 사용자 1명 유지 |
+| QA-SIGNUP-004 | 7자와 더 짧은 비밀번호 / 8자와 더 긴 비밀번호(실행 때 생성) | 7자 이하 거부·미생성, 8자 이상 성공 |
 | QA-SIGNUP-005 | 같은 canonical 이메일 동시 요청(N=5) | 정확히 1명 생성, 나머지 4xx 거부 |
-| QA-SIGNUP-006 | 성공·형식 오류·중복 요청별 응답과 실제 DB 변화 대조 | 응답 성공/실패가 실제 처리와 일치 |
+| QA-SIGNUP-006 | 정해진 순서의 정상·형식 오류·짧은 비밀번호·중복 요청(거부된 이메일로 바로 정상 가입 포함) | 응답 성공/실패가 실제 처리와 일치, 거부가 상태를 남기지 않음 |
 
 0.3까지 쓰던 QA-SIGNUP-004/005(7자·8자 분리), 006-API/006-UI, 007(동시 요청) 키는 위 키로 재정의했다. 과거 결과를 새 키의 의미로 재해석하지 않는다. 화면(UI) 검사는 2차 기업미팅의 "다수 화면 테스트는 범위 밖"에 따라 MVP에서 뺐다.
 
@@ -232,13 +232,11 @@ MVP scenario_key는 SCN-001이다. 내부 scenario_id와 requirement_id는 Regis
 
 | 검사 Key | 방식 | 확인 대상·기대 결과 | 요구 |
 |---|---|---|---|
-| SEC-SIGNUP-001 | 정적 | Argon2id 사용·수치 기준 충족·평문/MD5/SHA 등 저장 없음, 해시 호출 결과만 저장 | REQ-005 |
 | SEC-SIGNUP-002 | 실행 | 가입 후 저장값: `$argon2id$` 형식, 수치 충족, 같은 비밀번호 두 계정의 salt 다름, 원문과 다름. 실제 가입 비밀번호로 verify 성공, 별도로 생성한 다른 비밀번호로 verify 실패(비밀번호·저장 해시 값은 기록하지 않음) | REQ-005 |
-| SEC-SIGNUP-003 | 정적 | 이메일 UNIQUE 선언 + 정규화(strip·lower). pydantic 설정·`CREATE UNIQUE INDEX`도 인정 | REQ-003 |
-| SEC-SIGNUP-004 | 정적 | 응답·로그·예외·검증 오류 응답에 비밀번호·해시 경로 없음 | REQ-006 |
-| SEC-SIGNUP-005 | 실행 | 성공·실패 요청 후 응답 본문·서버 로그에 비밀번호 원문·저장 해시 문자열 없음(일치 여부만 기록) | REQ-006 |
+| SEC-SIGNUP-003 | 실행 | 대소문자·공백 변형 이메일이 정리된 값(앞뒤 공백 제거·소문자)으로 저장되고, 같은 행을 앱을 거치지 않고 DB에 넣으면 이메일 칸 UNIQUE로 거부 | REQ-003 |
+| SEC-SIGNUP-005 | 실행 | 성공·형식 오류·짧은 비밀번호·중복·형식이 틀린 본문·DB 오류 주입 요청의 응답과 서버 로그(앱 코드의 모든 로그 수준)·출력에 비밀번호·해시 없음(그대로·base64·16진수·해시 모양, 일치 여부만 기록) | REQ-006 |
 
-정적 검사(001·003·004)는 개발 순환 안 Security 판정(`security/assess.py`, dev 42번 승인 함수)으로 쓰고, 실행 검사(002·005)는 최종 독립 평가용이다. 0.3의 SEC-SIGNUP-004~007(SQL 삽입, 화면 스크립트, UI 우회 직접 API, 소스 비밀정보)은 위와 같이 확장 후보로 내렸다. 그래서 OPEN-12(이 항목들의 요구사항 연결)는 해소됐다.
+모든 검사는 실행 검사이고 QA와 Security가 같은 방식이다(2026-10-30). 검사마다 시험지 세 벌(순환용·시범 최종용·공식 최종용)이 있고, Ver1은 순환 안에서 QA·Security 에이전트가 각자 순환용 시험지를 실행하며(dev 보호 범위에 역할 표시), Ver2는 최종에서만 평가한다. 정적 판정(`security/assess.py`)은 점수·판정에 넣지 않고 최종 평가의 보조 점검(`STATIC-REQ-003·005·006`)으로만 쓴다. 예전 정적 검사 SEC-SIGNUP-001·004는 실행 검사 002·005에 합쳤다. 세부는 [기준표](scn001_criteria.md) 2절.
 
 REQ-006 중 Orchestrator 기록(Trace·Issue·Artifact·도구 시도·telemetry)의 노출은 위 표 밖에서 D4 `trace_checks.check_trace_exposure`가, REQ-008의 요구→개발→검증→수정→재검증 연결은 `check_traceability`가 확인한다. A2A Message 본문은 조회 API가 없어 보지 못한다.
 
@@ -565,10 +563,11 @@ experiments/                              # 실험 설정·집계 절차 (D6, �
 | src/evaluation/security/ | SCN-001 Security 정적 판정(D1): 기준 JSON + dev 42번 `assess()`. REQ-003·005·006, Bandit 지원 규칙 판정, dev 승인 로더 통과 |
 | src/evaluation/run_metrics.py | dev Run 조회 JSON → 지표(수정 요청과 재검증 PASS로 확인된 해결을 구분), 구조별 요약(평가 보고서의 코드 버전이 Run의 최종 코드 버전과 같을 때만 수용), 비교 가능 여부 검사(평가 보고서의 환경 지문을 그 Run의 동결 환경과도 대조, warm-up 차이 경고), 페이지 조회 도우미 |
 | src/evaluation/demo_index.py | 시연 자료 목록과 SHA-256, 256MiB 이하 텍스트의 알려진 비밀값 검색. 파일별 `sensitiveScan`으로 검색 완료·생략 사유 구분. 일반 파일만 받고 파이프·소켓 등 특수 파일은 거부 |
-| src/evaluation/protected_tests/ | 회원가입 보호 테스트(D2) 8개와 검사 대응표 11개, dev 보호 파일 설정·보호 QA 케이스·최종 평가 입력 생성, 팀장 전달 파일 내보내기(`python -m evaluation.protected_tests export`) |
+| src/evaluation/protected_tests/ | 회원가입 실행 검사 9개(QA 6·Security 3) × 시험지 세 벌(순환용·시범 최종용·공식 최종용), 역할별 dev 보호 범위·보호 케이스·최종 평가 입력 생성, Ver1용 팀장 전달 파일 내보내기 |
 | src/evaluation/check_adapters.py | unittest-v1 보고서·정적 판정 결과 → CheckResult. 보고서 없음·형식 오류·대응표 밖 줄은 모두 미검증 |
 | src/evaluation/trace_checks.py | Run 기록의 비밀번호·해시 노출(REQ-006 Orchestrator 부분), 요구→개발→검증→Issue→수정→재검증→판정 연결(REQ-008) |
 | src/evaluation/final_evaluation.py | 최종 독립 채점기(D5): Snapshot tar 해시·lock·이미지 확인, 안전한 풀기, 컨테이너 보호 테스트(dev 샌드박스와 같은 제한), 정적 판정, 독립 평가 보고서·증거 |
+| src/evaluation/scoring.py, coverage_runner.py | 최종 시험 점수(요구사항별 같은 비중·검사 완료율·보안 위반)와 연습 효과, 테스트가 지나간 줄 기록(보조 점검) |
 | src/evaluation/summary.py | 회의·발표용 Markdown 요약(판정·요구사항별 결과·실패→수정→재검증 흐름·지표, 에이전트 자유 글 제외) |
 | src/evaluation/common.py | 구조 이름·시각 파싱 공통 도우미 |
 | src/evaluation/__main__.py, report_demo.py | 집계·보고서 합성 예시 |
