@@ -81,6 +81,10 @@ def create_run(
     """Create a durable Run and its initial pending Planner Step."""
     if get_scenario(body.scenario_id) is None:
         raise HTTPException(status_code=422, detail="scenarioId is not registered; see GET /api/v1/scenarios")
+    # Configuration support must not silently dispatch a Single request to
+    # the existing four-role Planner path. The real Single dispatcher is 52.
+    if body.configuration.architecture == "SINGLE_AGENT":
+        raise HTTPException(status_code=503, detail="SINGLE_AGENT_RUNTIME_NOT_CONFIGURED")
     validator = request.app.state.submission_validator
     if validator is not None:
         try:

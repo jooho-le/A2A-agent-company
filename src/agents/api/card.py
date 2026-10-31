@@ -13,6 +13,7 @@ from a2a.types import (
 
 from agents.core.config import AgentSettings
 from agents.core.contracts import A2A_PROTOCOL_BINDING, A2A_PROTOCOL_VERSION
+from agents.core.identity import SingleAgentIdentity
 from orchestrator.domain.states import AgentRole
 
 
@@ -21,6 +22,7 @@ _ROLE_PURPOSES = {
     AgentRole.DEVELOPER: "product implementation, fixes, and build requests",
     AgentRole.QA: "independent functional testing and QA reporting",
     AgentRole.SECURITY: "independent security inspection and reporting",
+    SingleAgentIdentity.SINGLE_AGENT: "one Agent for planning, implementation, QA, security review, and fixes",
 }
 
 

@@ -57,7 +57,7 @@ class RunConfiguration(ImmutableDomainModel):
 
     model_config = ConfigDict(hide_input_in_errors=True)
     experiment_id: UUID4 | None = Field(default=None, alias="experimentId")
-    architecture: Literal["MULTI_AGENT"] = "MULTI_AGENT"
+    architecture: Literal["MULTI_AGENT", "SINGLE_AGENT"] = "MULTI_AGENT"
     starting_commit_hash: str | None = Field(default=None, alias="startingCommitHash", pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
     starting_snapshot_sha256: str | None = Field(default=None, alias="startingSnapshotSha256", pattern=r"^[0-9a-f]{64}$")
     model: ModelConfiguration | None = None
@@ -86,11 +86,12 @@ class RunConfiguration(ImmutableDomainModel):
 
     @model_validator(mode="after")
     def validate_experiment_inputs(self) -> "RunConfiguration":
+        # Ver2 intentionally has no in-loop protected suite. Keep the same
+        # exception already merged into dev; final evaluation remains separate.
         if self.experiment_id is not None and any(value is None for value in (
             self.starting_commit_hash, self.starting_snapshot_sha256, self.model,
             self.environment, self.limits.runtime_budget_ms,
-            self.protected_test_suite_ref, self.scanner_profile_ref,
-            self.warmup_state, self.execution_order,
+            self.scanner_profile_ref, self.warmup_state, self.execution_order,
         )):
             raise ValueError("experiment runs require the complete immutable comparison baseline")
         return self

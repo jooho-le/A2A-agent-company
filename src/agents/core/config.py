@@ -6,9 +6,9 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from agents.core.contracts import AGENT_PORTS
+from agents.core.contracts import AGENT_SERVICE_PORTS
+from agents.core.identity import AgentServiceIdentity
 from agents.llm.budget import LLMLimits
-from orchestrator.domain.states import AgentRole
 
 
 class AgentConfigurationError(ValueError):
@@ -16,7 +16,7 @@ class AgentConfigurationError(ValueError):
 
 
 class AgentSettings(BaseSettings):
-    """One role per process; all optional model settings start unconfigured."""
+    """One service identity per process; model settings start unconfigured."""
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
@@ -27,7 +27,7 @@ class AgentSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    role: AgentRole
+    role: AgentServiceIdentity
     host: Literal["127.0.0.1", "localhost", "::1"] = "127.0.0.1"
     port: int | None = Field(default=None, ge=1, le=65535)
     environment: Literal["local", "development", "test", "production"] = "local"
@@ -70,7 +70,7 @@ class AgentSettings(BaseSettings):
 
     @property
     def listen_port(self) -> int:
-        return self.port if self.port is not None else AGENT_PORTS[self.role]
+        return self.port if self.port is not None else AGENT_SERVICE_PORTS[self.role]
 
     @property
     def agent_base_url(self) -> str:

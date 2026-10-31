@@ -294,7 +294,15 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 사용자 개발정의서 §11-A와 `dev`에 반영된 평가 변경을 대조해 [47번 Single-Agent 실행 계약](docs/47-single-agent-execution-contract.md)을 정리했습니다. 한 Agent가 기획·개발·검증·수정을 이어서 수행하고, Multi와 같은 도구 기능·수정 기회·환경·평가 조건을 적용합니다. 단일 정체성, 보호된 Snapshot/평가 기준, Ver1·Ver2, 기록·평가 인계와 47~56번 구현 순서를 구분했습니다.
 
-47번은 문서 단계이며 현재 실행 설정은 계속 `MULTI_AGENT`만 허용합니다. 다음 작업은 **48번 Single-Agent 실행 설정·프로젝트 JSON Schema 확장**입니다. 앞선 44번 실제 LLM·Docker 실행 확인은 별도 보류 항목으로 남습니다.
+47번은 설계 기록입니다. 후속 48~50번 구현은 아래와 같으며, 앞선 44번 실제 LLM·Docker 실행 확인은 별도 보류 항목으로 남습니다.
+
+### Single-Agent 설정·서버·Prompt 기반 — 48~50번
+
+[48번 실행 설정](docs/48-single-agent-run-configuration.md)은 `SINGLE_AGENT`와 기존 `MULTI_AGENT`를 지원하고, Ver2의 순환용 보호 테스트 참조 생략 규칙을 유지합니다. 실제 Single 실행기가 연결되기 전에는 `/api/v1/runs`의 Single 요청을 503 `SINGLE_AGENT_RUNTIME_NOT_CONFIGURED`로 거절해 기존 Planner로 잘못 실행되는 것을 막습니다.
+
+[49번 서버](docs/49-single-agent-a2a-server.md)는 기존 네 역할과 별도의 `SINGLE_AGENT` 서비스 정체성·포트 `8105`·DB `.data/agents/single_agent.sqlite3`를 사용합니다. `PYTHONPATH=src .venv/bin/python -m agents.single`로 통신 서버를 시작할 수 있으며, 현재는 Bootstrap으로 작업을 거절하고 `executionReady=false`를 유지합니다.
+
+[50번 통합 Prompt/기록](docs/50-single-agent-prompts-context.md)은 같은 Agent의 System Prompt와 Context를 유지하면서 단계별 Draft를 검증하고, 재시작 뒤에도 저장된 메시지·산출물을 함께 불러옵니다. 다음은 **51번 MCP 기능·권한 연결**, 실제 개발 실행은 52번입니다. 실제 LLM/Docker 실행과 비교 실험은 아직 수행하지 않았습니다.
 
 ## 테스트
 

@@ -145,7 +145,10 @@
           "title": "Experimentid"
         },
         "architecture": {
-          "const": "MULTI_AGENT",
+          "enum": [
+            "MULTI_AGENT",
+            "SINGLE_AGENT"
+          ],
           "default": "MULTI_AGENT",
           "title": "Architecture",
           "type": "string"
