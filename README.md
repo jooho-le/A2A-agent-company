@@ -290,6 +290,12 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 [45번 플랫폼 인계 안내](docs/45-owned-platform-handoff.md)에 구현 위치·번호별 이력, Bootstrap/Owned Host 차이, 승인 설정·실행 명령, Run 조회·Artifact/Manifest 계약, 팀원 인계 경계와 미검증/보류 항목을 정리했습니다. 사용자 요청에 따라 실제 실행보다 문서를 먼저 정리했으며, **다음은 여전히 44번 실제 실행 준비·확인**입니다. 코드·공식 Schema·의존성·팀원 모듈 변경이나 실제 외부 실행·Git commit/push는 하지 않았습니다.
 
+### Single-Agent 실행 계약 — 47번, 구현 전 설계
+
+사용자 개발정의서 §11-A와 `dev`에 반영된 평가 변경을 대조해 [47번 Single-Agent 실행 계약](docs/47-single-agent-execution-contract.md)을 정리했습니다. 한 Agent가 기획·개발·검증·수정을 이어서 수행하고, Multi와 같은 도구 기능·수정 기회·환경·평가 조건을 적용합니다. 단일 정체성, 보호된 Snapshot/평가 기준, Ver1·Ver2, 기록·평가 인계와 47~56번 구현 순서를 구분했습니다.
+
+47번은 문서 단계이며 현재 실행 설정은 계속 `MULTI_AGENT`만 허용합니다. 다음 작업은 **48번 Single-Agent 실행 설정·프로젝트 JSON Schema 확장**입니다. 앞선 44번 실제 LLM·Docker 실행 확인은 별도 보류 항목으로 남습니다.
+
 ## 테스트
 
 ```bash
