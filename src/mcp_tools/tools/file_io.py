@@ -87,10 +87,15 @@ def _parts(workspace: BoundWorkspace, path: str, access: WorkspaceAccess):
         if not isinstance(workspace, BoundWorkspace):
             raise ValueError
         if access is WorkspaceAccess.WRITE and workspace.role not in (
-            AgentRole.DEVELOPER, AgentRole.QA,
+            AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY,
         ):
             raise ValueError
         parts = authorize_path(workspace.role, path, access)
+        if access is WorkspaceAccess.WRITE and workspace.role is AgentRole.SECURITY:
+            # New Security write capability exists only for generated tests,
+            # including at this lower primitive (not just the MCP wrapper).
+            if len(parts) < 4 or parts[:3] != ("outputs", "security", "tests"):
+                raise ValueError
         path.encode("utf-8", errors="strict")
         if len(parts) > MAX_DIRECTORY_DEPTH + 1 or any(
             part.casefold().startswith(_TEMP_PREFIX) for part in parts

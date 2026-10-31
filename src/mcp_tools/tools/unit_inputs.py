@@ -24,6 +24,7 @@ from mcp_tools.tools.unit_config import (
     MAX_UNIT_DIRECTORY_DEPTH, MAX_UNIT_FILE_BYTES, MAX_UNIT_FILES, MAX_UNIT_TOTAL_BYTES,
     UnitTestConfigurationError, UnitTestScope, _copy_scope, _test_path,
 )
+from orchestrator.domain.states import AgentRole
 from orchestrator.workspaces.filesystem import BoundWorkspace, open_regular_file, walk_directory
 from orchestrator.workspaces.policy import (
     WorkspaceAccess, WorkspaceAccessError, authorize_path,
@@ -137,11 +138,13 @@ def _read_file(directory_fd, name):
 
 
 def _capture_qa(workspace):
+    # Generated validator tests live in the role's own output scratch.
     captured = {}
     total = 0
     visited = 0
     observations = []
-    parts = authorize_path(workspace.role, "outputs/qa/tests", WorkspaceAccess.READ)
+    directory = "outputs/security/tests" if workspace.role is AgentRole.SECURITY else "outputs/qa/tests"
+    parts = authorize_path(workspace.role, directory, WorkspaceAccess.READ)
 
     def visit(directory_fd, components):
         nonlocal total, visited

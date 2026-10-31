@@ -1,25 +1,17 @@
 """One actor, several draft shapes; drafts are never execution evidence."""
 
 from dataclasses import dataclass, field
-from enum import Enum
 from hashlib import sha256
 import json
 from typing import Callable
 
+from agents.core.identity import SinglePhase
 from agents.llm.contracts import StructuredOutput
 from agents.roles.developer_contract import build_developer_output_contract, validate_developer_decision
 from agents.roles.planner_contract import build_planner_output_contract, validate_planner_decision
 from agents.roles.qa_contract import build_qa_output_contract, validate_qa_decision
 from agents.roles.security_contract import build_security_output_contract, validate_security_decision
 from orchestrator.domain.scenario_registry import RequirementValidator, ScenarioDefinition
-
-
-class SinglePhase(str, Enum):
-    PLANNING = "PLANNING"
-    IMPLEMENTING = "IMPLEMENTING"
-    QA = "QA"
-    SECURITY = "SECURITY"
-    FIXING = "FIXING"
 
 
 class SingleContractError(ValueError):

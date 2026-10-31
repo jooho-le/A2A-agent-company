@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 from mcp_tools.runtime import MCPBinding
 from mcp_tools.tools.build_config import _copy_profile
-from mcp_tools.tools.unit_config import UnitTestScope, _copy_scope, MAX_UNIT_FILES, MAX_UNIT_FILE_BYTES, MAX_UNIT_TOTAL_BYTES
+from mcp_tools.tools.unit_config import UnitTestScope, _copy_scope, scope_payload, MAX_UNIT_FILES, MAX_UNIT_FILE_BYTES, MAX_UNIT_TOTAL_BYTES
 from mcp_tools.tools.unit_inputs import UnitTestInputs, _RUNNER_PATH, _test_path
 from mcp_tools.tools.unit_report import UnitTestReport, parse_unit_report
 from orchestrator.artifacts.sqlite_store import SQLiteArtifactContentStore, _canonical
@@ -26,6 +26,10 @@ from orchestrator.domain.models import WorkflowRun, WorkflowStep
 from orchestrator.domain.run_configuration import RunConfigurationArtifact
 from orchestrator.domain.snapshot_handoff import CodeSnapshotArtifact, ExecutionManifest
 from orchestrator.domain.states import AgentRole, WorkflowStatus, WorkflowStepStatus
+
+# Validator roles run Host-selected tests against a frozen Snapshot during
+# validation. Security uses the same unit-test path as QA when configured.
+_VALIDATORS = frozenset({AgentRole.QA, AgentRole.SECURITY})
 from orchestrator.domain.workspaces import WorkspaceRecord
 from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
 from orchestrator.sandbox.contracts import ExecutionProfile, SandboxLimits, SandboxResult
@@ -197,9 +201,9 @@ class UnitTestOutputStore:
                     or stored.media_type != "application/x-tar"
                     or source.artifact_uri != f"artifact://{source.artifact_id}/source.tar"):
                 raise ValueError
-            if binding.role is AgentRole.QA and connection.execute(
-                "SELECT 1 FROM snapshot_read_grants WHERE artifact_id=? AND role='QA' AND access='READ_ONLY'",
-                (str(source.artifact_id),),
+            if binding.role in _VALIDATORS and connection.execute(
+                "SELECT 1 FROM snapshot_read_grants WHERE artifact_id=? AND role=? AND access='READ_ONLY'",
+                (str(source.artifact_id), binding.role.value),
             ).fetchone() is None:
                 raise ValueError
             return stored
@@ -208,7 +212,7 @@ class UnitTestOutputStore:
 
     @staticmethod
     def _context(connection, binding, source, scope):
-        if (not isinstance(binding, MCPBinding) or binding.role not in {AgentRole.DEVELOPER, AgentRole.QA}
+        if (not isinstance(binding, MCPBinding) or binding.role not in {AgentRole.DEVELOPER, *_VALIDATORS}
                 or binding.agent_role is not binding.role):
             raise UnitTestStoreError("UNIT_TEST_CONTEXT_DENIED")
         if not isinstance(source, CodeSnapshotArtifact):
@@ -226,7 +230,7 @@ class UnitTestOutputStore:
             configuration = RunConfigurationArtifact.model_validate_json(rows[2]["payload_json"])
             environment = configuration.configuration.environment
             allowed = {AgentRole.DEVELOPER: {WorkflowStatus.IMPLEMENTING, WorkflowStatus.FIXING},
-                       AgentRole.QA: {WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING}}
+                       **{role: {WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING} for role in _VALIDATORS}}
             if (run.run_id != binding.run_id or run.workspace_id != binding.workspace_id
                     or rows[0]["status"] != run.status.value or run.status not in allowed[binding.role]
                     or workspace.workspace_id != binding.workspace_id or workspace.run_id != binding.run_id
@@ -244,7 +248,7 @@ class UnitTestOutputStore:
                         or step.status.value != row["status"]):
                     raise UnitTestStoreError("UNIT_TEST_RESULT_INTEGRITY_ERROR")
                 if (step.agent_role is binding.role and step.status is WorkflowStepStatus.RUNNING
-                        and (binding.role is AgentRole.QA or step.attempt == run.fix_attempt)):
+                        and (binding.role in _VALIDATORS or step.attempt == run.fix_attempt)):
                     active.append(step)
             if len(active) != 1:
                 raise UnitTestStoreError("UNIT_TEST_CONTEXT_DENIED")
@@ -259,7 +263,7 @@ class UnitTestOutputStore:
                     raise UnitTestStoreError("UNIT_TEST_CONTEXT_DENIED")
             elif source.artifact_id not in step.input_artifact_ids:
                 raise UnitTestStoreError("UNIT_TEST_CONTEXT_DENIED")
-            if scope.kind == "PROTECTED" and (binding.role is not AgentRole.QA
+            if scope.kind == "PROTECTED" and (binding.role not in _VALIDATORS or binding.role not in scope.roles
                     or scope.protected_suite_ref != configuration.configuration.protected_test_suite_ref):
                 raise UnitTestStoreError("UNIT_TEST_CONTEXT_DENIED")
             return step, UnitTestOutputStore._source(connection, binding, source)
@@ -270,13 +274,7 @@ class UnitTestOutputStore:
 
     @staticmethod
     def _scope_payload(scope):
-        validated = _copy_scope(scope)
-        return {
-            "name": validated.name, "kind": validated.kind, "pattern": validated.pattern,
-            "source_directory": validated.source_directory,
-            "protected_files": None if validated.protected_files is None else dict(validated.protected_files),
-            "protected_suite_ref": validated.protected_suite_ref,
-        }
+        return scope_payload(_copy_scope(scope))
 
     @staticmethod
     def _profile(profile):
@@ -348,7 +346,7 @@ class UnitTestOutputStore:
 
     @staticmethod
     def _result_metadata(binding, source, result, manifest_id, step_id, profile, scope, inputs_payload, report):
-        if (not isinstance(binding, MCPBinding) or binding.role not in {AgentRole.DEVELOPER, AgentRole.QA}
+        if (not isinstance(binding, MCPBinding) or binding.role not in {AgentRole.DEVELOPER, *_VALIDATORS}
                 or binding.agent_role is not binding.role or type(result) is not SandboxResult
                 or not isinstance(source, CodeSnapshotArtifact) or type(report) is not UnitTestReport):
             raise UnitTestStoreError("UNIT_TEST_RESULT_INVALID")
@@ -444,7 +442,7 @@ class UnitTestOutputStore:
                 *, profile: ExecutionProfile, scope: UnitTestScope, inputs: UnitTestInputs,
                 report: UnitTestReport) -> UnitTestExecutionRecord:
         try:
-            if (not isinstance(binding, MCPBinding) or binding.role not in {AgentRole.DEVELOPER, AgentRole.QA}
+            if (not isinstance(binding, MCPBinding) or binding.role not in {AgentRole.DEVELOPER, *_VALIDATORS}
                     or binding.agent_role is not binding.role):
                 raise UnitTestStoreError("UNIT_TEST_CONTEXT_DENIED")
             try:
@@ -496,7 +494,9 @@ class UnitTestOutputStore:
             role = AgentRole(metadata["role"])
             binding = MCPBinding(role=role, agent_role=role, run_id=identities["runId"], workspace_id=identities["workspaceId"])
             scope_data = metadata["scope"]
-            if (type(scope_data) is not dict or set(scope_data) != {"name", "kind", "pattern", "source_directory", "protected_files", "protected_suite_ref"}):
+            fields = {"name", "kind", "pattern", "source_directory", "protected_files", "protected_suite_ref"}
+            # role appears only for scopes naming a non-QA validator (unit_config.scope_payload).
+            if type(scope_data) is not dict or set(scope_data) not in (fields, fields | {"role"}):
                 raise ValueError
             scope = UnitTestScope(**scope_data)
             profile_data = metadata["executionProfile"]
@@ -525,7 +525,7 @@ class UnitTestOutputStore:
                     or step_row["run_id"] != row["run_id"] or str(step.run_id) != row["run_id"]
                     or str(step.workflow_step_id) != row["workflow_step_id"] or step.agent_role is not role):
                 raise ValueError
-            if ((role is not AgentRole.QA and step.attempt != source.code_version - 1) or not step.requirement_ids
+            if ((role not in _VALIDATORS and step.attempt != source.code_version - 1) or not step.requirement_ids
                     or not set(step.requirement_ids) <= set(source.requirement_ids)
                     or step.code_version is not None and step.code_version != source.code_version):
                 raise ValueError

@@ -6,8 +6,9 @@ import logging
 from pathlib import Path
 import sys
 
+from agents.core.identity import SingleAgentIdentity, SinglePhase, service_identity
 from mcp_tools.runtime import MCPBinding, MCPDispatcher
-from mcp_tools.core.policy import MCPHostPrincipal
+from mcp_tools.core.policy import MCPHostPrincipal, SINGLE_PHASE_TOOL_ROLES
 from mcp_tools.server import create_server
 from mcp_tools.stdio import run_stdio
 from mcp_tools.tools.files import FileTools
@@ -42,8 +43,9 @@ class _Parser(argparse.ArgumentParser):
 def main(argv=None):
     parser = _Parser(description="Host-bound MCP stdio contract server")
     parser.add_argument("--role", required=True,
-                        choices=[role.value for role in AgentRole] + [MCPHostPrincipal.ORCHESTRATOR.value])
-    parser.add_argument("--agent-role", choices=[role.value for role in AgentRole])
+                        choices=[role.value for role in AgentRole] + [MCPHostPrincipal.ORCHESTRATOR.value, "SINGLE_AGENT"])
+    parser.add_argument("--agent-role", choices=[role.value for role in AgentRole] + ["SINGLE_AGENT"])
+    parser.add_argument("--single-phase", choices=[phase.value for phase in SinglePhase])
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--database-path", required=True)
@@ -58,9 +60,10 @@ def main(argv=None):
     try:
         args = parser.parse_args(argv)
         role = (MCPHostPrincipal.ORCHESTRATOR if args.role == MCPHostPrincipal.ORCHESTRATOR.value
-                else AgentRole(args.role))
-        binding = MCPBinding(role=role, agent_role=None if args.agent_role is None else AgentRole(args.agent_role),
-                             run_id=args.run_id, workspace_id=args.workspace_id)
+                else service_identity(args.role))
+        binding = MCPBinding(role=role, agent_role=None if args.agent_role is None else service_identity(args.agent_role),
+                             run_id=args.run_id, workspace_id=args.workspace_id,
+                             single_phase=None if args.single_phase is None else SinglePhase(args.single_phase))
         database, root = Path(args.database_path), Path(args.workspace_root)
         if not database.is_absolute() or not root.is_absolute() or database.is_symlink() or not database.is_file():
             raise ValueError("MCP_CONFIGURATION_REQUIRED")
@@ -72,6 +75,9 @@ def main(argv=None):
             project_artifact_id=args.source_artifact_id,
             snapshot_sha256=args.source_snapshot_sha256,
         )
+        if (binding.role is SingleAgentIdentity.SINGLE_AGENT
+                and binding.single_phase in (SinglePhase.QA, SinglePhase.SECURITY) and selection is None):
+            raise ValueError("MCP_CONFIGURATION_REQUIRED")
         artifacts = ArtifactStore(repository, registry)
         tools = FileTools(artifacts, frozen_source=selection)
         configuration = None if args.build_configuration_json is None else decode_build_configuration(args.build_configuration_json)
@@ -81,6 +87,9 @@ def main(argv=None):
                            max_call_seconds=args.max_call_seconds)
         unit_configuration = (None if args.unit_test_configuration_json is None
                               else decode_unit_configuration(args.unit_test_configuration_json))
+        if (binding.role is SingleAgentIdentity.SINGLE_AGENT and unit_configuration is not None
+                and any(scope.kind == "PROTECTED" for scope in unit_configuration.scopes)):
+            raise ValueError("MCP_CONFIGURATION_REQUIRED")
         browser_configuration = (None if args.browser_test_configuration_json is None
                                  else decode_browser_configuration(args.browser_test_configuration_json))
         security_configuration = (None if args.security_scan_configuration_json is None
@@ -104,13 +113,20 @@ def main(argv=None):
                                      configuration=security_configuration, max_call_seconds=args.max_call_seconds)
         if binding.role is MCPHostPrincipal.ORCHESTRATOR:
             handlers = {**build.handlers(binding.role), **reports.handlers(binding.role), **security.handlers(binding.role)}
+        elif binding.role is SingleAgentIdentity.SINGLE_AGENT:
+            providers = (tools, build, unit, browser, reports, security)
+            roles = SINGLE_PHASE_TOOL_ROLES[binding.single_phase]
+            by_role = {role: {name: handler for provider in providers for name, handler in provider.handlers(role).items()}
+                       for role in set(roles.values())}
+            handlers = {name: by_role[role][name] for name, role in roles.items() if name in by_role[role]}
         else:
             handlers = {**tools.handlers(binding.role), **build.handlers(binding.role), **unit.handlers(binding.role),
                         **browser.handlers(binding.role), **reports.handlers(binding.role), **security.handlers(binding.role)}
         # All ten MCP Tool handlers are connected; default role executors are
         # still separate work and no Tool result creates a product verdict.
         dispatcher = MCPDispatcher(binding, registry, handlers=handlers,
-                                   max_call_seconds=args.max_call_seconds)
+                                   max_call_seconds=args.max_call_seconds,
+                                   frozen_snapshot_id=selection.project_artifact_id if selection is not None else None)
         server = create_server(dispatcher)
         # Library diagnostics are never Source/argument Trace. Suppress SDK
         # diagnostic exception formatting at the CLI boundary altogether.

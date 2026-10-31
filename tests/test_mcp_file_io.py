@@ -277,6 +277,13 @@ class MCPFileIOTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertEqual((self.root / result["path"]).read_bytes(), b"# test\n")
 
+    def test_security_write_primitive_is_limited_to_its_test_scratch(self):
+        result = write_working(self.bind(AgentRole.SECURITY), "outputs/security/tests/test_hash.py", b"# test\n")
+        self.assertTrue(result["changed"])
+        self.assertEqual((self.root / result["path"]).read_bytes(), b"# test\n")
+        for path in ("outputs/security/report.json", "outputs/security/tests", "source/app.py", "outputs/qa/tests/test_app.py"):
+            self.assert_error("PATH_DENIED", lambda: write_working(self.bind(AgentRole.SECURITY), path, b"bad"))
+
     def test_bad_paths_and_secret_paths_are_denied_before_any_mutation(self):
         for path in (
             str(self.directory / "host.py"), "../source/file.py", "source/../host.py",

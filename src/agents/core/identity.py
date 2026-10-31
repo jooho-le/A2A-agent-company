@@ -9,6 +9,14 @@ class SingleAgentIdentity(str, Enum):
     SINGLE_AGENT = "SINGLE_AGENT"
 
 
+class SinglePhase(str, Enum):
+    PLANNING = "PLANNING"
+    IMPLEMENTING = "IMPLEMENTING"
+    QA = "QA"
+    SECURITY = "SECURITY"
+    FIXING = "FIXING"
+
+
 AgentServiceIdentity = AgentRole | SingleAgentIdentity
 
 

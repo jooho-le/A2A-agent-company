@@ -23,9 +23,10 @@ from mcp.shared.exceptions import MCPError
 from mcp_types import CallToolResult, DiscoverResult, TextContent
 
 from agents.llm.content import sanitize_content
+from agents.core.identity import SingleAgentIdentity, SinglePhase
 from agents.llm.contracts import JsonSchema, ToolCall, ToolContext, ToolDefinition, json_text, parse_json
 from mcp_tools.core.catalog import MAX_JSON_BYTES, get_tool_contract
-from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, MCP_TOOL_NAMES
+from mcp_tools.core.policy import MCP_PROTOCOL_VERSION, MCP_TOOL_NAMES, SINGLE_PHASE_TOOL_ROLES
 from orchestrator.domain.states import AgentRole
 from mcp_tools.runtime import MCPBinding, MCPExecutionError
 from mcp_tools.tools.build_config import BuildConfiguration, encode_build_configuration
@@ -123,6 +124,12 @@ class MCPChildConfiguration:
         object.__setattr__(self, "database_path", _host_path(self.database_path))
         object.__setattr__(self, "workspace_root", _host_path(self.workspace_root))
         object.__setattr__(self, "max_call_seconds", float(self.max_call_seconds))
+        if self.binding.role is SingleAgentIdentity.SINGLE_AGENT:
+            if (self.binding.single_phase in (SinglePhase.QA, SinglePhase.SECURITY) and self.frozen_source is None
+                    or self.unit_test_configuration is not None
+                    and any(scope.kind == "PROTECTED" for scope in self.unit_test_configuration.scopes)):
+                # Protected tests remain on a separate Host-only capability.
+                raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID", delivery_state=MCPDeliveryState.NOT_SENT)
 
 
 def child_parameters(configuration):
@@ -150,6 +157,8 @@ def child_parameters(configuration):
     ]
     if binding.agent_role is not None:
         arguments.extend(["--agent-role", binding.agent_role.value])
+    if binding.single_phase is not None:
+        arguments.extend(["--single-phase", binding.single_phase.value])
     arguments.extend([
         "--run-id", str(binding.run_id), "--workspace-id", str(binding.workspace_id),
         "--database-path", str(configuration.database_path),
@@ -277,6 +286,9 @@ class BoundMCPClient:
         contract = get_tool_contract(name)
         if contract is None or name not in MCP_TOOL_NAMES[binding.role]:
             raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
+        if (binding.role is SingleAgentIdentity.SINGLE_AGENT
+                and name not in SINGLE_PHASE_TOOL_ROLES[binding.single_phase]):
+            raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
         timeout = self.configuration.max_call_seconds
         deadline = time.monotonic() + timeout
         if deadline_monotonic is not None:
@@ -294,6 +306,10 @@ class BoundMCPClient:
             contract.validate_input(arguments)
             arguments = parse_json(json_text(arguments, max_bytes=_MAX_BYTES), max_bytes=_MAX_BYTES)
             if workspace_uuid(arguments["workspaceId"]) != binding.workspace_id:
+                raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
+            if binding.role is SingleAgentIdentity.SINGLE_AGENT and "snapshotId" in arguments and (
+                    self.configuration.frozen_source is None
+                    or workspace_uuid(arguments["snapshotId"]) != self.configuration.frozen_source.project_artifact_id):
                 raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
             arguments["workspaceId"] = str(binding.workspace_id)
             arguments = sanitize_content(
@@ -379,7 +395,7 @@ class BoundMCPClient:
         binding = self.configuration.binding
         try:
             if (
-                not isinstance(binding.role, AgentRole)
+                not isinstance(binding.role, (AgentRole, SingleAgentIdentity))
                 or not isinstance(call, ToolCall) or not isinstance(context, ToolContext)
                 or context.role is not binding.agent_role
                 or workspace_uuid(context.workspace_id) != binding.workspace_id

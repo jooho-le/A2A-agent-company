@@ -54,7 +54,8 @@ class UnitTestTools:
     def handlers(self, role):
         if not isinstance(role, AgentRole):
             raise MCPConfigurationError()
-        result = {"run_unit_tests": self.run_unit_tests} if role in (AgentRole.DEVELOPER, AgentRole.QA) else {}
+        result = ({"run_unit_tests": self.run_unit_tests}
+                  if role in (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY) else {})
         if role is AgentRole.QA:
             result["read_test_report"] = self.read_test_report
         return MappingProxyType(result)
@@ -106,7 +107,7 @@ class UnitTestTools:
         return source, prepare_unit_inputs(context, scope, runner_source)
 
     async def run_unit_tests(self, context, arguments):
-        self._context(context, (AgentRole.DEVELOPER, AgentRole.QA))
+        self._context(context, (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY))
         scope, profile = self._scope_profile(context.binding.role, arguments["testScope"])
         try:
             source_id = workspace_uuid(arguments["snapshotId"])

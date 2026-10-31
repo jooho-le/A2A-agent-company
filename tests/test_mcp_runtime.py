@@ -143,7 +143,10 @@ class MCPDispatcherTests(unittest.IsolatedAsyncioTestCase):
             dispatcher = self.dispatcher(role)
             for name in ROLE_TOOL_NAMES[role]:
                 with self.subTest(role=role, name=name):
-                    result = await dispatcher.call_tool(name, values[name])
+                    arguments = values[name]
+                    if role is AgentRole.SECURITY and name == "write_test_file":
+                        arguments = {**arguments, "path": "outputs/security/tests/test_signup.py"}
+                    result = await dispatcher.call_tool(name, arguments)
                     self.assertEqual(result.error_code, "TOOL_NOT_IMPLEMENTED")
         self.assertFalse((self.root / "source/signup.py").exists())
         self.assertFalse((self.root / "outputs/qa/test_signup.py").exists())

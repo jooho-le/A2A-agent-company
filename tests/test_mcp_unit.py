@@ -227,10 +227,13 @@ class UnitToolTests(unittest.IsolatedAsyncioTestCase):
         for field in ("command", "argv", "role", "hostPath", "pattern", "image", "dockerEndpoint"):
             with self.subTest(field=field), self.assertRaises(MCPProtocolError):
                 await self.dispatcher().call_tool("run_unit_tests", self.arguments(**{field: "untrusted"}))
-        for role in (AgentRole.PLANNER, AgentRole.SECURITY):
+        for role in (AgentRole.PLANNER,):
             self.assertEqual(dict(self.tools().handlers(role)), {})
             with self.assertRaises(MCPProtocolError):
                 await self.dispatcher(role).call_tool("run_unit_tests", self.arguments())
+        # Security is now supported, but may not use this Developer scope.
+        denied = await self.dispatcher(AgentRole.SECURITY).call_tool("run_unit_tests", self.arguments())
+        self.assertEqual(denied.error_code, "PERMISSION_DENIED")
         self.assertEqual(self.docker.calls, [])
 
     async def test_wrong_workspace_and_unregistered_source_stop_before_docker(self):

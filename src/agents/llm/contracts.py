@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from orchestrator.domain.run_configuration import ModelConfiguration
 from orchestrator.domain.states import AgentRole
+from agents.core.identity import AgentServiceIdentity
 
 
 class LLMErrorCode(str, Enum):
@@ -229,7 +230,7 @@ class ToolCall:
 @dataclass(frozen=True)
 class ToolContext:
     """Host binding only; not a filesystem grant or an MCP session yet."""
-    role: AgentRole
+    role: AgentServiceIdentity
     workspace_id: str | None = field(repr=False)
     deadline_monotonic: float
 
