@@ -170,6 +170,25 @@ class RunsAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.repository.get_run(run.run_id).status, WorkflowStatus.IMPLEMENTING)
 
+    def test_final_only_arm_is_accepted_as_a_declared_experiment_run(self) -> None:
+        # Same experiment, model, budget and environment: with and without the in-loop protected reference.
+        baseline = {
+            "experimentId": str(uuid4()), "startingCommitHash": "a" * 40, "startingSnapshotSha256": "b" * 64,
+            "model": {"provider": "test-provider", "modelId": "test-model", "temperature": 0},
+            "environment": {"containerImageDigest": "sha256:" + "c" * 64, "dependencyLockHash": "sha256:" + "d" * 64,
+                            "hardwareProfile": "fixed-local"},
+            "limits": {"runtimeBudgetMs": 60000}, "scannerProfileRef": "artifact://protected/scanner",
+            "warmupState": "COLD", "executionOrder": 0,
+        }
+        for order, reference in enumerate(("artifact://protected/tests", None)):
+            response = self.request("POST", "/api/v1/runs", json={
+                "scenarioId": str(SCN_001_ID), "requestText": "experiment arm",
+                "configuration": {**baseline, "executionOrder": order, "protectedTestSuiteRef": reference}})
+            self.assertEqual(response.status_code, 201, response.text)
+        incomplete = {**baseline, "scannerProfileRef": None}
+        self.assertEqual(self.request("POST", "/api/v1/runs", json={
+            "scenarioId": str(SCN_001_ID), "requestText": "experiment arm", "configuration": incomplete}).status_code, 422)
+
     def test_discovery_validation_and_secret_safe_run_configuration(self) -> None:
         discovered = self.request("GET", "/api/v1/scenarios").json()["scenarios"]
         self.assertEqual(discovered[0]["scenarioId"], str(SCN_001_ID))

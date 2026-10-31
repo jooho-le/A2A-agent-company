@@ -264,7 +264,8 @@ class MCPFileIOTests(unittest.TestCase):
             (AgentRole.DEVELOPER, "snapshots/app.py"),
             (AgentRole.QA, "source/app.py"),
             (AgentRole.QA, "outputs/security/report.py"),
-            (AgentRole.SECURITY, "outputs/security/report.py"),
+            (AgentRole.SECURITY, "source/app.py"),
+            (AgentRole.SECURITY, "outputs/qa/test.py"),
             (AgentRole.PLANNER, "planning/plan.py"),
         )
         for role, path in cases:
@@ -274,6 +275,11 @@ class MCPFileIOTests(unittest.TestCase):
 
     def test_qa_scoped_write_is_available_for_test_tool_wrapper(self):
         result = write_working(self.bind(AgentRole.QA), "outputs/qa/tests/test_app.py", b"# test\n")
+        self.assertTrue(result["changed"])
+        self.assertEqual((self.root / result["path"]).read_bytes(), b"# test\n")
+
+    def test_security_scoped_write_is_available_for_test_tool_wrapper(self):
+        result = write_working(self.bind(AgentRole.SECURITY), "outputs/security/tests/test_hash.py", b"# test\n")
         self.assertTrue(result["changed"])
         self.assertEqual((self.root / result["path"]).read_bytes(), b"# test\n")
 

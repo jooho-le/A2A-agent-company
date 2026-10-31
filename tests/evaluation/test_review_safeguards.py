@@ -32,7 +32,7 @@ from evaluation.trace_checks import check_traceability
 
 @pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
 def test_startup_failure_must_not_pass_all_protected_checks(monkeypatch):
-    """서비스 시작(startup)이 실패하면 보호 테스트 8개가 모두 SERVICE_SETUP_FAILED 미검증(SKIP)이다.
+    """서비스 시작(startup)이 실패하면 보호 테스트 9개가 모두 SERVICE_SETUP_FAILED 미검증(SKIP)이다.
     (시작 단계를 건너뛰고 요청만 보내 PASS가 되지 않게 한다.)"""
     original = signup_service.build
     def broken_startup(variant):
@@ -43,7 +43,7 @@ def test_startup_failure_must_not_pass_all_protected_checks(monkeypatch):
     monkeypatch.setattr(signup_service, 'build', broken_startup)
     result = run_protected('good')
     assert result['report']['passed'] == 0
-    assert result['report']['skipped'] == 8
+    assert result['report']['skipped'] == 9
     assert all(row['details'] == 'UNVERIFIED:SERVICE_SETUP_FAILED' for row in result['report']['tests'])
 
 
@@ -65,7 +65,7 @@ def test_killed_docker_process_must_not_produce_pass():
         def _call(self, args, timeout):
             if args[0] == 'image':
                 return subprocess.CompletedProcess(args, 0, json.dumps([{'Os': 'linux', 'Id': IMAGE}]), '')
-            rows = [{'testId': test_id, 'outcome': 'PASS'} for test_id in pt.evaluation_inputs(CONTRACT)['unit_cases']]
+            rows = [{'testId': test_id, 'outcome': 'PASS'} for test_id in pt.evaluation_inputs(CONTRACT, 'final')['unit_cases']]
             payload = {'format': 'unittest-v1', 'total': len(rows), 'passed': len(rows), 'failed': 0, 'skipped': 0, 'tests': rows}
             return subprocess.CompletedProcess(args, 137, json.dumps(payload)+'\n', '')
     archive = snapshot()
@@ -100,7 +100,7 @@ def test_missing_security_proof_must_not_be_shown_as_no_problem():
 
 @pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
 def test_startup_initialization_is_available_to_requests(monkeypatch):
-    """보호 테스트가 실제 서버처럼 startup을 실행해서, 시작 때 준비한 값을 가입 요청이 쓸 수 있다(정상 서비스는 8개 PASS)."""
+    """보호 테스트가 실제 서버처럼 startup을 실행해서, 시작 때 준비한 값을 가입 요청이 쓸 수 있다(정상 서비스는 9개 PASS)."""
     original = signup_service.build
     def with_startup(variant):
         """정상 서비스에 startup 처리기를 붙이고, 가입 처리에서 그 처리기가 준비한 값을 확인하게 바꾼다."""
@@ -111,7 +111,7 @@ def test_startup_initialization_is_available_to_requests(monkeypatch):
         return files
     monkeypatch.setattr(signup_service, 'build', with_startup)
     result = run_protected('good')
-    assert result['report']['passed'] == 8
+    assert result['report']['passed'] == 9
 
 
 @pytest.mark.parametrize('call', [
@@ -160,8 +160,8 @@ def test_final_evaluation_rechecks_custom_runner_error():
     class FailedRunner:
         """시험 대역: 전부 PASS인 보고서와 TIMEOUT 오류를 함께 돌려주는 실행기"""
         kind = 'docker'
-        def run(self, *args):
-            rows = [{'testId': key, 'outcome': 'PASS'} for key in pt.evaluation_inputs(CONTRACT)['unit_cases']]
+        def run(self, *args, **kwargs):
+            rows = [{'testId': key, 'outcome': 'PASS'} for key in pt.evaluation_inputs(CONTRACT, 'final')['unit_cases']]
             return RunnerOutcome({'format': 'unittest-v1', 'total': len(rows), 'passed': len(rows),
                                   'failed': 0, 'skipped': 0, 'tests': rows}, 0, 'TIMEOUT', IMAGE, self.kind)
     archive = snapshot()
@@ -205,15 +205,17 @@ def test_final_evaluation_rejects_foreign_metadata_before_execution(change):
 
 @pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
 def test_server_error_on_email_variants_is_not_a_final_pass():
-    """F1: 대문자·앞뒤 공백 이메일 재가입에서만 500이 나는 서비스는 QA-SIGNUP-003 FAIL, 최종 판정 FAIL이다.
-    (중복 계정은 생기지 않지만 기준표 4절의 "중복은 4xx 거부"를 어긴다.)"""
+    """F1: 대문자·앞뒤 공백 이메일에서만 500이 나는 서비스는 QA-SIGNUP-003 FAIL, 최종 판정 FAIL이다.
+    (중복 계정은 생기지 않지만 기준표 4절의 "중복은 4xx 거부"를 어긴다. 같은 원인으로 공백만 있는 이메일 거부(QA-002),
+    거부 뒤 상태(QA-006), 정규화 저장(SEC-003)도 FAIL이다.)"""
     from tests.evaluation.test_final_evaluation import LOCK, VerifiedImageRunner, canonical_tar, statuses
     files = signup_service.build('variant_email_server_error')
     archive = canonical_tar({**{name: text.encode('utf-8') for name, text in files.items()}, 'requirements.lock': LOCK})
     output = final(archive, manifest(archive), VerifiedImageRunner())
     result = statuses(output)
     assert result['QA-SIGNUP-003'] == 'FAIL' and output['report']['evaluationVerdict'] == 'FAIL'
-    assert {key for key, status in result.items() if status != 'PASS'} == {'QA-SIGNUP-003'}
+    assert {key for key, status in result.items() if status != 'PASS'} == {
+        'QA-SIGNUP-002', 'QA-SIGNUP-003', 'QA-SIGNUP-006', 'SEC-SIGNUP-003'}
 
 
 def test_final_output_carries_its_sources_into_the_summary():

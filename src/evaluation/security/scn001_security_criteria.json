@@ -3,7 +3,7 @@
   "criteriaId": "urn:criteria:scn-001:security-static:0.1.0",
   "scenarioKey": "SCN-001",
   "analyzer": "evaluation.security.static_analysis",
-  "checks": {"REQ-003": "SEC-SIGNUP-003", "REQ-005": "SEC-SIGNUP-001", "REQ-006": "SEC-SIGNUP-004"},
+  "checks": {"REQ-003": "STATIC-REQ-003", "REQ-005": "STATIC-REQ-005", "REQ-006": "STATIC-REQ-006"},
   "excludePathSegments": ["tests", "test"],
   "excludeFilePrefixes": ["test_"],
   "excludeFileNames": ["conftest.py"],

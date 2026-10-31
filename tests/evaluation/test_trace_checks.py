@@ -5,7 +5,8 @@
     FAIL로 만들지 않고, 판정 없이 멈춘 Run은 UNVERIFIED로 두는가?
   - 사건·Issue를 하나씩 지운 변형에서 끊어진 연결을 FAIL로 찾는가?
   - 노출 검사가 비밀번호 필드 값·해시 형식·알려 준 값을 찾고, 설명용 이름·가린 값은 통과시키는가?
-  - 결과에 비밀번호·해시 값이 남지 않는가?
+  - 결과에 비밀번호·해시 값이 남지 않는가? 비밀값이 JSON 이름(키)에 있으면 위치에서도 가리는가?
+  - A2A Message 본문 문서를 주면 본문까지 찾고, 비었거나 모양이 틀린 문서는 본 것으로 세지 않는가?
   - Regression 계산이 PASS→FAIL만 세고 비교할 수 없는 검사를 따로 알리는가?
 """
 import copy
@@ -135,7 +136,7 @@ def test_protected_test_uses_the_same_hash_shape():
     import ast
     from evaluation import protected_tests
     from evaluation.trace_checks import HASH_FORMAT
-    source = protected_tests.protected_files('final')['tests/signup/protected_signup_final.py']
+    source = protected_tests.protected_files('final')['tests/signup/signup_security_checks.py']
     assign = next(node for node in ast.parse(source).body if isinstance(node, ast.Assign)
                   and getattr(node.targets[0], 'id', None) == 'HASH_FORMAT')
     assert ast.literal_eval(assign.value.args[0]) == HASH_FORMAT.pattern
@@ -213,3 +214,72 @@ def test_regression_reports_uncompared_checks_and_rejects_gaps():
     for broken in ({}, {1: {}, 3: {}}, {2: {}}):
         with pytest.raises(ValueError):
             regression_count(broken)
+
+
+def a2a_rows(role):
+    """한 역할 저장소에서 이 Run의 기록(대화 하나·Task 하나, 비밀값 없음)"""
+    return {'contexts': [f'context-{role}'], 'history': [], 'receipts': [], 'events': [],
+            'tasks': [{'taskId': f'task-{role}', 'contextId': f'context-{role}', 'state': 'completed', 'task': {}}]}
+
+
+def a2a_document(run_id, **roles):
+    """dev a2a_export 모양의 A2A Message 본문 문서. roles를 안 주면 네 역할 모두 기록이 있고, 주면 roles에 없는 역할은
+    빠진 저장소(missingRoles)로 둔다."""
+    every = ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')
+    return {'runId': run_id, 'roles': {role: roles.get(role) or a2a_rows(role) for role in every if role in roles or not roles},
+            'missingRoles': [] if not roles else sorted(set(every) - set(roles))}
+
+
+def test_a2a_message_bodies_are_searched_when_given():
+    """A2A Message 본문 문서를 주면 그 안의 비밀번호 칸 값도 찾아 FAIL이고, 본문을 본 것으로 검사 범위에 적는다.
+    깨끗한 본문이면 PASS이고 "보지 못한 출력"에서 A2A Message 본문이 빠진다. 네 역할 중 빠진 저장소가 있으면
+    일부만 본 것이라 미검증이다. 다른 Run의 문서는 받지 않는다."""
+    run_id = RUNS[QA_FIX]['run']['runId']
+    base = documents(runId=run_id)
+    clean = check_trace_exposure({**base, 'a2aMessages': a2a_document(run_id)}, CRITERIA)
+    assert clean.status == 'PASS' and 'a2aMessages' in clean.coverage['checkedDocuments']
+    assert 'A2A_MESSAGE_BODY' not in clean.coverage['notCollectedOutputs']
+    leaked = {'contexts': ['c'], 'tasks': [], 'events': [], 'receipts': [],
+              'history': [{'taskId': 't', 'position': 0, 'message': {'parts': [{'data': {'password': SECRET}}]}}]}
+    every = {role: leaked if role == 'QA' else a2a_document(run_id)['roles'][role]
+             for role in ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')}
+    found = check_trace_exposure({**base, 'a2aMessages': a2a_document(run_id, **every)}, CRITERIA)
+    assert found.status == 'FAIL' and {item['document'] for item in found.findings} == {'a2aMessages'}
+    assert SECRET not in json.dumps(found.to_dict(), ensure_ascii=False)
+    partial = check_trace_exposure({**base, 'a2aMessages': a2a_document(run_id, QA=every['QA'] | {'history': []})}, CRITERIA)
+    assert partial.status == 'UNVERIFIED' and 'a2aMessages' in partial.coverage['incompleteDocuments']
+    with pytest.raises(ValueError):
+        check_trace_exposure({**base, 'a2aMessages': a2a_document('00000000-0000-4000-8000-000000000099')}, CRITERIA)
+
+
+
+def test_secret_in_a_key_is_not_copied_into_the_finding_path():
+    """비밀값이 JSON 값이 아니라 이름(키)에 있으면 FAIL이되, 찾은 위치(path)에 그 이름을 그대로 적지 않는다(Codex 10.30 R7).
+    부모 이름에 들어 있어도, 해시 값이 이름이어도 결과 전체에 원문이 남지 않는다."""
+    run_id = RUNS[QA_FIX]['run']['runId']
+    base = documents(runId=run_id)
+    digest = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$' + 'A' * 43
+    for artifacts in ([{SECRET: 'x'}], [{'a': {SECRET + '-suffix': {'b': 'c'}}}], [{digest: 1}]):
+        found = check_trace_exposure({**base, 'artifacts': artifacts}, CRITERIA, known_values=[SECRET])
+        assert found.status == 'FAIL'
+        text = json.dumps(found.to_dict(), ensure_ascii=False)
+        assert SECRET not in text and digest not in text and '[SENSITIVE_KEY]' in text
+
+
+def test_empty_or_malformed_a2a_document_is_not_counted_as_checked():
+    """Run 기록상 일을 한 역할의 저장소에 이 Run의 기록이 없으면(엉뚱한 빈 저장소를 연결) A2A 본문을 다 본 것이 아니라
+    미검증이다(Codex 10.30 R8). 역할 목록이 비었거나 빠진 저장소 표시가 없는 문서는 모양이 틀린 문서로 거부한다.
+    A2A 문서를 보더라도 가리기 전 송수신 본문은 보지 못한 출력으로 남는다."""
+    run_id = RUNS[QA_FIX]['run']['runId']
+    base = documents(runId=run_id)
+    empty = {'contexts': [], 'tasks': [], 'history': [], 'receipts': [], 'events': []}
+    hollow = check_trace_exposure({**base, 'a2aMessages': a2a_document(
+        run_id, PLANNER=empty, DEVELOPER=empty, QA=empty, SECURITY=empty)}, CRITERIA)
+    assert hollow.status == 'UNVERIFIED' and 'a2aMessages' in hollow.coverage['incompleteDocuments']
+    assert hollow.coverage['a2aEmptyRoles'] == ['DEVELOPER', 'PLANNER', 'QA', 'SECURITY']
+    for malformed in ({'runId': run_id, 'roles': {}}, {'runId': run_id, 'roles': {}, 'missingRoles': []},
+                      {'runId': run_id, 'roles': {'QA': {'contexts': []}}, 'missingRoles': ['PLANNER', 'DEVELOPER', 'SECURITY']}):
+        with pytest.raises(ValueError):
+            check_trace_exposure({**base, 'a2aMessages': malformed}, CRITERIA)
+    clean = check_trace_exposure({**base, 'a2aMessages': a2a_document(run_id)}, CRITERIA)
+    assert clean.status == 'PASS' and 'A2A_MESSAGE_BODY_BEFORE_REDACTION' in clean.coverage['notCollectedOutputs']

@@ -61,7 +61,7 @@ class FileTools:
             handlers["read_project_file"] = self.read_project_file
         if role is AgentRole.DEVELOPER:
             handlers.update(write_source_file=self.write_source_file, apply_patch=self.apply_patch)
-        elif role is AgentRole.QA:
+        elif role in (AgentRole.QA, AgentRole.SECURITY):
             handlers["write_test_file"] = self.write_test_file
         return MappingProxyType(handlers)
 
@@ -117,11 +117,11 @@ class FileTools:
         self._context(context)
         if context.binding.role is not role:
             raise MCPToolExecutionError("PERMISSION_DENIED")
-        if role is AgentRole.QA:
-            # Test scratch only. QA report bytes are published through the
-            # Artifact contract, not overwritten by a test-file Tool.
+        if role in (AgentRole.QA, AgentRole.SECURITY):
+            # Test scratch only. Validator report bytes are published through
+            # the Artifact contract, not overwritten by a test-file Tool.
             parts = relative_parts(path)
-            if len(parts) < 4 or parts[:3] != ("outputs", "qa", "tests"):
+            if len(parts) < 4 or parts[:3] != ("outputs", "qa" if role is AgentRole.QA else "security", "tests"):
                 raise MCPToolExecutionError("PATH_DENIED")
         return write_working(context.workspace, path, content.encode("utf-8"), expected_sha256)
 
@@ -133,7 +133,8 @@ class FileTools:
 
     async def write_test_file(self, context, arguments):
         result = await _run_file_operation(
-            self._write, context, arguments["path"], arguments["content"], None, AgentRole.QA,
+            self._write, context, arguments["path"], arguments["content"], None,
+            AgentRole.SECURITY if context.binding.role is AgentRole.SECURITY else AgentRole.QA,
         )
         # Exact existing write_test_file outputSchema excludes sizeBytes.
         return {key: result[key] for key in ("path", "sha256", "changed")}

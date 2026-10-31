@@ -5,8 +5,9 @@
   - Snapshot 해시가 기준과 다르면 실행하지 않고, lock·이미지를 확인하지 못하면 결과를 쓰지 않는가?
   - 이미지 해시가 기준과 다르면 Manifest 불일치로 결과를 쓰지 않는가?
   - DockerRunner가 해시로 고정한 이미지만 받고, dev 샌드박스와 같은 제한으로 실행하며, 이미지 확인에 실패하면 실행하지 않는가?
-  - (실행) 합성 회원가입 서비스로 보호 테스트 8개 + 정적 판정 3개를 채점해 독립 평가 보고서까지 만드는가?
-    정상은 PASS, 평문 저장은 FAIL이고, 로컬 실행은 이미지를 확인할 수 없어 결과를 쓰지 않는가?
+  - (실행) 합성 회원가입 서비스를 채점 시험지(실행 검사 9개)로 채점해 독립 평가 보고서·점수까지 만드는가?
+    순환용 시험지 참고 보고서, 보조 점검(지나간 줄 기록·정적 판정)은 판정·점수와 따로 나오는가?
+    정상은 PASS, 평문 저장·약한 해시는 FAIL이고, 로컬 실행은 이미지를 확인할 수 없어 결과를 쓰지 않는가?
 실제 Docker 시험은 EVAL_DOCKER_IMAGE(해시로 고정한 이미지 참조)를 주고 Docker가 켜져 있을 때만 돈다.
 """
 import hashlib
@@ -77,10 +78,10 @@ class VerifiedImageRunner:
     def __init__(self, digest=IMAGE):
         self.local, self.digest, self.calls = LocalRunner(trusted=True), digest, 0
 
-    def run(self, snapshot_dir, inputs_dir, directory, pattern):
+    def run(self, snapshot_dir, inputs_dir, directory, pattern, script='_unit_runner.py'):
         self.calls += 1
-        outcome = self.local.run(snapshot_dir, inputs_dir, directory, pattern)
-        return RunnerOutcome(outcome.report, outcome.exit_code, outcome.error, self.digest, self.kind)
+        outcome = self.local.run(snapshot_dir, inputs_dir, directory, pattern, script=script)
+        return RunnerOutcome(outcome.report, outcome.exit_code, outcome.error, self.digest, self.kind, outcome.coverage)
 
 
 class RecordingRunner:
@@ -90,7 +91,7 @@ class RecordingRunner:
     def __init__(self):
         self.calls = 0
 
-    def run(self, *args):
+    def run(self, *args, **kwargs):
         self.calls += 1
         return RunnerOutcome(None, 2, 'TEST_RUNNER_ERROR', IMAGE, self.kind)
 
@@ -99,12 +100,12 @@ def final(archive, expected, runner, **kwargs):
     """evaluate_final_snapshot을 SCN-001 정책·고정 평가 시각으로 부른다. 나머지 인자는 그대로 넘긴다."""
     return evaluate_final_snapshot(archive=archive, expected=expected, scenario_contract=CONTRACT,
                                    source_run_id=kwargs.pop('source_run_id', uid(2)), runner=runner,
-                                   created_at='2026-10-28T12:00:00+09:00', **kwargs)
+                                   exam=kwargs.pop('exam', 'final'), created_at='2026-10-28T12:00:00+09:00', **kwargs)
 
 
-def statuses(output):
-    """결과 보고서의 검사 상태를 {검사 번호(QA-SIGNUP-001 등): 상태}로 꺼낸다."""
-    return {check['title'].split(' ', 1)[0]: check['status'] for check in output['report']['checks']}
+def statuses(output, key='report'):
+    """결과 보고서(기본은 채점 보고서)의 검사 상태를 {검사 번호(QA-SIGNUP-001 등): 상태}로 꺼낸다."""
+    return {check['title'].split(' ', 1)[0]: check['status'] for check in output[key]['checks']}
 
 
 # ---------------------------------------------------------------- Snapshot 읽기
@@ -202,6 +203,34 @@ def test_missing_lock_means_results_are_not_used():
     assert output['report']['manifestCheck']['errorCode'] == 'MANIFEST_MISSING'
 
 
+@pytest.mark.parametrize('exam', ['practice', 'in-loop-qa', None])
+def test_exam_must_be_a_scored_set(exam):
+    """채점 시험지는 시범 최종용(pilot)·공식 최종용(final)만 고를 수 있다(순환용은 참고 채점에만)."""
+    archive = snapshot()
+    with pytest.raises(ValueError, match='pilot or final'):
+        final(archive, manifest(archive), RecordingRunner(), exam=exam)
+
+
+def test_snapshot_with_exam_files_is_not_run_or_scored():
+    """채점할 Snapshot에 시험지가 섞여 있으면(에이전트가 시험지를 볼 수 있었음) 실행하지 않고 점수도 만들지 않는다.
+    요약에는 "시험지 노출"로 드러낸다."""
+    from evaluation import protected_tests
+    from evaluation.summary import render_summary
+    files = {path: text.encode('utf-8') for path, text in signup_service.build('good').items()}
+    files['requirements.lock'] = LOCK
+    files['tests/test_exam_copy.py'] = protected_tests.protected_files('final')['tests/signup/exam_final.py'].encode('utf-8')
+    archive, runner = canonical_tar(files), RecordingRunner()
+    output = final(archive, manifest(archive), runner)
+    assert runner.calls == 0 and output['snapshot']['error'] == 'EXAM_EXPOSED'
+    assert [item['path'] for item in output['snapshot']['examExposure']] == ['tests/test_exam_copy.py']
+    assert output['report']['evaluationVerdict'] == 'UNVERIFIED'
+    assert output['score']['score'] is None and output['score']['reason'] == 'EXAM_EXPOSED'
+    assert output['score']['scoreUpperBound'] is None and output['score']['completionRate'] is None
+    assert output['referenceScore']['reason'] == 'EXAM_EXPOSED'
+    text = render_summary(output['report'], scenario_contract=CONTRACT, supplementary=output['supplementary'])
+    assert '**시험지 노출**' in text and 'tests/test_exam_copy.py' in text
+
+
 def test_local_runner_requires_explicit_trust():
     """LocalRunner는 trusted=True를 명시하지 않으면 만들 수 없다(생성 코드를 호스트에서 돌리지 않게)."""
     with pytest.raises(ValueError):
@@ -230,6 +259,11 @@ def test_docker_command_matches_dev_sandbox_limits(tmp_path):
     assert f'type=bind,src={tmp_path / "i"},dst=/inputs,readonly' in args
     assert args[-10:] == [IMAGE, '-I', '-B', '/inputs/_unit_runner.py', '--kind', 'PROTECTED', '--directory',
                           'tests/signup', '--pattern', 'protected_signup_*.py']
+    coverage = DockerRunner(IMAGE).command('eval-x', tmp_path / 's', tmp_path / 'i', 'tests/signup', 'exam_final.py',
+                                           script='_coverage_runner.py')
+    assert coverage[-7] == '/inputs/_coverage_runner.py'
+    with pytest.raises(ValueError):
+        DockerRunner(IMAGE).command('eval-x', tmp_path / 's', tmp_path / 'i', 'tests/signup', 'x.py', script='other.py')
 
 
 def test_written_tree_is_readable_by_container_user(tmp_path):
@@ -278,47 +312,74 @@ needs_runtime = pytest.mark.skipif(not RUNTIME, reason='fastapi·httpx·sqlalche
 
 @needs_runtime
 def test_good_service_passes_end_to_end_with_verified_image():
-    """정상 서비스는 검사 11개가 모두 PASS이고, Run 기록 추적 검사도 PASS이며, 증거는 실행 보고서·정적 판정 두 종류다."""
+    """정상 서비스는 채점 시험지 검사 9개가 모두 PASS(점수 1.0·완료율 1.0)이고, 순환용 참고 보고서도 PASS다.
+    보조 점검으로 지나간 줄 기록과 정적 판정이 판정과 따로 나오고, Run 기록 추적 검사도 PASS다.
+    증거는 실행 보고서 두 개(채점·참고)·줄 기록·정적 판정이다."""
     archive = snapshot()
     bundle = FIXTURE_RUNS['qa_failure_actual_fix_and_revalidation_preserve_all_lineages_and_shared_budget']
     output = final(archive, manifest(archive), VerifiedImageRunner(),
                    source_run_id=bundle['run']['runId'], run_bundle=bundle)
-    assert output['report']['evaluationVerdict'] == 'PASS', statuses(output)
-    assert len(output['report']['checks']) == 11 and set(statuses(output).values()) == {'PASS'}
+    assert output['exam'] == 'final' and output['report']['evaluationVerdict'] == 'PASS', statuses(output)
+    assert len(output['report']['checks']) == 9 and set(statuses(output).values()) == {'PASS'}
+    assert output['score'] == {'score': 1.0, 'scoreUpperBound': 1.0, 'completionRate': 1.0, 'scoreIsLowerBound': False,
+                               'requirementShares': output['score']['requirementShares'],
+                               'securityViolations': [], 'missingCheckIds': [], 'reason': None}
+    assert len(output['score']['requirementShares']) == 7
+    assert output['referenceReport']['evaluationVerdict'] == 'PASS' and output['referenceScore']['score'] == 1.0
+    assert output['referenceReport']['evaluationId'] != output['report']['evaluationId']
+    assert output['report']['suite']['sha256'] != output['referenceReport']['suite']['sha256']
+    coverage = output['supplementary']['coverage']
+    assert coverage['error'] is None and 0 < coverage['loaded']['rate'] <= 1
+    assert coverage['files']['routers/auth.py']['executed'] > 0 and 'requirements.lock' not in coverage['files']
+    assert not any(path.startswith(('tests/', '_')) for path in coverage['files'])  # 시험지·실행기는 기록하지 않는다
+    assert {item['outcome'] for item in output['supplementary']['static']['requirements'].values()} == {'PASS'}
     assert output['trace']['traceability']['status'] == 'PASS'
-    kinds = {item['kind'] for item in output['evidence'].values()}
-    assert kinds == {'UNIT_TEST_REPORT', 'STATIC_ASSESSMENT'}
+    kinds = sorted(item['kind'] for item in output['evidence'].values())
+    assert kinds == ['LINE_COVERAGE', 'STATIC_ASSESSMENT', 'UNIT_TEST_REPORT', 'UNIT_TEST_REPORT']
 
 
 @needs_runtime
-def test_weak_hash_fails_both_static_and_runtime_checks():
-    """Argon2 메모리 설정이 기준 미만이면 정적(SEC-001)·실행(SEC-002) 검사가 모두 FAIL이고 판정은 FAIL이다."""
+def test_weak_hash_fails_runtime_check_and_static_supplement():
+    """Argon2 메모리 설정이 기준 미만이면 실행 검사 SEC-SIGNUP-002가 FAIL이고 판정은 FAIL이다. 점수는 그 요구사항만
+    깎이고(요구사항별 같은 비중) 보안 위반으로 따로 드러난다. 정적 보조 점검(REQ-005)도 FAIL을 적는다."""
     archive = snapshot('weak_argon2_memory')
     output = final(archive, manifest(archive), VerifiedImageRunner())
     result = statuses(output)
-    assert result['SEC-SIGNUP-001'] == 'FAIL' and result['SEC-SIGNUP-002'] == 'FAIL' and result['QA-SIGNUP-001'] == 'PASS'
+    assert result['SEC-SIGNUP-002'] == 'FAIL' and result['QA-SIGNUP-001'] == 'PASS'
     assert output['report']['evaluationVerdict'] == 'FAIL'
+    assert output['score']['score'] == pytest.approx(6 / 7) and output['score']['securityViolations'] == ['SEC-SIGNUP-002']
+    assert output['supplementary']['static']['requirements']['REQ-005']['outcome'] == 'FAIL'
 
 
 @needs_runtime
 def test_runtime_check_catches_what_static_cannot_prove():
-    """hash_password()가 매개변수를 그대로 돌려주면 정적 판정은 확인 불가이고, 실행 검사가 평문 저장을 FAIL로 잡는다.
-    한 요구사항에 FAIL과 미검증이 섞이면 판정은 UNVERIFIED이고 확인된 FAIL은 따로 남는다."""
+    """hash_password()가 매개변수를 그대로 돌려주면 정적 보조 점검은 확인 불가(UNVERIFIED)이고, 실행 검사가 평문 저장을
+    FAIL로 잡는다. 정적 보조 점검은 판정에 들어가지 않는다."""
     archive = snapshot('plaintext_storage')
     output = final(archive, manifest(archive), VerifiedImageRunner())
-    result = statuses(output)
-    assert result['SEC-SIGNUP-001'] == 'ERROR' and result['SEC-SIGNUP-002'] == 'FAIL'
+    assert statuses(output)['SEC-SIGNUP-002'] == 'FAIL' and output['report']['evaluationVerdict'] == 'FAIL'
+    assert output['supplementary']['static']['requirements']['REQ-005']['outcome'] == 'UNVERIFIED'
     checks = {check['testId']: check['title'] for check in output['report']['checks']}
     assert any(checks[check_id].startswith('SEC-SIGNUP-002') for check_id in output['report']['confirmedFailureIds'])
 
 
 @needs_runtime
+def test_pilot_exam_is_scored_with_its_own_suite():
+    """시범 최종용(pilot)으로 채점하면 보고서의 suite 지문이 pilot 것이고 결과는 같은 검사 9개다."""
+    from evaluation import protected_tests
+    archive = snapshot()
+    output = final(archive, manifest(archive), VerifiedImageRunner(), exam='pilot')
+    assert output['exam'] == 'pilot' and output['report']['suite']['sha256'] == protected_tests.suite_sha256('pilot')
+    assert output['report']['evaluationVerdict'] == 'PASS' and len(output['report']['checks']) == 9
+
+
+@needs_runtime
 def test_image_digest_mismatch_blocks_results():
-    """실행한 이미지 해시가 기대값과 다르면 Manifest 불일치로 결과를 판정에 쓰지 않는다(UNVERIFIED)."""
+    """실행한 이미지 해시가 기대값과 다르면 Manifest 불일치로 결과를 판정에 쓰지 않는다(UNVERIFIED). 점수도 만들지 않는다."""
     archive = snapshot()
     output = final(archive, manifest(archive), VerifiedImageRunner(digest='sha256:' + 'e' * 64))
     assert output['report']['manifestCheck']['errorCode'] == 'MANIFEST_MISMATCH'
-    assert output['report']['evaluationVerdict'] == 'UNVERIFIED'
+    assert output['report']['evaluationVerdict'] == 'UNVERIFIED' and output['score']['score'] is None
 
 
 @needs_runtime
@@ -328,8 +389,8 @@ def test_local_runner_results_are_never_used_as_final_evidence():
     output = final(archive, manifest(archive), LocalRunner(trusted=True))
     assert output['runner']['kind'] == 'local' and output['runner']['imageDigest'] is None
     assert output['report']['manifestCheck']['errorCode'] == 'MANIFEST_MISSING'
-    unit = next(item for item in output['evidence'].values() if item['kind'] == 'UNIT_TEST_REPORT')
-    assert unit['report']['passed'] == 8  # 실행 자체는 되었지만 보고서 판정에는 쓰지 않는다.
+    unit = next(item for item in output['evidence'].values() if item['kind'] == 'UNIT_TEST_REPORT' and item['exam'] == 'final')
+    assert unit['report']['passed'] == 9  # 실행 자체는 되었지만 보고서 판정에는 쓰지 않는다.
 
 
 def docker_ready():

@@ -1,6 +1,6 @@
 # 시연 자료 정리 방법 (12월 최종 발표용, 팀장 전달)
 
-작성: 2026-10-14 · 갱신: 2026-10-28 · 4번(강석민). 팀장 카톡 요청: "시연의 실행 로그, 생성 파일, 화면 따로 정리해두기".
+작성: 2026-10-14 · 갱신: 2026-10-30 · 4번(강석민). 팀장 카톡 요청: "시연의 실행 로그, 생성 파일, 화면 따로 정리해두기".
 실제 Run이 아직 없어서 형식과 도구만 준비한 상태다. 아래 도구는 합성 폴더로 테스트했고 실제 시연 자료로 돌려 본 적은 없다.
 
 ## 폴더 구조
@@ -10,9 +10,9 @@
 ```text
 <자료 폴더>/
   logs/      실행 로그(서버 로그, Orchestrator Trace 내보내기, 도구 실행 로그)
-  source/    그 Run이 만든 소스(최종 Snapshot에서 꺼낸 파일). 여러 버전이면 code-1/, code-2/ 하위 폴더
+  source/    그 Run이 만든 소스(dev snapshot_export로 꺼낸 최종 Snapshot을 푼 파일). 여러 버전이면 code-1/, code-2/ 하위 폴더
   screens/   화면 캡처·시연 영상(.png, .mp4 등)
-  reports/   QA·Security 보고서, 독립 평가 보고서(INDEPENDENT_EVALUATION)
+  reports/   QA·Security 보고서, 독립 평가 보고서(INDEPENDENT_EVALUATION). experiment score 결과 폴더의 output.json·summary.md를 복사
 ```
 
 위 네 이름 외의 폴더·파일이 최상위에 있으면 목록 작성을 거부한다(섞여 들어가는 것을 막기 위해). macOS의 `.DS_Store`만 예외로 무시한다.

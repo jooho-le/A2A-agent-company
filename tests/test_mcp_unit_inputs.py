@@ -117,6 +117,18 @@ class UnitTestInputsTests(unittest.TestCase):
             captured = self.prepare(selected)
         self.assertEqual(captured.files["tests/test_auth.py"], b"# protected\n")
 
+    def test_security_scope_reads_only_security_generated_tests(self):
+        self.put("outputs/qa/tests/test_qa.py", b"# qa\n")
+        self.put("outputs/security/tests/test_hash.py", b"# security\n")
+        captured = self.prepare(scope(name="security", role="SECURITY"), self.bind(AgentRole.SECURITY))
+        self.assertEqual(captured.files, {"_unit_runner.py": RUNNER, "tests/test_hash.py": b"# security\n"})
+        fixed = scope(kind="PROTECTED", protected_files={"tests/test.py": "pass"},
+                      protected_suite_ref="artifact://protected/tests", role="SECURITY")
+        self.assertEqual(set(self.prepare(fixed, self.bind(AgentRole.SECURITY)).files), {"_unit_runner.py", "tests/test.py"})
+        for role in AgentRole:
+            if role is not AgentRole.SECURITY:
+                self.assert_error("PERMISSION_DENIED", lambda: self.prepare(fixed, self.bind(role)))
+
     def test_role_separation(self):
         fixed = scope(kind="PROTECTED", protected_files={"tests/test.py": "pass"}, protected_suite_ref="artifact://protected/tests")
         for role in AgentRole:

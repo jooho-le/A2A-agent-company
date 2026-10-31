@@ -2072,7 +2072,7 @@ def _security_finding_revalidation(connection, issue, security_report) -> str:
     if not results or any(
         result.outcome.value == "UNVERIFIED"
         or result.tool_evidence is None
-        or result.tool_evidence.tool_name != "run_security_scan"
+        or result.tool_evidence.tool_name not in {"run_security_scan", "run_unit_tests"}
         or result.tool_evidence.execution_manifest != security_report.execution_manifest
         or result.tool_evidence.outcome.value != "PASS"
         for result in results
@@ -2111,7 +2111,7 @@ def _record_revalidation_results(connection, run, qa_report, security_report) ->
         elif issue.category.startswith("SECURITY_FINDING"):
             outcome = _security_finding_revalidation(connection, issue, security_report)
         else:
-            matching = [proven_outcome(result, security_report, {"run_security_scan"})
+            matching = [proven_outcome(result, security_report, {"run_security_scan", "run_unit_tests"})
                         for result in security_report.requirement_results
                         if result.requirement_id in issue.requirement_ids]
             outcome = _combined_outcome(matching)

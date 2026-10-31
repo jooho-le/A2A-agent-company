@@ -7,6 +7,9 @@
 #   - (metrics가 있으면) 시간·수정·재시도·모델 호출·토큰·비용, 협업 시간(전달·병렬·에이전트 밖·사람 대기)
 #   - (trace가 있으면) Run 기록의 노출 검사·추적 검사 결과
 #   - (regression이 있으면) 버전별 보호 테스트 결과에서 계산한 Regression Count(run_metrics.regression_from_reports)
+#   - 최종 시험 점수(scoring.exam_score: 요구사항별 같은 비중, 검사 완료율, 확인된 보안 위반)
+#   - (reference_report가 있으면) 순환용 시험지 참고 채점(차이의 차이 계산용 보조 지표, 판정·점수와 별개)
+#   - (supplementary가 있으면) 보조 점검: 테스트가 지나가지 않은 줄, 정적 판정(판정·점수에 넣지 않음)
 # 에이전트가 쓴 자유 글(Issue 제목·설명, 실패 상세)은 비밀값이 섞일 수 있어서 넣지 않는다. 검사 제목·상태·근거 코드,
 # Issue의 종류·보고 역할·요구사항 이름만 쓴다. 모르는 값은 0이 아니라 "미확인"으로 적는다.
 # 함께 넣는 자료(run_bundle·metrics·trace·runner)는 평가 보고서와 같은 Run·같은 최종 코드 버전·같은 평가의 것이어야 한다.
@@ -17,9 +20,12 @@
 # - 놓친 결함(missedDefect): Orchestrator는 SUCCESS라고 했는데 독립 평가에서 필수 검사 FAIL이 확인된 경우.
 from typing import Mapping, Optional  # 자료형 이름표(실행에는 영향 없음)
 
+from .scoring import exam_score  # 요구사항별 같은 비중 점수
+
 UNKNOWN = '미확인'  # 모르는 값을 적는 글자(0으로 바꾸지 않는다)
 OUTPUT_NAMES = {'A2A_MESSAGE_BODY': 'A2A Message 본문', 'ARTIFACT_FILE_CONTENT': 'Artifact 파일 내용',
-                'AGENT_PROCESS_OUTPUT': '에이전트 프로세스 출력'}  # 노출 검사가 보지 못하는 출력의 표시 이름
+                'AGENT_PROCESS_OUTPUT': '에이전트 프로세스 출력',
+                'A2A_MESSAGE_BODY_BEFORE_REDACTION': '가리기 전 A2A 송수신 본문(저장된 기록은 가린 값)'}  # 노출 검사가 보지 못하는 출력의 표시 이름
 
 
 def _cell(value) -> str:
@@ -100,26 +106,85 @@ def _check_same_sources(report, metrics, run_bundle, trace, runner, regression=N
         raise ValueError('Regression results differ from the evaluated Run or protected suite')
 
 
+def _exposure_line(exposure: Optional[Mapping]) -> str:
+    # REQ-006(노출 금지) 전체 출력의 검증이 끝났는지 한 줄로 적는다. 보호 테스트·정적 판정이 모두 PASS여도
+    # Run 기록에서 노출을 찾았거나, 기록 검사가 없거나, 보지 못한 출력이 있으면 "완료"라고 쓰지 않는다.
+    if not exposure:
+        return '- REQ-006 전체 출력의 노출 검증: 미완료(Run 기록 노출 검사 결과 없음)'
+    if exposure.get('status') == 'FAIL':
+        return '- **REQ-006 충족하지 않음**: Run 기록에서 비밀번호·해시 노출 발견(위 판정과 별개)'
+    coverage = exposure.get('coverage') or {}
+    gaps = [] if exposure.get('status') == 'PASS' else [f"Run 기록 노출 검사 {_cell(exposure.get('status'))}"]
+    if not coverage:
+        # 검사 범위를 모르면 무엇을 보지 못했는지도 모르므로 완료라고 쓰지 않는다.
+        gaps.append('검사 범위 정보 없음')
+    if coverage.get('notCollectedOutputs'):
+        gaps.append('보지 못한 출력 ' + '·'.join(OUTPUT_NAMES.get(name, name) for name in coverage['notCollectedOutputs']))
+    if coverage.get('missingDocuments') or coverage.get('incompleteDocuments'):
+        gaps.append('받지 못한 기록 ' + '·'.join(coverage.get('missingDocuments', []) + coverage.get('incompleteDocuments', [])))
+    if gaps:
+        return f"- REQ-006 전체 출력의 노출 검증: 미완료({', '.join(gaps)})"
+    return '- REQ-006 Run 기록 노출 검사: PASS(보지 못한 출력·받지 못한 기록 없음)'
+
+
+def _percent(value) -> str:
+    # 0~1 비율을 "97.6%"처럼 적는다. None이면 "미확인".
+    return UNKNOWN if value is None else f'{value * 100:.1f}%'
+
+
+def _score_line(score: Mapping) -> str:
+    # 점수 한 줄: 점수(요구사항별 같은 비중)·검사 완료율. 미검증이 있으면 잠정 하한이라고 적는다.
+    if score['score'] is None:
+        return {'MANIFEST_NOT_CONFIRMED': '점수 없음(코드·환경 신분 미확인)',
+                'EXAM_EXPOSED': '점수 없음(시험지 노출)'}.get(score.get('reason'), '점수 없음')
+    return (f"{score['score']:.3f}(요구사항별 같은 비중){' 잠정 하한' if score['scoreIsLowerBound'] else ''}"
+            f" · 검사 완료율 {_percent(score['completionRate'])}")
+
+
 def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = None, metrics: Optional[Mapping] = None,
                    run_bundle: Optional[Mapping] = None, trace: Optional[Mapping] = None,
-                   runner: Optional[Mapping] = None, regression: Optional[Mapping] = None) -> str:
+                   runner: Optional[Mapping] = None, regression: Optional[Mapping] = None,
+                   reference_report: Optional[Mapping] = None, supplementary: Optional[Mapping] = None) -> str:
     # 독립 평가 보고서(report)와 선택 자료로 Markdown 요약 글을 만들어 돌려준다.
     # scenario_contract: 요구사항 표시 이름(REQ-001 등)을 쓰기 위한 시나리오 정책
     # metrics          : run_metrics() 결과(시간·수정·비용·협업 시간)
     # run_bundle       : Run 기록(코드 버전별 흐름 표), trace: Trace 검사 결과, runner: D5 실행 정보
     # regression       : run_metrics.regression_from_reports 결과(버전별 보호 테스트 결과의 PASS → FAIL 수)
+    # reference_report : D5 결과의 referenceReport(같은 Run·같은 코드를 순환용 시험지로 참고 채점한 보고서)
+    # supplementary    : D5 결과의 supplementary(지나간 줄 기록·정적 판정)
     _check_same_sources(report, metrics, run_bundle, trace, runner, regression)  # 0) 다른 Run·평가의 자료가 섞이지 않았는지
+    if reference_report is not None and (
+            reference_report.get('sourceRunId') != report.get('sourceRunId')
+            or reference_report.get('architecture') != report.get('architecture')
+            or reference_report.get('expectedManifest') != report.get('expectedManifest')):
+        raise ValueError('Reference report differs from the evaluated Run or final code')
+    score = exam_score(report)
     keys = _requirement_keys(scenario_contract)
     source = report.get('sourceRun') or {}
     manifest = report.get('manifestCheck') or {}
+    exposure = (trace or {}).get('exposure')
+    traceability = (trace or {}).get('traceability')
     # 1) 머리 부분: 평가·Run 번호, 판정, 놓친 결함, 신분 확인 결과
+    #    판정은 보호 테스트·정적 판정만의 결과이므로 검사 수를 함께 적고, 판정에 들어가지 않는 Run 기록 검사와
+    #    REQ-006 전체 출력의 노출 검증 상태를 바로 아래에 따로 적는다(PASS 판정이 기록 속 노출을 가리지 않게).
     lines = ['# 독립 평가 요약', '',
              f"- 평가 번호 `{report.get('evaluationId')}` · 대상 Run `{report.get('sourceRunId')}` · 구조 {report.get('architecture')}"
              f" · 평가 시각 {report.get('createdAt')}",
-             f"- **독립 평가 판정: {report.get('evaluationVerdict')}**"
+             f"- **독립 평가 판정(실행 검사 {len(report.get('checks', []))}개): {report.get('evaluationVerdict')}**"
              + (f" · Orchestrator 판정 {_cell(source.get('finalVerdict'))}, 수정 {_cell(source.get('fixAttempt'))}회, "
                 f"최종 코드 버전 {_cell(source.get('codeVersion'))}" if source else ''),
+             f"- 위 판정에 들어가지 않는 Run 기록 검사: 노출(REQ-006 기록) {_cell((exposure or {}).get('status') or '결과 없음')}, "
+             f"추적(REQ-008) {_cell((traceability or {}).get('status') or '결과 없음')}",
+             f"- 최종 시험 점수: {_score_line(score)}",
+             _exposure_line(exposure),
              ]
+    exposure_found = (supplementary or {}).get('examExposure')
+    if exposure_found:
+        # 채점할 코드에 시험지가 섞였다. 에이전트가 시험지를 볼 수 있었으므로 이 Run은 점수 비교에서 뺀다.
+        lines.append(f"- **시험지 노출**: 채점할 Snapshot에 시험지·평가 코드가 들어 있어 실행·점수를 만들지 않음 "
+                     f"({', '.join(_cell(item['path']) for item in exposure_found[:10])})")
+    if score['securityViolations']:
+        lines.append(f"- **확인된 보안 위반**(점수와 별개): {', '.join(score['securityViolations'])}")
     if source.get('missedDefect'):
         lines.append('- **놓친 결함**: Orchestrator는 SUCCESS였지만 독립 평가에서 필수 검사 FAIL이 확인됨')
     identity = '일치' if manifest.get('metadataMatches') else f"불일치·미확인({_cell(manifest.get('errorCode'))}) → 결과를 판정에 쓰지 않음"
@@ -135,7 +200,11 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
         # 검사 제목 "QA-SIGNUP-001 유효한 ..."에서 첫 단어(검사 번호)만 꺼내 쓴다.
         checks = ', '.join(f"{titles.get(check_id, check_id).split(' ', 1)[0]} {statuses.get(check_id)}"
                            for check_id in requirement.get('checkIds', []))
-        lines.append(f"| {_cell(key)} | {_cell(requirement.get('validationVerdict'))} | {_cell(checks)} |")
+        verdict = _cell(requirement.get('validationVerdict'))
+        # REQ-006 줄은 보호 테스트·정적 판정 결과다. Run 기록 노출 검사가 PASS가 아니면 같은 칸에 덧붙여 가려지지 않게 한다.
+        if key == 'REQ-006' and exposure and exposure.get('status') != 'PASS':
+            verdict += f" · Run 기록 노출 {_cell(exposure.get('status'))}"
+        lines.append(f"| {_cell(key)} | {verdict} | {_cell(checks)} |")
     # 3) 검사별 결과
     lines += ['', '## 검사별 결과', '', '| 검사 | 관점 | 결과 | 근거 코드 |', '|---|---|---|---|']
     for check in report.get('checks', []):
@@ -174,6 +243,29 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
                   f"{regression.get('comparedVersionPairs')}개 · 비교 못 한 검사 {regression.get('uncomparedChecks')}개"]
         lines += [f"  - v{item['fromVersion']} → v{item['toVersion']}: {_cell(titles.get(item['checkId'], item['checkId']).split(' ', 1)[0])}"
                   for item in regression.get('regressions', [])]
+    if reference_report is not None:
+        # 순환용 시험지는 Ver1이 개발 중에 결과를 본 시험지다. 최종 점수와 섞지 않고 차이의 차이(보조 지표) 계산에만 쓴다.
+        reference = exam_score(reference_report)
+        lines += ['', '## 순환용 시험지 참고 채점(판정·점수와 별개, 차이의 차이 계산용 보조 지표)', '',
+                  f"- 판정 {_cell(reference_report.get('evaluationVerdict'))} · 점수 {_score_line(reference)}"]
+    if supplementary:
+        lines += ['', '## 보조 점검(판정·점수에 넣지 않음)', '']
+        coverage = supplementary.get('coverage') or {}
+        if coverage.get('loaded'):
+            loaded = coverage['loaded']
+            gaps = [f"{path} {'·'.join(str(line) for line in item['missing'][:20])}"
+                    + (' 외' if len(item['missing']) > 20 else '')
+                    for path, item in sorted((coverage.get('files') or {}).items()) if item['executed'] and item['missing']]
+            lines.append(f"- 테스트가 지나간 줄(테스트가 불러온 파일 {loaded['files']}개 기준): {loaded['executed']}/{loaded['lines']}줄"
+                         f"({_percent(loaded['rate'])}). 지나가지 않은 줄: {'; '.join(gaps) if gaps else '없음'}")
+        elif coverage:
+            lines.append(f"- 테스트가 지나간 줄: 기록 없음({_cell(coverage.get('error'))})")
+        static = supplementary.get('static') or {}
+        if static.get('requirements'):
+            lines.append('- 정적 판정(실행 검사가 지나가지 않은 코드 경로까지 소스로 봄): ' + ', '.join(
+                f"{key} {_cell(item.get('outcome'))}" for key, item in sorted(static['requirements'].items())))
+        elif static:
+            lines.append(f"- 정적 판정: 결과 없음({_cell(static.get('error'))})")
     if trace:
         lines += ['', '## Run 기록 검사', '']
         for name, label in (('exposure', '비밀번호·해시 노출(REQ-006 Orchestrator 기록)'), ('traceability', '추적 가능성(REQ-008)')):

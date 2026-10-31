@@ -243,6 +243,22 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
                     plan.validate_configuration(configuration)
                 self.assert_safe(caught.exception)
 
+    def test_final_only_and_in_loop_arms_both_accept_a_declared_experiment(self):
+        # Ver2 (no in-loop protected tests) and Ver1 (protected tests) declare the same
+        # experiment; Ver2 keeps no protected reference and no protected selector.
+        final_only = self.inspect()
+        self.protected()
+        in_loop = self.inspect(protected_cases_file=self.cases_file)
+        experiment = {"experimentId": str(uuid4()), "warmupState": "COLD", "executionOrder": 0}
+        for name, plan in (("final_only", final_only), ("in_loop", in_loop)):
+            with self.subTest(arm=name):
+                submitted = RunConfiguration.model_validate(
+                    {**plan.approved_configuration.model_dump(mode="json", by_alias=True), **experiment})
+                plan.validate_configuration(submitted)
+        self.assertIsNone(final_only.approved_configuration.protected_test_suite_ref)
+        self.assertEqual(in_loop.approved_configuration.protected_test_suite_ref, SUITE_REF)
+        self.assertFalse(any(scope.kind == "PROTECTED" for scope in final_only.tools.unit_configuration_for(AgentRole.QA).scopes))
+
     def test_tool_and_runtime_timeout_must_match_exactly(self):
         self.runtime["llmLimits"]["tool_timeout_seconds"] = 59
         self.write()

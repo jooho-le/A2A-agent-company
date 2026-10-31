@@ -147,6 +147,17 @@ class FileToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(denied.error_code, "PATH_DENIED")
         self.assertEqual(self.file.read_bytes(), self.original)
 
+    async def test_security_writes_only_its_own_test_area(self):
+        dispatcher = self.dispatcher(AgentRole.SECURITY)
+        allowed = await dispatcher.call_tool("write_test_file", self.arguments(
+            path="outputs/security/tests/test_hash.py", content="def test_hash(): pass\n"))
+        self.assertEqual(set(allowed.data), {"path", "sha256", "changed"})
+        for path in ("outputs/qa/tests/test_hash.py", "source/signup.py", "outputs/security/report.json",
+                     "outputs/security/tests"):
+            denied = await dispatcher.call_tool("write_test_file", self.arguments(path=path, content="{}"))
+            self.assertEqual(denied.error_code, "PATH_DENIED")
+        self.assertEqual(self.file.read_bytes(), self.original)
+
     async def test_qa_and_security_source_read_never_fallback_to_working_copy(self):
         for role in (AgentRole.QA, AgentRole.SECURITY):
             result = await self.dispatcher(role).call_tool("read_project_file", self.arguments())
@@ -261,6 +272,7 @@ class FileToolTests(unittest.IsolatedAsyncioTestCase):
                 handlers = tools.handlers(role)
                 self.assertTrue(set(handlers) <= set(ROLE_TOOL_NAMES[role]))
             self.assertEqual(set(tools.handlers(AgentRole.QA)), {"read_project_file", "write_test_file"})
+            self.assertEqual(set(tools.handlers(AgentRole.SECURITY)), {"read_project_file", "write_test_file"})
 
     async def test_child_selection_is_host_only_and_not_visible_in_config_repr(self):
         selection = self.source_selection()

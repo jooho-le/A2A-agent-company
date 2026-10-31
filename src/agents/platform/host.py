@@ -90,10 +90,12 @@ def _policy_references(tools, cases):
     profiles = {profile.profile_ref for profile in tools.security_configuration.profiles}
     if len(profiles) != 1:
         raise HostFactoryError()
+    security = tools.unit_configuration_for(AgentRole.SECURITY)
     selectors = [
         (tool, selector)
         for tool, selected in (
             ("run_unit_tests", tools.unit_configuration_for(AgentRole.QA).scopes),
+            ("run_unit_tests", () if security is None else security.scopes),
             ("run_browser_tests", tools.browser_configuration.suites),
         ) for selector in selected if selector.kind == "PROTECTED"
     ]
@@ -202,6 +204,10 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         tools = load_tool_configuration(tools_path)
         if runtime.llm_limits.tool_timeout_seconds != tools.max_call_seconds:
             raise HostFactoryError()
+        if proof_verifier is not None and tools.unit_configuration_for(AgentRole.SECURITY) is not None:
+            # Security Requirements are decided by measured tests or by an
+            # approved proof, never both in one Run.
+            raise HostFactoryError()
         source = verify_starting_source(load_source_configuration(source_path),
             base_directory=source_path.parent, environment=tools.baseline)
         cases = _load_protected_cases(protected_cases_file)
@@ -232,7 +238,11 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             "unit": parse_json(tools._unit_json), "browser": parse_json(tools._browser_json),
             "security": parse_json(tools._security_json), "maxCallSeconds": tools.max_call_seconds,
             "protectedCases": [_case_data(case) for case in cases],
-            "semanticProof": "UNVERIFIED" if proof_verifier is None else proof_verifier.descriptor,
+            # Security Requirements come from an approved proof, from measured
+            # Security unit tests (role SECURITY scopes), or stay UNVERIFIED.
+            "semanticProof": (proof_verifier.descriptor if proof_verifier is not None
+                              else "MEASURED_TESTS" if tools.unit_configuration_for(AgentRole.SECURITY) is not None
+                              else "UNVERIFIED"),
         }
         if price_book is not None:
             policy["pricing"] = price_book.descriptor

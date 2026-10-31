@@ -280,7 +280,7 @@ class AgentMCPSettingsTests(unittest.TestCase):
                 "read_project_file", "write_test_file", "run_unit_tests", "run_browser_tests", "read_test_report",
             ),
             AgentRole.SECURITY: (
-                "read_project_file", "run_security_scan", "read_security_report",
+                "read_project_file", "write_test_file", "run_unit_tests", "run_security_scan", "read_security_report",
             ),
         }
         self.assertEqual(dict(ROLE_TOOL_NAMES), expected)

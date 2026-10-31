@@ -1,6 +1,6 @@
 # Single-Agent 비교 기준선 (D6, 팀 공유·논의용)
 
-작성: 2026-10-14 · 갱신: 2026-10-28 · 4번(강석민) · 상태: **설계 초안. 담당은 4번, Single 실행 경로가 없어 실제 비교는 아직 불가**
+작성: 2026-10-14 · 갱신: 2026-10-31 · 4번(강석민) · 상태: **설계 초안. Single 실행기는 주호가 개발(10.29 회의록), 4번은 평가 기준·비교 집계 담당. Single 실행 경로가 없어 실제 비교는 아직 불가(평가 쪽 비교 도구는 준비됨)**
 근거: 개발정의서 11-A, 기업질의응답(Q75~80), 2차 기업미팅 11~12절, dev `run_configuration.py`·`telemetry_store.py`, [evaluation_spec.md](evaluation_spec.md) 13절.
 
 ## 1. 우선순위와 범위
@@ -70,7 +70,7 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 
 `/usage.summary`는 Run 전체 요약이므로 페이지의 record를 다시 더하지 않는다. `costUsd=null`과 미측정 모델 호출 수를 0으로 쓰지 않는다. 구조별 모델 호출 합계 `modelCalls`는 모든 대상 Run의 측정이 있을 때만 표시하고, 확인된 부분 합은 `knownModelCalls`, 완전성은 `modelCallsComplete`로 구분한다. `HUMAN_REVIEW`는 재개될 수 있어 영구 종료로 일괄 처리하지 않는다. Orchestrator SUCCESS인데 독립 평가의 필수 실패가 확인된 Run 수는 두 구조의 "자체 성공" 신뢰도를 비교하는 보조 지표다. 이 값은 실제 연결한 Run과 평가 결과로 계산하며 선택 항목 `sourceRun` 생략에 영향받지 않는다.
 
-위 표의 계산은 모두 구현했다(합성 입력과 dev 파이프라인 테스트 Run으로 확인). 구현과 실제 자동 산출은 다르다: Regression은 버전별 Snapshot을 받아 D5로 채점한 보고서가 있어야 하는데, Snapshot 인계 경로가 정해지지 않아 아직 실행 결과에서 자동으로 나오지 않는다. 보고서의 `sourceRun.durationMs`는 Run 생성~종료 시간이고, `run_metrics()`의 시간은 RUN_STARTED 사건부터 계산한다. 사건 수가 누락되거나 불일치하면 사건 기반 시간은 None으로 남긴다.
+위 표의 계산은 모두 구현했다(합성 입력과 dev 파이프라인 테스트 Run으로 확인). 구현과 실제 자동 산출은 다르다: Regression은 버전별 Snapshot을 받아 D5로 채점한 보고서가 있어야 한다. dev `snapshot_export --all-versions`와 `experiment score --all-versions`로 자동 계산하지만 실제 Run으로는 아직 돌리지 않았다. 보고서의 `sourceRun.durationMs`는 Run 생성~종료 시간이고, `run_metrics()`의 시간은 RUN_STARTED 사건부터 계산한다. 사건 수가 누락되거나 불일치하면 사건 기반 시간은 None으로 남긴다.
 
 ## 6. 비교가 무효가 되는 경우 (개발정의서 11-A)
 
@@ -99,13 +99,13 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 
 | 막힌 것 | 필요한 결정·작업 | 담당 논의 |
 |---|---|---|
-| Single 실행기가 없음. `architecture`가 `MULTI_AGENT`만 허용 | 담당은 4번(dev 45번 §7 "Single-Agent 기준선은 역할 4 범위", 개발계획). 실행 경로(`architecture` 확장 또는 기존 Multi 구현 일부를 단일 구조로 바꾸는 방법, 기업 미팅 제안)는 1·2번 코드라 협의 필요 | 주호(팀장)·석민 |
-| 시작 코드 미정(owned-source 미설정) | 서비스 웹페이지 저장소의 특정 커밋인지 회원가입 자리만 비운 별도 틀인지, 승인 커밋. Single·Multi는 같은 시작 Commit에서 출발해야 한다(정의서 11-A) | 주호(팀장) |
-| 보호 테스트 위치 | (결정) B(순환 안)로 진행, A 비교는 시간 여유가 있을 때. 순환 안 QA 5개·최종 전용 3개로 나눠 구현(2026-10-28) | — |
+| Single 실행기가 없음. `architecture`가 `MULTI_AGENT`만 허용 | 10.29 회의록에서 Single 에이전트 개발은 주호 담당으로 정함(dev 45번 §7의 "Single-Agent 기준선은 역할 4 범위"보다 나중 결정). 4번은 평가 기준과 비교 집계(`experiment compare --group-by architecture`)를 맡음. 실행 경로(`architecture` 확장 또는 기존 Multi 구현 일부를 단일 구조로 바꾸는 방법)는 주호의 dev 작업 | 주호(팀장) |
+| 시작 코드 미정(owned-source 미설정) | 시작 코드 규격 에이전트 여부 논의(11/2) 뒤 위치·형태와 승인 커밋을 정함. Single·Multi는 같은 시작 Commit에서 출발해야 한다(정의서 11-A) | 주호(팀장) |
+| 보호 테스트 위치 | 10.29 회의록의 방안 1(순환 + 최종)·방안 2(최종 중심)는 방식 검토 중. 회의 뒤 4번 방침으로 멀티에이전트를 Ver1(방안 1 조건)·Ver2(방안 2 조건) 두 버전으로 모두 실행. Single vs Multi는 같은 방안 안에서 비교(보호 테스트 조건이 같아야 유효). 검사 9개 × 시험지 세 벌(순환용·시범·공식)로 구현(2026-10-30). Single을 다시 비교할 때도 같은 채점용 시험지를 쓴다 | — |
 | 실험 예산·모델·가격표 | 모델 lock, 단가, 한도, 반복 횟수 | 전원 |
-| 최종 Snapshot 인계 | 소스 접근·Manifest·권한 | 주호(팀장) |
+| 최종 Snapshot 인계 | (해소, 10.30) dev `snapshot_export`(4번 추가)로 tar·Manifest를 꺼냄 | — |
 
 ## 9. 4번이 먼저 해 둘 수 있는 것
 
-- 완료(구현): 통제 조건 비교, 지표 변환, 구조별 요약, 협업 시간(시도·재개 구간별), Regression 계산과 버전별 보고서 연결(`run_metrics.py`), 최종 독립 채점기(`final_evaluation.py`). 남음: Single 실행 경로(1·2번 코드 협의), 버전별 Snapshot 인계와 평가 기록, 실제 Run으로 검증.
+- 완료(구현): 통제 조건 비교, 지표 변환, 구조별 요약, 협업 시간(시도·재개 구간별), Regression 계산과 버전별 보고서 연결(`run_metrics.py`), 최종 독립 채점기(`final_evaluation.py`). 남음: Single 실행 경로(주호 개발, 10.29 회의록), 실제 Run으로 검증.
 - 실제 Run이 없으므로 합성 데이터 결과는 실험 결과로 쓰지 않는다.

@@ -30,6 +30,12 @@ class RunConfigurationTests(unittest.TestCase):
             scanner_profile_ref="artifact://protected/scanner", warmup_state="COLD", execution_order=0,
         )
         self.assertEqual(config.architecture, "MULTI_AGENT")
+        # A final-only arm has no in-loop protected tests; every other baseline field stays required.
+        baseline = config.model_dump(by_alias=True)
+        self.assertIsNone(RunConfiguration.model_validate({**baseline, "protectedTestSuiteRef": None}).protected_test_suite_ref)
+        for field in ("scannerProfileRef", "warmupState", "executionOrder", "startingCommitHash"):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                RunConfiguration.model_validate({**baseline, field: None})
 
     def test_scenario_policy_is_frozen_and_public_copy_is_detached(self):
         artifact = RunConfigurationArtifact(run_id=uuid4(), scenario_id=SCN_001_ID, workspace_id=uuid4())

@@ -86,11 +86,14 @@ class RunConfiguration(ImmutableDomainModel):
 
     @model_validator(mode="after")
     def validate_experiment_inputs(self) -> "RunConfiguration":
+        # The protected test reference may be absent: an experiment arm can
+        # deliberately run without in-loop protected tests (final-only arm).
+        # Comparisons that need it (for example Single vs Multi) require it
+        # in the evaluation's comparison check instead.
         if self.experiment_id is not None and any(value is None for value in (
             self.starting_commit_hash, self.starting_snapshot_sha256, self.model,
             self.environment, self.limits.runtime_budget_ms,
-            self.protected_test_suite_ref, self.scanner_profile_ref,
-            self.warmup_state, self.execution_order,
+            self.scanner_profile_ref, self.warmup_state, self.execution_order,
         )):
             raise ValueError("experiment runs require the complete immutable comparison baseline")
         return self
