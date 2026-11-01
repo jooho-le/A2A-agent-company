@@ -3,6 +3,12 @@
 Static warnings and model prose are proposals, not proof of vulnerabilities or
 Requirement satisfaction. Only an explicitly configured trusted Host verifier
 may upgrade grounded proposals. Nothing executes project Source on the Host.
+
+When the Host configures Security unit-test scopes (the same unit-test path QA
+uses), Requirement outcomes come instead from measured Sandbox test receipts:
+the model writes and binds its own tests, every configured protected Security
+case is always run, and a Requirement is PASS only when all its bound tests
+pass. A proof verifier and test scopes are never combined for one Run.
 """
 
 import asyncio
@@ -25,6 +31,7 @@ from referencing import Registry, Resource
 
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text, parse_json
+from agents.roles.qa_contract import QACaseBinding
 from agents.roles.outputs import validate_completed_role_output
 from agents.runtime.qa_context import validation_cycle, verify_report_predecessor
 from agents.runtime.evaluation_policy_store import EvaluationPolicyStore, security_policy_sha256
@@ -36,6 +43,8 @@ from mcp_tools.runtime import MCPExecutionContext
 from mcp_tools.tools.files import _run_file_operation
 from mcp_tools.tools.security import SecurityScanTools
 from mcp_tools.tools.security_store import SecurityScanOutputStore
+from mcp_tools.tools.unit import UnitTestTools
+from mcp_tools.tools.unit_store import UnitTestOutputStore
 from mcp_tools.tools.snapshots import SnapshotReader
 from orchestrator.artifacts.service import ArtifactStore
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
@@ -56,6 +65,8 @@ class SecurityServicesError(ValueError):
             "SECURITY_SERVICES_INVALID", "SECURITY_SCAN_EVIDENCE_INVALID",
             "SECURITY_CODE_REFERENCE_INVALID", "SECURITY_REVIEW_INVALID",
             "SECURITY_PROOF_INVALID", "SECURITY_ARTIFACT_INVALID",
+            # Measured Security test mode: input, ID binding and run evidence.
+            "SECURITY_TEST_INPUT_INVALID", "SECURITY_TEST_BINDING_INVALID", "SECURITY_TEST_EVIDENCE_INVALID",
         } else "SECURITY_SERVICES_INVALID"
         super().__init__(self.code)
 
@@ -173,7 +184,7 @@ class SecurityRuntimeServices:
     """One opt-in Host Run capability; its constructor performs no I/O."""
 
     def __init__(self, repository, workspace_registry, artifact_store, *, mcp_configuration,
-                 client_factory=open_mcp_client, proof_verifier=None):
+                 client_factory=open_mcp_client, proof_verifier=None, protected_cases=()):
         try:
             if (not isinstance(repository, SQLiteWorkflowRepository)
                     or not isinstance(workspace_registry, WorkspaceRegistry)
@@ -189,15 +200,36 @@ class SecurityRuntimeServices:
                     or mcp_configuration.frozen_source is None
                     or mcp_configuration.security_scan_configuration is None
                     or mcp_configuration.build_configuration is not None
-                    or mcp_configuration.unit_test_configuration is not None
                     or mcp_configuration.browser_test_configuration is not None
-                    or not callable(client_factory) or proof_verifier is not None and not callable(proof_verifier)):
+                    or not callable(client_factory) or proof_verifier is not None and not callable(proof_verifier)
+                    or type(protected_cases) is not tuple or len(protected_cases) > 256
+                    or any(type(case) is not QACaseBinding for case in protected_cases)):
                 raise ValueError
             policy = mcp_configuration.security_scan_configuration
             timeout = min(policy.limits.timeout_seconds,
                 mcp_configuration.max_call_seconds - 2 * policy.limits.control_timeout_seconds - 1)
             if timeout < .01:
                 raise ValueError
+            generated, protected = (), ()
+            unit = mcp_configuration.unit_test_configuration
+            if unit is not None:
+                timeout = min(unit.limits.timeout_seconds,
+                    mcp_configuration.max_call_seconds - 2 * unit.limits.control_timeout_seconds - 1)
+                if (proof_verifier is not None or timeout < .01
+                        or any(AgentRole.SECURITY not in scope.roles for scope in unit.scopes)):
+                    raise ValueError
+                generated = tuple(scope.name for scope in unit.scopes if scope.kind == "QA_TESTS")
+                protected = tuple(scope.name for scope in unit.scopes if scope.kind == "PROTECTED")
+                if not generated:
+                    raise ValueError
+            keys = [(case.tool_name, case.selector, case.test_id) for case in protected_cases]
+            if (len(set(keys)) != len(keys)
+                    or {(case.tool_name, case.selector) for case in protected_cases}
+                       != {("run_unit_tests", name) for name in protected}):
+                raise ValueError
+            approved = tuple(QACaseBinding(**{name: getattr(case, name) for name in (
+                "tool_name", "selector", "test_id", "requirement_id", "title", "expected_result")})
+                for case in protected_cases)
         except Exception:
             raise SecurityServicesError() from None
         self.configuration, self.client_factory = mcp_configuration, client_factory
@@ -207,9 +239,16 @@ class SecurityRuntimeServices:
         self._verifier = proof_verifier
         self._issued, self._reads = {}, {}
         self._scan_started = False
+        self._unit = UnitTestOutputStore(repository)
+        self._test_selectors, self._protected_selectors, self._protected_cases = generated, protected, approved
 
     def __repr__(self):
         return "SecurityRuntimeServices()"
+
+    @property
+    def test_selectors(self):
+        """Generated Security test scopes offered to the model; empty means the proof path."""
+        return self._test_selectors
 
     def _verify(self, execution):
         binding, source = self.configuration.binding, execution.source
@@ -257,8 +296,20 @@ class SecurityRuntimeServices:
                 or policy.image_reference is not None
                 and policy.image_reference.rsplit("@", 1)[-1] != environment.container_image_digest):
             raise ValueError
+        unit = self.configuration.unit_test_configuration
+        if unit is not None:
+            # A frozen protected-suite obligation cannot disappear because the
+            # Security child lacks its protected scopes, and vice versa.
+            reference = configuration.configuration.protected_test_suite_ref
+            if ((reference is not None) != bool(self._protected_selectors)
+                    or any(scope.kind == "PROTECTED" and scope.protected_suite_ref != reference for scope in unit.scopes)
+                    or unit.image_reference is not None
+                    and unit.image_reference.rsplit("@", 1)[-1] != environment.container_image_digest
+                    or any(case.requirement_id not in execution.metadata.requirement_ids for case in self._protected_cases)):
+                raise ValueError
         self._evaluation_policies.pin(binding, workflow_step_id=execution.metadata.workflow_step_id,
-            source_artifact_id=source.artifact_id, policy_sha256=security_policy_sha256(self.configuration))
+            source_artifact_id=source.artifact_id,
+            policy_sha256=security_policy_sha256(self.configuration, self._protected_cases))
         return dict(sorted(files.items()))
 
     async def prepare(self, execution):
@@ -390,6 +441,14 @@ class SecurityRuntimeServices:
         execution.budget.check()
         self._tracked(tracked, execution)
         self._bundle(measured, execution)
+        if name == "write_test_file":
+            # Generated Security tests are scratch only; the Host still runs them.
+            if (not self._test_selectors or type(arguments.get("path")) is not str
+                    or not arguments["path"].startswith("outputs/security/tests/")):
+                raise SecurityServicesError("SECURITY_TEST_INPUT_INVALID")
+            result = await tracked.invoke(name, arguments, deadline_monotonic=execution.budget.deadline_monotonic)
+            execution.budget.check()
+            return result
         if name not in {"read_project_file", "read_security_report"}:
             raise SecurityServicesError("SECURITY_CODE_REFERENCE_INVALID")
         if name == "read_security_report":
@@ -479,8 +538,13 @@ class SecurityRuntimeServices:
                 "findingId": review.finding_id, "proposedDisposition": review.proposed_disposition,
                 "rationale": review.rationale, "references": [reference(value) for value in review.references]}
                 for review in decision.finding_reviews]}
+            if self._test_selectors:
+                data["testCases"] = [{"selector": case.selector, "testId": case.test_id,
+                    "requirementId": str(case.requirement_id), "title": case.title,
+                    "expectedResult": case.expected_result} for case in decision.test_cases]
             validated = validate_security_decision(data, execution.metadata.requirement_ids,
-                                                  measured.finding_ids, measured.source_paths)
+                                                  measured.finding_ids, measured.source_paths,
+                                                  self._test_selectors or None)
             anchors = {}
             for review in (*validated.requirement_reviews, *validated.finding_reviews):
                 identity = getattr(review, "requirement_id", getattr(review, "finding_id", None))
@@ -491,6 +555,9 @@ class SecurityRuntimeServices:
             raise
         except Exception:
             raise SecurityServicesError("SECURITY_REVIEW_INVALID") from None
+        tests = None
+        if self._test_selectors:
+            tests = await self._run_tests(execution, validated, tracked)
         proof = None
         if self._verifier is not None:
             try:
@@ -516,9 +583,97 @@ class SecurityRuntimeServices:
                 raise SecurityServicesError("SECURITY_PROOF_INVALID") from None
         execution.budget.check()
         return await _run_file_operation(self._assemble, execution, validated, measured, anchors, proof,
-                                         task_id, context_id)
+                                         task_id, context_id, tests)
 
-    def _assemble(self, execution, decision, measured, anchors, proof, task_id, context_id):
+    def _capture_tests(self, execution, selector):
+        # Copy the exact generated or protected inputs before the Tool runs,
+        # as QA does, so the receipt can be compared with what was offered.
+        self._verify(execution)
+        binding = self.configuration.binding
+        context = MCPExecutionContext(binding=binding,
+            workspace=self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.SECURITY))
+        tools = UnitTestTools(self._artifacts, SandboxRuntime(self._repository, self._workspaces, self._artifacts),
+            self._unit, configuration=self.configuration.unit_test_configuration,
+            max_call_seconds=self.configuration.max_call_seconds)
+        scope, profile = tools._scope_profile(AgentRole.SECURITY, selector)
+        _source, captured = tools._prepare(context, scope, execution.source.artifact_id)
+        return self._unit._inputs_payload(captured, scope), profile, self._unit._scope_payload(scope)
+
+    async def _run_tests(self, execution, decision, tracked):
+        """Run every generated and protected Security scope; decide each Requirement from measured cases."""
+        cases = decision.test_cases + self._protected_cases
+        if any(case.selector not in self._test_selectors for case in decision.test_cases):
+            raise SecurityServicesError("SECURITY_TEST_BINDING_INVALID")
+        binding, measured = self.configuration.binding, {}
+        for selector in self._test_selectors + self._protected_selectors:
+            execution.budget.check()
+            try:
+                inputs, profile, policy = await _run_file_operation(self._capture_tests, execution, selector)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise SecurityServicesError("SECURITY_TEST_INPUT_INVALID") from None
+            arguments = {"workspaceId": str(execution.configuration.workspace_id),
+                         "snapshotId": str(execution.source.artifact_id), "testScope": selector}
+            tool_sequence, timeout = execution.budget.reserve_tracked_tool_call()
+            result = await asyncio.wait_for(tracked.invoke("run_unit_tests", arguments,
+                deadline_monotonic=execution.budget.deadline_monotonic), timeout)
+            execution.budget.account_tool_call(tool_sequence)
+            execution.budget.check()
+            try:
+                record = await _run_file_operation(self._tools.get, binding, result.record.logical_call_id)
+                receipt = await _run_file_operation(self._unit.get, execution.metadata.run_id,
+                                                   result.data["executionManifestId"])
+                evidence = record.to_tool_evidence()
+                if (record != result.record or result.data != receipt.tool_output()
+                        or record.workflow_step_id != execution.metadata.workflow_step_id
+                        or record.role is not AgentRole.SECURITY or record.tool_name != "run_unit_tests"
+                        or record.source_artifact_id != execution.source.artifact_id
+                        or evidence.outcome is not ToolExecutionOutcome.PASS
+                        or record.execution_manifest != execution.source.execution_manifest()
+                        or record.selector_sha256 != sha256(selector.encode()).hexdigest()
+                        or receipt.run_id != execution.metadata.run_id
+                        or receipt.workflow_step_id != execution.metadata.workflow_step_id
+                        or receipt.workspace_id != execution.configuration.workspace_id
+                        or receipt.role is not AgentRole.SECURITY or receipt.tool_name != "run_unit_tests"
+                        or receipt.source_artifact_id != execution.source.artifact_id
+                        or receipt.execution_manifest != execution.source.execution_manifest()
+                        or receipt.execution_profile != profile or receipt.profile_name != selector
+                        or _plain(receipt.inputs) != _plain(inputs)
+                        or self._unit._scope_payload(receipt.scope) != policy):
+                    raise ValueError
+                measured[selector] = (receipt, evidence)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise SecurityServicesError("SECURITY_TEST_EVIDENCE_INVALID") from None
+        for selector, (receipt, _evidence) in measured.items():
+            bound = {case.test_id for case in cases if case.selector == selector}
+            if any(actual.test_id not in bound for actual in receipt.report.tests):
+                # Never guess a Requirement for an unbound executed case.
+                raise SecurityServicesError("SECURITY_TEST_BINDING_INVALID")
+        rows = {}
+        for case in cases:
+            receipt, evidence = measured[case.selector]
+            actual = next((item for item in receipt.report.tests if item.test_id == case.test_id), None)
+            outcome = actual.outcome if actual is not None and actual.outcome in {"PASS", "FAIL"} else "UNVERIFIED"
+            rows.setdefault(case.requirement_id, []).append(
+                (outcome, evidence, f"run_unit_tests:{case.selector}:{case.test_id}"))
+        decided = {}
+        for requirement_id in execution.metadata.requirement_ids:
+            items = rows.get(requirement_id, [])
+            failed = [item for item in items if item[0] == "FAIL"]
+            if failed:
+                value, evidence = "FAIL", failed[0][1]
+            elif items and all(item[0] == "PASS" for item in items):
+                value, evidence = "PASS", items[0][1]
+            else:
+                value, evidence = "UNVERIFIED", None
+            decided[requirement_id] = (value, evidence, tuple({"testId": test_id, "outcome": outcome}
+                                                              for outcome, _evidence, test_id in items))
+        return decided
+
+    def _assemble(self, execution, decision, measured, anchors, proof, task_id, context_id, tests=None):
         requirement_values, finding_values = {}, {}
         if proof is not None:
             if type(proof) is not SecuritySemanticProof:
@@ -562,6 +717,18 @@ class SecurityRuntimeServices:
             evidence = measured.scans[0][2]
             requirements, findings = [], []
             for review in decision.requirement_reviews:
+                if tests is not None:
+                    # Measured Security test receipts decide the Requirement.
+                    value, test_evidence, cases = tests[review.requirement_id]
+                    location = None if not anchors[review.requirement_id] else (
+                        anchors[review.requirement_id][0]["path"] + ":" + str(anchors[review.requirement_id][0]["startLine"]))
+                    requirements.append(SecurityRequirementResult(requirement_id=review.requirement_id,
+                        outcome=ValidationOutcome(value), details=json_text({
+                            "code": "MEASURED_SECURITY_TESTS" if value != "UNVERIFIED" else "SECURITY_TESTS_UNVERIFIED",
+                            "tests": list(cases), "codeReferences": list(anchors[review.requirement_id])}),
+                        actual_result=value, normalized_location=location,
+                        tool_evidence=test_evidence if value != "UNVERIFIED" else None))
+                    continue
                 value = requirement_values.get(review.requirement_id, "UNVERIFIED")
                 if value in {"PASS", "FAIL"} and (review.proposed_outcome not in {"PASS", "FAIL"} or not anchors[review.requirement_id]):
                     raise SecurityServicesError("SECURITY_PROOF_INVALID")

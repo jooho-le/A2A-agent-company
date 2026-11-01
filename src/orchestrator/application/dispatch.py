@@ -115,20 +115,29 @@ class PlannerRunDispatcher:
         client_factory: ClientFactory = A2AAgentClient,
         before_dispatch: Callable[[UUID], Awaitable[None]] | None = None,
         allow_fix_dispatch: bool = True,
+        single_agent: bool = False,
     ) -> None:
         self._repository = repository
         self._agent_registry = agent_registry
         self._client_factory = client_factory
         if before_dispatch is not None and not callable(before_dispatch):
             raise ValueError("DISPATCH_CONFIGURATION_INVALID")
-        if type(allow_fix_dispatch) is not bool:
+        if (type(allow_fix_dispatch) is not bool or type(single_agent) is not bool
+                or single_agent and allow_fix_dispatch):
             raise ValueError("DISPATCH_CONFIGURATION_INVALID")
+        self._single_agent = single_agent
         self._before_dispatch = before_dispatch
         self._allow_fix_dispatch = allow_fix_dispatch
         self._active_runs: set[UUID] = set()
         self._dispatch_tasks: dict[UUID, asyncio.Task] = {}
         self._dispatch_tokens: dict[UUID, str] = {}
         self._control_stops: set[asyncio.Task] = set()
+
+    def supports_architecture(self, architecture: str) -> bool:
+        return architecture == ("SINGLE_AGENT" if self._single_agent else "MULTI_AGENT")
+
+    def _agent_id(self, role: AgentRole) -> str:
+        return "single_agent" if self._single_agent else role.value.lower()
 
     def is_run_active(self, run_id: UUID) -> bool:
         return run_id in self._active_runs
@@ -213,6 +222,13 @@ class PlannerRunDispatcher:
             logger.info("Planner dispatch skipped for Run %s", run_id)
             return
 
+        configuration = self._repository.get_run_configuration(run_id)
+        if (configuration is None and self._single_agent or configuration is not None
+                and not self.supports_architecture(configuration.configuration.architecture)):
+            self._move_to_human_review(run_id, step.workflow_step_id, step.attempt,
+                additional_event_types=("RUNTIME_ARCHITECTURE_MISMATCH",))
+            return
+
         if self._before_dispatch is not None:
             try:
                 await self._before_dispatch(run_id)
@@ -244,7 +260,7 @@ class PlannerRunDispatcher:
                 result = await runner.submit_and_wait(
                     run,
                     step,
-                    agent_id="planner",
+                    agent_id=self._agent_id(AgentRole.PLANNER),
                     payload={
                         "request": run.request_text,
                         "workspaceId": str(run.workspace_id),
@@ -384,8 +400,9 @@ class PlannerRunDispatcher:
                 result = await A2ATaskRunner(client).submit_and_wait(
                     developer_run,
                     developer_step,
-                    agent_id="developer",
+                    agent_id=self._agent_id(AgentRole.DEVELOPER),
                     payload=payload,
+                    agent_context=self._context_for(run.run_id, AgentRole.DEVELOPER) if self._single_agent else None,
                     observer=self._repository.task_update_observer(developer_run),
                 )
         except Exception as exc:
@@ -554,7 +571,7 @@ class PlannerRunDispatcher:
                         run,
                         step,
                         handoff,
-                        agent_id=role.value.lower(),
+                        agent_id=self._agent_id(role),
                         recipient=role,
                         request_text=request_text,
                         agent_context=self._context_for(run.run_id, role),
@@ -570,7 +587,18 @@ class PlannerRunDispatcher:
                 )
                 return exc
 
-        outcomes = await asyncio.gather(*(dispatch_one(step) for step in steps))
+        if self._single_agent:
+            # Same opaque Context cannot execute two phase Tasks concurrently.
+            steps = tuple(sorted(steps, key=lambda item: item.agent_role is AgentRole.SECURITY))
+            outcomes = []
+            for step in steps:
+                outcome = await dispatch_one(step)
+                outcomes.append(outcome)
+                if isinstance(outcome, Exception) or outcome.disposition != TaskRunDisposition.COMPLETED:
+                    outcomes.extend(RuntimeError("SINGLE_PREVIOUS_PHASE_INCOMPLETE") for _ in steps[len(outcomes):])
+                    break
+        else:
+            outcomes = await asyncio.gather(*(dispatch_one(step) for step in steps))
         if any(
             isinstance(outcome, Exception)
             or outcome.disposition != TaskRunDisposition.COMPLETED
@@ -790,7 +818,7 @@ class PlannerRunDispatcher:
         )
 
     def _context_for(self, run_id: UUID, role: AgentRole):
-        return next((item for item in self._repository.list_agent_contexts(run_id) if item.agent_id == role.value.lower()), None)
+        return next((item for item in self._repository.list_agent_contexts(run_id) if item.agent_id == self._agent_id(role)), None)
 
     def _run_configuration_payload(self, run_id: UUID, *, include_scenario=True):
         configuration = self._repository.get_run_configuration(run_id)

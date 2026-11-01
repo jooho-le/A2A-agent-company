@@ -28,9 +28,14 @@ _ROLE_PURPOSES = {
 
 def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) -> AgentCard:
     """Use official SDK models without advertising unimplemented skills."""
-    if type(execution_ready) is not bool or execution_ready and settings.role not in tuple(AgentRole):
+    if type(execution_ready) is not bool or execution_ready and settings.role not in (*tuple(AgentRole), SingleAgentIdentity.SINGLE_AGENT):
         raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
     description = (
+        "Host-configured Single Agent: one provider and persisted Context sequentially plan, implement, "
+        "test and review the initial candidate using a stable system prompt. Host-measured Source, "
+        "Build, QA and Security receipts determine the verdict. Automatic fixes and continuation "
+        "are not configured at this stage."
+        if execution_ready and settings.role is SingleAgentIdentity.SINGLE_AGENT else
         "Host-configured Planner: produces a validated task plan while preserving "
         "frozen requirements. Per-Run configuration and budget must be admitted; "
         "no Source modification, MCP execution or product verdict is performed."
@@ -84,7 +89,11 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
             id="measured-initial-security", name="Measured security review and revalidation",
             description="Reviews all approved frozen scans with actual Source references; only Host-verified proof can establish confirmed findings or requirement outcomes, not project success.",
             tags=["security", "scan", "code-review", "snapshot"],
-        )] if execution_ready and settings.role is AgentRole.SECURITY else [],
+        )] if execution_ready and settings.role is AgentRole.SECURITY else [AgentSkill(
+            id="single-initial-pipeline", name="Single Agent initial software pipeline",
+            description="One retained Context and model identity for protected planning, measured implementation, QA and Security; Host receipts determine outcomes.",
+            tags=["single-agent", "planning", "implementation", "qa", "security"],
+        )] if execution_ready and settings.role is SingleAgentIdentity.SINGLE_AGENT else [],
     )
     if settings.bearer_token is not None:
         card.security_schemes["bearerAuth"].CopyFrom(

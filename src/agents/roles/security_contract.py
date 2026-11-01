@@ -5,6 +5,11 @@ approved Source anchors, or request clarification. These anchors are only
 claims until the Host verifies actual reads and independently approved proof.
 Rationale, a valid range, READY, or a clean scanner do not establish PASS,
 CONFIRMED, FALSE_POSITIVE, or a final product verdict.
+
+When the Host offers Security unit-test scopes, the model also binds named
+generated tests to every assigned Requirement (the same case shape as QA).
+Those bindings are claims too: the Host executes the scopes and only measured
+outcomes decide the Requirement results.
 """
 
 from dataclasses import dataclass, field
@@ -12,6 +17,9 @@ import unicodedata
 from uuid import UUID
 
 from agents.llm.contracts import JsonSchema, StructuredOutput, json_text, parse_json
+from agents.roles.qa_contract import (
+    MAX_QA_CASES, MAX_QA_EXPECTED_RESULT_LENGTH, MAX_QA_TEST_ID_BYTES, MAX_QA_TITLE_LENGTH, QACaseBinding,
+)
 from mcp_tools.tools.security_contract import _source_path
 from orchestrator.core.security import redact_data
 
@@ -36,6 +44,7 @@ _FIELDS = frozenset({"kind", "requirementReviews", "findingReviews", "questions"
 _REQUIREMENT_FIELDS = frozenset({"requirementId", "proposedOutcome", "rationale", "references"})
 _FINDING_FIELDS = frozenset({"findingId", "proposedDisposition", "rationale", "references"})
 _REFERENCE_FIELDS = frozenset({"path", "startLine", "endLine"})
+_TEST_CASE_FIELDS = frozenset({"selector", "testId", "requirementId", "title", "expectedResult"})
 
 
 class SecurityContractError(ValueError):
@@ -180,6 +189,9 @@ class SecurityDecision:
     requirement_reviews: tuple[SecurityRequirementReview, ...] = field(repr=False)
     finding_reviews: tuple[SecurityFindingReview, ...] = field(repr=False)
     questions: tuple[str, ...] = field(repr=False)
+    # Generated test bindings, present only when the Host offered Security
+    # unit-test scopes. Each is a run_unit_tests QACaseBinding.
+    test_cases: tuple[QACaseBinding, ...] = field(default=(), repr=False)
 
     def __post_init__(self):
         invalid = False
@@ -189,7 +201,11 @@ class SecurityDecision:
             if (any(type(value) is not SecurityRequirementReview for value in self.requirement_reviews)
                     or any(type(value) is not SecurityFindingReview for value in self.finding_reviews)
                     or len({value.requirement_id for value in self.requirement_reviews}) != len(self.requirement_reviews)
-                    or len({value.finding_id for value in self.finding_reviews}) != len(self.finding_reviews)):
+                    or len({value.finding_id for value in self.finding_reviews}) != len(self.finding_reviews)
+                    or type(self.test_cases) is not tuple or len(self.test_cases) > MAX_QA_CASES
+                    or any(type(case) is not QACaseBinding or case.tool_name != "run_unit_tests"
+                           for case in self.test_cases)
+                    or self.kind != "READY" and self.test_cases):
                 raise SecurityContractError()
         except Exception:
             invalid = True
@@ -197,7 +213,16 @@ class SecurityDecision:
             raise SecurityContractError() from None
 
 
-def build_security_output_contract(requirement_ids, finding_ids, source_paths) -> StructuredOutput:
+def _test_selectors(value):
+    if value is None:
+        return None
+    if (type(value) is not tuple or not 1 <= len(value) <= 32 or len(set(value)) != len(value)
+            or any(type(name) is not str for name in value)):
+        raise SecurityContractError()
+    return value
+
+
+def build_security_output_contract(requirement_ids, finding_ids, source_paths, test_selectors=None) -> StructuredOutput:
     """Build an inert closed provider-strict analysis schema, not an Artifact.
 
     Empty scanner findings deliberately produce maxItems=0, never enum=[].
@@ -207,6 +232,7 @@ def build_security_output_contract(requirement_ids, finding_ids, source_paths) -
     invalid = False
     try:
         ids, findings, paths = _host_scope(requirement_ids, finding_ids, source_paths)
+        selectors = _test_selectors(test_selectors)
         rationale = {"type": "string", "minLength": 1, "maxLength": MAX_SECURITY_RATIONALE_LENGTH}
         references = {"type": "array", "maxItems": MAX_SECURITY_REFERENCES, "items": {
             "type": "object", "additionalProperties": False, "required": ["path", "startLine", "endLine"],
@@ -219,10 +245,7 @@ def build_security_output_contract(requirement_ids, finding_ids, source_paths) -
         finding_id = {"type": "string", "minLength": 1, "maxLength": MAX_SECURITY_FINDING_ID_BYTES}
         if findings:
             finding_id["enum"] = list(findings)
-        schema = JsonSchema.from_dict({
-            "type": "object", "additionalProperties": False,
-            "required": ["kind", "requirementReviews", "findingReviews", "questions"],
-            "properties": {
+        properties = {
                 "kind": {"type": "string", "enum": ["READY", "INPUT_REQUIRED", "REJECTED"]},
                 "requirementReviews": {"type": "array", "maxItems": len(ids), "items": {
                     "type": "object", "additionalProperties": False,
@@ -240,7 +263,18 @@ def build_security_output_contract(requirement_ids, finding_ids, source_paths) -
                 }},
                 "questions": {"type": "array", "maxItems": MAX_SECURITY_QUESTIONS,
                     "items": {"type": "string", "minLength": 1, "maxLength": MAX_SECURITY_QUESTION_LENGTH}},
-            },
+        }
+        if selectors is not None:
+            properties["testCases"] = {"type": "array", "maxItems": MAX_QA_CASES, "items": {
+                "type": "object", "additionalProperties": False, "required": sorted(_TEST_CASE_FIELDS),
+                "properties": {"selector": {"type": "string", "enum": list(selectors)},
+                    "testId": {"type": "string", "minLength": 1, "maxLength": MAX_QA_TEST_ID_BYTES},
+                    "requirementId": {"type": "string", "enum": list(ids)},
+                    "title": {"type": "string", "minLength": 1, "maxLength": MAX_QA_TITLE_LENGTH},
+                    "expectedResult": {"type": "string", "minLength": 1, "maxLength": MAX_QA_EXPECTED_RESULT_LENGTH}},
+            }}
+        schema = JsonSchema.from_dict({
+            "type": "object", "additionalProperties": False, "required": sorted(properties), "properties": properties,
         })
         schema.require_openai_strict()
         result = StructuredOutput(name="security_decision", schema=schema)
@@ -265,7 +299,7 @@ def _read_references(values, paths):
     return values
 
 
-def validate_security_decision(data, requirement_ids, finding_ids, source_paths) -> SecurityDecision:
+def validate_security_decision(data, requirement_ids, finding_ids, source_paths, test_selectors=None) -> SecurityDecision:
     """Admit proposals only; independent Host proof is still mandatory.
 
     A listed path/range does not prove the model actually read that Source,
@@ -275,7 +309,8 @@ def validate_security_decision(data, requirement_ids, finding_ids, source_paths)
     invalid = False
     try:
         ids, findings, paths = _host_scope(requirement_ids, finding_ids, source_paths)
-        if type(data) is not dict or set(data) != _FIELDS:
+        selectors = _test_selectors(test_selectors)
+        if type(data) is not dict or set(data) != (_FIELDS if selectors is None else _FIELDS | {"testCases"}):
             raise SecurityContractError()
         _validate_branch(data["kind"], data["requirementReviews"], data["findingReviews"], data["questions"],
                          container_type=list)
@@ -294,16 +329,28 @@ def validate_security_decision(data, requirement_ids, finding_ids, source_paths)
             reviews.append(SecurityFindingReview(finding_id=row["findingId"],
                 proposed_disposition=row["proposedDisposition"], rationale=row["rationale"],
                 references=_read_references(row["references"], paths)))
+        cases = []
+        for row in data.get("testCases", ()):
+            if (type(row) is not dict or set(row) != _TEST_CASE_FIELDS or type(row["selector"]) is not str
+                    or row["selector"] not in selectors or type(row["requirementId"]) is not str
+                    or row["requirementId"] not in ids):
+                raise SecurityContractError()
+            cases.append(QACaseBinding(tool_name="run_unit_tests", selector=row["selector"], test_id=row["testId"],
+                requirement_id=UUID(row["requirementId"]), title=row["title"], expected_result=row["expectedResult"]))
         copied = parse_json(json_text(data, max_bytes=MAX_SECURITY_DECISION_JSON_BYTES),
                             max_bytes=MAX_SECURITY_DECISION_JSON_BYTES)
-        build_security_output_contract(requirement_ids, finding_ids, source_paths).schema.validate(copied)
+        build_security_output_contract(requirement_ids, finding_ids, source_paths, test_selectors).schema.validate(copied)
         if redact_data(copied) != copied:
             raise SecurityContractError()
         result = SecurityDecision(kind=copied["kind"], requirement_reviews=tuple(requirements),
-                                  finding_reviews=tuple(reviews), questions=tuple(copied["questions"]))
+                                  finding_reviews=tuple(reviews), questions=tuple(copied["questions"]),
+                                  test_cases=tuple(cases))
+        keys = [(case.selector, case.test_id) for case in result.test_cases]
         if (result.kind == "READY" and (
                 {str(value.requirement_id) for value in result.requirement_reviews} != set(ids)
-                or {value.finding_id for value in result.finding_reviews} != set(findings))):
+                or {value.finding_id for value in result.finding_reviews} != set(findings)
+                or selectors is not None and {str(case.requirement_id) for case in result.test_cases} != set(ids))
+                or len(set(keys)) != len(keys)):
             raise SecurityContractError()
     except Exception:
         invalid = True

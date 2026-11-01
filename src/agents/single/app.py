@@ -13,5 +13,6 @@ def create_app(settings: AgentSettings | None = None, *, executor: AgentExecutor
     if settings.role is not SingleAgentIdentity.SINGLE_AGENT:
         raise ValueError("SINGLE_AGENT_IDENTITY_REQUIRED")
     # Bootstrap by default. Provider settings or an arbitrary injected executor
-    # do not advertise measured product execution before 51–52 are implemented.
+    # do not advertise execution. Only the explicit Single Host factory binds
+    # the implemented executor, common Run budget and trusted phase services.
     return create_agent_app(settings, executor=executor)

@@ -48,9 +48,8 @@ def build_single_draft_contract(
     """Use the existing bounded decision validators, without running Agents.
 
     All scope arguments are trusted Host inputs, not fields from an A2A body.
-    The optional measured Security contract follows dev's test_selectors API;
-    a checkout without that API refuses it instead of falling back to static
-    proof. Test execution/receipt assembly belongs to later Host integration.
+    Measured Security accepts the same tool-to-selector map as Single QA and
+    translates it to the existing Security contract's unit selector tuple.
     """
     try:
         phase = SinglePhase(phase)
@@ -70,9 +69,11 @@ def build_single_draft_contract(
         else:
             ids = scenario.requirement_ids_for(RequirementValidator.SECURITY)
             findings, paths = tuple(finding_ids), tuple(source_paths)
-            options = {} if security_test_selectors is None else {
-                "test_selectors": {tool: tuple(names) for tool, names in security_test_selectors.items()},
-            }
+            options = {}
+            if security_test_selectors is not None:
+                if set(security_test_selectors) != {"run_unit_tests"}:
+                    raise SingleContractError()
+                options["test_selectors"] = tuple(security_test_selectors["run_unit_tests"])
             output = build_security_output_contract(ids, findings, paths, **options)
             validate = lambda data: validate_security_decision(data, ids, findings, paths, **options)
         output.schema.require_openai_strict()

@@ -1,6 +1,7 @@
 """Host-only Single MCP configuration, not an Agent or Tool argument parser."""
 
 from dataclasses import replace
+from contextlib import asynccontextmanager
 
 from agents.core.identity import SingleAgentIdentity, SinglePhase
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration, MCPClientError, MCPDeliveryState
@@ -56,3 +57,24 @@ def single_phase_tool_definitions(client: BoundMCPClient):
         raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID", delivery_state=MCPDeliveryState.NOT_SENT)
     names = SINGLE_PHASE_TOOL_ROLES[client.configuration.binding.single_phase]
     return tuple(tool for tool in client.list_tools() if tool.name in names)
+
+
+@asynccontextmanager
+async def open_single_model_client(host_configuration, phase, client_factory):
+    """Reuse role-scoped receipt APIs while retaining the Single wire principal.
+
+    Host build/protected checks use their original separate capabilities.
+    This view does not start another Agent or copy any model conversation.
+    """
+    host = host_configuration
+    actual = build_single_mcp_configuration(phase=phase,
+        run_id=host.binding.run_id, workspace_id=host.binding.workspace_id,
+        database_path=host.database_path, workspace_root=host.workspace_root,
+        frozen_source=host.frozen_source, build_configuration=host.build_configuration,
+        unit_test_configuration=host.unit_test_configuration, browser_test_configuration=host.browser_test_configuration,
+        security_scan_configuration=host.security_scan_configuration, max_call_seconds=host.max_call_seconds)
+    async with client_factory(actual) as wire:
+        if type(wire) is not BoundMCPClient or wire.configuration != actual:
+            raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID", delivery_state=MCPDeliveryState.NOT_SENT)
+        yield BoundMCPClient(configuration=host, _client=wire._client, _state=wire._state,
+                             principal_configuration=actual)

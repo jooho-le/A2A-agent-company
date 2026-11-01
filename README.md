@@ -302,13 +302,21 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 [49번 서버](docs/49-single-agent-a2a-server.md)는 기존 네 역할과 별도의 `SINGLE_AGENT` 서비스 정체성·포트 `8105`·DB `.data/agents/single_agent.sqlite3`를 사용합니다. `PYTHONPATH=src .venv/bin/python -m agents.single`로 통신 서버를 시작할 수 있으며, 현재는 Bootstrap으로 작업을 거절하고 `executionReady=false`를 유지합니다.
 
-[50번 통합 Prompt/기록](docs/50-single-agent-prompts-context.md)은 같은 Agent의 System Prompt와 Context를 유지하면서 단계별 Draft를 검증하고, 재시작 뒤에도 저장된 메시지·산출물을 함께 불러옵니다. 실제 개발 실행은 후속 52번입니다. 실제 LLM/Docker 실행과 비교 실험은 아직 수행하지 않았습니다.
+[50번 통합 Prompt/기록](docs/50-single-agent-prompts-context.md)은 같은 Agent의 System Prompt와 Context를 유지하면서 단계별 Draft를 검증하고, 재시작 뒤에도 저장된 메시지·산출물을 함께 불러옵니다. 이 기록을 사용하는 최초 실행 경로는 아래 52번에서 연결했습니다. 실제 LLM/Docker 실행과 비교 실험은 아직 수행하지 않았습니다.
 
 ### Single-Agent MCP 도구·단계 권한 — 51번
 
 [51번 MCP 권한 연결](docs/51-single-agent-mcp-permissions.md)은 `SINGLE_AGENT` 주체와 업무 단계를 고정해 기존 도구 10개의 합집합을 연결합니다. 모델용 목록·Client·stdio 서버가 각각 단계 권한을 검사하며, 검증 단계는 같은 Frozen Snapshot과 자기 테스트 폴더만 사용합니다. 보호 테스트는 별도 Host 설정에 남깁니다.
 
-`agents.single.mcp.build_single_mcp_configuration()`과 `single_phase_tool_definitions()`가 Host의 단계별 연결 지점입니다. `dev`의 Security 자체 테스트 MCP 구현도 필요한 범위만 반영했습니다. 다음은 **52번 실제 LLM 실행기·Orchestrator 연결**이며, 현재 Single A2A 서버는 계속 `executionReady=false`입니다.
+`agents.single.mcp.build_single_mcp_configuration()`과 `single_phase_tool_definitions()`가 Host의 단계별 연결 지점입니다. `dev`의 Security 자체 테스트 MCP 구현도 필요한 범위만 반영했습니다. 기본 Single 통신 서버는 계속 Bootstrap이며, 실제 실행은 아래 Host 조합을 명시적으로 구성해야 합니다.
+
+### Single-Agent 최초 구현·검증 실행 — 52번
+
+[52번 실제 실행 연결](docs/52-single-agent-initial-pipeline.md)은 `agents.single.platform.create_single_platform()`으로 Orchestrator와 **하나의 Single Agent 서버·Provider·Context**를 연결합니다. 같은 System Prompt와 저장된 작업 기록을 이어 사용하며 기획 → 코드 작성·Build → QA → Security를 순서대로 수행합니다. 기존 네 실행기를 Single이라고 바꿔 호출하지 않습니다.
+
+기존 Host 서비스의 Snapshot·Sandbox·보호 테스트·실행 증거 검사를 재사용하며, Security 실행 테스트 모드도 처리합니다. 실제 Host 조합으로 만든 서버만 `executionReady=true`를 반환합니다. 기본 Orchestrator의 Single 요청 503 거절과 `python -m agents.single`의 Bootstrap 동작은 유지합니다. 이 조합은 `agents.platform.runner.run_platform()`으로 두 로컬 엔드포인트를 실행할 수 있으며, 기존 Multi Host CLI 설정을 자동 변경하지 않습니다.
+
+최초 후보의 검증까지 연결했습니다. 자동 수정은 **53번**, 재개·복구·영속 예산은 **54번**, 전체 사용량·평가 인계는 **55번**, 최종 실행 안내와 점검은 **56번**입니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
 
 ## 테스트
 

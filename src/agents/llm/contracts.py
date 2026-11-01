@@ -308,7 +308,7 @@ class ToolExecutor(Protocol):
 class UsageRecord:
     """Accounting only: no prompt, Source, call arguments, output, or secret."""
     sequence: int
-    role: AgentRole
+    role: AgentServiceIdentity
     requested_model: ModelConfiguration
     reported_model_id: str | None = field(repr=False)
     outcome: str

@@ -81,10 +81,12 @@ def create_run(
     """Create a durable Run and its initial pending Planner Step."""
     if get_scenario(body.scenario_id) is None:
         raise HTTPException(status_code=422, detail="scenarioId is not registered; see GET /api/v1/scenarios")
-    # Configuration support must not silently dispatch a Single request to
-    # the existing four-role Planner path. The real Single dispatcher is 52.
-    if body.configuration.architecture == "SINGLE_AGENT":
+    # Only an explicitly composed runtime can admit Single; default stays Multi.
+    supported = getattr(dispatcher, "supports_architecture", None)
+    if body.configuration.architecture == "SINGLE_AGENT" and (not callable(supported) or not supported("SINGLE_AGENT")):
         raise HTTPException(status_code=503, detail="SINGLE_AGENT_RUNTIME_NOT_CONFIGURED")
+    if callable(supported) and not supported(body.configuration.architecture):
+        raise HTTPException(status_code=422, detail="RUNTIME_ARCHITECTURE_MISMATCH")
     validator = request.app.state.submission_validator
     if validator is not None:
         try:
@@ -233,6 +235,7 @@ async def cancel_run(
 @router.post("/{run_id}/resume", response_model=RunStatusResponse)
 async def resume_run(run_id: UUID, body: ResumeRunRequest, repository: Repository, controls: Controls):
     _get_run_or_404(repository, run_id)
+    _require_supported_continuation(repository, run_id)
     try:
         run = await controls.resume(run_id, step_id=body.workflow_step_id, input_data=body.input_data)
     except (WorkflowControlConflict, RunDispatchConflict, AgentNotConfiguredError, ValueError) as exc:
@@ -243,11 +246,18 @@ async def resume_run(run_id: UUID, body: ResumeRunRequest, repository: Repositor
 @router.post("/{run_id}/recover", response_model=RunStatusResponse)
 async def recover_run(run_id: UUID, body: ResumeRunRequest, repository: Repository, controls: Controls):
     _get_run_or_404(repository, run_id)
+    _require_supported_continuation(repository, run_id)
     try:
         run = await controls.resume(run_id, step_id=body.workflow_step_id, input_data=body.input_data, recover=True)
     except (WorkflowControlConflict, RunDispatchConflict, AgentNotConfiguredError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RunStatusResponse.from_run(run)
+
+
+def _require_supported_continuation(repository, run_id):
+    configuration = repository.get_run_configuration(run_id)
+    if configuration is not None and configuration.configuration.architecture == "SINGLE_AGENT":
+        raise HTTPException(status_code=503, detail="SINGLE_AGENT_CONTINUATION_NOT_CONFIGURED")
 
 
 @router.get("/{run_id}/artifacts", response_model=RunArtifactsResponse)

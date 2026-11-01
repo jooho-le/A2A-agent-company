@@ -213,7 +213,10 @@ def _verify_role_context(connection, run, steps, active, context, role):
     A2A_MESSAGE_SENT may persist latest Task=None before the new Agent Task is
     observed, but it cannot authorize another Context or any historical Task.
     """
-    previous = [step for step in steps if step.agent_role is role
+    row = connection.execute("SELECT payload_json FROM run_configurations WHERE run_id=?", (str(run.run_id),)).fetchone()
+    configuration = None if row is None else RunConfigurationArtifact.model_validate(_json(row["payload_json"]))
+    single = configuration is not None and configuration.configuration.architecture == "SINGLE_AGENT"
+    previous = [step for step in steps if (single or step.agent_role is role)
                 and step.workflow_step_id != active.workflow_step_id]
     task_ids = [step.a2a_task_id for step in previous if step.a2a_task_id is not None]
     if len(task_ids) != len(set(task_ids)) or context.task_id in task_ids:
@@ -223,7 +226,7 @@ def _verify_role_context(connection, run, steps, active, context, role):
             or len(contexts) > 1 or contexts and contexts != {context.context_id}
             or active.agent_context_id is not None and active.agent_context_id != context.context_id):
         raise ValueError
-    agent_id = role.value.lower()
+    agent_id = "single_agent" if single else role.value.lower()
     row = connection.execute("SELECT * FROM agent_contexts WHERE run_id=? AND agent_id=?",
                              (str(run.run_id), agent_id)).fetchone()
     if row is None:

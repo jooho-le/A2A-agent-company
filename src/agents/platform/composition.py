@@ -119,7 +119,7 @@ class PlatformEndpoint:
 
     def __post_init__(self):
         if (type(self.name) is not str or type(self.host) is not str
-                or self.name not in {"orchestrator", *(role.value.lower() for role in AgentRole)}
+                or self.name not in {"orchestrator", "single_agent", *(role.value.lower() for role in AgentRole)}
                 or self.host not in {"127.0.0.1", "localhost", "::1"}
                 or type(self.port) is not int or not 1 <= self.port <= 65535
                 or not isinstance(self.app, FastAPI)):

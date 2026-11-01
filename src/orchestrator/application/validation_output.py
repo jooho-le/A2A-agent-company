@@ -139,7 +139,8 @@ def parse_validation_output(
             raise ValueError(f"{name} Execution Manifest differs from the Source Snapshot")
 
         result_items = report.tests if isinstance(report, QAReportArtifact) else report.requirement_results
-        allowed_tools = {"run_unit_tests", "run_browser_tests"} if isinstance(report, QAReportArtifact) else {"run_security_scan"}
+        allowed_tools = ({"run_unit_tests", "run_browser_tests"} if isinstance(report, QAReportArtifact)
+                         else {"run_security_scan", "run_unit_tests"})
         for item in result_items:
             evidence = item.tool_evidence
             if evidence is not None and (

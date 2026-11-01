@@ -221,6 +221,28 @@ class BoundMCPClient:
     configuration: MCPChildConfiguration
     _client: object = field(repr=False)
     _state: _SessionState = field(default_factory=_SessionState, repr=False)
+    principal_configuration: MCPChildConfiguration | None = field(default=None, repr=False)
+
+    def __post_init__(self):
+        if self.principal_configuration is None:
+            return
+        # A Host-only view for existing receipt validators. The actual wire
+        # authority remains SINGLE_AGENT and is included in journal hashes.
+        from agents.single.mcp import build_single_mcp_configuration
+        actual, host = self.principal_configuration, self.configuration
+        phase_role = {SinglePhase.PLANNING: AgentRole.PLANNER, SinglePhase.IMPLEMENTING: AgentRole.DEVELOPER,
+                      SinglePhase.FIXING: AgentRole.DEVELOPER, SinglePhase.QA: AgentRole.QA,
+                      SinglePhase.SECURITY: AgentRole.SECURITY}
+        if actual.binding.role is not SingleAgentIdentity.SINGLE_AGENT or host.binding.role is not phase_role.get(actual.binding.single_phase):
+            raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID", delivery_state=MCPDeliveryState.NOT_SENT)
+        expected = build_single_mcp_configuration(phase=actual.binding.single_phase,
+            run_id=host.binding.run_id, workspace_id=host.binding.workspace_id,
+            database_path=host.database_path, workspace_root=host.workspace_root,
+            frozen_source=host.frozen_source, build_configuration=host.build_configuration,
+            unit_test_configuration=host.unit_test_configuration, browser_test_configuration=host.browser_test_configuration,
+            security_scan_configuration=host.security_scan_configuration, max_call_seconds=host.max_call_seconds)
+        if actual != expected:
+            raise MCPClientError("MCP_CLIENT_CONFIGURATION_INVALID", delivery_state=MCPDeliveryState.NOT_SENT)
 
     def _check_open(self):
         if not self._state.active:
@@ -282,7 +304,8 @@ class BoundMCPClient:
 
     async def call_tool(self, name, arguments, *, deadline_monotonic=None) -> dict:
         self._check_open()
-        binding = self.configuration.binding
+        authority = self.principal_configuration or self.configuration
+        binding = authority.binding
         contract = get_tool_contract(name)
         if contract is None or name not in MCP_TOOL_NAMES[binding.role]:
             raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
@@ -308,8 +331,8 @@ class BoundMCPClient:
             if workspace_uuid(arguments["workspaceId"]) != binding.workspace_id:
                 raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
             if binding.role is SingleAgentIdentity.SINGLE_AGENT and "snapshotId" in arguments and (
-                    self.configuration.frozen_source is None
-                    or workspace_uuid(arguments["snapshotId"]) != self.configuration.frozen_source.project_artifact_id):
+                    authority.frozen_source is None
+                    or workspace_uuid(arguments["snapshotId"]) != authority.frozen_source.project_artifact_id):
                 raise MCPClientError("MCP_CLIENT_PERMISSION_DENIED", delivery_state=MCPDeliveryState.NOT_SENT)
             arguments["workspaceId"] = str(binding.workspace_id)
             arguments = sanitize_content(
