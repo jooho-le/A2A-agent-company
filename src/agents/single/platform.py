@@ -40,7 +40,7 @@ from orchestrator.workspaces.registry import WorkspaceRegistry
 def create_single_platform(*, repository, workspace_registry, artifact_store, orchestrator_settings,
     agent_settings, provider, developer_services_factory, qa_services_factory, security_services_factory,
     prepare_workspace, limits, orchestrator_host="127.0.0.1", orchestrator_port=8000,
-    a2a_client_factory=None, usage_sink=None) -> OwnedAgentPlatform:
+    a2a_client_factory=None, usage_sink=None, price_book=None) -> OwnedAgentPlatform:
     """Use one provider and server; role fields are only phase-routing aliases.
 
     All four legacy Orchestrator URL/token fields must explicitly target this
@@ -87,7 +87,7 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
         raise PlatformConfigurationError() from None
 
     lifecycle = _Lifecycle(providers=(provider,))
-    telemetry_store = AgentTelemetryStore(repository.database_path)
+    telemetry_store = AgentTelemetryStore(repository.database_path, price_book=price_book)
     budgets = RunBudgetRegistry(repository, limits=limits, telemetry_store=telemetry_store)
     telemetry = RuntimeTelemetry(repository, telemetry_store)
 
@@ -118,6 +118,7 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
             budget = await _host_call(budgets.admit, run_id)
             configuration = await _host_call(repository.get_run_configuration, run_id)
             validate_submission(configuration.configuration)
+            await _host_call(telemetry_store.pin_pricing, run_id)
             budget.check()
             await asyncio.wait_for(_host_call(prepare_workspace, run_id), timeout=budget.remaining_seconds())
             budget.check()

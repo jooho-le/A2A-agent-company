@@ -544,7 +544,8 @@ class AgentTelemetryStore:
             clause = "run_id=?" + (" AND json_extract(payload_json,'$.recordType')='USAGE'" if usage_only else "")
             values = (str(run_id),)
             with self._connection() as connection:
-                connection.execute("BEGIN")
+                if not connection.in_transaction:
+                    connection.execute("BEGIN")
                 total = connection.execute(f"SELECT COUNT(*) FROM agent_runtime_events WHERE {clause}", values).fetchone()[0]
                 rows = connection.execute(
                     f"SELECT trace_event_id,kind,payload_json FROM agent_runtime_events WHERE {clause} ORDER BY sequence LIMIT ? OFFSET ?",
@@ -563,7 +564,8 @@ class AgentTelemetryStore:
     def usage_summary(self, run_id: UUID) -> dict:
         try:
             with self._connection() as connection:
-                connection.execute("BEGIN")
+                if not connection.in_transaction:
+                    connection.execute("BEGIN")
                 rows = connection.execute(
                     "SELECT json_extract(payload_json,'$.detail') FROM agent_runtime_events WHERE run_id=? AND json_extract(payload_json,'$.recordType')='USAGE' ORDER BY sequence",
                     (str(run_id),)).fetchall()

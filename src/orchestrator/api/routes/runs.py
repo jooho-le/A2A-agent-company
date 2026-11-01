@@ -197,6 +197,16 @@ def get_run_usage(run_id: UUID, request: Request, repository: Repository,
             "total": total, "limit": limit, "offset": offset}
 
 
+@router.get("/{run_id}/metrics")
+def get_run_metrics(run_id: UUID, repository: Repository):
+    _get_run_or_404(repository, run_id)
+    from agents.platform.run_records import collect_run_metrics, RunRecordsError
+    try:
+        return collect_run_metrics(repository, run_id)
+    except RunRecordsError:
+        raise HTTPException(status_code=503, detail="RUN_METRICS_UNAVAILABLE") from None
+
+
 @router.get("/{run_id}/telemetry")
 def get_run_telemetry(run_id: UUID, request: Request, repository: Repository,
                       limit: int = Query(default=100, ge=1, le=500),

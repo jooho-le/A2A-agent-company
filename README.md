@@ -316,7 +316,7 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 기존 Host 서비스의 Snapshot·Sandbox·보호 테스트·실행 증거 검사를 재사용하며, Security 실행 테스트 모드도 처리합니다. 실제 Host 조합으로 만든 서버만 `executionReady=true`를 반환합니다. 기본 Orchestrator의 Single 요청 503 거절과 `python -m agents.single`의 Bootstrap 동작은 유지합니다. 이 조합은 `agents.platform.runner.run_platform()`으로 두 로컬 엔드포인트를 실행할 수 있으며, 기존 Multi Host CLI 설정을 자동 변경하지 않습니다.
 
-최초 후보의 검증에 이어 아래 53번의 수정·재검증, 54번의 재개·취소·영속 예산 복구를 연결했습니다. 전체 사용량·비용·평가 인계는 **55번**, 최종 실행 안내와 점검은 **56번**입니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
+최초 후보의 검증에 이어 아래 53번의 수정·재검증, 54번의 재개·취소·영속 예산 복구, 55번의 기록·비용·평가 인계를 연결했습니다. 최종 실행 안내와 점검은 **56번**입니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
 
 ### Single-Agent 수정·재검증과 판정 — 53번
 
@@ -328,7 +328,13 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 [54번 제어·복구](docs/54-single-agent-controls-durable-budgets.md)는 같은 Step·Task·Context로 입력/인증 뒤 재개하고, 실제 작업 종료를 확인한 뒤 취소합니다. QA가 입력을 기다리는 동안 Security를 보내지 않으며, 완료된 작업은 GET으로 확인해 중복 실행을 막습니다.
 
-Single Host도 기존 영속 예산 원장을 사용합니다. 재시작하면 같은 동결 설정·호출 수·토큰·원래 UTC deadline과 영수증을 확인해 복구합니다. 미완료 모델/도구 예약, 누락·미확인 사용량, 한도 변경·시간 역행·기한 만료는 새 예산을 주지 않고 실행을 차단합니다. 이 감사에 필요한 기본 LLM/MCP 기록은 실제 `SINGLE_AGENT` 주체로 저장합니다. 가격표·전체 기록/평가 내보내기 연결은 다음 **55번**입니다.
+Single Host도 기존 영속 예산 원장을 사용합니다. 재시작하면 같은 동결 설정·호출 수·토큰·원래 UTC deadline과 영수증을 확인해 복구합니다. 미완료 모델/도구 예약, 누락·미확인 사용량, 한도 변경·시간 역행·기한 만료는 새 예산을 주지 않고 실행을 차단합니다. 이 감사에 필요한 기본 LLM/MCP 기록은 실제 `SINGLE_AGENT` 주체로 저장합니다.
+
+### Single-Agent 기록·비용·평가 인계 — 55번
+
+[55번 인계 안내](docs/55-single-agent-records-evaluation-handoff.md)는 승인 가격표와 Single 계상을 연결하고, `GET /api/v1/runs/{runId}/metrics`로 Run 전체 시간·사람 대기·호출·토큰·비용을 제공합니다. 미확인 사용량/비용은 null로 남깁니다.
+
+`python -m agents.platform.evaluation_export --database PATH --run-id UUID --store SINGLE_AGENT=PATH --out NEW_DIR`는 모든 후보의 원본 Snapshot/Manifest, 전체 기록·사용량·실제 단일 A2A 저장소 자료를 읽기 전용으로 인계합니다. 실패·취소·Snapshot/기록 누락도 표시합니다. Single A2A는 schemaVersion 2이며, `dev`의 기존 D4 소비자는 네 역할 고정 검사를 이 계약에 맞게 확장해야 합니다. 55번 문서에 역할 4 인계 조건을 명시했습니다.
 
 ## 테스트
 

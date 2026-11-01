@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, UUID4
 
 from agents.llm.budget import BudgetSnapshot
 from agents.llm.contracts import LLMErrorCode, TokenUsage, UsageRecord, parse_json
+from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity
 from agents.platform.pricing import (
     ApprovedPriceBook, quote_frozen_usage, validate_frozen_price_book,
 )
@@ -45,7 +46,7 @@ class _UsageDetail(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True, hide_input_in_errors=True)
 
     sequence: int = Field(ge=1, strict=True)
-    role: AgentRole
+    role: AgentServiceIdentity
     requested_model: dict = Field(alias="requestedModel")
     reported_model_id: str | None = Field(default=None, alias="reportedModelId", max_length=256)
     reported_service_tier: str | None = Field(default=None, alias="reportedServiceTier", max_length=256)
@@ -69,7 +70,7 @@ class _Binding(BaseModel):
     workflow_step_id: UUID4 = Field(alias="workflowStepId")
     a2a_task_id: str = Field(alias="a2aTaskId", min_length=1)
     agent_context_id: str = Field(alias="agentContextId", min_length=1)
-    role: AgentRole
+    role: AgentServiceIdentity
     attempt: int = Field(ge=0, strict=True)
     code_version: int | None = Field(default=None, ge=1, strict=True, alias="codeVersion")
     requirement_ids: tuple[UUID4, ...] = Field(default=(), alias="requirementIds")
@@ -235,8 +236,10 @@ def _usage(connection, run_id, sequence):
         raise ValueError
     frozen = RunConfigurationArtifact.model_validate_json(configuration_row[0])
     step = WorkflowStep.model_validate_json(step_row[0])
+    expected_role = (SingleAgentIdentity.SINGLE_AGENT if frozen.configuration.architecture == "SINGLE_AGENT"
+                     else step.agent_role)
     if (frozen.run_id != run_id or frozen.configuration.model is None
-            or step.run_id != run_id or step.workflow_step_id != binding.workflow_step_id or step.agent_role is not binding.role):
+            or step.run_id != run_id or step.workflow_step_id != binding.workflow_step_id or expected_role is not binding.role):
         raise ValueError
     selected_model = frozen.configuration.model.model_dump(mode="json", by_alias=True)
     # Match the existing factual telemetry's safe projection, not raw secrets.

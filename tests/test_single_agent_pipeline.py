@@ -136,7 +136,7 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         return FakeProvider(*script)
 
     @asynccontextmanager
-    async def running(self, *, cap=8, tool_cap=12, provider=None):
+    async def running(self, *, cap=8, tool_cap=12, provider=None, price_book=None):
         provider = provider or self.provider()
         limits = LLMLimits(max_model_calls=cap, max_tool_calls=tool_cap, model_timeout_seconds=2, max_output_tokens=4096)
         selected = self.f.settings[AgentRole.DEVELOPER].model_copy(update={"role": SingleAgentIdentity.SINGLE_AGENT,
@@ -155,7 +155,8 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             developer_services_factory=lambda execution: self.services(AgentRole.DEVELOPER, execution),
             qa_services_factory=lambda execution: self.services(AgentRole.QA, execution),
             security_services_factory=lambda execution: self.services(AgentRole.SECURITY, execution),
-            prepare_workspace=self.f.prepare_workspace, limits=limits, a2a_client_factory=a2a, usage_sink=self.usage.append)
+            prepare_workspace=self.f.prepare_workspace, limits=limits, a2a_client_factory=a2a, usage_sink=self.usage.append,
+            price_book=price_book)
         self.assertEqual({endpoint.name for endpoint in _owned_endpoints(self.platform)}, {"orchestrator", "single_agent"})
         try:
             async with AsyncExitStack() as stack:
