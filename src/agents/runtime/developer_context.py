@@ -109,7 +109,7 @@ def _previous_inputs(metadata, previous_source, previous_artifacts, fix_issues, 
         sanitize_content(issue.model_dump(mode="json"), reject_secrets=True)
 
 
-def _load_fix_inputs(connection, run, step, steps, context):
+def _load_fix_inputs(connection, run, step, steps, context, configuration):
     """Authenticate the exact journaled Fix Request before resolving budget."""
     if (not 1 <= run.fix_attempt <= 3 or run.code_version != run.fix_attempt
             or step.code_version != run.fix_attempt + 1):
@@ -154,21 +154,26 @@ def _load_fix_inputs(connection, run, step, steps, context):
             or context.task_id in {item.a2a_task_id for item in steps
                                   if item.agent_role is AgentRole.DEVELOPER and item.workflow_step_id != step.workflow_step_id}):
         raise ValueError
-    mapping_row = connection.execute("SELECT * FROM agent_contexts WHERE run_id=? AND agent_id='developer'",
-                                     (str(run.run_id),)).fetchone()
-    if mapping_row is None:
-        raise ValueError
-    mapping = AgentContext.model_validate(_json(mapping_row["payload_json"]))
-    # A2A_MESSAGE_SENT persists the reused Context before the Agent has assigned
-    # and returned its new Task. None is legitimate only in that observation gap.
-    allowed_tasks = (previous_developer.a2a_task_id, context.task_id)
-    if step.a2a_task_id is None:
-        allowed_tasks = (None, *allowed_tasks)
-    if (mapping.run_id != run.run_id or mapping.agent_id != "developer"
-            or mapping_row["run_id"] != str(mapping.run_id) or mapping_row["agent_id"] != mapping.agent_id
-            or mapping.agent_context_id != context.context_id
-            or mapping.latest_a2a_task_id not in allowed_tasks):
-        raise ValueError
+    if configuration.configuration.architecture == "SINGLE_AGENT":
+        # The latest Single Task may be Security/QA or the failed Build, not
+        # the prior Developer phase. Authenticate the complete owned lineage.
+        from agents.runtime.qa_context import _verify_role_context
+        _verify_role_context(connection, run, steps, step, context, AgentRole.DEVELOPER)
+    else:
+        mapping_row = connection.execute("SELECT * FROM agent_contexts WHERE run_id=? AND agent_id='developer'",
+                                         (str(run.run_id),)).fetchone()
+        if mapping_row is None:
+            raise ValueError
+        mapping = AgentContext.model_validate(_json(mapping_row["payload_json"]))
+        # None is legitimate only before the new Task has been observed.
+        allowed_tasks = (previous_developer.a2a_task_id, context.task_id)
+        if step.a2a_task_id is None:
+            allowed_tasks = (None, *allowed_tasks)
+        if (mapping.run_id != run.run_id or mapping.agent_id != "developer"
+                or mapping_row["run_id"] != str(mapping.run_id) or mapping_row["agent_id"] != mapping.agent_id
+                or mapping.agent_context_id != context.context_id
+                or mapping.latest_a2a_task_id not in allowed_tasks):
+            raise ValueError
     private_row = connection.execute("SELECT * FROM artifact_contents WHERE artifact_id=? AND run_id=?",
                                      (str(source.artifact_id), str(run.run_id))).fetchone()
     if private_row is None:
@@ -371,7 +376,7 @@ class SQLiteDeveloperContextLoader:
                 artifact = RequirementArtifact.model_validate(_json(artifact_row["payload_json"]))
                 previous_source, previous_artifacts, fix_issues = None, (), ()
                 if run.status is WorkflowStatus.FIXING:
-                    previous_source, previous_artifacts, fix_issues = _load_fix_inputs(connection, run, step, steps, context)
+                    previous_source, previous_artifacts, fix_issues = _load_fix_inputs(connection, run, step, steps, context, configuration)
                 elif (run.status is not WorkflowStatus.IMPLEMENTING or run.fix_attempt != 0
                       or run.code_version is not None or tuple(step.input_artifact_ids) != (artifact.artifact_id,)):
                     raise ValueError

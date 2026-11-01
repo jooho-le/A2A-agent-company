@@ -66,7 +66,7 @@ class UnitTestOutputStoreTests(unittest.TestCase):
         step = WorkflowStep(run_id=run.run_id, agent_role=AgentRole.DEVELOPER, status=WorkflowStepStatus.RUNNING,
                             code_version=1, requirement_ids=list(SCENARIO_REGISTRY[SCN_001_ID].requirement_ids))
         configuration = RunConfigurationArtifact(run_id=run.run_id, scenario_id=run.scenario_id, workspace_id=run.workspace_id,
-            configuration=RunConfiguration(protected_test_suite_ref="https://criteria.example.invalid/signup/v1",
+            configuration=RunConfiguration(architecture=getattr(self, "architecture", "MULTI_AGENT"), protected_test_suite_ref="https://criteria.example.invalid/signup/v1",
                 environment=ExecutionBaseline(container_image_digest="sha256:" + "d" * 64,
                     dependency_lock_hash="sha256:" + sha256(self.lock).hexdigest(), hardware_profile="unit-store-fixture")))
         root = self.base / str(run.workspace_id)

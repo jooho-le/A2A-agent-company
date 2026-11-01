@@ -331,7 +331,7 @@ class ToolConfigurationRoleTests(_ToolConfigurationFixture, unittest.TestCase):
 
     def test_planner_and_string_role_cannot_request_unit_capability(self):
         config = self.decode()
-        for role in (AgentRole.PLANNER, "DEVELOPER", "ORCHESTRATOR", None):
+        for role in (AgentRole.PLANNER, "SECURITY", "DEVELOPER", "ORCHESTRATOR", None):
             with self.subTest(role=role):
                 self.assert_code("INVALID", config.unit_configuration_for, role)
         # Security gets only scopes naming its role; with none it keeps the scanner-plus-proof path.
@@ -344,6 +344,9 @@ class ToolConfigurationRoleTests(_ToolConfigurationFixture, unittest.TestCase):
         self.assertEqual([scope.name for scope in config.unit_configuration_for(AgentRole.SECURITY).scopes],
                          ["security-tests"])
         self.assertNotIn("security-tests", [scope.name for scope in config.unit_configuration_for(AgentRole.QA).scopes])
+
+    def test_security_has_no_unit_profile_unless_explicitly_approved(self):
+        self.assertIsNone(self.decode().unit_configuration_for(AgentRole.SECURITY))
 
     def test_combined_unit_policy_requires_both_snapshot_and_qa_test_scopes(self):
         for scopes in ([], [{"name": "only-source", "kind": "SNAPSHOT"}],

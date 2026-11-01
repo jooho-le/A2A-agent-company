@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -95,6 +96,20 @@ class RunsAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["dispatchStatus"], "SCHEDULED")
         self.assertEqual(dispatcher.run_ids, [UUID(response.json()["run"]["runId"])])
+
+    def test_single_configuration_cannot_start_a_mislabeled_multi_run(self):
+        dispatcher = RecordingDispatcher()
+        self.app = create_app(self.repository, dispatcher=dispatcher,
+                              settings=Settings(_env_file=None, database_path=str(self.database_path)))
+        with patch.object(self.repository, "create_run", wraps=self.repository.create_run) as create:
+            response = self.request("POST", "/api/v1/runs", json={
+                "scenarioId": str(SCN_001_ID), "requestText": "Single 실행",
+                "configuration": {"architecture": "SINGLE_AGENT"},
+            })
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.json()["detail"], "SINGLE_AGENT_RUNTIME_NOT_CONFIGURED")
+            create.assert_not_called()
+        self.assertEqual(dispatcher.run_ids, [])
 
     def test_status_steps_and_event_pagination(self) -> None:
         created = self.request(

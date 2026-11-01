@@ -82,7 +82,7 @@ class TrackedMCPExecutor:
                     or not math.isfinite(retry_delay_seconds) or not 0 <= retry_delay_seconds <= 5):
                 raise ValueError
             step_id = workspace_uuid(workflow_step_id)
-            parameters = child_parameters(client.configuration)
+            parameters = child_parameters(client.principal_configuration or client.configuration)
             policy = {"protocolVersion": MCP_PROTOCOL_VERSION, "arguments": parameters.args,
                       "environment": parameters.env, "retryPolicy": "tracked-mcp-v1",
                       "maxRetries": MAX_MCP_TOOL_RETRIES, "retryDelaySeconds": float(retry_delay_seconds)}

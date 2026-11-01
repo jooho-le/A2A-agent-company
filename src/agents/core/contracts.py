@@ -9,6 +9,7 @@ from a2a.utils.constants import (
 )
 
 from orchestrator.domain.states import AgentRole
+from agents.core.identity import SingleAgentIdentity
 
 
 A2A_PROTOCOL_VERSION = PROTOCOL_VERSION_1_0
@@ -20,4 +21,10 @@ AGENT_PORTS = MappingProxyType({
     AgentRole.DEVELOPER: 8102,
     AgentRole.QA: 8103,
     AgentRole.SECURITY: 8104,
+})
+
+# Preserve the original four-role mapping used by Multi Host admission.
+AGENT_SERVICE_PORTS = MappingProxyType({
+    **AGENT_PORTS,
+    SingleAgentIdentity.SINGLE_AGENT: 8105,
 })

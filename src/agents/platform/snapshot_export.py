@@ -23,6 +23,7 @@ from uuid import UUID
 from orchestrator.artifacts.sqlite_store import SQLiteArtifactContentStore
 from orchestrator.domain.snapshot_handoff import CodeSnapshotArtifact
 from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
+from agents.platform.export_readonly import ReadOnlyWorkflowRepository
 
 
 class SnapshotExportError(ValueError):
@@ -59,13 +60,18 @@ def export_snapshots(repository, run_id, *, all_versions=False) -> tuple[Exporte
         if run.code_version not in versions:
             raise SnapshotExportError("SNAPSHOT_NOT_FOUND")
         versions = [run.code_version]
-    contents, exported = SQLiteArtifactContentStore(repository), []
+    exported = []
     for version in versions:
         source = next(item for item in sources if item.code_version == version)
         try:
-            record = contents.get(run_id, source.artifact_id)
+            with repository._connection() as connection:
+                row = connection.execute("SELECT * FROM artifact_contents WHERE run_id=? AND artifact_id=?",
+                    (str(run_id), str(source.artifact_id))).fetchone()
+                if row is None:
+                    raise ValueError()
+                record = SQLiteArtifactContentStore._decode(connection, row)
         except Exception:
-            raise SnapshotExportError("SNAPSHOT_NOT_FOUND") from None
+            raise SnapshotExportError("SNAPSHOT_INTEGRITY_ERROR") from None
         digest = sha256(record.content).hexdigest()
         # The registry row gains A2A Task/Artifact IDs after publication; the
         # stored content keeps the frozen form. Their code identity must agree.
@@ -115,8 +121,10 @@ def main(argv=None):
     try:
         if not options.database.is_file():
             raise SnapshotExportError("DATABASE_NOT_FOUND")
-        written = write_export(SQLiteWorkflowRepository(options.database), options.run_id, options.out,
-                               all_versions=options.all_versions, force=options.force)
+        repository = ReadOnlyWorkflowRepository(options.database)
+        with repository.snapshot():
+            written = write_export(repository, options.run_id, options.out,
+                                   all_versions=options.all_versions, force=options.force)
     except SnapshotExportError as error:
         sys.stderr.write(error.code + "\n")
         return 1

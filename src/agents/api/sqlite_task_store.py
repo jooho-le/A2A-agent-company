@@ -35,8 +35,8 @@ from google.protobuf.message import Message as ProtoMessage
 
 from agents.api.task_store import sanitize_task
 from agents.api.validation import parse_workflow_metadata, request_metadata
+from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity, service_identity
 from orchestrator.core.security import redact_data
-from orchestrator.domain.states import AgentRole
 
 
 _TERMINAL = frozenset({
@@ -106,9 +106,9 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
     ``aclose`` so an executor cannot write after interruption is recorded.
     """
 
-    def __init__(self, path: Path, role: AgentRole) -> None:
+    def __init__(self, path: Path, role: AgentServiceIdentity) -> None:
         self.path = Path(path)
-        self.role = AgentRole(role)
+        self.role = service_identity(role)
         self._lease_token: str | None = None
         self._generator = UUIDGenerator()
 
@@ -222,6 +222,12 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
             else:
                 if message.context_id:
                     self._check_context(connection, message.context_id, owner, metadata)
+                    if self.role is SingleAgentIdentity.SINGLE_AGENT and connection.execute(
+                        "SELECT 1 FROM agent_tasks WHERE context_id=? AND state IN (?, ?, ?, ?)",
+                        (message.context_id, TaskState.TASK_STATE_SUBMITTED, TaskState.TASK_STATE_WORKING,
+                         TaskState.TASK_STATE_INPUT_REQUIRED, TaskState.TASK_STATE_AUTH_REQUIRED),
+                    ).fetchone():
+                        raise UnsupportedOperationError(message="Single Context already has an unfinished Task")
                 task_id = self._generator.generate(IDGeneratorContext(context_id=message.context_id or None))
                 context_id = message.context_id or self._generator.generate(IDGeneratorContext(task_id=task_id))
                 self._bind_context(connection, context_id, owner, metadata)
@@ -308,6 +314,34 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
             ).fetchall()
         return [_load_task(row[0]) for row in rows]
 
+    async def context_tasks(
+        self, context_id: str, metadata, context: ServerCallContext, *,
+        max_tasks: int = 128, max_bytes: int = 1_048_576,
+    ) -> tuple[Task, ...]:
+        """Read an owned Context's complete saved work in admission order.
+
+        Host-only API, not a new HTTP endpoint. Refuse over-budget history
+        instead of silently dropping earlier requirements/results. The caller
+        uses one read transaction so concurrent saves cannot mix DB versions.
+        Construction/restart never replays a model or Tool call.
+        """
+        self._require_started()
+        if (type(max_tasks) is not int or not 1 <= max_tasks <= 128
+                or type(max_bytes) is not int or not 1 <= max_bytes <= 1_048_576):
+            raise AgentTaskStoreError("Agent Context history limits are invalid")
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            self._assert_lease(connection)
+            self._check_context(connection, context_id, self._owner(context), metadata)
+            rows = connection.execute(
+                "SELECT t.payload_json FROM agent_tasks t WHERE t.context_id=? AND t.owner=? "
+                "ORDER BY (SELECT MIN(r.rowid) FROM agent_message_receipts r WHERE r.task_id=t.task_id), t.task_id "
+                "LIMIT ?", (context_id, self._owner(context), max_tasks + 1),
+            ).fetchall()
+        if len(rows) > max_tasks or sum(len(row[0].encode("utf-8")) for row in rows) > max_bytes:
+            raise AgentTaskStoreError("Agent Context history exceeds the configured limit")
+        return tuple(_load_task(row[0]) for row in rows)
+
     @staticmethod
     def _owner(context: ServerCallContext) -> str:
         owner = resolve_user_scope(context)
@@ -379,6 +413,10 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
         if connection.execute("SELECT 1 FROM agent_contexts WHERE context_id=?", (context_id,)).fetchone():
             self._check_context(connection, context_id, owner, metadata)
             return
+        if self.role is SingleAgentIdentity.SINGLE_AGENT and connection.execute(
+            "SELECT 1 FROM agent_contexts WHERE run_id=?", (str(metadata.run_id),),
+        ).fetchone():
+            raise InvalidParamsError(message="Single Run must preserve its original Context")
         connection.execute(
             "INSERT INTO agent_contexts(context_id, owner, run_id, scenario_id, created_at) VALUES (?, ?, ?, ?, ?)",
             (context_id, owner, str(metadata.run_id), str(metadata.scenario_id), _now()),

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "host": "127.0.0.1",
+  "environment": "local",
+  "logLevel": "INFO",
+  "orchestrator": {
+    "port": 8000,
+    "databasePath": "../.data/single/orchestrator.sqlite3"
+  },
+  "workspaceRoot": "../.data/single/workspaces",
+  "agents": {
+    "SINGLE_AGENT": {
+      "port": 8105,
+      "databasePath": "../.data/single/agents/single_agent.sqlite3",
+      "bearerTokenEnv": "A2A_PLATFORM_SINGLE_AGENT_TOKEN"
+    }
+  },
+  "model": {
+    "provider": "openai",
+    "modelId": null,
+    "modelRevision": null,
+    "temperature": null,
+    "seed": null
+  },
+  "apiKeyEnv": "A2A_PLATFORM_LLM_API_KEY",
+  "llmLimits": {
+    "max_model_calls": 8,
+    "max_tool_calls": 20,
+    "max_output_tokens": 2048,
+    "max_total_tokens": null,
+    "model_timeout_seconds": 60,
+    "tool_timeout_seconds": 60,
+    "max_json_bytes": 1048576
+  },
+  "runtimeBudgetMs": null
+}

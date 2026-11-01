@@ -13,6 +13,7 @@ from a2a.types import (
 
 from agents.core.config import AgentSettings
 from agents.core.contracts import A2A_PROTOCOL_BINDING, A2A_PROTOCOL_VERSION
+from agents.core.identity import SingleAgentIdentity
 from orchestrator.domain.states import AgentRole
 
 
@@ -21,14 +22,21 @@ _ROLE_PURPOSES = {
     AgentRole.DEVELOPER: "product implementation, fixes, and build requests",
     AgentRole.QA: "independent functional testing and QA reporting",
     AgentRole.SECURITY: "independent security inspection and reporting",
+    SingleAgentIdentity.SINGLE_AGENT: "one Agent for planning, implementation, QA, security review, and fixes",
 }
 
 
 def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) -> AgentCard:
     """Use official SDK models without advertising unimplemented skills."""
-    if type(execution_ready) is not bool or execution_ready and settings.role not in tuple(AgentRole):
+    if type(execution_ready) is not bool or execution_ready and settings.role not in (*tuple(AgentRole), SingleAgentIdentity.SINGLE_AGENT):
         raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
     description = (
+        "Host-configured Single Agent: one provider and persisted Context sequentially plan, implement, "
+        "test, review and fix candidates using a stable system prompt. Up to three Issue-bound fixes "
+        "preserve the same Context and Run budget, with a new frozen candidate and measured Build, "
+        "QA and Security receipts. Input/auth continuation and confirmed cancellation retain Task identity; "
+        "restart recovery requires the original durable budget and complete accounting, never replaying uncertain writes."
+        if execution_ready and settings.role is SingleAgentIdentity.SINGLE_AGENT else
         "Host-configured Planner: produces a validated task plan while preserving "
         "frozen requirements. Per-Run configuration and budget must be admitted; "
         "no Source modification, MCP execution or product verdict is performed."
@@ -82,7 +90,11 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
             id="measured-initial-security", name="Measured security review and revalidation",
             description="Reviews all approved frozen scans with actual Source references; only Host-verified proof can establish confirmed findings or requirement outcomes, not project success.",
             tags=["security", "scan", "code-review", "snapshot"],
-        )] if execution_ready and settings.role is AgentRole.SECURITY else [],
+        )] if execution_ready and settings.role is AgentRole.SECURITY else [AgentSkill(
+            id="single-initial-pipeline", name="Single Agent software pipeline and bounded fixes",
+            description="One retained Context and model identity for protected planning, implementation, QA, Security and up to three Issue-bound fixes; new candidate receipts determine outcomes.",
+            tags=["single-agent", "planning", "implementation", "qa", "security"],
+        )] if execution_ready and settings.role is SingleAgentIdentity.SINGLE_AGENT else [],
     )
     if settings.bearer_token is not None:
         card.security_schemes["bearerAuth"].CopyFrom(

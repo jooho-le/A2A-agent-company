@@ -147,9 +147,8 @@ class OwnedToolConfiguration:
         if role not in (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY) or type(role) is not AgentRole:
             raise ToolConfigurationError()
         configuration = decode_unit_configuration(self._unit_json)
-        # Developer gets Source tests only; QA gets generated and protected tests.
-        # Security gets only scopes naming its role, or None when it has none
-        # (then it keeps the scanner-plus-approved-proof validation path).
+        # Security's opt-in generated tests keep their own output folder. No
+        # scope preserves the existing scanner/assessor path for older files.
         scopes = tuple(item for item in configuration.scopes if role in item.roles)
         if role is AgentRole.SECURITY and not scopes:
             return None

@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import TokenUsage, UsageRecord, parse_json
+from agents.core.identity import SingleAgentIdentity
 from orchestrator.domain.run_configuration import ModelConfiguration
 from orchestrator.domain.states import AgentRole
 
@@ -201,7 +202,8 @@ class CostQuote:
 def _record(value):
     if (type(value) is not UsageRecord or value.cost_usd is not None
             or type(value.sequence) is not int or value.sequence < 1
-            or type(value.role) is not AgentRole or type(value.duration_ms) is not int or value.duration_ms < 0
+            or type(value.role) not in (AgentRole, SingleAgentIdentity)
+            or type(value.duration_ms) is not int or value.duration_ms < 0
             or type(value.outcome) is not str or not value.outcome
             or type(value.requested_model) is not ModelConfiguration):
         raise ValueError

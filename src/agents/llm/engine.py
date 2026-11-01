@@ -13,6 +13,9 @@ from agents.llm.contracts import (
 )
 from agents.roles.contracts import get_role_contract
 from agents.roles.prompts import PreparedRolePrompt, build_system_prompt
+from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity, SinglePhase
+from agents.single.prompts import PreparedSinglePrompt, build_single_system_prompt, SINGLE_PROMPT_VERSION
+from mcp_tools.core.policy import SINGLE_PHASE_TOOL_ROLES
 from orchestrator.core.security import redact_data, redact_text
 from orchestrator.domain.run_configuration import ModelConfiguration
 from orchestrator.domain.states import AgentRole
@@ -27,12 +30,18 @@ class LLMEngine:
     """
 
     def __init__(
-        self, *, role: AgentRole, provider: LLMProvider,
+        self, *, role: AgentServiceIdentity, provider: LLMProvider,
         tools: tuple[ToolDefinition, ...] = (), tool_executor: ToolExecutor | None = None,
+        single_phase: SinglePhase | None = None,
     ):
-        self._role = get_role_contract(role).role
+        single = role is SingleAgentIdentity.SINGLE_AGENT
+        if (single and not isinstance(single_phase, SinglePhase)
+                or not single and single_phase is not None):
+            raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
+        self._single_phase = single_phase
+        self._role = role if single else get_role_contract(role).role
         self._provider = provider
-        allowed = get_role_contract(role).allowed_tool_names
+        allowed = SINGLE_PHASE_TOOL_ROLES[single_phase] if single else get_role_contract(role).allowed_tool_names
         if not isinstance(tools, tuple) or any(tool.name not in allowed for tool in tools):
             raise LLMRuntimeError(LLMErrorCode.TOOL_POLICY)
         if len({tool.name for tool in tools}) != len(tools) or tools and tool_executor is None:
@@ -44,7 +53,7 @@ class LLMEngine:
         self._executor = tool_executor
 
     async def run(
-        self, *, prompt: PreparedRolePrompt, model: ModelConfiguration,
+        self, *, prompt: PreparedRolePrompt | PreparedSinglePrompt, model: ModelConfiguration,
         output: StructuredOutput, budget: ExecutionBudget,
         workspace_id: str | None = None,
         usage_sink: Callable[[UsageRecord], None] | None = None,
@@ -54,12 +63,17 @@ class LLMEngine:
         seen_calls: set[str] = set()
         executed = 0
         try:
-            if (
-                prompt.role != self._role
-                or prompt.version != get_role_contract(self._role).version
-                or prompt.system_prompt != build_system_prompt(self._role)
-                or model.provider != self._provider.name
-            ):
+            if self._role is SingleAgentIdentity.SINGLE_AGENT:
+                valid = (isinstance(prompt, PreparedSinglePrompt)
+                         and prompt.identity is SingleAgentIdentity.SINGLE_AGENT
+                         and prompt.phase is self._single_phase and prompt.version == SINGLE_PROMPT_VERSION
+                         and prompt.system_prompt == build_single_system_prompt()
+                         and prompt.draft_contract.output == output)
+            else:
+                valid = (isinstance(prompt, PreparedRolePrompt) and prompt.role == self._role
+                         and prompt.version == get_role_contract(self._role).version
+                         and prompt.system_prompt == build_system_prompt(self._role))
+            if not valid or model.provider != self._provider.name:
                 raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
             if workspace_id is not None and (not isinstance(workspace_id, str) or not workspace_id.strip()):
                 raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)

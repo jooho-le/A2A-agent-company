@@ -3,6 +3,7 @@
 from types import MappingProxyType
 from enum import Enum
 
+from agents.core.identity import SingleAgentIdentity, SinglePhase
 from orchestrator.domain.states import AgentRole
 
 
@@ -42,9 +43,25 @@ ROLE_TOOL_NAMES = MappingProxyType({
     ),
 })
 
+# Complete capabilities of Multi, without adding shell/network/Host powers.
+SINGLE_TOOL_NAMES = tuple(dict.fromkeys(name for names in ROLE_TOOL_NAMES.values() for name in names))
+_SINGLE_DEVELOPMENT = {
+    **{name: AgentRole.DEVELOPER for name in ROLE_TOOL_NAMES[AgentRole.DEVELOPER]},
+    "read_test_report": AgentRole.QA, "read_security_report": AgentRole.SECURITY,
+}
+SINGLE_PHASE_TOOL_ROLES = MappingProxyType({
+    SinglePhase.PLANNING: MappingProxyType({}),
+    SinglePhase.IMPLEMENTING: MappingProxyType(_SINGLE_DEVELOPMENT),
+    SinglePhase.FIXING: MappingProxyType(_SINGLE_DEVELOPMENT),
+    SinglePhase.QA: MappingProxyType({name: AgentRole.QA for name in ROLE_TOOL_NAMES[AgentRole.QA]}),
+    SinglePhase.SECURITY: MappingProxyType({name: AgentRole.SECURITY for name in ROLE_TOOL_NAMES[AgentRole.SECURITY]}),
+})
+
+
 # ROLE_TOOL_NAMES remains the four LLM roles' immutable contract. The Host
 # principal is intentionally absent from Agent role contracts and prompts.
 MCP_TOOL_NAMES = MappingProxyType({
     **ROLE_TOOL_NAMES,
     MCPHostPrincipal.ORCHESTRATOR: tuple(ORCHESTRATOR_TOOL_ROLES),
+    SingleAgentIdentity.SINGLE_AGENT: SINGLE_TOOL_NAMES,
 })

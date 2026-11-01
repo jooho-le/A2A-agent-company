@@ -81,6 +81,12 @@ def create_run(
     """Create a durable Run and its initial pending Planner Step."""
     if get_scenario(body.scenario_id) is None:
         raise HTTPException(status_code=422, detail="scenarioId is not registered; see GET /api/v1/scenarios")
+    # Only an explicitly composed runtime can admit Single; default stays Multi.
+    supported = getattr(dispatcher, "supports_architecture", None)
+    if body.configuration.architecture == "SINGLE_AGENT" and (not callable(supported) or not supported("SINGLE_AGENT")):
+        raise HTTPException(status_code=503, detail="SINGLE_AGENT_RUNTIME_NOT_CONFIGURED")
+    if callable(supported) and not supported(body.configuration.architecture):
+        raise HTTPException(status_code=422, detail="RUNTIME_ARCHITECTURE_MISMATCH")
     validator = request.app.state.submission_validator
     if validator is not None:
         try:
@@ -191,6 +197,16 @@ def get_run_usage(run_id: UUID, request: Request, repository: Repository,
             "total": total, "limit": limit, "offset": offset}
 
 
+@router.get("/{run_id}/metrics")
+def get_run_metrics(run_id: UUID, repository: Repository):
+    _get_run_or_404(repository, run_id)
+    from agents.platform.run_records import collect_run_metrics, RunRecordsError
+    try:
+        return collect_run_metrics(repository, run_id)
+    except RunRecordsError:
+        raise HTTPException(status_code=503, detail="RUN_METRICS_UNAVAILABLE") from None
+
+
 @router.get("/{run_id}/telemetry")
 def get_run_telemetry(run_id: UUID, request: Request, repository: Repository,
                       limit: int = Query(default=100, ge=1, le=500),
@@ -227,8 +243,9 @@ async def cancel_run(
 
 
 @router.post("/{run_id}/resume", response_model=RunStatusResponse)
-async def resume_run(run_id: UUID, body: ResumeRunRequest, repository: Repository, controls: Controls):
+async def resume_run(run_id: UUID, body: ResumeRunRequest, request: Request, repository: Repository, controls: Controls):
     _get_run_or_404(repository, run_id)
+    _require_supported_continuation(request, repository, run_id)
     try:
         run = await controls.resume(run_id, step_id=body.workflow_step_id, input_data=body.input_data)
     except (WorkflowControlConflict, RunDispatchConflict, AgentNotConfiguredError, ValueError) as exc:
@@ -237,13 +254,21 @@ async def resume_run(run_id: UUID, body: ResumeRunRequest, repository: Repositor
 
 
 @router.post("/{run_id}/recover", response_model=RunStatusResponse)
-async def recover_run(run_id: UUID, body: ResumeRunRequest, repository: Repository, controls: Controls):
+async def recover_run(run_id: UUID, body: ResumeRunRequest, request: Request, repository: Repository, controls: Controls):
     _get_run_or_404(repository, run_id)
+    _require_supported_continuation(request, repository, run_id)
     try:
         run = await controls.resume(run_id, step_id=body.workflow_step_id, input_data=body.input_data, recover=True)
     except (WorkflowControlConflict, RunDispatchConflict, AgentNotConfiguredError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RunStatusResponse.from_run(run)
+
+
+def _require_supported_continuation(request, repository, run_id):
+    configuration = repository.get_run_configuration(run_id)
+    if (configuration is not None and configuration.configuration.architecture == "SINGLE_AGENT"
+            and not getattr(request.app.state, "single_continuation_ready", False)):
+        raise HTTPException(status_code=503, detail="SINGLE_AGENT_CONTINUATION_NOT_CONFIGURED")
 
 
 @router.get("/{run_id}/artifacts", response_model=RunArtifactsResponse)

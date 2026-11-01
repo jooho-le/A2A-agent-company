@@ -290,6 +290,66 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 [45번 플랫폼 인계 안내](docs/45-owned-platform-handoff.md)에 구현 위치·번호별 이력, Bootstrap/Owned Host 차이, 승인 설정·실행 명령, Run 조회·Artifact/Manifest 계약, 팀원 인계 경계와 미검증/보류 항목을 정리했습니다. 사용자 요청에 따라 실제 실행보다 문서를 먼저 정리했으며, **다음은 여전히 44번 실제 실행 준비·확인**입니다. 코드·공식 Schema·의존성·팀원 모듈 변경이나 실제 외부 실행·Git commit/push는 하지 않았습니다.
 
+### Single-Agent 실행 계약 — 47번, 구현 전 설계
+
+사용자 개발정의서 §11-A와 `dev`에 반영된 평가 변경을 대조해 [47번 Single-Agent 실행 계약](docs/47-single-agent-execution-contract.md)을 정리했습니다. 한 Agent가 기획·개발·검증·수정을 이어서 수행하고, Multi와 같은 도구 기능·수정 기회·환경·평가 조건을 적용합니다. 단일 정체성, 보호된 Snapshot/평가 기준, Ver1·Ver2, 기록·평가 인계와 47~56번 구현 순서를 구분했습니다.
+
+47번은 설계 기록입니다. 후속 48~50번 구현은 아래와 같으며, 앞선 44번 실제 LLM·Docker 실행 확인은 별도 보류 항목으로 남습니다.
+
+### Single-Agent 설정·서버·Prompt 기반 — 48~50번
+
+[48번 실행 설정](docs/48-single-agent-run-configuration.md)은 `SINGLE_AGENT`와 기존 `MULTI_AGENT`를 지원하고, Ver2의 순환용 보호 테스트 참조 생략 규칙을 유지합니다. 실제 Single 실행기가 연결되기 전에는 `/api/v1/runs`의 Single 요청을 503 `SINGLE_AGENT_RUNTIME_NOT_CONFIGURED`로 거절해 기존 Planner로 잘못 실행되는 것을 막습니다.
+
+[49번 서버](docs/49-single-agent-a2a-server.md)는 기존 네 역할과 별도의 `SINGLE_AGENT` 서비스 정체성·포트 `8105`·DB `.data/agents/single_agent.sqlite3`를 사용합니다. `PYTHONPATH=src .venv/bin/python -m agents.single`로 통신 서버를 시작할 수 있으며, 현재는 Bootstrap으로 작업을 거절하고 `executionReady=false`를 유지합니다.
+
+[50번 통합 Prompt/기록](docs/50-single-agent-prompts-context.md)은 같은 Agent의 System Prompt와 Context를 유지하면서 단계별 Draft를 검증하고, 재시작 뒤에도 저장된 메시지·산출물을 함께 불러옵니다. 이 기록을 사용하는 최초 실행 경로는 아래 52번에서 연결했습니다. 실제 LLM/Docker 실행과 비교 실험은 아직 수행하지 않았습니다.
+
+### Single-Agent MCP 도구·단계 권한 — 51번
+
+[51번 MCP 권한 연결](docs/51-single-agent-mcp-permissions.md)은 `SINGLE_AGENT` 주체와 업무 단계를 고정해 기존 도구 10개의 합집합을 연결합니다. 모델용 목록·Client·stdio 서버가 각각 단계 권한을 검사하며, 검증 단계는 같은 Frozen Snapshot과 자기 테스트 폴더만 사용합니다. 보호 테스트는 별도 Host 설정에 남깁니다.
+
+`agents.single.mcp.build_single_mcp_configuration()`과 `single_phase_tool_definitions()`가 Host의 단계별 연결 지점입니다. `dev`의 Security 자체 테스트 MCP 구현도 필요한 범위만 반영했습니다. 기본 Single 통신 서버는 계속 Bootstrap이며, 실제 실행은 아래 Host 조합을 명시적으로 구성해야 합니다.
+
+### Single-Agent 최초 구현·검증 실행 — 52번
+
+[52번 실제 실행 연결](docs/52-single-agent-initial-pipeline.md)은 `agents.single.platform.create_single_platform()`으로 Orchestrator와 **하나의 Single Agent 서버·Provider·Context**를 연결합니다. 같은 System Prompt와 저장된 작업 기록을 이어 사용하며 기획 → 코드 작성·Build → QA → Security를 순서대로 수행합니다. 기존 네 실행기를 Single이라고 바꿔 호출하지 않습니다.
+
+기존 Host 서비스의 Snapshot·Sandbox·보호 테스트·실행 증거 검사를 재사용하며, Security 실행 테스트 모드도 처리합니다. 실제 Host 조합으로 만든 서버만 `executionReady=true`를 반환합니다. 기본 Orchestrator의 Single 요청 503 거절과 `python -m agents.single`의 Bootstrap 동작은 유지합니다. 이 조합은 `agents.platform.runner.run_platform()`으로 두 로컬 엔드포인트를 실행할 수 있으며, 기존 Multi Host CLI 설정을 자동 변경하지 않습니다.
+
+최초 후보의 검증에 이어 아래 53번의 수정·재검증, 54번의 재개·취소·영속 예산 복구, 55번의 기록·비용·평가 인계, 56번의 파일 기반 실행·최종 점검을 연결했습니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
+
+### Single-Agent 수정·재검증과 판정 — 53번
+
+[53번 수정·재검증](docs/53-single-agent-fix-revalidation.md)은 Build·QA·Security의 확인된 제품 실패를 기존 Issue에 연결하고, **같은 Agent·Provider·Context로 최대 3회 수정**합니다. 수정할 때마다 새 Source·Build 결과를 만들고 같은 후보로 QA → Security를 다시 수행합니다. 이전 후보의 PASS를 복사하지 않으며, 기존 판정기의 SUCCESS·FAIL·HUMAN_REVIEW 정책을 사용합니다.
+
+반복 Issue는 기존 fingerprint 규칙으로 사람 검토에 넘기고, 수정 단계도 최초부터 사용한 Run 예산과 deadline을 이어 사용합니다. 잘못된 Context나 오래된 Task 매핑은 수정 모델·파일 쓰기 전에 거절합니다. 기본 통신 서버의 Bootstrap과 미구성 Single API의 503은 유지하며, 명시적 `create_single_platform()` 구성에서 이 기능을 사용합니다.
+
+### Single-Agent 입력·취소·복구·영속 예산 — 54번
+
+[54번 제어·복구](docs/54-single-agent-controls-durable-budgets.md)는 같은 Step·Task·Context로 입력/인증 뒤 재개하고, 실제 작업 종료를 확인한 뒤 취소합니다. QA가 입력을 기다리는 동안 Security를 보내지 않으며, 완료된 작업은 GET으로 확인해 중복 실행을 막습니다.
+
+Single Host도 기존 영속 예산 원장을 사용합니다. 재시작하면 같은 동결 설정·호출 수·토큰·원래 UTC deadline과 영수증을 확인해 복구합니다. 미완료 모델/도구 예약, 누락·미확인 사용량, 한도 변경·시간 역행·기한 만료는 새 예산을 주지 않고 실행을 차단합니다. 이 감사에 필요한 기본 LLM/MCP 기록은 실제 `SINGLE_AGENT` 주체로 저장합니다.
+
+### Single-Agent 기록·비용·평가 인계 — 55번
+
+[55번 인계 안내](docs/55-single-agent-records-evaluation-handoff.md)는 승인 가격표와 Single 계상을 연결하고, `GET /api/v1/runs/{runId}/metrics`로 Run 전체 시간·사람 대기·호출·토큰·비용을 제공합니다. 미확인 사용량/비용은 null로 남깁니다.
+
+`python -m agents.platform.evaluation_export --database PATH --run-id UUID --store SINGLE_AGENT=PATH --out NEW_DIR`는 모든 후보의 원본 Snapshot/Manifest, 전체 기록·사용량·실제 단일 A2A 저장소 자료를 읽기 전용으로 인계합니다. 실패·취소·Snapshot/기록 누락도 표시합니다. Single A2A는 schemaVersion 2이며, `dev`의 기존 D4 소비자는 네 역할 고정 검사를 이 계약에 맞게 확장해야 합니다. 55번 문서에 역할 4 인계 조건을 명시했습니다.
+
+### Single-Agent 최종 점검·실행 안내 — 56번
+
+[56번 실행·인계 안내](docs/56-single-agent-final-audit-runbook.md)에 47~56번 구현·개발정의서 대조, 설정 준비·요청 생성·조회·내보내기, 역할 3·4 인계 조건을 정리했습니다. `configs/single-runtime.example.json`은 실제 Agent 하나와 `.data/single/` 저장소를 지정하는 미완성 승인 설정 예시입니다.
+
+```sh
+PYTHONPATH=src .venv/bin/python -m agents.platform.run_host \
+  --architecture SINGLE_AGENT \
+  --runtime configs/single-runtime.local.json \
+  --tools configs/owned-tools.local.json \
+  --source configs/owned-source.local.json
+```
+
+기본은 파일 검사이며 서버·모델을 시작하지 않습니다. 승인 설정·환경변수·Docker를 준비한 뒤 같은 명령에 `--start`를 추가하면 Orchestrator와 Single 두 서버를 실행합니다. `--architecture`를 생략하면 기존 Multi 모드입니다. Security 자체 테스트 scope도 양쪽 Host가 같은 정책으로 전달하며, 미확인 근거를 PASS로 처리하지 않습니다. 실제 환경 실행과 독립 비교 실험은 아직 수행하지 않았습니다.
+
 ## 테스트
 
 ```bash

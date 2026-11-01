@@ -43,7 +43,7 @@ class FileToolTests(unittest.IsolatedAsyncioTestCase):
         self.lock = b"local-fixture==1\n"
         configuration = RunConfigurationArtifact(
             run_id=self.run.run_id, scenario_id=SCN_001_ID, workspace_id=self.run.workspace_id,
-            configuration=RunConfiguration(environment=ExecutionBaseline(
+            configuration=RunConfiguration(architecture=getattr(self, "architecture", "MULTI_AGENT"), environment=ExecutionBaseline(
                 container_image_digest="sha256:" + "d" * 64,
                 dependency_lock_hash="sha256:" + sha256(self.lock).hexdigest(),
                 hardware_profile="file-tool-fixture")),

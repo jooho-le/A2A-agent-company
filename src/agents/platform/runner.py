@@ -156,9 +156,12 @@ def _owned_endpoints(platform):
         if type(platform) is not OwnedAgentPlatform:
             raise ValueError
         endpoints = platform.endpoints
-        if (type(endpoints) is not tuple or len(endpoints) != 5
+        support = getattr(platform.dispatcher, "supports_architecture", None)
+        single = callable(support) and support("SINGLE_AGENT")
+        names = {"orchestrator", "single_agent"} if single else _NAMES
+        if (type(endpoints) is not tuple or len(endpoints) != len(names)
                 or any(type(item) is not PlatformEndpoint for item in endpoints)
-                or {item.name for item in endpoints} != _NAMES
+                or {item.name for item in endpoints} != names
                 or not callable(platform.aclose)):
             raise ValueError
         identities = []
@@ -285,7 +288,7 @@ async def _finish(platform, servers, tasks, listeners, timeout):
 
 
 async def run_platform(platform, *, startup_timeout_seconds=30, shutdown_timeout_seconds=60):
-    """Own exactly one configured Host, five loopback endpoints, and one loop.
+    """Own one configured Host, its declared loopback endpoints, and one loop.
 
     Agent apps start before the Orchestrator starts accepting work. Port bind
     rollback closes only these sockets; it does not delete databases/history.

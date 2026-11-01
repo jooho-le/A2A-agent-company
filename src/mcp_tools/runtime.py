@@ -19,9 +19,13 @@ import anyio
 
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import json_text, parse_json
+from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity, SinglePhase
 from mcp_tools.core.catalog import MAX_JSON_BYTES, ToolSchemaError, get_tool_contract
-from mcp_tools.core.policy import MCPHostPrincipal, ORCHESTRATOR_TOOL_ROLES, MCP_TOOL_NAMES
+from mcp_tools.core.policy import MCPHostPrincipal, ORCHESTRATOR_TOOL_ROLES, MCP_TOOL_NAMES, SINGLE_PHASE_TOOL_ROLES
 from orchestrator.domain.states import AgentRole
+from orchestrator.domain.states import WorkflowStatus
+from orchestrator.domain.run_configuration import RunConfigurationArtifact
+from orchestrator.artifacts.sqlite_store import SQLiteArtifactContentStore
 from orchestrator.workspaces.filesystem import BoundWorkspace
 from orchestrator.workspaces.policy import (
     WorkspaceAccess, WorkspaceAccessError, WorkspaceErrorCode,
@@ -97,16 +101,24 @@ class MCPBinding:
     executor. It receives only the three explicitly declared capabilities.
     """
 
-    role: AgentRole | MCPHostPrincipal
-    agent_role: AgentRole | None
+    role: AgentServiceIdentity | MCPHostPrincipal
+    agent_role: AgentServiceIdentity | None
     run_id: UUID = field(repr=False)
     workspace_id: UUID = field(repr=False)
+    single_phase: SinglePhase | None = None
 
     def __post_init__(self):
         host = self.role is MCPHostPrincipal.ORCHESTRATOR
+        single = self.role is SingleAgentIdentity.SINGLE_AGENT
         if not (host and self.agent_role is None or
+                single and self.agent_role is SingleAgentIdentity.SINGLE_AGENT or
                 isinstance(self.role, AgentRole) and
                 isinstance(self.agent_role, AgentRole) and self.role is self.agent_role):
+            raise MCPConfigurationError()
+        if single:
+            if not isinstance(self.single_phase, SinglePhase):
+                raise MCPConfigurationError()
+        elif self.single_phase is not None:
             raise MCPConfigurationError()
         try:
             object.__setattr__(self, "run_id", workspace_uuid(self.run_id))
@@ -119,6 +131,8 @@ class MCPBinding:
 class MCPExecutionContext:
     binding: MCPBinding
     workspace: BoundWorkspace = field(repr=False)
+    # The delegated role is an internal Tool ACL, never a second Agent.
+    principal_binding: MCPBinding | None = field(default=None, repr=False)
 
 
 def delegate_host_context(context, tool_name):
@@ -232,6 +246,7 @@ class MCPDispatcher:
     def __init__(
         self, binding: MCPBinding, workspace_registry, *,
         handlers: Mapping | None = None, max_call_seconds: float = 60,
+        frozen_snapshot_id: UUID | None = None,
     ):
         if not isinstance(binding, MCPBinding) or (
             isinstance(max_call_seconds, bool)
@@ -253,17 +268,33 @@ class MCPDispatcher:
         self._registry = workspace_registry
         self._handlers = MappingProxyType(copied)
         self._max_call_seconds = float(max_call_seconds)
+        try:
+            self._snapshot_id = None if frozen_snapshot_id is None else workspace_uuid(frozen_snapshot_id)
+        except WorkspaceAccessError:
+            raise MCPConfigurationError() from None
+        if (binding.role is SingleAgentIdentity.SINGLE_AGENT
+                and binding.single_phase in (SinglePhase.QA, SinglePhase.SECURITY)
+                and self._snapshot_id is None):
+            raise MCPConfigurationError()
 
     def list_tools(self):
         return tuple(get_tool_contract(name) for name in MCP_TOOL_NAMES[self.binding.role])
 
     def is_implemented(self, name) -> bool:
-        return isinstance(name, str) and name in self._handlers
+        return (isinstance(name, str) and name in self._handlers
+                and (self.binding.role is not SingleAgentIdentity.SINGLE_AGENT
+                     or name in SINGLE_PHASE_TOOL_ROLES[self.binding.single_phase]))
 
     async def call_tool(self, name, arguments) -> ToolOutcome:
         contract = get_tool_contract(name)
         if contract is None or name not in MCP_TOOL_NAMES[self.binding.role]:
             raise MCPProtocolError()
+        single = self.binding.role is SingleAgentIdentity.SINGLE_AGENT
+        workspace_role = (SINGLE_PHASE_TOOL_ROLES[self.binding.single_phase].get(name) if single
+                          else ORCHESTRATOR_TOOL_ROLES[name] if self.binding.role is MCPHostPrincipal.ORCHESTRATOR
+                          else self.binding.role)
+        if workspace_role is None:
+            return _failure(MCPExecutionError.PERMISSION_DENIED)
         arguments = _bounded_object(arguments)
         try:
             contract.validate_input(arguments)
@@ -274,11 +305,18 @@ class MCPDispatcher:
             return _failure(MCPExecutionError.PERMISSION_DENIED)
         # Normalize the known UUID, not arbitrary paths or Source bytes.
         arguments["workspaceId"] = str(workspace_id)
+        if single and "snapshotId" in arguments:
+            try:
+                requested_snapshot = workspace_uuid(arguments["snapshotId"])
+            except WorkspaceAccessError:
+                raise MCPProtocolError() from None
+            if self._snapshot_id is None or requested_snapshot != self._snapshot_id:
+                return _failure(MCPExecutionError.PERMISSION_DENIED)
         try:
             if name == "read_project_file":
-                authorize_path(self.binding.role, arguments["path"], WorkspaceAccess.READ)
+                authorize_path(workspace_role, arguments["path"], WorkspaceAccess.READ)
             elif name in ("write_source_file", "write_test_file"):
-                authorize_path(self.binding.role, arguments["path"], WorkspaceAccess.WRITE)
+                authorize_path(workspace_role, arguments["path"], WorkspaceAccess.WRITE)
             if "reportRef" in arguments:
                 _artifact_reference(arguments["reportRef"])
         except WorkspaceAccessError:
@@ -293,10 +331,27 @@ class MCPDispatcher:
         except Exception:
             return _failure(MCPExecutionError.SECRET_DENIED)
         try:
-            workspace_role = (ORCHESTRATOR_TOOL_ROLES[name]
-                              if self.binding.role is MCPHostPrincipal.ORCHESTRATOR
-                              else self.binding.role)
             record = self._registry.get_record(workspace_id, run_id=self.binding.run_id)
+            if single:
+                repository = self._registry._repository
+                configuration = repository.get_run_configuration(self.binding.run_id)
+                run = repository.get_run(self.binding.run_id)
+                allowed_states = {
+                    SinglePhase.IMPLEMENTING: (WorkflowStatus.IMPLEMENTING,),
+                    SinglePhase.FIXING: (WorkflowStatus.FIXING,),
+                    SinglePhase.QA: (WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING),
+                    SinglePhase.SECURITY: (WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING),
+                }.get(self.binding.single_phase, ())
+                if (not isinstance(configuration, RunConfigurationArtifact)
+                        or configuration.configuration.architecture != "SINGLE_AGENT"
+                        or configuration.run_id != self.binding.run_id or configuration.workspace_id != workspace_id
+                        or run is None or run.status not in allowed_states):
+                    return _failure(MCPExecutionError.PERMISSION_DENIED)
+                if self.binding.single_phase in (SinglePhase.QA, SinglePhase.SECURITY):
+                    source = SQLiteArtifactContentStore(repository).get(self.binding.run_id, self._snapshot_id).metadata
+                    if (source.artifact_type != "SOURCE" or source.artifact_id != self._snapshot_id
+                            or source.run_id != self.binding.run_id or source.code_version != run.code_version):
+                        return _failure(MCPExecutionError.PERMISSION_DENIED)
             workspace = self._registry.bind(
                 workspace_id, run_id=self.binding.run_id, role=workspace_role,
             )
@@ -318,7 +373,11 @@ class MCPDispatcher:
         handler = self._handlers.get(name)
         if handler is None:
             return _failure(MCPExecutionError.TOOL_NOT_IMPLEMENTED)
-        context = MCPExecutionContext(binding=self.binding, workspace=workspace)
+        effective_binding = (MCPBinding(role=workspace_role, agent_role=workspace_role,
+                                       run_id=self.binding.run_id, workspace_id=workspace_id)
+                             if single else self.binding)
+        context = MCPExecutionContext(binding=effective_binding, workspace=workspace,
+                                      principal_binding=self.binding if single else None)
         try:
             invocation = handler(context, arguments)
             if not inspect.isawaitable(invocation):

@@ -17,9 +17,10 @@ class _Parser(argparse.ArgumentParser):
 
 
 async def _start(options):
+    mode = {} if options.architecture == "MULTI_AGENT" else {"architecture": options.architecture}
     platform = await create_host(runtime_file=options.runtime, tools_file=options.tools,
         source_file=options.source, protected_cases_file=options.qa_cases,
-        price_book_file=options.price_book)
+        price_book_file=options.price_book, **mode)
     failure = None
     try:
         await run_platform(platform, startup_timeout_seconds=options.startup_timeout,
@@ -40,7 +41,8 @@ async def _start(options):
 
 
 def main(argv=None):
-    parser = _Parser(description="Check approved Host configuration; explicitly --start to allocate/run all five apps.")
+    parser = _Parser(description="Check approved Host configuration; --start runs Multi (five apps) or Single (two apps).")
+    parser.add_argument("--architecture", choices=("MULTI_AGENT", "SINGLE_AGENT"), default="MULTI_AGENT")
     parser.add_argument("--runtime", required=True)
     parser.add_argument("--tools", required=True)
     parser.add_argument("--source", required=True)
@@ -58,9 +60,10 @@ def main(argv=None):
         if options.start:
             asyncio.run(_start(options))
         else:
+            mode = {} if options.architecture == "MULTI_AGENT" else {"architecture": options.architecture}
             plan = inspect_host_configuration(runtime_file=options.runtime, tools_file=options.tools,
                 source_file=options.source, protected_cases_file=options.qa_cases,
-                price_book_file=options.price_book)
+                price_book_file=options.price_book, **mode)
             if options.check_secrets:
                 try:
                     resolve_runtime_configuration(plan.runtime, base_directory=plan.runtime_directory)

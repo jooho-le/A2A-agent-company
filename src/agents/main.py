@@ -30,12 +30,15 @@ def create_app(
         from agents.runtime.developer import DeveloperAgentExecutor
         from agents.runtime.qa import QAAgentExecutor
         from agents.runtime.security import SecurityAgentExecutor
+        from agents.single.runtime import SingleAgentExecutor
+        from agents.core.identity import SingleAgentIdentity
         from orchestrator.domain.states import AgentRole
         implemented_roles = (
             (PlannerAgentExecutor, AgentRole.PLANNER),
             (DeveloperAgentExecutor, AgentRole.DEVELOPER),
             (QAAgentExecutor, AgentRole.QA),
             (SecurityAgentExecutor, AgentRole.SECURITY),
+            (SingleAgentExecutor, SingleAgentIdentity.SINGLE_AGENT),
         )
         expected_role = next((role for implemented, role in implemented_roles
                               if isinstance(executor, implemented)), None)
@@ -52,6 +55,8 @@ def create_app(
     # Construction has no DB IO. Startup acquires exclusive process ownership
     # before the SDK may execute a Task; each role has its own durable store.
     store = SQLiteAgentTaskStore(settings.task_database_path, settings.role)
+    if executor is not None and execution_ready and settings.role.value == "SINGLE_AGENT":
+        executor.bind_task_store(store)
     handler = ProjectRequestHandler(
         agent_executor=SafeAgentExecutor(executor or BootstrapAgentExecutor()),
         task_store=store, agent_card=card, validate_input_modes=True,
