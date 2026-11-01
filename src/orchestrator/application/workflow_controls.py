@@ -64,6 +64,9 @@ class WorkflowControlService:
             run = self.repository.get_run(run_id)
             if run is None:
                 raise WorkflowControlConflict("Run does not exist")
+            single = self._single(run_id)
+            if single and (not self.dispatcher.supports_architecture("SINGLE_AGENT") or self.preflight is None):
+                raise WorkflowControlConflict("Single continuation requires its configured Host and existing budget")
             if run.status in _FINAL:
                 raise WorkflowControlConflict("A finished or aborted Run cannot be resumed")
             if not recover and run.status not in (
@@ -159,6 +162,10 @@ class WorkflowControlService:
                         handoff=handoff, plan=plan,
                         continue_interrupted=step.workflow_step_id in continuation_steps,
                     ))
+                    if single and outcomes[-1].disposition != TaskRunDisposition.COMPLETED:
+                        # A single Context cannot admit the unsent peer while
+                        # its current Task still needs input/auth or termination.
+                        break
                 interrupted = next((
                     result for result in outcomes
                     if result.disposition != TaskRunDisposition.COMPLETED
@@ -236,7 +243,7 @@ class WorkflowControlService:
                     "a2a_task_state": A2ATaskState.CANCELED,
                 })
                 context = AgentContext(
-                    run_id=run_id, agent_id=step.agent_role.value.lower(),
+                    run_id=run_id, agent_id=self._agent_id(run_id, step.agent_role),
                     agent_context_id=step.agent_context_id,
                     latest_a2a_task_id=step.a2a_task_id,
                 )
@@ -256,6 +263,8 @@ class WorkflowControlService:
         run = self.repository.get_run(run_id)
         if run is None or run.status in _FINAL:
             raise WorkflowControlConflict("Only an active Run can be canceled")
+        if self._single(run_id) and not self.dispatcher.supports_architecture("SINGLE_AGENT"):
+            raise WorkflowControlConflict("Single cancellation requires its configured Host")
         steps = self.repository.list_steps(run_id)
         for step in steps:
             if step.a2a_task_id is None and self._message_sent(step):
@@ -267,6 +276,8 @@ class WorkflowControlService:
         return steps
 
     def _check_budget(self, run_id):
+        if self._single(run_id) and self.preflight is None:
+            raise WorkflowControlConflict("CONTROL_BUDGET_UNAVAILABLE: Single budget is not configured")
         if self.preflight is not None:
             try:
                 self.preflight(run_id)
@@ -289,7 +300,15 @@ class WorkflowControlService:
             raise WorkflowControlConflict("Current stage has no durable Step to recover")
         if stage in (WorkflowStatus.VALIDATING, WorkflowStatus.REVALIDATING, WorkflowStatus.SNAPSHOT_READY) and {s.agent_role for s in selected} != {AgentRole.QA, AgentRole.SECURITY}:
             raise WorkflowControlConflict("Validation recovery requires the matching QA and Security Steps")
-        return selected
+        return (sorted(selected, key=lambda step: step.agent_role is AgentRole.SECURITY)
+                if self._single(run.run_id) else selected)
+
+    def _single(self, run_id):
+        configuration = self.repository.get_run_configuration(run_id)
+        return configuration is not None and configuration.configuration.architecture == "SINGLE_AGENT"
+
+    def _agent_id(self, run_id, role):
+        return "single_agent" if self._single(run_id) else role.value.lower()
 
     def _message_sent(self, step: WorkflowStep) -> bool:
         offset = 0
@@ -325,7 +344,7 @@ class WorkflowControlService:
         continue_interrupted: bool = True,
     ) -> A2ATaskRunResult:
         role = step.agent_role
-        agent_id = role.value.lower()
+        agent_id = self._agent_id(run.run_id, role)
         saved_context = next((c for c in self.repository.list_agent_contexts(run.run_id) if c.agent_id == agent_id), None)
         context = (AgentContext(run_id=run.run_id, agent_id=agent_id, agent_context_id=step.agent_context_id, latest_a2a_task_id=step.a2a_task_id) if step.a2a_task_id else saved_context)
         url = self.registry.require_base_url(role)

@@ -316,13 +316,19 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 기존 Host 서비스의 Snapshot·Sandbox·보호 테스트·실행 증거 검사를 재사용하며, Security 실행 테스트 모드도 처리합니다. 실제 Host 조합으로 만든 서버만 `executionReady=true`를 반환합니다. 기본 Orchestrator의 Single 요청 503 거절과 `python -m agents.single`의 Bootstrap 동작은 유지합니다. 이 조합은 `agents.platform.runner.run_platform()`으로 두 로컬 엔드포인트를 실행할 수 있으며, 기존 Multi Host CLI 설정을 자동 변경하지 않습니다.
 
-최초 후보의 검증에 이어 아래 53번에서 수정·재검증도 연결했습니다. 재개·복구·영속 예산은 **54번**, 전체 사용량·평가 인계는 **55번**, 최종 실행 안내와 점검은 **56번**입니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
+최초 후보의 검증에 이어 아래 53번의 수정·재검증, 54번의 재개·취소·영속 예산 복구를 연결했습니다. 전체 사용량·비용·평가 인계는 **55번**, 최종 실행 안내와 점검은 **56번**입니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
 
 ### Single-Agent 수정·재검증과 판정 — 53번
 
 [53번 수정·재검증](docs/53-single-agent-fix-revalidation.md)은 Build·QA·Security의 확인된 제품 실패를 기존 Issue에 연결하고, **같은 Agent·Provider·Context로 최대 3회 수정**합니다. 수정할 때마다 새 Source·Build 결과를 만들고 같은 후보로 QA → Security를 다시 수행합니다. 이전 후보의 PASS를 복사하지 않으며, 기존 판정기의 SUCCESS·FAIL·HUMAN_REVIEW 정책을 사용합니다.
 
-반복 Issue는 기존 fingerprint 규칙으로 사람 검토에 넘기고, 수정 단계도 최초부터 사용한 Run 예산과 deadline을 이어 사용합니다. 잘못된 Context나 오래된 Task 매핑은 수정 모델·파일 쓰기 전에 거절합니다. 기본 통신 서버의 Bootstrap과 미구성 Single API의 503은 유지하며, 명시적 `create_single_platform()` 구성에서 이 기능을 사용합니다. 다음은 **54번 입력·취소·복구·영속 예산 연결**입니다.
+반복 Issue는 기존 fingerprint 규칙으로 사람 검토에 넘기고, 수정 단계도 최초부터 사용한 Run 예산과 deadline을 이어 사용합니다. 잘못된 Context나 오래된 Task 매핑은 수정 모델·파일 쓰기 전에 거절합니다. 기본 통신 서버의 Bootstrap과 미구성 Single API의 503은 유지하며, 명시적 `create_single_platform()` 구성에서 이 기능을 사용합니다.
+
+### Single-Agent 입력·취소·복구·영속 예산 — 54번
+
+[54번 제어·복구](docs/54-single-agent-controls-durable-budgets.md)는 같은 Step·Task·Context로 입력/인증 뒤 재개하고, 실제 작업 종료를 확인한 뒤 취소합니다. QA가 입력을 기다리는 동안 Security를 보내지 않으며, 완료된 작업은 GET으로 확인해 중복 실행을 막습니다.
+
+Single Host도 기존 영속 예산 원장을 사용합니다. 재시작하면 같은 동결 설정·호출 수·토큰·원래 UTC deadline과 영수증을 확인해 복구합니다. 미완료 모델/도구 예약, 누락·미확인 사용량, 한도 변경·시간 역행·기한 만료는 새 예산을 주지 않고 실행을 차단합니다. 이 감사에 필요한 기본 LLM/MCP 기록은 실제 `SINGLE_AGENT` 주체로 저장합니다. 가격표·전체 기록/평가 내보내기 연결은 다음 **55번**입니다.
 
 ## 테스트
 

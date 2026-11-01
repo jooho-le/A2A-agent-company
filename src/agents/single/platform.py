@@ -17,6 +17,8 @@ from agents.llm.content import sanitize_content
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, parse_json
 from agents.main import create_app as create_agent_app
 from agents.platform.budgets import RunBudgetRegistry
+from agents.platform.telemetry_store import AgentTelemetryStore
+from agents.platform.telemetry import RuntimeTelemetry
 from agents.platform.composition import (OwnedAgentPlatform, PlatformEndpoint, PlatformConfigurationError,
     PlatformPreparationError, _ADMISSION_OUTPUT, _Lifecycle, _bound_services, _host_call, _secret)
 from agents.runtime.developer_services import DeveloperRuntimeServices
@@ -46,9 +48,9 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
     ``run_platform(platform)`` can serve the resulting two local endpoints.
     Provider close ownership transfers only on successful construction.
 
-    This path does not enable restart/recovery or durable Single telemetry.
-    Budget counters/deadline are shared across all phases and up to three fixes;
-    a process restart fails closed instead of allocating another budget.
+    Durable counters/deadline are shared across all phases, fixes and controls.
+    Restart restores only completely accounted reservations; uncertain effects
+    fail closed instead of allocating another budget or replaying writes.
     """
     try:
         if (type(repository) is not SQLiteWorkflowRepository or type(workspace_registry) is not WorkspaceRegistry
@@ -85,7 +87,9 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
         raise PlatformConfigurationError() from None
 
     lifecycle = _Lifecycle(providers=(provider,))
-    budgets = RunBudgetRegistry(repository, limits=limits)
+    telemetry_store = AgentTelemetryStore(repository.database_path)
+    budgets = RunBudgetRegistry(repository, limits=limits, telemetry_store=telemetry_store)
+    telemetry = RuntimeTelemetry(repository, telemetry_store)
 
     def validate_submission(configuration):
         try:
@@ -132,15 +136,26 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
             (AgentRole.QA, qa_services_factory, QARuntimeServices),
             (AgentRole.SECURITY, security_services_factory, SecurityRuntimeServices))}
     executor = SingleAgentExecutor(repository=repository, budgets=budgets, provider=provider,
-                                  services_factories=factories, usage_sink=usage_sink)
-    client_factory = a2a_client_factory or agent_client_factory(settings, trust_env=False)
+        services_factories=factories, usage_sink=usage_sink, telemetry_factory=telemetry.bind)
+    client_factory = a2a_client_factory if a2a_client_factory is not None else agent_client_factory(settings, trust_env=False)
     dispatcher = PlannerRunDispatcher(repository, A2AAgentRegistry.from_settings(settings),
         client_factory=client_factory, before_dispatch=before_dispatch, allow_fix_dispatch=True, single_agent=True)
     app = create_orchestrator_app(repository=repository, settings=settings, dispatcher=dispatcher,
                                 submission_validator=validate_submission)
     app.state.workspace_registry, app.state.agent_client_factory = workspace_registry, client_factory
+    app.state.telemetry_store = telemetry_store
+    app.state.single_continuation_ready = True
+
+    def control_preflight(run_id):
+        if lifecycle.closed:
+            raise PlatformPreparationError()
+        configuration = repository.get_run_configuration(run_id)
+        validate_submission(configuration.configuration)
+        budgets.resolve(configuration).check_model_call()
+
+    app.state.control_preflight = control_preflight
     agent = create_agent_app(selected, executor=executor)
     endpoints = (PlatformEndpoint(name="orchestrator", host=orchestrator_host, port=orchestrator_port, app=app),
                  PlatformEndpoint(name="single_agent", host=selected.host, port=selected.listen_port, app=agent))
     return OwnedAgentPlatform(orchestrator_app=app, agent_apps=MappingProxyType({SingleAgentIdentity.SINGLE_AGENT: agent}),
-        dispatcher=dispatcher, budgets=budgets, endpoints=endpoints, _lifecycle=lifecycle)
+        dispatcher=dispatcher, budgets=budgets, endpoints=endpoints, _lifecycle=lifecycle, telemetry_store=telemetry_store)

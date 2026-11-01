@@ -233,9 +233,9 @@ async def cancel_run(
 
 
 @router.post("/{run_id}/resume", response_model=RunStatusResponse)
-async def resume_run(run_id: UUID, body: ResumeRunRequest, repository: Repository, controls: Controls):
+async def resume_run(run_id: UUID, body: ResumeRunRequest, request: Request, repository: Repository, controls: Controls):
     _get_run_or_404(repository, run_id)
-    _require_supported_continuation(repository, run_id)
+    _require_supported_continuation(request, repository, run_id)
     try:
         run = await controls.resume(run_id, step_id=body.workflow_step_id, input_data=body.input_data)
     except (WorkflowControlConflict, RunDispatchConflict, AgentNotConfiguredError, ValueError) as exc:
@@ -244,9 +244,9 @@ async def resume_run(run_id: UUID, body: ResumeRunRequest, repository: Repositor
 
 
 @router.post("/{run_id}/recover", response_model=RunStatusResponse)
-async def recover_run(run_id: UUID, body: ResumeRunRequest, repository: Repository, controls: Controls):
+async def recover_run(run_id: UUID, body: ResumeRunRequest, request: Request, repository: Repository, controls: Controls):
     _get_run_or_404(repository, run_id)
-    _require_supported_continuation(repository, run_id)
+    _require_supported_continuation(request, repository, run_id)
     try:
         run = await controls.resume(run_id, step_id=body.workflow_step_id, input_data=body.input_data, recover=True)
     except (WorkflowControlConflict, RunDispatchConflict, AgentNotConfiguredError, ValueError) as exc:
@@ -254,9 +254,10 @@ async def recover_run(run_id: UUID, body: ResumeRunRequest, repository: Reposito
     return RunStatusResponse.from_run(run)
 
 
-def _require_supported_continuation(repository, run_id):
+def _require_supported_continuation(request, repository, run_id):
     configuration = repository.get_run_configuration(run_id)
-    if configuration is not None and configuration.configuration.architecture == "SINGLE_AGENT":
+    if (configuration is not None and configuration.configuration.architecture == "SINGLE_AGENT"
+            and not getattr(request.app.state, "single_continuation_ready", False)):
         raise HTTPException(status_code=503, detail="SINGLE_AGENT_CONTINUATION_NOT_CONFIGURED")
 
 

@@ -2,6 +2,7 @@
 
 from orchestrator.domain import TraceEvent
 from mcp_tools.execution_store import ToolCallRecord
+from agents.core.identity import SingleAgentIdentity
 
 
 class RuntimeTelemetryError(RuntimeError):
@@ -26,7 +27,11 @@ class RuntimeTelemetry:
             run = self.repository.get_run(metadata.run_id)
             step = next(item for item in self.repository.list_steps(metadata.run_id)
                         if item.workflow_step_id == metadata.workflow_step_id)
-            if (run is None or step.agent_role is not role
+            single = role is SingleAgentIdentity.SINGLE_AGENT
+            configuration = self.repository.get_run_configuration(metadata.run_id)
+            if (single and (configuration is None or configuration.configuration.architecture != "SINGLE_AGENT")
+                    or not single and configuration is not None and configuration.configuration.architecture == "SINGLE_AGENT"
+                    or run is None or not single and step.agent_role is not role
                     or step.attempt != metadata.attempt
                     or step.code_version != metadata.code_version
                     or step.requirement_ids != list(metadata.requirement_ids or ())
@@ -44,15 +49,17 @@ class RuntimeTelemetry:
                 "inputArtifactIds": [str(item) for item in step.input_artifact_ids],
                 "snapshotSha256": None if source is None else source.snapshot_sha256,
             }
-            return BoundRuntimeTelemetry(self.repository, self.store, binding, execution.model, usage_sink)
+            return BoundRuntimeTelemetry(self.repository, self.store, binding, execution.model, usage_sink,
+                                         step_role=step.agent_role)
         except Exception:
             raise RuntimeTelemetryError() from None
 
 
 class BoundRuntimeTelemetry:
-    def __init__(self, repository, store, binding, model, usage_sink):
+    def __init__(self, repository, store, binding, model, usage_sink, *, step_role=None):
         self.repository, self.store, self.binding = repository, store, binding
         self.model, self._external_sink = model, usage_sink
+        self._step_role = step_role
 
     def __repr__(self):
         return "BoundRuntimeTelemetry()"
@@ -90,7 +97,8 @@ class BoundRuntimeTelemetry:
             if (type(record) is not ToolCallRecord
                     or str(record.run_id) != self.binding["runId"]
                     or str(record.workflow_step_id) != self.binding["workflowStepId"]
-                    or record.role.value != self.binding["role"]):
+                    or record.role.value != (self._step_role.value if self.binding["role"] == "SINGLE_AGENT"
+                                            and self._step_role is not None else self.binding["role"])):
                 raise ValueError
             measured = next(item for item in record.attempts if item.attempt == attempt)
             detail = {

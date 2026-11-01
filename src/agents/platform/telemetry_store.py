@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 
 from agents.llm.budget import BudgetSnapshot
 from agents.llm.contracts import UsageRecord
+from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity
 from agents.platform.pricing import ApprovedPriceBook
 from agents.platform.pricing_store import RunPricingLedger
 from orchestrator.core.security import redact_data, redact_text
@@ -42,7 +43,7 @@ class TelemetryBinding(BaseModel):
     workflow_step_id: UUID4 = Field(alias="workflowStepId")
     a2a_task_id: str = Field(alias="a2aTaskId", min_length=1)
     agent_context_id: str = Field(alias="agentContextId", min_length=1)
-    role: AgentRole
+    role: AgentServiceIdentity
     attempt: int = Field(ge=0, strict=True)
     code_version: int | None = Field(default=None, ge=1, strict=True, alias="codeVersion")
     requirement_ids: tuple[UUID4, ...] = Field(default=(), alias="requirementIds")
@@ -69,7 +70,7 @@ class UsageDetail(BaseModel):
                               hide_input_in_errors=True)
 
     sequence: int = Field(ge=1, strict=True)
-    role: AgentRole
+    role: AgentServiceIdentity
     requested_model: dict = Field(alias="requestedModel")
     reported_model_id: str | None = Field(default=None, alias="reportedModelId", max_length=256)
     outcome: Literal["completed", "incomplete", "failed", "refused", "canceled",
@@ -460,8 +461,14 @@ class AgentTelemetryStore:
         if row is None:
             raise TelemetryStoreError()
         step = WorkflowStep.model_validate_json(row[0])
+        from orchestrator.domain.run_configuration import RunConfigurationArtifact
+        configured = connection.execute("SELECT payload_json FROM run_configurations WHERE run_id=?",
+                                        (str(event.run_id),)).fetchone()
+        single = (configured is not None and RunConfigurationArtifact.model_validate_json(configured[0])
+                  .configuration.architecture == "SINGLE_AGENT")
+        actor = SingleAgentIdentity.SINGLE_AGENT.value if single else step.agent_role.value
         attempt = detail.get("workflowAttempt") if kind == "MCP" else event.attempt
-        if (event.actor != step.agent_role.value or step.attempt != attempt
+        if (event.actor != actor or step.attempt != attempt
                 or step.code_version != event.code_version
                 or step.requirement_ids != event.requirement_ids
                 or step.input_artifact_ids != event.input_artifact_ids

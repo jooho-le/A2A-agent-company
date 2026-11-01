@@ -34,7 +34,8 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
         "Host-configured Single Agent: one provider and persisted Context sequentially plan, implement, "
         "test, review and fix candidates using a stable system prompt. Up to three Issue-bound fixes "
         "preserve the same Context and Run budget, with a new frozen candidate and measured Build, "
-        "QA and Security receipts. Continuation/restart recovery is not configured at this stage."
+        "QA and Security receipts. Input/auth continuation and confirmed cancellation retain Task identity; "
+        "restart recovery requires the original durable budget and complete accounting, never replaying uncertain writes."
         if execution_ready and settings.role is SingleAgentIdentity.SINGLE_AGENT else
         "Host-configured Planner: produces a validated task plan while preserving "
         "frozen requirements. Per-Run configuration and budget must be admitted; "

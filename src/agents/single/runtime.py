@@ -30,6 +30,7 @@ from agents.runtime.security_context import SQLiteSecurityContextLoader
 from agents.single.contracts import build_single_draft_contract
 from agents.single.mcp import open_single_model_client
 from agents.single.prompts import prepare_single_prompt
+from agents.platform.telemetry import bind_runtime_telemetry
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.domain.states import AgentRole
 
@@ -72,13 +73,14 @@ class _SingleTools:
 
 
 class SingleAgentExecutor(AgentExecutor):
-    def __init__(self, *, repository, budgets, provider, services_factories, usage_sink=None):
+    def __init__(self, *, repository, budgets, provider, services_factories, usage_sink=None, telemetry_factory=None):
         from agents.platform.budgets import RunBudgetRegistry
         from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
         if (type(repository) is not SQLiteWorkflowRepository or type(budgets) is not RunBudgetRegistry
                 or set(services_factories) != {AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY}
                 or any(not callable(value) for value in services_factories.values())
                 or usage_sink is not None and not callable(usage_sink)
+                or telemetry_factory is not None and not callable(telemetry_factory)
                 or not callable(getattr(provider, "complete", None))):
             raise SingleExecutionError()
         self._repository, self._provider = repository, provider
@@ -87,6 +89,7 @@ class SingleAgentExecutor(AgentExecutor):
             (AgentRole.PLANNER, SQLitePlannerContextLoader), (AgentRole.DEVELOPER, SQLiteDeveloperContextLoader),
             (AgentRole.QA, SQLiteQAContextLoader), (AgentRole.SECURITY, SQLiteSecurityContextLoader))}
         self._store, self._usage_sink = None, usage_sink
+        self._telemetry_factory = telemetry_factory
 
     def bind_task_store(self, store):
         if self._store is not None or type(store) is not SQLiteAgentTaskStore or store.role is not SingleAgentIdentity.SINGLE_AGENT:
@@ -112,7 +115,7 @@ class SingleAgentExecutor(AgentExecutor):
         await updater.update_status(state, metadata=metadata,
             message=updater.new_agent_message(parts=[new_data_part(data, media_type="application/json")]))
 
-    async def _model(self, context, execution, task_input, phase, contract, *, tools=(), executor=None):
+    async def _model(self, context, execution, task_input, phase, contract, *, tools=(), executor=None, telemetry=None):
         prompt = await prepare_single_prompt(self._store, context_id=context.context_id,
             metadata=execution.metadata, scenario=execution.scenario, draft_contract=contract,
             task_input=task_input, call_context=context.call_context,
@@ -120,19 +123,25 @@ class SingleAgentExecutor(AgentExecutor):
         engine = LLMEngine(role=SingleAgentIdentity.SINGLE_AGENT, single_phase=phase,
                            provider=self._provider, tools=tools, tool_executor=executor)
         result = await engine.run(prompt=prompt, model=execution.model, output=contract.output,
-            budget=execution.budget, workspace_id=str(execution.configuration.workspace_id), usage_sink=self._usage_sink)
+            budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
+            usage_sink=telemetry.usage if telemetry is not None else self._usage_sink,
+            call_started_sink=telemetry.model_started if telemetry is not None else None)
         return contract.validate(result.data)
 
     async def _work(self, context, role, execution, task_input):
         phase = (SinglePhase.FIXING if role is AgentRole.DEVELOPER and execution.fix_attempt
                  else _PHASE[role])
+        telemetry, _usage, _started = bind_runtime_telemetry(self._telemetry_factory,
+            SingleAgentIdentity.SINGLE_AGENT, context, execution, self._usage_sink)
         if role is AgentRole.PLANNER:
             contract = build_single_draft_contract(phase, scenario=execution.scenario)
-            return await self._model(context, execution, task_input, phase, contract), ()
+            return await self._model(context, execution, task_input, phase, contract, telemetry=telemetry), ()
         services = await _host_factory(self._services[role], execution)
         checkpoint = await services.prepare(execution)
         async with services.client_factory(services.configuration) as host:
             host_tracked = services.tracked(host, execution)
+            if telemetry is not None:
+                host_tracked.set_event_sink(telemetry.tool_event)
             options, measured = {}, None
             if role is AgentRole.DEVELOPER:
                 wanted = {"read_project_file", "write_source_file"}
@@ -163,11 +172,13 @@ class SingleAgentExecutor(AgentExecutor):
             contract = build_single_draft_contract(phase, scenario=execution.scenario, **options)
             async with open_single_model_client(services.configuration, phase, services.client_factory) as client:
                 tracked = services.tracked(client, execution)
+                if telemetry is not None:
+                    tracked.set_event_sink(telemetry.tool_event)
                 tools = tuple(tool for tool in tracked.list_tools() if tool.name in wanted)
                 if {tool.name for tool in tools} != wanted:
                     raise SingleExecutionError()
                 decision = await self._model(context, execution, task_input, phase, contract, tools=tools,
-                    executor=_SingleTools(tracked, execution, role, services=services, measured=measured))
+                    executor=_SingleTools(tracked, execution, role, services=services, measured=measured), telemetry=telemetry)
             execution.budget.check()
             artifacts = ()
             if decision.kind == "READY":

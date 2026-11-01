@@ -2,6 +2,8 @@
 
 작성일: 2026-11-01. 선행 작업: [52번 최초 구현·검증](52-single-agent-initial-pipeline.md). 담당: 주호(역할 1·2).
 
+이 문서는 53번 당시 범위·검증 기록이다. 이후 [54번 제어·복구](54-single-agent-controls-durable-budgets.md)에서 Single 입력/인증 재개·취소·영속 예산 복구를 연결했다. 아래의 제어 미구현 설명은 53번 당시 상태다.
+
 ## 1. 구현 결과
 
 명시적 `create_single_platform()` Host에서 최초 후보의 확인된 Build·QA·Security 실패를 기존 Issue/Fix Request에 연결하고, **같은 Single Agent·Provider·Context로 최대 3회 수정**하도록 연결했다.

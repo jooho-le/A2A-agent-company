@@ -211,7 +211,7 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await direct.get("/.well-known/agent-card.json")).json()["skills"][0]["id"], "single-initial-pipeline")
             for action in ("resume", "recover"):
                 response = await client.post(f"/api/v1/runs/{run_id}/{action}", json={})
-                self.assertEqual(response.status_code, 503, response.text)
+                self.assertEqual(response.status_code, 409, response.text)  # registered evidence cannot be overridden
 
     async def test_measured_single_pipeline_reaches_success_on_same_candidate(self):
         self.measured_security = True
