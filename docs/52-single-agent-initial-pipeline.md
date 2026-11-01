@@ -2,6 +2,8 @@
 
 작성일: 2026-10-31. 선행 작업: [51번 MCP 권한](51-single-agent-mcp-permissions.md).
 
+이 문서는 52번 완료 당시의 범위·검증 기록이다. 후속 [53번 수정·재검증](53-single-agent-fix-revalidation.md)에서 명시적 Single Host의 자동 수정 경로를 연결했다. 아래의 수정 미구현 설명은 52번 당시 상태다.
+
 ## 1. 구현 내용
 
 [SingleAgentExecutor](../src/agents/single/runtime.py)와 [Single Host factory](../src/agents/single/platform.py)를 추가했다. 요청부터 기획, Source 작성·Build, QA, Security까지 하나의 실제 실행 경로를 연결했다.

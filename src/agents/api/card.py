@@ -32,9 +32,9 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
         raise ValueError("AGENT_EXECUTOR_ROLE_MISMATCH")
     description = (
         "Host-configured Single Agent: one provider and persisted Context sequentially plan, implement, "
-        "test and review the initial candidate using a stable system prompt. Host-measured Source, "
-        "Build, QA and Security receipts determine the verdict. Automatic fixes and continuation "
-        "are not configured at this stage."
+        "test, review and fix candidates using a stable system prompt. Up to three Issue-bound fixes "
+        "preserve the same Context and Run budget, with a new frozen candidate and measured Build, "
+        "QA and Security receipts. Continuation/restart recovery is not configured at this stage."
         if execution_ready and settings.role is SingleAgentIdentity.SINGLE_AGENT else
         "Host-configured Planner: produces a validated task plan while preserving "
         "frozen requirements. Per-Run configuration and budget must be admitted; "
@@ -90,8 +90,8 @@ def build_agent_card(settings: AgentSettings, *, execution_ready: bool = False) 
             description="Reviews all approved frozen scans with actual Source references; only Host-verified proof can establish confirmed findings or requirement outcomes, not project success.",
             tags=["security", "scan", "code-review", "snapshot"],
         )] if execution_ready and settings.role is AgentRole.SECURITY else [AgentSkill(
-            id="single-initial-pipeline", name="Single Agent initial software pipeline",
-            description="One retained Context and model identity for protected planning, measured implementation, QA and Security; Host receipts determine outcomes.",
+            id="single-initial-pipeline", name="Single Agent software pipeline and bounded fixes",
+            description="One retained Context and model identity for protected planning, implementation, QA, Security and up to three Issue-bound fixes; new candidate receipts determine outcomes.",
             tags=["single-agent", "planning", "implementation", "qa", "security"],
         )] if execution_ready and settings.role is SingleAgentIdentity.SINGLE_AGENT else [],
     )

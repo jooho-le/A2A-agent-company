@@ -100,7 +100,7 @@ class SingleAgentExecutor(AgentExecutor):
         step = next((item for item in self._repository.list_steps(metadata.run_id)
                      if item.workflow_step_id == metadata.workflow_step_id), None)
         if (self._store is None or config is None or config.configuration.architecture != "SINGLE_AGENT"
-                or run is None or run.fix_attempt != 0 or step is None or step.agent_role not in _PHASE):
+                or run is None or not 0 <= run.fix_attempt <= 3 or step is None or step.agent_role not in _PHASE):
             raise SingleExecutionError()
         return step.agent_role, self._loaders[step.agent_role](context)
 
@@ -124,7 +124,8 @@ class SingleAgentExecutor(AgentExecutor):
         return contract.validate(result.data)
 
     async def _work(self, context, role, execution, task_input):
-        phase = _PHASE[role]
+        phase = (SinglePhase.FIXING if role is AgentRole.DEVELOPER and execution.fix_attempt
+                 else _PHASE[role])
         if role is AgentRole.PLANNER:
             contract = build_single_draft_contract(phase, scenario=execution.scenario)
             return await self._model(context, execution, task_input, phase, contract), ()

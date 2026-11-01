@@ -62,7 +62,7 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             return
         if role is SingleAgentIdentity.SINGLE_AGENT:
             phase = configuration.binding.single_phase
-            semantic = {SinglePhase.IMPLEMENTING: AgentRole.DEVELOPER, SinglePhase.QA: AgentRole.QA,
+            semantic = {SinglePhase.IMPLEMENTING: AgentRole.DEVELOPER, SinglePhase.FIXING: AgentRole.DEVELOPER, SinglePhase.QA: AgentRole.QA,
                         SinglePhase.SECURITY: AgentRole.SECURITY}[phase]
             self.model_clients.append(configuration)
             self.events.append(("model-mcp", phase))
@@ -82,14 +82,19 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                 if "/inputs/_unit_runner.py" in container["Config"]["Cmd"]:
                     identities = [f"test_security.Security.test_req_{index}" for index in range(
                         1, len(self.f.scenario.requirement_ids_for(RequirementValidator.SECURITY)) + 1)]
-                    payload = {"format": "unittest-v1", "total": len(identities), "passed": len(identities),
-                        "failed": 0, "skipped": 0, "tests": [{"testId": identity, "outcome": "PASS"} for identity in identities]}
+                    version = self.f.repository.get_run(configuration.binding.run_id).code_version
+                    failure = getattr(self, "security_failures", {}).get(version)
+                    docker.exit_code = int(failure is not None)
+                    payload = {"format": "unittest-v1", "total": len(identities),
+                        "passed": len(identities) - docker.exit_code, "failed": docker.exit_code, "skipped": 0,
+                        "tests": [{"testId": identity, "outcome": "FAIL" if index == failure else "PASS"}
+                                  for index, identity in enumerate(identities)]}
                 else:
                     profile = configuration.security_scan_configuration.profiles[0]
                     payload = {"format": "bandit-v1", "profileName": profile.name, "scanner": "bandit",
                         "scannerVersion": profile.scanner_version, "ruleIds": sorted(profile.rule_ids),
                         "profileRef": profile.profile_ref, "scannedFiles": ["signup.py"], "findings": []}
-                docker.start_result = CLIResult(returncode=0, stdout=json.dumps(payload).encode(), stderr=b"")
+                docker.start_result = CLIResult(returncode=docker.exit_code, stdout=json.dumps(payload).encode(), stderr=b"")
             docker.start_hook = result
         dispatcher = MCPDispatcher(configuration.binding, self.f.registry, handlers=handlers,
             frozen_snapshot_id=None if configuration.frozen_source is None else configuration.frozen_source.project_artifact_id,
@@ -131,9 +136,9 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         return FakeProvider(*script)
 
     @asynccontextmanager
-    async def running(self, *, cap=8, provider=None):
+    async def running(self, *, cap=8, tool_cap=12, provider=None):
         provider = provider or self.provider()
-        limits = LLMLimits(max_model_calls=cap, max_tool_calls=12, model_timeout_seconds=2, max_output_tokens=4096)
+        limits = LLMLimits(max_model_calls=cap, max_tool_calls=tool_cap, model_timeout_seconds=2, max_output_tokens=4096)
         selected = self.f.settings[AgentRole.DEVELOPER].model_copy(update={"role": SingleAgentIdentity.SINGLE_AGENT,
             "database_path": self.f.directory / "single.sqlite3", "llm_limits": limits})
         settings = self.f.orchestrator_settings.model_copy(update={

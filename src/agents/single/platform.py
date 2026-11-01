@@ -46,8 +46,8 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
     ``run_platform(platform)`` can serve the resulting two local endpoints.
     Provider close ownership transfers only on successful construction.
 
-    This initial path does not enable fixes, restart/recovery or durable Single
-    telemetry. Budget counters/deadline are shared across all initial phases;
+    This path does not enable restart/recovery or durable Single telemetry.
+    Budget counters/deadline are shared across all phases and up to three fixes;
     a process restart fails closed instead of allocating another budget.
     """
     try:
@@ -135,7 +135,7 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
                                   services_factories=factories, usage_sink=usage_sink)
     client_factory = a2a_client_factory or agent_client_factory(settings, trust_env=False)
     dispatcher = PlannerRunDispatcher(repository, A2AAgentRegistry.from_settings(settings),
-        client_factory=client_factory, before_dispatch=before_dispatch, allow_fix_dispatch=False, single_agent=True)
+        client_factory=client_factory, before_dispatch=before_dispatch, allow_fix_dispatch=True, single_agent=True)
     app = create_orchestrator_app(repository=repository, settings=settings, dispatcher=dispatcher,
                                 submission_validator=validate_submission)
     app.state.workspace_registry, app.state.agent_client_factory = workspace_registry, client_factory

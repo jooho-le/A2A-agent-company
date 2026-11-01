@@ -122,8 +122,7 @@ class PlannerRunDispatcher:
         self._client_factory = client_factory
         if before_dispatch is not None and not callable(before_dispatch):
             raise ValueError("DISPATCH_CONFIGURATION_INVALID")
-        if (type(allow_fix_dispatch) is not bool or type(single_agent) is not bool
-                or single_agent and allow_fix_dispatch):
+        if type(allow_fix_dispatch) is not bool or type(single_agent) is not bool:
             raise ValueError("DISPATCH_CONFIGURATION_INVALID")
         self._single_agent = single_agent
         self._before_dispatch = before_dispatch
@@ -782,7 +781,7 @@ class PlannerRunDispatcher:
                 result = await A2ATaskRunner(client).submit_and_wait(
                     fixing_run,
                     step,
-                    agent_id="developer",
+                    agent_id=self._agent_id(AgentRole.DEVELOPER),
                     payload=payload,
                     agent_context=self._context_for(run.run_id, AgentRole.DEVELOPER),
                     observer=self._repository.task_update_observer(fixing_run),
