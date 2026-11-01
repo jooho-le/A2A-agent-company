@@ -1,4 +1,4 @@
-"""Explicit, offline Host configuration for the owned four-Agent platform.
+"""Explicit, offline Host configuration for Multi and opt-in Single platforms.
 
 This is operator configuration, not an A2A message, Run Artifact, or MCP input.
 Only ``load_runtime_configuration`` reads file contents. Inspection resolves storage
@@ -19,6 +19,7 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from agents.core.config import AgentSettings
+from agents.core.identity import SingleAgentIdentity
 from agents.llm.budget import LLMLimits
 from agents.llm.contracts import parse_json
 from orchestrator.core.config import Settings
@@ -114,6 +115,14 @@ class RuntimeAgentsConfiguration(_ConfigurationModel):
         return MappingProxyType({role: getattr(self, role.value.lower()) for role in AgentRole})
 
 
+class RuntimeSingleAgentConfiguration(_ConfigurationModel):
+    single_agent: RuntimeAgentConfiguration = Field(alias="SINGLE_AGENT")
+
+    @property
+    def by_role(self):
+        return MappingProxyType({SingleAgentIdentity.SINGLE_AGENT: self.single_agent})
+
+
 class _RuntimeModel(ModelConfiguration):
     model_config = ConfigDict(
         extra="forbid", frozen=True, strict=True, hide_input_in_errors=True,
@@ -172,13 +181,19 @@ class OwnedRuntimeConfiguration(_ConfigurationModel):
     @model_validator(mode="after")
     def independent_roles(self):
         ports = (self.orchestrator.port, *(value.port for value in self.agents.by_role.values()))
-        if len(set(ports)) != 5:
+        if len(set(ports)) != len(ports):
             raise ValueError("Platform listeners require distinct ports")
         if self.environment == "production" and any(
             value.bearer_token_env is None for value in self.agents.by_role.values()
         ):
             raise ValueError("Production roles require explicit authentication")
         return self
+
+
+class OwnedSingleRuntimeConfiguration(OwnedRuntimeConfiguration):
+    """Explicit Single Host input; not a fifth role in the Multi schema."""
+
+    agents: RuntimeSingleAgentConfiguration
 
 
 @dataclass(frozen=True, kw_only=True, repr=False)
@@ -208,17 +223,17 @@ class ResolvedRuntimeConfiguration:
 
 def _validated(configuration):
     try:
-        if type(configuration) is not OwnedRuntimeConfiguration:
+        if type(configuration) not in (OwnedRuntimeConfiguration, OwnedSingleRuntimeConfiguration):
             raise ValueError
         # Frozen/model_copy/model_construct objects are not admission proofs.
-        return OwnedRuntimeConfiguration.model_validate(
+        return type(configuration).model_validate(
             configuration.model_dump(mode="json", by_alias=True, warnings=False)
         )
     except Exception:
         raise RuntimeConfigurationError() from None
 
 
-def load_runtime_configuration(path) -> OwnedRuntimeConfiguration:
+def load_runtime_configuration(path, *, architecture="MULTI_AGENT") -> OwnedRuntimeConfiguration:
     """Read one bounded regular JSON file; reject symlinks/FIFOs and raw errors."""
     try:
         source = Path(path).absolute()
@@ -234,7 +249,8 @@ def load_runtime_configuration(path) -> OwnedRuntimeConfiguration:
     except Exception:
         raise RuntimeConfigurationError("RUNTIME_CONFIGURATION_FILE_INVALID") from None
     try:
-        configuration = OwnedRuntimeConfiguration.model_validate(document)
+        model = {"MULTI_AGENT": OwnedRuntimeConfiguration, "SINGLE_AGENT": OwnedSingleRuntimeConfiguration}[architecture]
+        configuration = model.model_validate(document)
     except Exception:
         raise RuntimeConfigurationError() from None
     # Layout errors remain separately identifiable without disclosing paths.
@@ -366,12 +382,16 @@ def resolve_runtime_configuration(configuration, *, base_directory, environ=None
                 llm_model_revision=model.model_revision, llm_temperature=model.temperature,
                 llm_seed=model.seed, llm_api_key=api_key, llm_limits=limits)
             agents[role] = _canonical_settings(AgentSettings, explicit)
+        # These are existing logical phase-routing fields. In explicit Single
+        # mode every alias derives from its sole approved endpoint/credential.
+        single = type(selected) is OwnedSingleRuntimeConfiguration
+        routes = {role: SingleAgentIdentity.SINGLE_AGENT if single else role for role in AgentRole}
         explicit = _ExplicitOrchestratorSettings(_env_file=None,
             app_name="A2A Orchestrator", environment=selected.environment,
             log_level=selected.log_level, api_prefix="/api/v1",
             database_path=str(layout.orchestrator_database_path), workspace_root=str(layout.workspace_root),
-            **{f"{role.value.lower()}_agent_url": layout.agent_urls[role] for role in AgentRole},
-            **{f"{role.value.lower()}_bearer_token": tokens[role] for role in AgentRole})
+            **{f"{role.value.lower()}_agent_url": layout.agent_urls[identity] for role, identity in routes.items()},
+            **{f"{role.value.lower()}_bearer_token": tokens[identity] for role, identity in routes.items()})
         return ResolvedRuntimeConfiguration(
             orchestrator_settings=_canonical_settings(Settings, explicit),
             agent_settings=MappingProxyType(agents), model=model, limits=limits,

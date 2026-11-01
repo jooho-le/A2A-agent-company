@@ -19,11 +19,13 @@ class _Parser(argparse.ArgumentParser):
 def main(argv=None):
     parser = _Parser(description="Validate trusted Host settings without starting any Agent or calling APIs.")
     parser.add_argument("--file", required=True, help="Operator-selected JSON configuration file.")
+    parser.add_argument("--architecture", choices=("MULTI_AGENT", "SINGLE_AGENT"), default="MULTI_AGENT")
     parser.add_argument("--check-secrets", action="store_true", help="Also check referenced process environment credentials locally.")
     try:
         options = parser.parse_args(argv)
         path = Path(options.file).absolute()
-        configuration = load_runtime_configuration(path)
+        configuration = (load_runtime_configuration(path) if options.architecture == "MULTI_AGENT"
+                         else load_runtime_configuration(path, architecture=options.architecture))
         if options.check_secrets:
             resolve_runtime_configuration(configuration, base_directory=path.parent)
         sys.stdout.write(json.dumps({

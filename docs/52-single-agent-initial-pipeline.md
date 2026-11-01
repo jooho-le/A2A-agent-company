@@ -48,7 +48,7 @@ platform = create_single_platform(**approved_host_inputs)
 asyncio.run(run_platform(platform))
 ```
 
-위 코드는 Host 조합의 사용 형태다. 승인 정책·이미지·시작 Source·키를 임의로 채우는 기본 설정은 추가하지 않았다. 기존 Multi Host CLI를 Single로 바꾸지 않았으며 전체 운영 실행 안내는 56번에서 정리한다.
+위 코드는 52번 당시 Host 조합의 사용 형태다. 승인 정책·이미지·시작 Source·키를 임의로 채우는 기본 설정은 추가하지 않았다. 이후 [56번](56-single-agent-final-audit-runbook.md)에서 기존 Multi 기본값을 유지하면서 `run_host --architecture SINGLE_AGENT`의 명시적 파일 기반 실행과 운영 안내를 추가했다.
 
 | 실행 방식 | 상태 |
 | --- | --- |

@@ -1,4 +1,4 @@
-"""Start the local Single A2A transport; product runtime is not yet connected."""
+"""Start Bootstrap transport; use run_host --architecture SINGLE_AGENT for execution."""
 
 import uvicorn
 

@@ -316,7 +316,7 @@ API 제출용 승인 `configuration` 확인법, cleanup·재시작 경계와 개
 
 기존 Host 서비스의 Snapshot·Sandbox·보호 테스트·실행 증거 검사를 재사용하며, Security 실행 테스트 모드도 처리합니다. 실제 Host 조합으로 만든 서버만 `executionReady=true`를 반환합니다. 기본 Orchestrator의 Single 요청 503 거절과 `python -m agents.single`의 Bootstrap 동작은 유지합니다. 이 조합은 `agents.platform.runner.run_platform()`으로 두 로컬 엔드포인트를 실행할 수 있으며, 기존 Multi Host CLI 설정을 자동 변경하지 않습니다.
 
-최초 후보의 검증에 이어 아래 53번의 수정·재검증, 54번의 재개·취소·영속 예산 복구, 55번의 기록·비용·평가 인계를 연결했습니다. 최종 실행 안내와 점검은 **56번**입니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
+최초 후보의 검증에 이어 아래 53번의 수정·재검증, 54번의 재개·취소·영속 예산 복구, 55번의 기록·비용·평가 인계, 56번의 파일 기반 실행·최종 점검을 연결했습니다. 실제 키·Docker 실행과 공정 비교 실험은 별도 확인이 필요합니다.
 
 ### Single-Agent 수정·재검증과 판정 — 53번
 
@@ -335,6 +335,20 @@ Single Host도 기존 영속 예산 원장을 사용합니다. 재시작하면 �
 [55번 인계 안내](docs/55-single-agent-records-evaluation-handoff.md)는 승인 가격표와 Single 계상을 연결하고, `GET /api/v1/runs/{runId}/metrics`로 Run 전체 시간·사람 대기·호출·토큰·비용을 제공합니다. 미확인 사용량/비용은 null로 남깁니다.
 
 `python -m agents.platform.evaluation_export --database PATH --run-id UUID --store SINGLE_AGENT=PATH --out NEW_DIR`는 모든 후보의 원본 Snapshot/Manifest, 전체 기록·사용량·실제 단일 A2A 저장소 자료를 읽기 전용으로 인계합니다. 실패·취소·Snapshot/기록 누락도 표시합니다. Single A2A는 schemaVersion 2이며, `dev`의 기존 D4 소비자는 네 역할 고정 검사를 이 계약에 맞게 확장해야 합니다. 55번 문서에 역할 4 인계 조건을 명시했습니다.
+
+### Single-Agent 최종 점검·실행 안내 — 56번
+
+[56번 실행·인계 안내](docs/56-single-agent-final-audit-runbook.md)에 47~56번 구현·개발정의서 대조, 설정 준비·요청 생성·조회·내보내기, 역할 3·4 인계 조건을 정리했습니다. `configs/single-runtime.example.json`은 실제 Agent 하나와 `.data/single/` 저장소를 지정하는 미완성 승인 설정 예시입니다.
+
+```sh
+PYTHONPATH=src .venv/bin/python -m agents.platform.run_host \
+  --architecture SINGLE_AGENT \
+  --runtime configs/single-runtime.local.json \
+  --tools configs/owned-tools.local.json \
+  --source configs/owned-source.local.json
+```
+
+기본은 파일 검사이며 서버·모델을 시작하지 않습니다. 승인 설정·환경변수·Docker를 준비한 뒤 같은 명령에 `--start`를 추가하면 Orchestrator와 Single 두 서버를 실행합니다. `--architecture`를 생략하면 기존 Multi 모드입니다. Security 자체 테스트 scope도 양쪽 Host가 같은 정책으로 전달하며, 미확인 근거를 PASS로 처리하지 않습니다. 실제 환경 실행과 독립 비교 실험은 아직 수행하지 않았습니다.
 
 ## 테스트
 

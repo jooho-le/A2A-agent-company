@@ -193,7 +193,7 @@ class HostRuntimeServices:
             frozen_source=selection,
             build_configuration=self._tools.build_configuration if role is AgentRole.DEVELOPER else None,
             unit_test_configuration=self._tools.unit_configuration_for(role)
-                if role in (AgentRole.DEVELOPER, AgentRole.QA) else None,
+                if role in (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY) else None,
             browser_test_configuration=self._tools.browser_configuration if role is AgentRole.QA else None,
             security_scan_configuration=self._tools.security_configuration if role is AgentRole.SECURITY else None,
         )

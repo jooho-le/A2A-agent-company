@@ -22,8 +22,10 @@ from agents.platform.composition import (
 )
 from agents.platform.configuration import (
     _comparison_path, inspect_runtime_configuration, load_runtime_configuration,
-    resolve_runtime_configuration,
+    resolve_runtime_configuration, OwnedSingleRuntimeConfiguration,
 )
+from agents.core.identity import SingleAgentIdentity
+from agents.single.platform import create_single_platform
 from agents.platform.host_policy_store import HostPolicyStore
 from agents.platform.host_services import HostRuntimeServices, _model_json
 from agents.platform.pricing import load_price_book
@@ -87,6 +89,12 @@ def _load_protected_cases(path):
 
 
 def _policy_references(tools, cases):
+    # This Host's case file is QA's in-loop suite. Security self-tests can be
+    # enabled explicitly; a separate protected Security case contract is not
+    # implemented here and must never be silently inferred from QA cases.
+    security_unit = tools.unit_configuration_for(AgentRole.SECURITY)
+    if security_unit is not None and any(scope.kind == "PROTECTED" for scope in security_unit.scopes):
+        raise HostFactoryError()
     profiles = {profile.profile_ref for profile in tools.security_configuration.profiles}
     if len(profiles) != 1:
         raise HostFactoryError()
@@ -188,7 +196,7 @@ class _HostConfiguration:
 
 
 def inspect_host_configuration(*, runtime_file, tools_file, source_file, protected_cases_file=None,
-                               proof_verifier=None, price_book_file=None):
+                               proof_verifier=None, price_book_file=None, architecture="MULTI_AGENT"):
     """Read-only settings/Git cross-check; never resolve credentials or stores."""
     try:
         if proof_verifier is not None:
@@ -197,7 +205,9 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             proof_verifier.verify_integrity()
         price_book = None if price_book_file is None else load_price_book(price_book_file)
         runtime_path, tools_path, source_path = (Path(value).absolute() for value in (runtime_file, tools_file, source_file))
-        runtime = load_runtime_configuration(runtime_path)
+        # Preserve the default Multi call signature for existing trusted callers.
+        runtime = (load_runtime_configuration(runtime_path) if architecture == "MULTI_AGENT"
+                   else load_runtime_configuration(runtime_path, architecture=architecture))
         layout = inspect_runtime_configuration(runtime, base_directory=runtime_path.parent)
         tools = load_tool_configuration(tools_path)
         if runtime.llm_limits.tool_timeout_seconds != tools.max_call_seconds:
@@ -217,6 +227,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             inputs += (price_book.approval_path,)
         _layout_guard(layout, source, inputs, lock)
         approved = RunConfiguration(
+            architecture=architecture,
             model=runtime.model.model_dump(by_alias=True),
             limits=ExecutionLimits(runtime_budget_ms=runtime.runtime_budget_ms),
             environment=tools.baseline, starting_commit_hash=source.configuration.commit_hash,
@@ -266,7 +277,7 @@ async def _close_allocated(providers, platform=None):
 async def create_host(*, runtime_file, tools_file, source_file, protected_cases_file=None,
                       environ=None, provider_factory=provider_from_settings,
                       mcp_client_factory=open_mcp_client, a2a_client_factory=None, proof_verifier=None,
-                      price_book_file=None):
+                      price_book_file=None, architecture="MULTI_AGENT"):
     """Explicit allocation/composition only; returned platform owns shutdown.
 
     Only trusted Python callers may inject transport/proof factories. JSON,
@@ -278,7 +289,7 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
     plan = await _host_call(lambda _argument: inspect_host_configuration(
         runtime_file=runtime_file, tools_file=tools_file, source_file=source_file,
         protected_cases_file=protected_cases_file, proof_verifier=proof_verifier,
-        price_book_file=price_book_file), None)
+        price_book_file=price_book_file, architecture=architecture), None)
     try:
         resolved = resolve_runtime_configuration(plan.runtime,
             base_directory=plan.runtime_directory, environ=environ)
@@ -320,16 +331,20 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
                 deadline_monotonic=budget.deadline_monotonic), run_id)
             budget.check()
 
-        for role in AgentRole:
+        for role in resolved.agent_settings:
             provider = provider_factory(resolved.agent_settings[role])
             if inspect.isawaitable(provider):
                 if inspect.iscoroutine(provider):
                     provider.close()
                 raise HostFactoryError(_FAILED)
             providers[role] = provider
-        platform = create_platform(repository=repository, workspace_registry=workspaces, artifact_store=artifacts,
-            orchestrator_settings=resolved.orchestrator_settings, agent_settings=resolved.agent_settings,
-            providers=providers, developer_services_factory=services.developer,
+        single = type(plan.runtime) is OwnedSingleRuntimeConfiguration
+        factory = create_single_platform if single else create_platform
+        identities = ({"agent_settings": resolved.agent_settings[SingleAgentIdentity.SINGLE_AGENT],
+                       "provider": providers[SingleAgentIdentity.SINGLE_AGENT]} if single else
+                      {"agent_settings": resolved.agent_settings, "providers": providers})
+        platform = factory(repository=repository, workspace_registry=workspaces, artifact_store=artifacts,
+            orchestrator_settings=resolved.orchestrator_settings, **identities, developer_services_factory=services.developer,
             qa_services_factory=services.qa, security_services_factory=services.security,
             prepare_workspace=prepare_workspace, limits=resolved.limits,
             orchestrator_host=resolved.orchestrator_host, orchestrator_port=resolved.orchestrator_port,

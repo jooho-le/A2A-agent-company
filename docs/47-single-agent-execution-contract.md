@@ -2,7 +2,7 @@
 
 작성 기준일: 2026-10-31. 담당: 주호(역할 1·2).
 
-상태: **개발정의서와 당시 코드를 대조한 설계 문서**. 47번 작성 당시에는 Single-Agent 서버·실행기·설정 Schema를 구현하지 않았다. 이후 48~53번 기반·실행·수정, [54번 제어·영속 예산 복구](54-single-agent-controls-durable-budgets.md), [55번 기록·비용·평가 인계](55-single-agent-records-evaluation-handoff.md)를 연결했다. 최종 점검은 56번이다. 아래 내용은 47번 당시 계약·점검 기록이다.
+상태: **개발정의서와 당시 코드를 대조한 설계 문서**. 47번 작성 당시에는 Single-Agent 서버·실행기·설정 Schema를 구현하지 않았다. 이후 48~53번 기반·실행·수정, [54번 제어·영속 예산 복구](54-single-agent-controls-durable-budgets.md), [55번 기록·비용·평가 인계](55-single-agent-records-evaluation-handoff.md), [56번 파일 기반 실행·최종 점검](56-single-agent-final-audit-runbook.md)을 연결했다. 실제 환경 실행·독립 비교는 별도 확인이다. 아래 내용은 47번 당시 계약·점검 기록이다.
 
 ## 1. 근거와 현재 구현 상태
 

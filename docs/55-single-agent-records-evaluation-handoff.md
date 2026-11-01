@@ -41,7 +41,7 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.evaluation_export \
   --database .data/orchestrator.sqlite3 \
   --run-id '<실제 Run UUID>' \
   --store SINGLE_AGENT=.data/agents/single_agent.sqlite3 \
-  --out .data/evaluation-handoffs/<새로운-폴더명>
+  --out '.data/evaluation-handoffs/<새로운-폴더명>'
 ```
 
 | 파일 | 내용 |

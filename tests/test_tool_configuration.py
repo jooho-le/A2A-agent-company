@@ -329,11 +329,14 @@ class ToolConfigurationRoleTests(_ToolConfigurationFixture, unittest.TestCase):
         self.assertEqual(tuple(scope.kind for scope in qa.scopes), ("QA_TESTS", "PROTECTED"))
         self.assertTrue(all(scope.roles == (AgentRole.QA,) for scope in qa.scopes))
 
-    def test_planner_security_and_string_role_cannot_request_unit_capability(self):
+    def test_planner_and_string_role_cannot_request_unit_capability(self):
         config = self.decode()
-        for role in (AgentRole.PLANNER, AgentRole.SECURITY, "DEVELOPER", "ORCHESTRATOR", None):
+        for role in (AgentRole.PLANNER, "SECURITY", "DEVELOPER", "ORCHESTRATOR", None):
             with self.subTest(role=role):
                 self.assert_code("INVALID", config.unit_configuration_for, role)
+
+    def test_security_has_no_unit_profile_unless_explicitly_approved(self):
+        self.assertIsNone(self.decode().unit_configuration_for(AgentRole.SECURITY))
 
     def test_combined_unit_policy_requires_both_snapshot_and_qa_test_scopes(self):
         for scopes in ([], [{"name": "only-source", "kind": "SNAPSHOT"}],
