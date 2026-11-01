@@ -688,6 +688,45 @@ dialog::backdrop { background: rgb(3 4 7 / 78%); backdrop-filter: none; }
 }
 
 </style>
+<style>
+/* 모드 선택과 싱글 에이전트 목업에만 적용합니다. */
+.execution-modes{border:0;padding:0;margin:12px 0 14px;position:relative;z-index:2;width:min(100%,440px)}
+.execution-modes legend{font-size:10px;color:#e0eaff;margin-bottom:7px}
+.execution-options{display:flex;gap:8px;flex-wrap:wrap}
+.execution-options button{flex:1;min-width:130px;border:1px solid #ffffff65;border-radius:7px;background:#0e4097;color:#e9f0ff;padding:10px 12px;text-align:left;font-size:11px}
+.execution-options button[aria-pressed="true"]{background:#D4FF24;border-color:#D4FF24;color:#111709}
+.execution-options small{display:block;font-size:9px;margin-top:4px;opacity:.85}
+.execution-mode-note{font-size:10px;line-height:1.7;color:#deebff;margin:8px 0 0}
+.single-workspace{min-width:0}
+.single-panel{padding:24px;border:1px solid #343b46;border-radius:12px;background:#11151c;margin-bottom:22px}
+.single-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.single-heading p,.single-panel>p{font-size:12px;color:#aab4c3;line-height:1.8;margin:8px 0 0}
+.single-actor{display:flex;align-items:center;gap:18px;padding:22px;border:1px solid #607052;border-radius:10px;background:#171e1c;margin:18px 0}
+.single-emblem{width:64px;height:64px;flex-shrink:0;display:grid;place-items:center;border-radius:16px;background:#D4FF24;color:#152009;font-size:23px;font-weight:700}
+.single-actor h3{font-size:18px;margin:0 0 5px}.single-actor p{font-size:12px;color:#bec8d1;margin:0;line-height:1.7}
+.single-stages{list-style:none;padding:0;margin:22px 0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.single-stages li{border:1px solid #39414e;background:#151a23;border-radius:8px;padding:15px 12px;min-width:0}
+.single-stages li[data-state="active"]{border-color:#D4FF24;background:#252e1b}
+.single-stages li[data-state="done"]{border-color:#61705b}
+.single-stages strong,.single-stages small{display:block;font-size:12px}.single-stages small{font-size:10px;color:#acb7c6;line-height:1.7;margin-top:7px}
+.single-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}
+.single-note{font-size:11px;color:#b5c2a5;line-height:1.8;margin:18px 0 0}
+.single-projects{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+.single-projects .single-panel{margin:0}.single-projects h3{margin:0 0 12px}
+.single-records{padding-left:20px;color:#b7c1cf;font-size:12px;line-height:2}
+.single-workspace button:focus-visible,.execution-modes button:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.single-workspace dialog{max-width:560px;width:calc(100% - 32px)}
+.single-workspace dialog textarea,dialog.single-workspace textarea{width:100%;min-height:100px;background:#171d27;border:1px solid #475164;border-radius:7px;color:#eef1f5;padding:12px}
+.single-workspace .single-form{margin-top:14px}
+.single-workspace .single-form label{display:block;font-size:12px;margin-bottom:8px}
+.single-workspace .single-detail{white-space:pre-wrap;overflow-wrap:anywhere;color:#bdc7d4;font-size:12px;line-height:1.8}
+@media(max-width:900px){.execution-modes{width:calc(100% - 225px)}.execution-options button{min-width:110px}.single-stages{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.execution-modes{width:100%;margin-top:14px}.execution-options button{min-width:0;padding:10px}.single-panel{padding:18px}.single-actor{padding:16px;gap:12px}.single-emblem{width:48px;height:48px;font-size:19px}.single-actor h3{font-size:16px}.single-projects{grid-template-columns:1fr}.single-stages{gap:8px}.single-stages li{padding:13px 10px}}
+
+@media(max-width:600px){.request-composer:has(.execution-modes){display:block}.request-composer:has(.execution-modes) .request-name{margin-top:12px}.request-composer:has(.execution-modes) .composer-office{position:relative;inset:auto;width:100%;height:150px;margin:0}}
+
+body[data-execution-mode="single"] .multi-mode-content{display:none!important}
+</style>
 </head>
 <body>
   <button class="sidebar-dismiss" id="sidebar-dismiss" type="button" aria-label="회사 메뉴 닫기" tabindex="-1"></button>
@@ -875,7 +914,7 @@ dialog::backdrop { background: rgb(3 4 7 / 78%); backdrop-filter: none; }
       </main>
     </div>
   </div>
-  <dialog id="new-dialog" aria-labelledby="new-title"><div class="dialog-header"><div><p class="eyebrow">NEW ASSIGNMENT</p><h2 id="new-title">직원들에게 어떤 일을 맡길까요?</h2></div><button class="close-button" data-close="new-dialog" aria-label="새 업무 창 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><form id="new-form"><div class="dialog-body"><label class="field-label" for="new-name">프로젝트 이름</label><input id="new-name" class="field" placeholder="예: 우리 팀의 업무 도구" maxlength="60" required><div class="blue-field"><label class="field-label" for="new-request">업무 요청</label><textarea id="new-request" placeholder="필요한 기능, 사용할 사람, 원하는 모습을 알려주세요." maxlength="1600" rows="5" required></textarea><span>기획 담당 사슴이 요청을 받아 계획을 정리합니다.</span></div><p class="dialog-note">디자인 목업입니다. 실제 서버에 요청을 보내지 않습니다.</p></div><div class="dialog-footer"><button class="button" type="button" data-close="new-dialog">취소</button><button class="button start" type="submit">업무 시작<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div></form></dialog>
+  <dialog id="new-dialog" aria-labelledby="new-title"><div class="dialog-header"><div><p class="eyebrow">NEW ASSIGNMENT</p><h2 id="new-title">직원들에게 어떤 일을 맡길까요?</h2></div><button class="close-button" data-close="new-dialog" aria-label="새 업무 창 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><form id="new-form"><div class="dialog-body"><label class="field-label" for="new-name">프로젝트 이름</label><input id="new-name" class="field" placeholder="예: 우리 팀의 업무 도구" maxlength="60" required><div class="blue-field"><label class="field-label" for="new-request">업무 요청</label><textarea id="new-request" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." maxlength="1600" rows="5" required></textarea><span>기획 담당 사슴이 요청을 받아 계획을 정리합니다.</span></div><p class="dialog-note">디자인 목업입니다. 실제 서버에 요청을 보내지 않습니다.</p></div><div class="dialog-footer"><button class="button" type="button" data-close="new-dialog">취소</button><button class="button start" type="submit">업무 시작<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div></form></dialog>
   <dialog id="plan-dialog" aria-labelledby="plan-title"><div class="dialog-header"><div><p class="eyebrow">APPROVAL REQUEST</p><h2 id="plan-title">대표님, 이 계획으로 진행할까요?</h2></div><button class="close-button" data-close="plan-dialog" aria-label="기획안 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body"><div class="sender"><span class="mini-avatar">사</span><div><strong>사슴<small>기획 담당 · Planner</small></strong></div></div><p class="dialog-description" id="plan-description"></p><h3 class="detail-section-title">이렇게 만들 예정이에요</h3><ul class="scope-list" id="scope-list"></ul><p class="dialog-note">승인 후 개발 담당 고양이가 구현을 시작합니다. 목업 상태만 바뀝니다.</p></div><div class="dialog-footer"><button class="button" id="request-revision">수정 요청</button><button class="button start" id="approve-plan">승인하고 시작<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div></dialog>
   <dialog id="revision-dialog" aria-labelledby="revision-title"><div class="dialog-header"><div><p class="eyebrow">FEEDBACK TO YOUR TEAM</p><h2 id="revision-title">어떤 부분을 바꾸면 좋을까요?</h2></div><button class="close-button" data-close="revision-dialog" aria-label="수정 요청 창 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><form id="revision-form"><div class="dialog-body"><div class="blue-field"><label class="field-label" for="revision-text">사슴에게 전달할 피드백</label><textarea id="revision-text" placeholder="추가하거나 바꾸고 싶은 내용을 적어주세요." maxlength="1600" rows="5" required></textarea></div><p class="dialog-note">요청한 프로젝트가 다시 기획 중 상태로 바뀝니다.</p></div><div class="dialog-footer"><button class="button" type="button" data-close="revision-dialog">취소</button><button class="button start" type="submit">수정 요청 전달<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div></form></dialog>
   <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-header"><div><p class="eyebrow" id="detail-eyebrow">EMPLOYEE PROFILE</p><h2 id="detail-title"></h2></div><button class="close-button" data-close="detail-dialog" aria-label="상세 창 닫기"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body" id="detail-body"></div></dialog>
@@ -1356,5 +1395,122 @@ dialog::backdrop { background: rgb(3 4 7 / 78%); backdrop-filter: none; }
 })();
 </script>
 
+<script>
+/* 싱글 모드는 독립적인 디자인 목업입니다. 기존 멀티 API 연결은 그대로 둡니다. */
+(() => {
+  const $ = (selector) => document.querySelector(selector);
+  const escape = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+  const stages = ['기획', '개발', 'QA', '보안 검토'];
+  const descriptions = ['요청과 작업 계획 정리', '계획에 따른 기능 구현', '기능 및 예외 상황 확인', '접근 권한과 정보 보호 검토'];
+  let mode = 'multi', sequence = 0, selectedId = 'single-demo', query = '', trigger, noticeTimer;
+  const projects = [{ id:'single-demo', name:'싱글 에이전트 체험 프로젝트', description:'한 AI가 기획부터 보안 검토까지 순서대로 수행하는 목업입니다.', step:0, approval:false, feedback:'', history:['싱글 에이전트 목업을 준비했어요.'] }];
+  const selected = () => projects.find((item) => item.id === selectedId);
+  const modeMarkup = `<fieldset class="execution-modes"><legend>업무 수행 방식</legend><div class="execution-options"><button type="button" data-mode="multi" aria-pressed="true">멀티 에이전트<small>네 직원이 역할을 나누어 협업</small></button><button type="button" data-mode="single" aria-pressed="false">싱글 에이전트<small>싱글 AI가 모든 단계를 순차적으로 수행</small></button></div><p class="execution-mode-note">화면 전환은 목업이며 실제 Agent Run을 생성하지 않습니다.</p></fieldset>`;
+  $('#request-form .composer-top').insertAdjacentHTML('afterend', modeMarkup);
+  // 원본 DOM과 이벤트 핸들러는 보존하고 싱글용 영역만 별도로 둡니다.
+  for (const view of ['home','projects','team','workflow','outputs']) {
+    const root = $(`#${view}-view`);
+    if (view === 'home') root.querySelector('.office-grid').classList.add('multi-mode-content');
+    else {
+      const wrapper = document.createElement('div'); wrapper.className = 'multi-mode-content';
+      while (root.firstChild) wrapper.append(root.firstChild);
+      root.append(wrapper);
+    }
+    const panel = document.createElement('div'); panel.className = 'single-workspace'; panel.id = `single-${view}`; panel.hidden = true; root.append(panel);
+  }
+  const dialog = document.createElement('dialog'); dialog.id = 'single-dialog'; dialog.className = 'single-workspace'; document.body.append(dialog);
+  dialog.addEventListener('close', () => { if (trigger?.isConnected) trigger.focus({ preventScroll:true }); });
+  dialog.addEventListener('click', (event) => { const box = dialog.getBoundingClientRect(); if (event.target === dialog && (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom)) dialog.close(); });
+  const original = { label:$('#request-form .composer-top label').innerHTML, tagline:$('#request-form .composer-top>span').textContent, footer:$('#request-form .composer-bottom p').innerHTML, submit:$('#request-form button[type="submit"]').innerHTML };
+  const message = () => { clearTimeout(noticeTimer); const toast = $('#toast'); toast.textContent = '디자인 목업 상태입니다. 실제 Agent API는 호출하지 않았습니다.'; toast.hidden = false; noticeTimer = setTimeout(() => { toast.hidden = true; }, 4500); };
+  const stateLabel = (p) => p.approval ? '기획안 승인 대기' : p.step === 4 ? '목업 작업 완료' : `${stages[p.step]} · 목업 진행 중`;
+  const actor = (p) => `<div class="single-actor"><span class="single-emblem" aria-hidden="true">AI</span><div><h3>atelier AI</h3><p>한 AI · 전체 업무 담당<br>${stateLabel(p)}</p></div></div>`;
+  const stageMarkup = (p) => `<ol class="single-stages" aria-label="한 AI의 순차 작업 단계">${stages.map((stage,index) => `<li data-state="${index < p.step ? 'done' : index === p.step ? 'active' : 'waiting'}"><strong>0${index+1} · ${stage}</strong><small>${descriptions[index]}<br>${index < p.step ? '목업 완료' : index === p.step ? p.approval ? '승인 대기' : '목업 진행 중' : '대기'}</small></li>`).join('')}</ol>`;
+  const options = () => `<label class="output-selector">프로젝트 <select data-single-select>${projects.map((p) => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${escape(p.name)}</option>`).join('')}</select></label>`;
+  const note = '<p class="single-note">디자인 시연용 목업이며 실제 Agent API는 연결되어 있지 않습니다.</p>';
+  function render() {
+    const p = selected();
+    $('#single-home').innerHTML = `<section class="single-panel"><div class="single-heading"><div><p class="eyebrow">SINGLE AGENT / DESIGN MOCKUP</p><h2>${escape(p.name)}</h2></div>${options()}</div><p>${escape(p.description)}</p>${actor(p)}${stageMarkup(p)}<p class="single-note">네 개의 독립 Agent가 아닌 동일한 AI의 네 작업 단계입니다. QA 이후 보안 검토로 넘어갑니다.</p><div class="single-actions"><button class="button" data-single-action="profile">AI 업무 보기</button><button class="button" data-single-action="history">업무 기록</button><button class="button start" data-single-action="advance"${p.approval || p.step === 4 ? ' disabled' : ''}>${p.approval ? '승인 대기' : p.step === 4 ? '완료 상태' : '다음 목업 상태 보기'}</button>${p.approval ? '<button class="button start" data-single-action="plan">기획안 확인</button>' : ''}</div></section>`;
+    $('#single-projects').innerHTML = `<div class="view-toolbar"><h2>싱글 에이전트 목업 프로젝트</h2><label class="search">검색<input aria-label="싱글 프로젝트 검색" data-single-search value="${escape(query)}"></label></div><div class="single-projects">${projects.filter((item) => `${item.name} ${item.description}`.includes(query)).map((item) => `<article class="single-panel"><h3>${escape(item.name)}</h3><p>${escape(item.description)}</p><p>담당 AI 1개 · 디자인 목업</p><button class="button" data-single-project="${item.id}">업무 보기</button></article>`).join('') || '<p class="single-note">일치하는 프로젝트가 없어요.</p>'}</div>`;
+    $('#single-team').innerHTML = `<section class="single-panel"><h2>한 AI, 네 가지 작업 단계.</h2><p>직원 네 명 중 한 명을 선택하는 방식이 아닙니다.</p>${actor(p)}<button class="button" data-single-action="profile">AI 소개 보기</button></section>`;
+    $('#single-workflow').innerHTML = `<section class="single-panel"><p class="eyebrow">ONE AI / FOUR SEQUENTIAL STAGES</p><h2>한 AI가 끝까지 이어가는 업무.</h2><p>${escape(p.name)} · 모든 단계는 동일한 AI가 순서대로 수행합니다.</p>${actor(p)}${stageMarkup(p)}${note}</section>`;
+    $('#single-outputs').innerHTML = `<section class="single-panel"><h2>싱글 에이전트 결과물 보관함</h2>${options()}<p>실제 생성된 결과물이 없습니다. 목업 진행 상태를 실제 코드·테스트 성공 결과로 표시하지 않습니다.</p><button class="button" data-single-action="history">목업 업무 기록 보기</button></section>`;
+    applyMode();
+  }
+  function applyMode() {
+    document.body.dataset.executionMode = mode;
+    document.querySelectorAll('.execution-options [data-mode]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
+    document.querySelectorAll('.view>.single-workspace').forEach((panel) => { panel.hidden = mode !== 'single'; });
+    const form = $('#request-form');
+    form.querySelector('.composer-top label').innerHTML = original.label;
+    form.querySelector('.composer-top>span').textContent = mode === 'single' ? '한 AI와 차근차근, 처음부터 끝까지.' : original.tagline;
+    form.querySelector('.composer-bottom p').innerHTML = mode === 'single' ? '싱글 AI가 기획 → 개발 → QA → 보안 검토를 순차 수행합니다.' : original.footer;
+    form.querySelector('button[type="submit"]').innerHTML = mode === 'single' ? '목업 업무 시작' : original.submit;
+    const screen = form.querySelector('.desk-display-role'); if (screen && mode === 'single') screen.textContent = 'Single AI';
+    $('[data-view="team"] .nav-count').textContent = mode === 'single' ? '01' : '04';
+    $('#nav-count').hidden = mode === 'single';
+  }
+  function show(type) {
+    trigger = document.activeElement;
+    const p = selected();
+    const title = ({ profile:'atelier AI · 전체 업무 담당', history:'싱글 에이전트 목업 기록', plan:'기획안 확인', revision:'기획 수정 요청', new:'싱글 에이전트에 새 업무 맡기기' })[type];
+    const content = {
+      profile:`<p class="single-detail">하나의 AI가 요청을 정리하고, 개발하고, QA와 보안 검토를 순서대로 수행합니다. 네 직원 중 한 명을 선택한 것이 아닙니다.</p>${stageMarkup(p)}`,
+      history:`<ol class="single-records">${p.history.map((text) => `<li>${escape(text)}</li>`).join('')}</ol>`,
+      plan:`<p class="single-detail">${escape(p.description)}${p.feedback ? '\n수정 요청: '+escape(p.feedback) : ''}</p><p class="single-note">승인하면 동일한 AI의 개발 목업 단계로 넘어갑니다.</p><div class="single-actions"><button class="button" data-single-action="revision">수정 요청</button><button class="button start" data-single-action="approve">승인하고 시작</button></div>`,
+      revision:'<form data-single-feedback><label for="single-feedback">동일한 AI에게 전달할 피드백</label><textarea id="single-feedback" name="feedback" required maxlength="1600"></textarea><button class="button start">수정 요청 전달</button></form>',
+      new:'<form class="single-form" data-single-new><label for="single-name">프로젝트 이름</label><input id="single-name" class="field" name="projectName" required maxlength="60"><label for="single-request">업무 요청</label><textarea id="single-request" name="request" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." required maxlength="1600"></textarea><button class="button start">목업 업무 시작</button></form>'
+    }[type];
+    dialog.innerHTML = `<div class="dialog-header"><h2>${title}</h2><button class="close-button" data-single-action="close" aria-label="창 닫기">×</button></div><div class="dialog-body">${content}${note}</div>`;
+    if (!dialog.open) dialog.showModal();
+  }
+  function create(name, description) {
+    const p = { id:`single-${++sequence}`, name, description, step:0, approval:false, feedback:'', history:['새 요청을 받고 기획 목업을 시작했어요.'] };
+    projects.unshift(p); selectedId = p.id; dialog.close(); render(); $('[data-view="home"]').click(); message();
+  }
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('button'); if (!button) return;
+    if (button.dataset.mode) { mode = button.dataset.mode; applyMode(); if (mode === 'single') message(); else { clearTimeout(noticeTimer); $('#toast').hidden = true; } return; }
+    if (mode !== 'single') return;
+    if (button.hasAttribute('data-new-project')) { event.preventDefault(); event.stopImmediatePropagation(); show('new'); return; }
+    if (button.dataset.singleProject) { selectedId = button.dataset.singleProject; render(); $('[data-view="home"]').click(); return; }
+    const action = button.dataset.singleAction; if (!action) return;
+    event.preventDefault();
+    const p = selected();
+    if (action === 'close') { dialog.close(); return; }
+    if (['profile','history','plan','revision'].includes(action)) { show(action); return; }
+    if (action === 'advance' && !p.approval && p.step < 4) {
+      if (p.step === 0) { p.approval = true; p.history.push('기획안 확인을 요청했어요.'); }
+      else { p.history.push(`${stages[p.step]} 단계의 목업을 마쳤어요.`); p.step += 1; }
+    }
+    if (action === 'approve' && p.approval) { p.step = 1; p.approval = false; p.history.push('기획안을 승인하고 같은 AI가 개발을 시작했어요.'); dialog.close(); }
+    render(); message();
+  }, true);
+  // 문서 캡처 단계에서 싱글 제출을 처리하므로 기존 iframe 멀티 postMessage까지 도달하지 않습니다.
+  document.addEventListener('submit', (event) => {
+    if (mode !== 'single') return;
+    const form = event.target;
+    if (form.id === 'request-form' || form.hasAttribute('data-single-new')) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const name = form.querySelector('[name="projectName"],#request-name')?.value.trim();
+      const request = form.querySelector('[name="request"],#request-text')?.value.trim();
+      if (!name || !request) return;
+      create(name, request); form.reset();
+    } else if (form.hasAttribute('data-single-feedback')) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const text = form.elements.feedback.value.trim(); if (!text) return;
+      const p = selected(); p.feedback = text; p.step = 0; p.approval = false; p.history.push('피드백을 받아 같은 AI가 기획을 다시 정리해요.'); dialog.close(); render(); message();
+    }
+  }, true);
+  document.addEventListener('change', (event) => { if (event.target.hasAttribute('data-single-select')) { selectedId = event.target.value; render(); } });
+  document.addEventListener('input', (event) => {
+    if (!event.target.hasAttribute('data-single-search')) return;
+    query = event.target.value; const start = event.target.selectionStart; render();
+    const input = $('[data-single-search]'); input.focus(); input.setSelectionRange(start,start);
+  });
+  document.addEventListener('atelier:render', applyMode);
+  render();
+})();
+</script>
 </body>
 </html>
