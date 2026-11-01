@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from database import Base, engine
-import models  # 테이블 생성 전에 User 모델을 Base에 등록합니다.
+import models  # 테이블 생성 전에 User와 Document 모델을 Base에 등록합니다.
 from routers.auth import router as auth_router
+from routers.documents import router as documents_router
 
 
 @asynccontextmanager
@@ -25,6 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router)
+app.include_router(documents_router)
 
 
 @app.exception_handler(RequestValidationError)

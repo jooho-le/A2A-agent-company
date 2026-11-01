@@ -120,12 +120,14 @@ ROLE_CONTRACTS = MappingProxyType({
     AgentRole.SECURITY: AgentRoleContract(
         role=AgentRole.SECURITY,
         purpose="같은 Frozen Snapshot에서 명시적 보안 요구사항과 Finding을 검증한다.",
-        inputs=("할당된 Security Requirement·동결 securityPolicy", "READ_ONLY Source Snapshot·ExecutionManifest", "허용 Scanner Profile 참조"),
+        inputs=("할당된 Security Requirement·동결 securityPolicy", "READ_ONLY Source Snapshot·ExecutionManifest", "허용 Scanner Profile 참조",
+                "Host가 Security 테스트 범위를 줄 때만 Security 전용 출력 영역"),
         responsibilities=(
             "각 할당 Requirement에 정확히 한 개의 requirementResults를 기록한다.",
             "허용된 run_security_scan의 실제 결과와 코드·재현 근거를 분석한다.",
             "Runtime이 승인된 Scanner를 실행한다. 모델은 읽은 코드 위치와 분석 Draft만 제안하며 검증된 결과는 Host 근거 검증 후 조립한다.",
-            "Host의 독립 근거 검증이 없으면 Requirement는 UNVERIFIED, Scanner 경고는 SUSPECTED로 남긴다.",
+            "Host가 Security 테스트 범위를 주면 QA처럼 할당된 모든 Requirement에 최소 한 개의 독립 보안 테스트를 Security 전용 영역에 작성하고 testCases로 연결한다. Runtime이 그 테스트와 보호된 Security 테스트를 실행하고 측정 결과로만 Requirement를 판정한다.",
+            "Host의 독립 근거(측정된 테스트 실행 또는 승인된 검증)가 없으면 Requirement는 UNVERIFIED, Scanner 경고는 SUSPECTED로 남긴다.",
             "findings에 findingId/severity/disposition/title/description 및 Requirement·Rule·Location·근거 참조를 연결한다.",
             "재현 또는 명확한 코드 근거가 있을 때만 CONFIRMED, 오탐 근거가 있을 때만 FALSE_POSITIVE를 사용한다.",
             "의심은 SUSPECTED, 검증 불가는 UNVERIFIED로 남기고 정책 선택이 필요하면 사람 판단을 요청한다.",
@@ -135,6 +137,7 @@ ROLE_CONTRACTS = MappingProxyType({
             "제품 Source·Frozen Snapshot·동결 보안 정책을 변경하지 않는다.",
             "Scanner 경고 자체를 CONFIRMED로 확정하거나 경고 0개만으로 Security PASS를 선언하지 않는다.",
             "의심 또는 검증 불가 Finding을 근거 없이 해결·FALSE_POSITIVE로 바꾸지 않는다.",
+            "보안 테스트를 생략·약화하거나 Security 전용 영역 밖에 써서 PASS를 만들지 않는다.",
         ),
         outputs=(ArtifactOutputContract(
             "security-report.json", "schemas/project/security_report.schema.json",

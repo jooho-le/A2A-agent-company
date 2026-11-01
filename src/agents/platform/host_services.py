@@ -84,12 +84,21 @@ class HostRuntimeServices:
             if approved_source != source_configuration:
                 raise ValueError
             approved_cases = tuple(replace(case) for case in protected_cases)
+            # One Host case file may hold QA and Security cases; a case belongs
+            # to the role named by its protected scope (QA unless SECURITY).
+            security = approved_tools.unit_configuration_for(AgentRole.SECURITY)
+            security_selectors = set() if security is None else {
+                scope.name for scope in security.scopes if scope.kind == "PROTECTED"}
+            security_cases = tuple(case for case in approved_cases
+                                   if case.tool_name == "run_unit_tests" and case.selector in security_selectors)
+            approved_cases = tuple(case for case in approved_cases if case not in security_cases)
         except Exception:
             raise PlatformConfigurationError() from None
         self._repository, self._workspaces, self._artifacts = repository, workspace_registry, artifact_store
         self._tools, self._source = approved_tools, approved_source
         self._validate_configuration, self._client_factory = validate_configuration, client_factory
         self._protected_cases, self._proof_verifier = approved_cases, proof_verifier
+        self._security_cases = security_cases
 
     def __repr__(self):
         return "HostRuntimeServices()"
@@ -223,7 +232,8 @@ class HostRuntimeServices:
         try:
             return SecurityRuntimeServices(self._repository, self._workspaces, self._artifacts,
                 mcp_configuration=self._configuration(execution, AgentRole.SECURITY),
-                proof_verifier=self._proof_verifier, client_factory=self._client(execution))
+                proof_verifier=self._proof_verifier, protected_cases=self._security_cases,
+                client_factory=self._client(execution))
         except LLMRuntimeError:
             raise
         except Exception:

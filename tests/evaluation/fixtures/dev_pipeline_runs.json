@@ -1,0 +1,1722 @@
+{
+ "source": "dev tests/test_owned_agent_fix_pipeline.py (2026-10-28, dev 08542c6) 실행 Run에서 추적 관련 사건만 남김",
+ "runs": {
+  "build_failure_gap_keeps_report_lineage_distinct_from_code_version": {
+   "run": {
+    "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653",
+    "status": "FINISHED",
+    "verdict": "SUCCESS",
+    "fixAttempt": 2,
+    "codeVersion": 3
+   },
+   "events": [
+    {
+     "eventType": "RUN_STARTED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "PLANNER_OUTPUT_VALIDATED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "38bb7801-8aea-4430-83b5-7f813bb4fed4",
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 1,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "38bb7801-8aea-4430-83b5-7f813bb4fed4",
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "DEVELOPER",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": "5514ebe0-46f8-46f4-9100-72a8b7fa91c5",
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "BUILD_FAILED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": "5514ebe0-46f8-46f4-9100-72a8b7fa91c5",
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 3,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "VERDICT_CREATED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "eventType": "RUN_FINISHED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    }
+   ],
+   "eventsTotal": 20,
+   "issues": [
+    {
+     "issueId": "38bb7801-8aea-4430-83b5-7f813bb4fed4",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 1,
+     "newCodeVersion": 2,
+     "revalidationResult": null,
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    },
+    {
+     "issueId": "5514ebe0-46f8-46f4-9100-72a8b7fa91c5",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "reporter": "DEVELOPER",
+     "category": "BUILD_CODE_FAILURE",
+     "previousCodeVersion": 2,
+     "newCodeVersion": 3,
+     "revalidationResult": "PASS",
+     "runId": "2c8826ee-f7c1-40cb-90b9-e202b6325653"
+    }
+   ]
+  },
+  "fix_cannot_reset_budget_after_initial_agents_spend_call_cap": {
+   "run": {
+    "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf",
+    "status": "HUMAN_REVIEW",
+    "verdict": null,
+    "fixAttempt": 1,
+    "codeVersion": 1
+   },
+   "events": [
+    {
+     "eventType": "RUN_STARTED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    },
+    {
+     "eventType": "PLANNER_OUTPUT_VALIDATED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "4fb558d8-693d-4481-98f6-9cfb93a69817",
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 1,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "4fb558d8-693d-4481-98f6-9cfb93a69817",
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    }
+   ],
+   "eventsTotal": 8,
+   "issues": [
+    {
+     "issueId": "4fb558d8-693d-4481-98f6-9cfb93a69817",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 1,
+     "newCodeVersion": 2,
+     "revalidationResult": null,
+     "runId": "fbd0413e-aa29-4b3c-97dd-ee3334f1d3bf"
+    }
+   ]
+  },
+  "initial_build_failure_is_fixed_then_missing_security_proof_stays_unverified": {
+   "run": {
+    "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf",
+    "status": "HUMAN_REVIEW",
+    "verdict": "HUMAN_REVIEW",
+    "fixAttempt": 1,
+    "codeVersion": 2
+   },
+   "events": [
+    {
+     "eventType": "RUN_STARTED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "PLANNER_OUTPUT_VALIDATED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "DEVELOPER",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": "c474cf08-69bb-4a28-8b0c-de239242e404",
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "BUILD_FAILED",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": "c474cf08-69bb-4a28-8b0c-de239242e404",
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 2,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    },
+    {
+     "eventType": "VERDICT_CREATED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    }
+   ],
+   "eventsTotal": 12,
+   "issues": [
+    {
+     "issueId": "c474cf08-69bb-4a28-8b0c-de239242e404",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "reporter": "DEVELOPER",
+     "category": "BUILD_CODE_FAILURE",
+     "previousCodeVersion": 1,
+     "newCodeVersion": 2,
+     "revalidationResult": "PASS",
+     "runId": "e7f05c1e-577b-41c8-9ce2-86350782dedf"
+    }
+   ]
+  },
+  "qa_failure_actual_fix_and_revalidation_preserve_all_lineages_and_shared_budget": {
+   "run": {
+    "runId": "296c80b8-e20c-4e56-8471-bd4152eec641",
+    "status": "FINISHED",
+    "verdict": "SUCCESS",
+    "fixAttempt": 1,
+    "codeVersion": 2
+   },
+   "events": [
+    {
+     "eventType": "RUN_STARTED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "PLANNER_OUTPUT_VALIDATED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "0ccb3e1c-4b43-456f-b2f0-f645fbfea6db",
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 1,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "0ccb3e1c-4b43-456f-b2f0-f645fbfea6db",
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 2,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "VERDICT_CREATED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    },
+    {
+     "eventType": "RUN_FINISHED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    }
+   ],
+   "eventsTotal": 15,
+   "issues": [
+    {
+     "issueId": "0ccb3e1c-4b43-456f-b2f0-f645fbfea6db",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 1,
+     "newCodeVersion": 2,
+     "revalidationResult": "PASS",
+     "runId": "296c80b8-e20c-4e56-8471-bd4152eec641"
+    }
+   ]
+  },
+  "repeated_issue_stops_after_two_unsolved_fix_cycles": {
+   "run": {
+    "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917",
+    "status": "HUMAN_REVIEW",
+    "verdict": "HUMAN_REVIEW",
+    "fixAttempt": 2,
+    "codeVersion": 3
+   },
+   "events": [
+    {
+     "eventType": "RUN_STARTED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "PLANNER_OUTPUT_VALIDATED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "c890626a-5f7b-42a4-8d0a-0586b4bb0e91",
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 1,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "c890626a-5f7b-42a4-8d0a-0586b4bb0e91",
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "8753cace-5843-49f7-90a9-918e2a11a75c",
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 2,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "8753cace-5843-49f7-90a9-918e2a11a75c",
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "5c0a36e4-8554-4443-9ed3-42011c1fdee2",
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 3,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "eventType": "VERDICT_CREATED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    }
+   ],
+   "eventsTotal": 22,
+   "issues": [
+    {
+     "issueId": "c890626a-5f7b-42a4-8d0a-0586b4bb0e91",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 1,
+     "newCodeVersion": 2,
+     "revalidationResult": "FAIL",
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "issueId": "8753cace-5843-49f7-90a9-918e2a11a75c",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 2,
+     "newCodeVersion": 3,
+     "revalidationResult": "FAIL",
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    },
+    {
+     "issueId": "5c0a36e4-8554-4443-9ed3-42011c1fdee2",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": null,
+     "newCodeVersion": null,
+     "revalidationResult": null,
+     "runId": "8753db83-fdbe-44aa-b3d5-a08b5d403917"
+    }
+   ]
+  },
+  "three_distinct_failed_fix_cycles_stop_at_four_candidates": {
+   "run": {
+    "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093",
+    "status": "FINISHED",
+    "verdict": "FAIL",
+    "fixAttempt": 3,
+    "codeVersion": 4
+   },
+   "events": [
+    {
+     "eventType": "RUN_STARTED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "PLANNER_OUTPUT_VALIDATED",
+     "actor": "Orchestrator",
+     "codeVersion": null,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "3a82e979-3b33-4753-baa2-1c0afea3d337",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 1,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "issueId": "3a82e979-3b33-4753-baa2-1c0afea3d337",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 2,
+     "requirementIds": [
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd"
+     ],
+     "issueId": "0977c4a5-e462-44d2-8b1d-890a1629dc3e",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 2,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd"
+     ],
+     "issueId": "0977c4a5-e462-44d2-8b1d-890a1629dc3e",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 3,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e"
+     ],
+     "issueId": "6ca2df6d-3be1-4ce7-b359-e6505eb33f2c",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 3,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 3,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "FIX_REQUESTED",
+     "actor": "Orchestrator",
+     "codeVersion": 4,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e"
+     ],
+     "issueId": "6ca2df6d-3be1-4ce7-b359-e6505eb33f2c",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "SNAPSHOT_FROZEN",
+     "actor": "Orchestrator",
+     "codeVersion": 4,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "FIX_COMPLETED",
+     "actor": "DEVELOPER",
+     "codeVersion": 4,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "BUILD_PASSED",
+     "actor": "Orchestrator",
+     "codeVersion": 4,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "ISSUE_CREATED",
+     "actor": "QA",
+     "codeVersion": 4,
+     "requirementIds": [
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3"
+     ],
+     "issueId": "2d6f9881-60a1-49e0-af1a-57c20d85a249",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "QA",
+     "codeVersion": 4,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VALIDATION_FINISHED",
+     "actor": "SECURITY",
+     "codeVersion": 4,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "VERDICT_CREATED",
+     "actor": "Orchestrator",
+     "codeVersion": 4,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "eventType": "RUN_FINISHED",
+     "actor": "Orchestrator",
+     "codeVersion": 4,
+     "requirementIds": [],
+     "issueId": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    }
+   ],
+   "eventsTotal": 30,
+   "issues": [
+    {
+     "issueId": "3a82e979-3b33-4753-baa2-1c0afea3d337",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 1,
+     "newCodeVersion": 2,
+     "revalidationResult": "PASS",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "issueId": "0977c4a5-e462-44d2-8b1d-890a1629dc3e",
+     "codeVersion": 2,
+     "requirementIds": [
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 2,
+     "newCodeVersion": 3,
+     "revalidationResult": "PASS",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "issueId": "6ca2df6d-3be1-4ce7-b359-e6505eb33f2c",
+     "codeVersion": 3,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": 3,
+     "newCodeVersion": 4,
+     "revalidationResult": "PASS",
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    },
+    {
+     "issueId": "2d6f9881-60a1-49e0-af1a-57c20d85a249",
+     "codeVersion": 4,
+     "requirementIds": [
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "previousCodeVersion": null,
+     "newCodeVersion": null,
+     "revalidationResult": null,
+     "runId": "5cbbce60-5d4b-4640-92f9-a51a38a51093"
+    }
+   ]
+  }
+ }
+}

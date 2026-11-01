@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" fill="none">
+  <!-- 문서와 작업 카드가 연결된 단순한 협업 흐름 그림입니다. -->
+  <g stroke="#779ed4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M340 450H440V340H760V450H870" stroke-dasharray="8 12" opacity=".65"/>
+    <path d="M600 230V340M980 530V650H760" stroke-dasharray="8 12" opacity=".65"/>
+
+    <g transform="rotate(-8 230 430)">
+      <rect x="122" y="280" width="236" height="326" rx="16" fill="#203955" opacity=".5"/>
+      <path d="M136 254H292L340 304V580H136V254Z" fill="#294768"/>
+      <path d="M292 254V304H340" fill="#385d86"/>
+      <rect x="164" y="294" width="36" height="36" rx="7" fill="#4b729e" stroke="none"/>
+      <path d="M164 366H302M164 398H302M164 430H272M164 462H290"/>
+      <path d="m166 515 10 10 20-23M212 515H286" stroke="#97c8d4"/>
+    </g>
+
+    <g transform="rotate(7 980 440)">
+      <rect x="870" y="342" width="246" height="188" rx="16" fill="#233e5c"/>
+      <path d="M870 388H1116"/>
+      <rect x="892" y="360" width="18" height="10" rx="3" fill="#a9c7ee" stroke="none"/>
+      <path d="M924 365H990M896 418H998M896 445H1052M896 472H1020"/>
+      <path d="m1066 478 9 9 17-22" stroke="#97c8d4"/>
+    </g>
+
+    <g opacity=".75">
+      <path d="M550 80H636L664 108V222H550V80Z" fill="#253f5f"/>
+      <path d="M636 80V108H664M572 135H640M572 160H640M572 185H616"/>
+    </g>
+
+    <rect x="702" y="620" width="120" height="64" rx="12" fill="#294768"/>
+    <path d="m722 652 8 8 16-20M758 650H799" stroke="#97c8d4"/>
+  </g>
+</svg>

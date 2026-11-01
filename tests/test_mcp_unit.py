@@ -231,7 +231,8 @@ class UnitToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(dict(self.tools().handlers(role)), {})
             with self.assertRaises(MCPProtocolError):
                 await self.dispatcher(role).call_tool("run_unit_tests", self.arguments())
-        # Security is now supported, but may not use this Developer scope.
+        # Security is supported only for explicitly approved Security scopes.
+        self.assertEqual(set(self.tools().handlers(AgentRole.SECURITY)), {"run_unit_tests"})
         denied = await self.dispatcher(AgentRole.SECURITY).call_tool("run_unit_tests", self.arguments())
         self.assertEqual(denied.error_code, "PERMISSION_DENIED")
         self.assertEqual(self.docker.calls, [])

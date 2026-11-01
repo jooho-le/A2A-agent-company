@@ -33,7 +33,7 @@
 `owned-tools.example.json`의 `unit.scopes`에 다음 자체 테스트 scope를 추가했다.
 
 ```json
-{"name": "security-unit", "kind": "QA_TESTS", "role": "SECURITY", "source_directory": "tests", "pattern": "test_*.py"}
+{"name": "security-tests", "kind": "QA_TESTS", "role": "SECURITY", "source_directory": "tests", "pattern": "test_*.py"}
 ```
 
 Security 테스트는 `outputs/security/tests/`를 사용하고 QA 테스트와 섞이지 않는다. 기존 로컬 파일에 이 scope가 없으면 기존 Scanner/Assessor 경로를 유지하며 검증 근거 부족을 PASS로 바꾸지 않는다. **이 Host의 보호 case 파일은 QA 순환용 계약**이므로 별도 case 계약이 없는 Security `PROTECTED` scope는 구성 단계에서 거절한다. 최종 보호 공통 시험지는 역할 4가 개발 순환 밖에서 실행한다.

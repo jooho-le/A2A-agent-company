@@ -264,7 +264,8 @@ class MCPFileIOTests(unittest.TestCase):
             (AgentRole.DEVELOPER, "snapshots/app.py"),
             (AgentRole.QA, "source/app.py"),
             (AgentRole.QA, "outputs/security/report.py"),
-            (AgentRole.SECURITY, "outputs/security/report.py"),
+            (AgentRole.SECURITY, "source/app.py"),
+            (AgentRole.SECURITY, "outputs/qa/test.py"),
             (AgentRole.PLANNER, "planning/plan.py"),
         )
         for role, path in cases:

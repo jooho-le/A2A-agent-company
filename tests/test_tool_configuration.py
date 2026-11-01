@@ -334,6 +334,16 @@ class ToolConfigurationRoleTests(_ToolConfigurationFixture, unittest.TestCase):
         for role in (AgentRole.PLANNER, "SECURITY", "DEVELOPER", "ORCHESTRATOR", None):
             with self.subTest(role=role):
                 self.assert_code("INVALID", config.unit_configuration_for, role)
+        # Security gets only scopes naming its role; with none it keeps the scanner-plus-proof path.
+        self.assertIsNone(config.unit_configuration_for(AgentRole.SECURITY))
+
+    def test_security_receives_only_security_scopes(self):
+        data = deepcopy(self.data)
+        data["unit"]["scopes"].append({"name": "security-tests", "kind": "QA_TESTS", "role": "SECURITY"})
+        config = self.decode(data)
+        self.assertEqual([scope.name for scope in config.unit_configuration_for(AgentRole.SECURITY).scopes],
+                         ["security-tests"])
+        self.assertNotIn("security-tests", [scope.name for scope in config.unit_configuration_for(AgentRole.QA).scopes])
 
     def test_security_has_no_unit_profile_unless_explicitly_approved(self):
         self.assertIsNone(self.decode().unit_configuration_for(AgentRole.SECURITY))
