@@ -2,7 +2,7 @@ import { useState } from 'react'
 import SignupPage from './pages/SignupPage'
 import LoginPage from './pages/LoginPage'
 import PipelinePage from './pages/PipelinePage'
-import DashboardPage from './pages/DashboardPage'
+import AtelierDashboard from './pages/AtelierDashboard'
 import DocumentPage from './pages/DocumentPage'
 import './App.css'
 
@@ -66,7 +66,7 @@ function App() {
   }
 
   return (
-    <DashboardPage
+    <AtelierDashboard
       onRunScenario={() => setShowPipeline(true)}
       onOpenDocuments={() => setShowDocuments(true)}
       onLogout={handleLogout}
