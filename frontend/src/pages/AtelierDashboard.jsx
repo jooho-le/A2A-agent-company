@@ -33,6 +33,8 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [motionRequested, setMotionRequested] = useState(true)
   const [handoffStep, setHandoffStep] = useState(0)
+  const [singleHandoffStep, setSingleHandoffStep] = useState(0)
+  const [singleProjectCount, setSingleProjectCount] = useState(0)
   const [celebration, setCelebration] = useState(null)
   const mobile = useMediaQuery('(max-width:760px)')
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
@@ -40,7 +42,7 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const project = projects.find((item) => item.id === selectedId)
   const copy = viewCopy[view]
 
-  useAtelierMotion(rootRef, { enabled: motion, view, project, projectCount: projects.length, onStep: setHandoffStep })
+  useAtelierMotion(rootRef, { enabled: motion, view, mode, project, projectCount: projects.length, onStep: mode === 'single' ? setSingleHandoffStep : setHandoffStep })
 
   useEffect(() => {
     function restoreView() { setView(readView()); setDrawerOpen(false) }
@@ -143,8 +145,9 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   }
   function focusStep(event) {
     const index = Number(event.currentTarget.dataset.focusStep)
-    setHandoffStep(index)
-    const element = rootRef.current?.querySelector(`[data-handoff-step="${index}"]`)
+    if (mode === 'single') setSingleHandoffStep(index)
+    else setHandoffStep(index)
+    const element = Array.from(rootRef.current?.querySelectorAll(`[data-handoff-step="${index}"]`) || []).find((item) => !item.closest('[hidden]'))
     if (!element) return
     const box = element.getBoundingClientRect()
     const targetY = innerWidth <= 600 ? Math.min(innerHeight * 0.63, 490) : innerHeight * 0.5
@@ -166,17 +169,17 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
     <button type="button" className="sidebar-dismiss" aria-label="회사 메뉴 닫기" tabIndex={-1} onClick={() => closeDrawer(true)} />
     <AtelierIcons />
     <div className="app"><div className="titlebar"><span className="window-dots" aria-hidden="true"><i /><i /><i /></span><span>atelier / company workspace</span><span className="titlebar-note">ATELIER WORKSPACE</span></div>
-      <div className="layout"><AtelierSidebar view={view} mode={mode} count={projects.length} onView={changeView} mobile={mobile} open={drawerOpen} onClose={closeDrawer} onRunScenario={onRunScenario} onOpenDocuments={onOpenDocuments} onLogout={onLogout} />
+      <div className="layout"><AtelierSidebar view={view} mode={mode} count={mode === 'single' ? singleProjectCount : projects.length} onView={changeView} mobile={mobile} open={drawerOpen} onClose={closeDrawer} onRunScenario={onRunScenario} onOpenDocuments={onOpenDocuments} onLogout={onLogout} />
         <main className="main"><AtelierHeader view={view} drawerOpen={mobile && drawerOpen} onMenu={() => setDrawerOpen(!drawerOpen)} motion={motion} reducedMotion={reducedMotion} onMotion={() => setMotionRequested(!motionRequested)} onNew={requestNew} />
-          <div className="content"><header className="page-header"><div><p className="eyebrow">{copy[1]}</p><h1 id="page-title" tabIndex={-1} key={view}>{(copy[2].match(/\S+\s*/g) || []).map((word, index) => <span className="headline-word" style={{ '--word-index': index }} key={index}>{word}</span>)}</h1><p className="page-description">{copy[3]}</p></div><div className="office-date"><span>2026. 10. 30</span><strong>FRIDAY</strong></div></header>
+          <div className="content"><header className="page-header"><div><p className="eyebrow">{copy[1]}</p><h1 id="page-title" tabIndex={-1} key={view}>{(copy[2].match(/\S+\s*/g) || []).map((word, index) => <span className="headline-word" style={{ '--word-index': index }} key={index}>{word}</span>)}</h1><p className="page-description">{mode === 'single' && view === 'team' ? '기린 한 명이 기획·개발·QA·보안 역할을 순차 수행합니다.' : copy[3]}</p></div><div className="office-date"><span>2026. 10. 30</span><strong>FRIDAY</strong></div></header>
             <div hidden={mode !== 'multi'}>
-            <div id="home-view" className="view" hidden={view !== 'home'}><HomeView mode={mode} onMode={changeMode} projects={projects} project={project} activities={activities} onSelect={selectProject} onCreate={createProject} onNew={() => openModal('new')} onEmployee={(index) => openModal('employee', { index })} onPlan={(projectId) => openModal('plan', { projectId })} onAdvance={advance} onWorklog={() => openModal('worklog')} /></div>
+            <div id="home-view" className="view" hidden={view !== 'home'}><HomeView mode="multi" onMode={changeMode} projects={projects} project={project} activities={activities} onSelect={selectProject} onCreate={createProject} onNew={() => openModal('new')} onEmployee={(index) => openModal('employee', { index })} onPlan={(projectId) => openModal('plan', { projectId })} onAdvance={advance} onWorklog={() => openModal('worklog')} /></div>
             <section id="workflow-view" className="view" aria-label="팀의 업무 흐름" hidden={view !== 'workflow'}><WorkflowView project={project} activeStep={handoffStep} onStep={focusStep} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="projects-view" className="view" aria-label="전체 프로젝트" hidden={view !== 'projects'}><ProjectsView projects={projects} search={search} onSearch={setSearch} onSelect={(id) => { selectProject(id); changeView('home') }} /></section>
             <section id="team-view" className="view" aria-label="직원 소개" hidden={view !== 'team'}><TeamView project={project} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="outputs-view" className="view" aria-label="결과물 보관함" hidden={view !== 'outputs'}><OutputsView projects={projects} project={project} onSelect={selectProject} onFile={(index) => openModal('file', { index })} onDownload={download} /></section>
             </div>
-            <AtelierSingleMode view={view} active={mode === 'single'} onMode={changeMode} onView={changeView} newRequest={singleNewRequest} onNewHandled={() => setSingleNewRequest(false)} />
+            <AtelierSingleMode view={view} active={mode === 'single'} onMode={changeMode} onView={changeView} newRequest={singleNewRequest} onNewHandled={() => setSingleNewRequest(false)} activeStep={singleHandoffStep} onStep={focusStep} rootRef={rootRef} onProjectCount={setSingleProjectCount} onNotify={notify} />
             <footer className="page-footer"><span>DESIGN MOCKUP · 입력한 내용은 새로고침하면 초기화됩니다.</span><span>atelier — a company of your own.</span></footer>
           </div>
         </main>

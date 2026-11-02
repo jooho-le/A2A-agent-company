@@ -753,7 +753,7 @@ body[data-execution-mode="single"] .multi-mode-content{display:none!important}
     <div class="layout">
       <aside class="sidebar" id="company-sidebar" aria-label="회사 메뉴">
         <a class="brand" href="#/home" aria-label="atelier 회사 홈"><svg aria-hidden="true"><use href="#i-mark"/></svg><span>atelier<span class="brand-period">.</span></span></a>
-        <div class="company-name"><span class="company-monogram">J</span><span>주호의 소프트웨어 회사<small>MY AI COMPANY</small></span></div>
+        <div class="company-name"><span class="company-monogram">A</span><span>AI 소프트웨어 회사<small>MY AI COMPANY</small></span></div>
         <span class="nav-caption">WORKSPACE</span>
         <nav class="nav" aria-label="주 메뉴">
           <button class="nav-button" data-view="home" aria-current="page"><svg aria-hidden="true"><use href="#i-grid"/></svg><span>오피스</span></button>
@@ -763,10 +763,10 @@ body[data-execution-mode="single"] .multi-mode-content{display:none!important}
           <button class="nav-button" data-view="outputs"><svg aria-hidden="true"><use href="#i-file"/></svg><span>결과물 보관함</span></button>
         </nav>
         <div class="sidebar-memo"><span class="memo-label">OUR WAY OF WORKING</span><p>좋은 아이디어는 대표님이.<br>차근차근 만드는 일은 우리가.</p><span>기획 · 개발 · 품질 · 보안</span></div>
-        <div class="owner-profile"><span class="owner-avatar">JH</span><span><strong>주호 대표님</strong><small>회사 오너 · Owner</small></span><span class="owner-tag">YOU</span></div>
+        <div class="owner-profile"><span class="owner-avatar">A</span><span><strong>대표님</strong><small>회사 오너 · Owner</small></span><span class="owner-tag">YOU</span></div>
       </aside>
       <main class="main">
-        <header class="topbar"><div class="breadcrumb"><button class="mobile-menu-button" id="mobile-menu" type="button" aria-label="회사 메뉴 열기" aria-controls="company-sidebar" aria-expanded="false"><svg aria-hidden="true"><use href="#i-grid"/></svg></button><span>주호의 회사</span><svg aria-hidden="true"><use href="#i-chevron"/></svg><strong id="breadcrumb">오피스</strong></div><div class="topbar-actions"><span class="preview-label">목업 데이터</span><button class="motion-switch" id="motion-switch" aria-pressed="true" type="button">모션 켜짐</button><button class="button compact" data-new-project><svg aria-hidden="true"><use href="#i-plus"/></svg>새 업무</button></div></header>
+        <header class="topbar"><div class="breadcrumb"><button class="mobile-menu-button" id="mobile-menu" type="button" aria-label="회사 메뉴 열기" aria-controls="company-sidebar" aria-expanded="false"><svg aria-hidden="true"><use href="#i-grid"/></svg></button><span>우리 회사</span><svg aria-hidden="true"><use href="#i-chevron"/></svg><strong id="breadcrumb">오피스</strong></div><div class="topbar-actions"><span class="preview-label">목업 데이터</span><button class="motion-switch" id="motion-switch" aria-pressed="true" type="button">모션 켜짐</button><button class="button compact" data-new-project><svg aria-hidden="true"><use href="#i-plus"/></svg>새 업무</button></div></header>
         <div class="content">
           <header class="page-header"><div><p class="eyebrow" id="page-kicker">YOUR COMPANY, YOUR TEAM.</p><h1 id="page-title">대표님, 오늘도 좋은 일 만들어봐요.</h1><p class="page-description" id="page-description">아이디어를 맡기고, 직원들의 진행 상황을 확인하세요.</p></div><div class="office-date"><span>2026. 10. 30</span><strong>FRIDAY</strong></div></header>
           <div id="home-view" class="view">
@@ -1046,7 +1046,7 @@ body[data-execution-mode="single"] .multi-mode-content{display:none!important}
   function renderProjectOptions(){for(const select of [$('#project-select'),$('#outputs-select')])select.replaceChildren(...projects.map(project=>{const option=document.createElement('option');option.value=project.id;option.textContent=project.name;option.selected=project.id===selectedId;return option;}));}
   function projectMarkup(project){
     const state=status(project),amount=progress(project),monogram=project.id==='orbit'?'O':project.id==='flow'?'F':project.id==='desk'?'D':'+';
-    return `<button class="project-card" data-project="${project.id}" aria-label="${escapeText(project.name)} 업무 보기"><span class="project-card-top"><span class="project-monogram ${project.id==='flow'?'flow':project.id==='desk'?'desk':''}">${monogram}</span><span class="badge ${state.kind}">${state.text}</span></span><h2>${escapeText(project.name)}</h2><p>${escapeText(project.description)}</p><span class="project-card-meta"><span>의뢰인 · 주호 대표님</span><span>${escapeText(project.time)}</span></span><span class="progress-meta"><span>프로젝트 진행</span><strong>${amount}%</strong></span><span class="progress-track"><span class="progress-fill" style="display:block;width:${amount}%"></span></span><span class="project-card-footer"><span>담당 직원 4명</span>${icon('arrow')}</span></button>`;
+    return `<button class="project-card" data-project="${project.id}" aria-label="${escapeText(project.name)} 업무 보기"><span class="project-card-top"><span class="project-monogram ${project.id==='flow'?'flow':project.id==='desk'?'desk':''}">${monogram}</span><span class="badge ${state.kind}">${state.text}</span></span><h2>${escapeText(project.name)}</h2><p>${escapeText(project.description)}</p><span class="project-card-meta"><span>의뢰인 · 대표님</span><span>${escapeText(project.time)}</span></span><span class="progress-meta"><span>프로젝트 진행</span><strong>${amount}%</strong></span><span class="progress-track"><span class="progress-fill" style="display:block;width:${amount}%"></span></span><span class="project-card-footer"><span>담당 직원 4명</span>${icon('arrow')}</span></button>`;
   }
   function renderProjects(){
     const query=$('#search').value.trim().toLocaleLowerCase();const matches=projects.filter(project=>`${project.name} ${project.description}`.toLocaleLowerCase().includes(query));
@@ -1054,7 +1054,7 @@ body[data-execution-mode="single"] .multi-mode-content{display:none!important}
     $('#project-count').textContent=String(projects.length).padStart(2,'0');$('#nav-count').textContent=String(projects.length).padStart(2,'0');
     $('#active-count').replaceChildren(document.createTextNode(String(projects.filter(project=>project.phase!==3).length)),Object.assign(document.createElement('span'),{textContent:'건'}));
   }
-  function activityMarkup(activity){const employee=employees[activity.employee];const project=projects.find(item=>item.id===activity.projectId);return `<li class="activity-item"><span class="activity-avatar">${employee?employee.name.slice(0,1):'주'}</span><div><p class="activity-text"><strong>${employee?employee.name+' · '+employee.job:'주호 대표님'}</strong><br>${escapeText(activity.text)}</p><span class="activity-meta">${escapeText(project?.name||'프로젝트')} · ${activity.time}</span></div></li>`;}
+  function activityMarkup(activity){const employee=employees[activity.employee];const project=projects.find(item=>item.id===activity.projectId);return `<li class="activity-item"><span class="activity-avatar">${employee?employee.name.slice(0,1):'A'}</span><div><p class="activity-text"><strong>${employee?employee.name+' · '+employee.job:'대표님'}</strong><br>${escapeText(activity.text)}</p><span class="activity-meta">${escapeText(project?.name||'프로젝트')} · ${activity.time}</span></div></li>`;}
   function renderAction(){
     const pending=projects.filter(project=>project.needsApproval);const project=pending.find(item=>item.id===selectedId)||pending[0];
     const heading=`<div class="section-heading"><h2>대표님 결재함</h2><span class="count-pill">${pending.length}</span></div>`;

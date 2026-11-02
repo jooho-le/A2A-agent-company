@@ -10,7 +10,7 @@ export function useMediaQuery(query) {
 }
 
 // React가 관리하는 내용은 바꾸지 않고 화면 안의 CSS 변수와 표시용 클래스만 갱신합니다.
-export default function useAtelierMotion(rootRef, { enabled, view, project, projectCount, onStep }) {
+export default function useAtelierMotion(rootRef, { enabled, view, mode, project, projectCount, onStep }) {
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
@@ -41,8 +41,8 @@ export default function useAtelierMotion(rootRef, { enabled, view, project, proj
     function updateScroll() {
       frame = 0
       if (view !== 'workflow') return
-      const steps = all('[data-handoff-step]')
-      const stage = root.querySelector('.handoff-office .office-diorama')
+      const steps = all('[data-handoff-step]').filter((item) => !item.closest('[hidden]'))
+      const stage = all('.handoff-office .office-diorama').find((item) => !item.closest('[hidden]'))
       if (!steps.length || !stage) return
       const targetY = innerWidth <= 600 ? Math.min(innerHeight * 0.63, 490) : innerHeight * 0.5
       let nearest = 0
@@ -60,7 +60,7 @@ export default function useAtelierMotion(rootRef, { enabled, view, project, proj
       if (nearest !== activeStep) { activeStep = nearest; onStep(nearest) }
       const first = steps[0].getBoundingClientRect()
       const amount = Math.max(0, Math.min(1, (targetY - first.top) / (last.bottom - first.top)))
-      root.querySelector('.handoff-steps').style.setProperty('--handoff-progress', amount.toFixed(3))
+      all('.handoff-steps').find((item) => !item.closest('[hidden]')).style.setProperty('--handoff-progress', amount.toFixed(3))
       stage.style.setProperty('--desk-turn', enabled ? `${(-5 + amount * 14).toFixed(2)}deg` : '0deg')
       stage.style.setProperty('--desk-lean', enabled ? `${(amount * 3).toFixed(2)}deg` : '0deg')
     }
@@ -110,5 +110,5 @@ export default function useAtelierMotion(rootRef, { enabled, view, project, proj
       window.removeEventListener('blur', resetTilt)
       document.removeEventListener('visibilitychange', visibility)
     }
-  }, [rootRef, enabled, view, project, projectCount, onStep])
+  }, [rootRef, enabled, view, mode, project, projectCount, onStep])
 }
