@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AtelierIcons } from '../components/atelier/AtelierArtwork'
-import { AtelierHeader, AtelierSidebar } from '../components/atelier/AtelierChrome'
-import AtelierSingleMode from '../components/atelier/AtelierSingleMode'
+import { AtelierHeader, AtelierSidebar, OfficeDate } from '../components/atelier/AtelierChrome'
+import AgentOffice3D from '../components/atelier/AgentOffice3D'
 import AtelierDialog from '../components/atelier/AtelierDialog'
 import { HomeView, OutputsView, ProjectsView, TeamView, WorkflowView } from '../components/atelier/AtelierViews'
 import { artifactContent, initialActivities, initialProjects, viewCopy } from '../components/atelier/atelierMock'
@@ -21,8 +21,6 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const celebrationTimer = useRef(null)
   const celebrated = useRef(new Set())
   const downloads = useRef(new Map())
-  const [mode, setMode] = useState('multi')
-  const [singleNewRequest, setSingleNewRequest] = useState(false)
   const [view, setView] = useState(readView)
   const [projects, setProjects] = useState(() => structuredClone(initialProjects))
   const [activities, setActivities] = useState(initialActivities)
@@ -33,8 +31,6 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [motionRequested, setMotionRequested] = useState(true)
   const [handoffStep, setHandoffStep] = useState(0)
-  const [singleHandoffStep, setSingleHandoffStep] = useState(0)
-  const [singleProjectCount, setSingleProjectCount] = useState(0)
   const [celebration, setCelebration] = useState(null)
   const mobile = useMediaQuery('(max-width:760px)')
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
@@ -42,7 +38,7 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const project = projects.find((item) => item.id === selectedId)
   const copy = viewCopy[view]
 
-  useAtelierMotion(rootRef, { enabled: motion, view, mode, project, projectCount: projects.length, onStep: mode === 'single' ? setSingleHandoffStep : setHandoffStep })
+  useAtelierMotion(rootRef, { enabled: motion, view, mode: 'multi', project, projectCount: projects.length, onStep: setHandoffStep })
 
   useEffect(() => {
     function restoreView() { setView(readView()); setDrawerOpen(false) }
@@ -57,7 +53,7 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
 
   useEffect(() => {
     const previousTitle = document.title
-    document.title = `${viewCopy[view][0]} — atelier`
+    document.title = `${viewCopy[view][0]} — AI 에이전트 회사`
     rootRef.current?.querySelector('#page-title')?.focus({ preventScroll: true })
     return () => { document.title = previousTitle }
   }, [view])
@@ -72,11 +68,7 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
     }
   }, [])
 
-  function changeMode(next) {
-    setMode(next); setModal(null); setSingleNewRequest(false)
-    notify(next === 'single' ? '싱글 에이전트 목업입니다. 한 AI가 모든 단계를 순서대로 수행합니다.' : '기존 멀티 에이전트 목업으로 돌아왔습니다.')
-  }
-  function requestNew() { if (mode === 'single') { setSingleNewRequest(true); changeView('home') } else openModal('new') }
+  function requestNew() { openModal('new') }
   function notify(message) {
     clearTimeout(toastTimer.current)
     setToast(message)
@@ -109,23 +101,23 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
     setProjects((current) => [{ id, name, description: request, phase: 0, needsApproval: false, time: '방금 전', scope: [request], files: ['docs/project-plan.md'] }, ...current])
     setSelectedId(id); setSearch(''); setModal(null)
     record(0, '대표님의 새 업무 요청을 받았어요. 먼저 기획안을 정리할게요.', id)
-    changeView('home'); notify('사슴에게 업무를 맡겼어요. ‘다음 상태 보기’로 목업 흐름을 살펴보세요.')
+    changeView('home'); notify('기획 에이전트에게 업무를 맡겼어요. 3D 오피스의 시연 컨트롤로 흐름을 살펴보세요.')
   }
   function approvePlan() {
     const target = projects.find((item) => item.id === modal?.projectId)
     if (!target?.needsApproval) return
     updateProject(target.id, { needsApproval: false, phase: 1, files: target.id.startsWith('draft-') ? ['docs/project-plan.md', 'src/pages/Project.tsx', 'src/styles/tokens.css'] : target.files })
     setSelectedId(target.id); setModal(null)
-    record(null, '기획안을 승인했어요. 고양이가 개발을 시작합니다.', target.id)
-    changeView('home'); notify('기획안을 승인했어요. 목업의 고양이가 개발을 시작합니다.')
+    record(null, '기획안을 승인했어요. 개발 에이전트가 개발을 시작합니다.', target.id)
+    changeView('home'); notify('기획안을 승인했어요. 목업의 개발 에이전트가 개발을 시작합니다.')
   }
   function feedback(text) {
     const target = projects.find((item) => item.id === modal?.projectId)
     if (!target?.needsApproval) return
     updateProject(target.id, { feedback: text, scope: [...target.scope, text], needsApproval: false, phase: 0 })
     setSelectedId(target.id); setModal(null)
-    record(null, '기획안 수정을 요청했어요. 사슴이 피드백을 반영합니다.', target.id)
-    changeView('home'); notify('사슴에게 피드백을 전달했어요. 목업의 기획 작업을 다시 시작합니다.')
+    record(null, '기획안 수정을 요청했어요. 기획 에이전트가 피드백을 반영합니다.', target.id)
+    changeView('home'); notify('기획 에이전트에게 피드백을 전달했어요. 목업의 기획 작업을 다시 시작합니다.')
   }
   function advance() {
     if (project.needsApproval || project.phase === 3) return
@@ -134,7 +126,7 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
       record(0, '기획안을 준비했어요. 대표님께 확인을 요청합니다.', project.id)
     } else {
       updateProject(project.id, { phase: project.phase + 1 })
-      record(2, project.phase === 1 ? '개발을 마친 기능을 토끼와 함께 확인하고 있어요.' : '기능·보안 검토를 마친 목업 상태예요. 결과물을 확인해주세요.', project.id)
+      record(2, project.phase === 1 ? '개발을 마친 기능을 보안 에이전트와 함께 확인하고 있어요.' : '기능·보안 검토를 마친 목업 상태예요. 결과물을 확인해주세요.', project.id)
       if (project.phase === 2 && motion && !document.hidden && !celebrated.current.has(project.id)) {
         celebrated.current.add(project.id); setCelebration(project.id)
         clearTimeout(celebrationTimer.current)
@@ -145,8 +137,7 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   }
   function focusStep(event) {
     const index = Number(event.currentTarget.dataset.focusStep)
-    if (mode === 'single') setSingleHandoffStep(index)
-    else setHandoffStep(index)
+    setHandoffStep(index)
     const element = Array.from(rootRef.current?.querySelectorAll(`[data-handoff-step="${index}"]`) || []).find((item) => !item.closest('[hidden]'))
     if (!element) return
     const box = element.getBoundingClientRect()
@@ -168,19 +159,18 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   return <div ref={rootRef} className={`atelier-dashboard ${motion ? 'motion-ready' : 'motion-paused'}${mobile && drawerOpen ? ' nav-open' : ''}`}>
     <button type="button" className="sidebar-dismiss" aria-label="회사 메뉴 닫기" tabIndex={-1} onClick={() => closeDrawer(true)} />
     <AtelierIcons />
-    <div className="app"><div className="titlebar"><span className="window-dots" aria-hidden="true"><i /><i /><i /></span><span>atelier / company workspace</span><span className="titlebar-note">ATELIER WORKSPACE</span></div>
-      <div className="layout"><AtelierSidebar view={view} mode={mode} count={mode === 'single' ? singleProjectCount : projects.length} onView={changeView} mobile={mobile} open={drawerOpen} onClose={closeDrawer} onRunScenario={onRunScenario} onOpenDocuments={onOpenDocuments} onLogout={onLogout} />
+    <div className="app"><div className="titlebar"><span className="window-dots" aria-hidden="true"><i /><i /><i /></span><span>AI 에이전트 회사 / company workspace</span><span className="titlebar-note">AI AGENT COMPANY</span></div>
+      <div className="layout"><AtelierSidebar view={view} mode="multi" count={projects.length} onView={changeView} mobile={mobile} open={drawerOpen} onClose={closeDrawer} onRunScenario={onRunScenario} onOpenDocuments={onOpenDocuments} onLogout={onLogout} />
         <main className="main"><AtelierHeader view={view} drawerOpen={mobile && drawerOpen} onMenu={() => setDrawerOpen(!drawerOpen)} motion={motion} reducedMotion={reducedMotion} onMotion={() => setMotionRequested(!motionRequested)} onNew={requestNew} />
-          <div className="content"><header className="page-header"><div><p className="eyebrow">{copy[1]}</p><h1 id="page-title" tabIndex={-1} key={view}>{(copy[2].match(/\S+\s*/g) || []).map((word, index) => <span className="headline-word" style={{ '--word-index': index }} key={index}>{word}</span>)}</h1><p className="page-description">{mode === 'single' && view === 'team' ? '기린 한 명이 기획·개발·QA·보안 역할을 순차 수행합니다.' : copy[3]}</p></div><div className="office-date"><span>2026. 10. 30</span><strong>FRIDAY</strong></div></header>
-            <div hidden={mode !== 'multi'}>
-            <div id="home-view" className="view" hidden={view !== 'home'}><HomeView mode="multi" onMode={changeMode} projects={projects} project={project} activities={activities} onSelect={selectProject} onCreate={createProject} onNew={() => openModal('new')} onEmployee={(index) => openModal('employee', { index })} onPlan={(projectId) => openModal('plan', { projectId })} onAdvance={advance} onWorklog={() => openModal('worklog')} /></div>
+          <div className="content"><header className="page-header"><div><p className="eyebrow">{copy[1]}</p><h1 id="page-title" tabIndex={-1} key={view}>{(copy[2].match(/\S+\s*/g) || []).map((word, index) => <span className="headline-word" style={{ '--word-index': index }} key={index}>{word}</span>)}</h1><p className="page-description">{copy[3]}</p></div><OfficeDate /></header>
+            <div>
+            <div id="home-view" className="view" hidden={view !== 'home'}><HomeView officeScene={view === 'home' ? <AgentOffice3D requestText={project.description} motionEnabled={motion} /> : null} mode="multi" projects={projects} project={project} activities={activities} onSelect={selectProject} onCreate={createProject} onNew={() => openModal('new')} onEmployee={(index) => openModal('employee', { index })} onPlan={(projectId) => openModal('plan', { projectId })} onAdvance={advance} onWorklog={() => openModal('worklog')} /></div>
             <section id="workflow-view" className="view" aria-label="팀의 업무 흐름" hidden={view !== 'workflow'}><WorkflowView project={project} activeStep={handoffStep} onStep={focusStep} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="projects-view" className="view" aria-label="전체 프로젝트" hidden={view !== 'projects'}><ProjectsView projects={projects} search={search} onSearch={setSearch} onSelect={(id) => { selectProject(id); changeView('home') }} /></section>
             <section id="team-view" className="view" aria-label="직원 소개" hidden={view !== 'team'}><TeamView project={project} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="outputs-view" className="view" aria-label="결과물 보관함" hidden={view !== 'outputs'}><OutputsView projects={projects} project={project} onSelect={selectProject} onFile={(index) => openModal('file', { index })} onDownload={download} /></section>
             </div>
-            <AtelierSingleMode view={view} active={mode === 'single'} onMode={changeMode} onView={changeView} newRequest={singleNewRequest} onNewHandled={() => setSingleNewRequest(false)} activeStep={singleHandoffStep} onStep={focusStep} rootRef={rootRef} onProjectCount={setSingleProjectCount} onNotify={notify} />
-            <footer className="page-footer"><span>DESIGN MOCKUP · 입력한 내용은 새로고침하면 초기화됩니다.</span><span>atelier — a company of your own.</span></footer>
+            <footer className="page-footer"><span>DESIGN MOCKUP · 입력한 내용은 새로고침하면 초기화됩니다.</span><span>AI 에이전트 회사 — a company of your own.</span></footer>
           </div>
         </main>
       </div>

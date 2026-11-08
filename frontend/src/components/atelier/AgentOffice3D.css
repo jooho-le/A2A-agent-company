@@ -1,0 +1,78 @@
+/* 원본의 전역 html/body/header/footer 규칙을 가져오지 않고 이 영역 안에만 적용합니다. */
+.atelier-dashboard .agent-office-3d { min-width:0; margin-bottom:20px; overflow:hidden; isolation:isolate; color:#e9e7e2; background:#0b0e13; border:1px solid #34404e; border-radius:12px; }
+.atelier-dashboard .agent-office-3d [hidden] { display:none!important; }
+.atelier-dashboard .agent-office-3d button, .atelier-dashboard .agent-office-3d select { font:inherit; font-size:11px; color:#d9dfe8; background:#141c28; border:1px solid #ffffff24; border-radius:7px; padding:8px 10px; cursor:pointer; }
+.atelier-dashboard .agent-office-3d button:hover { background:#263141; }
+.atelier-dashboard .agent-office-3d button:focus-visible, .atelier-dashboard .agent-office-3d select:focus-visible, .atelier-dashboard .agent-office-3d input:focus-visible, .atelier-dashboard .agent-office-3d:focus-visible { outline:2px solid #d4ff24; outline-offset:3px; }
+.atelier-dashboard .agent-office-3d button:disabled { opacity:.45; cursor:default; }
+.atelier-dashboard .office3d-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:18px 18px 8px; }
+.atelier-dashboard .office3d-heading h3 { margin:0 0 6px; font-size:16px; font-weight:600; letter-spacing:-.4px; }
+.atelier-dashboard .office3d-heading p { margin:0; font-size:10px; color:#a0a7b1; line-height:1.5; }
+.atelier-dashboard .office3d-mock { flex-shrink:0; font-size:10px; padding:5px 8px; border:1px solid #d4ff2444; border-radius:20px; color:#d4ff24; }
+.atelier-dashboard .office3d-disclaimer { margin:0; padding:4px 18px 14px; color:#a0a7b1; font-size:10px; line-height:1.6; }
+.atelier-dashboard .office3d-lead-summary { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; margin:0 12px 10px; padding:10px 12px; border:1px solid #75613c; border-radius:8px; background:#24241d; }
+.atelier-dashboard .office3d-lead-summary strong { color:#ead29a; font-size:11px; font-weight:600; }
+.atelier-dashboard .office3d-lead-summary>span { color:#bec2c9; font-size:10px; line-height:1.6; }
+.atelier-dashboard .office3d-workflow { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; padding:0 12px 12px; }
+.atelier-dashboard .agent-office-3d .office3d-step { display:flex; justify-content:center; align-items:center; gap:6px; color:#a0a7b1; border-color:transparent; background:transparent; padding:8px 3px; }
+.atelier-dashboard .office3d-step span { display:grid; place-items:center; width:19px; height:19px; border:1px solid #77808e60; border-radius:50%; font-size:10px; }
+.atelier-dashboard .agent-office-3d .office3d-step.current { background:#1558c92b; border-color:#1558c978; color:#edf2ff; }
+.atelier-dashboard .office3d-step.current span { background:#1558c9; border-color:#1558c9; }
+.atelier-dashboard .office3d-step.done span { border-color:#d4ff2460; color:#d4ff24; }
+.atelier-dashboard .office3d-tools { display:flex; flex-wrap:wrap; gap:6px; padding:0 12px 10px; }
+.atelier-dashboard .office3d-stage { position:relative; width:100%; height:460px; overflow:hidden; touch-action:pan-y; }
+.atelier-dashboard .office3d-stage canvas { display:block; width:100%; height:100%; }
+.atelier-dashboard .office3d-loading { position:absolute; inset:0; display:grid; place-content:center; background:#0b0e13; color:#aab2bd; font-size:12px; z-index:5; }
+.atelier-dashboard .agent-office-3d .office3d-agent-label { position:absolute; top:0; left:0; display:flex; align-items:center; gap:5px; white-space:nowrap; padding:6px 8px; font-size:10px; border-radius:20px; background:#0a0f15dd; backdrop-filter:blur(12px); will-change:transform; }
+.atelier-dashboard .office3d-agent-label small { font-size:9px; color:#9aa5b3; }
+.atelier-dashboard .office3d-agent-label .status-dot { width:5px; height:5px; border-radius:50%; background:#747986; }
+.atelier-dashboard .agent-office-3d .office3d-agent-label[data-state=working] { border-color:#d4ff2460; }
+.atelier-dashboard .office3d-agent-label[data-state=working] .status-dot { background:#d4ff24; }
+.atelier-dashboard .office3d-agent-label[data-state=handoff] .status-dot { background:#1558c9; }
+.atelier-dashboard .office3d-agent-label[data-state=completed] .status-dot { background:#9dc88f; }
+.atelier-dashboard .agent-office-3d .office3d-agent-label.is-lead { border-color:#b69a60; color:#ead29a; background:#23241de8; }
+.atelier-dashboard .office3d-lead-tag { padding:2px 4px; border-radius:4px; background:#d6bc7b; color:#2a281f; font-size:8px; font-weight:650; }
+.atelier-dashboard .office3d-bubble { position:absolute; z-index:2; left:50%; top:12px; translate:-50% 0; width:min(290px,calc(100% - 28px)); min-height:116px; padding:11px 14px 20px; border:1px solid #ced9ff88; border-radius:14px; background:#101723f7; box-shadow:0 10px 30px #0007; pointer-events:none; }
+.atelier-dashboard .office3d-bubble::after { content:''; position:absolute; top:100%; left:var(--popup-tail,50%); margin-left:-8px; border:8px solid transparent; border-top-color:#101723; }
+.atelier-dashboard .office3d-bubble-role { font-size:10px; color:#adbcf8; font-weight:600; }
+.atelier-dashboard .office3d-emotion:not(:empty) { display:inline-block; margin-top:5px; padding:2px 6px; border:1px solid #ffc4c555; border-radius:5px; color:#ffe1da; font-size:9px; }
+.atelier-dashboard .office3d-bubble h4 { margin:5px 0; font-size:16px; line-height:1.3; color:#fff; }
+.atelier-dashboard .office3d-bubble p { margin:0; color:#d1d9e9; font-size:11px; line-height:1.5; }
+.atelier-dashboard .office3d-bubble[data-tone=error] { background:#751b28fa; border-color:#ff9699; }
+.atelier-dashboard .office3d-bubble[data-tone=error]::after { border-top-color:#751b28; }
+.atelier-dashboard .office3d-bubble[data-tone=error] .office3d-bubble-role { color:#ffc4c5; }
+.atelier-dashboard .office3d-bubble[data-tone=success] { border-color:#d4ff2488; }
+.atelier-dashboard .office3d-bubble-track { position:absolute; bottom:9px; left:14px; right:14px; height:3px; border-radius:3px; background:#ffffff24; overflow:hidden; }
+.atelier-dashboard [data-office3d=bubble-progress] { width:100%; height:100%; transform-origin:left; background:#b7c6ff; }
+.atelier-dashboard .office3d-bubble[data-tone=error] [data-office3d=bubble-progress] { background:#ff969b; }
+.atelier-dashboard .office3d-celebration { position:absolute; z-index:2; top:12px; left:50%; translate:-50% 0; scale:var(--celebration-scale,1); transform-origin:top center; width:min(260px,calc(100% - 24px)); text-align:center; padding:8px 12px; border:1px solid #d4ff2488; border-radius:14px; background:#101820f5; pointer-events:none; }
+.atelier-dashboard .office3d-celebration span { font-size:10px; color:#d4ff24; }
+.atelier-dashboard .office3d-celebration h4 { margin:4px 0; font-size:18px; line-height:1.25; color:#f3ffdc; }
+.atelier-dashboard .office3d-celebration p { margin:0; font-size:10px; line-height:1.4; color:#d1d9e9; }
+.atelier-dashboard .office3d-status { position:absolute; z-index:3; left:12px; right:12px; bottom:12px; max-width:310px; padding:12px; border:1px solid #ffffff30; border-radius:10px; background:#0b101aee; }
+.atelier-dashboard .office3d-status h4 { margin:0 0 6px; font-size:12px; }
+.atelier-dashboard .office3d-status pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; color:#a4b7cb; font:10px/1.7 ui-monospace,monospace; }
+.atelier-dashboard .office3d-player { position:relative; padding:14px; background:#0d1119; border-top:1px solid #ffffff17; }
+.atelier-dashboard .office3d-caption { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px; }
+.atelier-dashboard .office3d-caption p { margin:0; min-width:0; overflow-wrap:anywhere; font-size:11px; line-height:1.6; }
+.atelier-dashboard .office3d-caption small { white-space:nowrap; padding-top:2px; color:#d4ff24; font-size:10px; }
+.atelier-dashboard .office3d-controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.atelier-dashboard .agent-office-3d .office3d-play { color:#1b2209; background:#d4ff24; border-color:#d4ff24; min-width:92px; }
+.atelier-dashboard .office3d-track { display:flex; flex:1; min-width:140px; align-items:center; gap:8px; }
+.atelier-dashboard .office3d-track input { appearance:none; min-width:30px; width:100%; flex:1; height:4px; border:0; padding:0; border-radius:3px; background:linear-gradient(to right,#d4ff24 var(--played,0%),#343b49 var(--played,0%)); cursor:pointer; }
+.atelier-dashboard .office3d-track input::-webkit-slider-thumb { appearance:none; width:12px; height:12px; background:#e7eadd; border-radius:50%; }
+.atelier-dashboard .office3d-track span { font:10px ui-monospace,monospace; color:#a8aebb; white-space:nowrap; }
+.atelier-dashboard .office3d-demo-controls { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.atelier-dashboard .office3d-demo-controls label { display:flex; align-items:center; gap:8px; font-size:10px; color:#a0a7b1; }
+.atelier-dashboard .office3d-hint { margin:12px 0 0; color:#8793a4; font-size:10px; line-height:1.6; }
+.atelier-dashboard .office3d-error { margin:0; padding:24px; font-size:12px; line-height:1.7; color:#ffb8b8; }
+.atelier-dashboard .agent-office-3d:fullscreen { display:flex; flex-direction:column; margin:0; overflow:auto; border-radius:0; }
+.atelier-dashboard .agent-office-3d:fullscreen .office3d-stage { flex:1; min-height:240px; height:auto; }
+@media(max-width:600px) {
+  .atelier-dashboard .office3d-stage { height:390px; }
+  .atelier-dashboard .office3d-agent-label small { display:none; }
+  .atelier-dashboard .office3d-controls { gap:8px; }
+  .atelier-dashboard .office3d-track { flex-basis:100%; order:3; }
+  .atelier-dashboard .office3d-player { padding:12px; }
+  .atelier-dashboard .office3d-bubble { width:min(252px,calc(100% - 24px)); }
+}

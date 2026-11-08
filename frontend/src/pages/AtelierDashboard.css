@@ -280,7 +280,8 @@
 .atelier-dashboard .project-card:hover { background: #14171c; border-color: #6f7b69; }
 .atelier-dashboard .project-card h2 { font-size: 18px; margin-top: 18px; line-height: 1.5; }
 .atelier-dashboard .project-card > p { font-size: 11px; line-height: 1.8; }
-.atelier-dashboard .project-monogram { border-radius: var(--radius-pill); }
+.atelier-dashboard .project-monogram { width: 42px; height: 42px; border-radius: 50%; }
+.atelier-dashboard .project-monogram::before { content: none; }
 .atelier-dashboard .project-card-top { gap: 14px; }
 .atelier-dashboard .project-card-meta, .atelier-dashboard .project-card-footer { font-size: 10px; }
 .atelier-dashboard .empty-state { border-radius: var(--radius-card); padding: 70px 24px; }
@@ -708,6 +709,19 @@
 /* 두 모드의 입력창과 바깥 포커스 표시 사이에 같은 간격을 확보합니다. */
 .atelier-dashboard .request-composer .request-name { min-height: 44px; }
 .atelier-dashboard .request-composer .request-text { margin-top: 16px; min-height: 112px; padding-block: 12px; }
+
+/* 로고를 뺀 자리의 여백을 줄이고 회사명을 사이드바의 중심 표기로 사용합니다. */
+.atelier-dashboard .sidebar .company-name { margin-top: 0; margin-bottom: 24px; padding-top: 8px; padding-bottom: 18px; font-size: 15px; font-weight: 650; gap: 10px; }
+.atelier-dashboard .sidebar .company-name small { font-size: 8px; font-weight: 450; margin-top: 5px; }
+
+/* 골드 표시는 직책 안내입니다. 실제 작업 상태를 나타내는 색상과 구분합니다. */
+.atelier-dashboard .agent-card[data-lead="true"] { border-color: #9a8559; }
+.atelier-dashboard .agent-card[data-lead="true"]:hover { border-color: #c8ae76; }
+.atelier-dashboard .portrait[data-person="planner"] { background: #e0dbcc; }
+.atelier-dashboard .leader-portrait-badge { position: absolute; top: 15px; right: 15px; padding: 5px 9px; border: 1px solid #a38b55; border-radius: 20px; background: #f1e6c9; color: #5c4828; font-size: 9px; font-weight: 650; z-index: 2; }
+.atelier-dashboard .leader-rank { align-self: flex-start; margin-top: 9px; padding: 4px 8px; border: 1px solid #76633e; border-radius: 20px; background: #2a281f; color: #e4cc94; font-size: 9px; line-height: 1.5; }
+.atelier-dashboard .handoff-step[data-lead="true"] .handoff-employee { color: #e4cc94; }
+.atelier-dashboard .handoff-step[data-lead="true"] .handoff-step-number { border-color: #a38b55; }
 
 @keyframes atelier-single-relay-handoff {
   0%, 3.125% { left: var(--single-relay-x-0, 12.5%); opacity: 0; transform: translate(-50%, -50%) rotate(-10deg); }

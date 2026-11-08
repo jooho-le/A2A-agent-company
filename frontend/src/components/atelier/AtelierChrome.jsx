@@ -2,7 +2,45 @@ import { useEffect, useRef, useState } from 'react'
 import { Icon } from './AtelierArtwork'
 import { viewCopy } from './atelierMock'
 
+const koreaTimeZone = 'Asia/Seoul'
+const dateFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: koreaTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+const weekdayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: koreaTimeZone, weekday: 'long' })
 
+export function OfficeDate() {
+  const [today, setToday] = useState(() => new Date())
+
+  useEffect(() => {
+    let timer
+    function scheduleMidnight() {
+      clearTimeout(timer)
+      const dayInMilliseconds = 24 * 60 * 60 * 1000
+      const koreanTime = Date.now() + 9 * 60 * 60 * 1000
+      // 한국 시간 자정이 지나면 화면을 새로고침하지 않아도 날짜와 요일을 바꿉니다.
+      timer = setTimeout(() => {
+        setToday(new Date())
+        scheduleMidnight()
+      }, dayInMilliseconds - koreanTime % dayInMilliseconds + 100)
+    }
+    function refresh() {
+      setToday(new Date())
+      scheduleMidnight()
+    }
+    function resume() { if (!document.hidden) refresh() }
+    scheduleMidnight()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', resume)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', resume)
+    }
+  }, [])
+
+  const parts = dateFormatter.formatToParts(today)
+  const part = (type) => parts.find((value) => value.type === type).value
+  const date = `${part('year')}-${part('month')}-${part('day')}`
+  return <div className="office-date"><time dateTime={date}>{date.replaceAll('-', '. ')}</time><strong>{weekdayFormatter.format(today).toUpperCase()}</strong></div>
+}
 
 export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClose, onRunScenario, onOpenDocuments, onLogout }) {
   const sidebarRef = useRef(null)
@@ -35,8 +73,7 @@ export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClos
     }
   }, [open, mobile, onClose])
   return <aside ref={sidebarRef} className="sidebar" id="company-sidebar" aria-label="회사 메뉴" inert={mobile && !open ? true : undefined}>
-    <a className="brand" href="#/home" onClick={(event) => { event.preventDefault(); onView('home') }} aria-label="atelier 회사 홈"><Icon name="mark" /><span>atelier<span className="brand-period">.</span></span></a>
-    <div className="company-name"><span className="company-monogram">A</span><span>AI 소프트웨어 회사<small>MY AI COMPANY</small></span></div>
+    <a className="company-name" href="#/home" onClick={(event) => { event.preventDefault(); onView('home') }} aria-label="AI 에이전트 회사 홈"><span className="company-monogram">A</span><span>AI 에이전트 회사<small>MY AI COMPANY</small></span></a>
     <span className="nav-caption">WORKSPACE</span>
     <nav className="nav" aria-label="주 메뉴">{[['home', 'grid'], ['projects', 'folder'], ['team', 'team'], ['workflow', 'arrow'], ['outputs', 'file']].map(([name, icon]) => <button key={name} type="button" className="nav-button" data-view={name} aria-current={view === name ? 'page' : undefined} onClick={() => onView(name)}><Icon name={icon} /><span>{viewCopy[name][0]}</span>{name === 'projects' && <span className="nav-count">{String(count).padStart(2, '0')}</span>}{name === 'team' && <span className="nav-count">{mode === 'single' ? '01' : '04'}</span>}</button>)}</nav>
     <div className="sidebar-memo"><span className="memo-label">OUR WAY OF WORKING</span><p>좋은 아이디어는 대표님이.<br />차근차근 만드는 일은 우리가.</p><span>기획 · 개발 · 품질 · 보안</span></div>
