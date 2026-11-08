@@ -6,6 +6,9 @@ import AtelierDashboard from './pages/AtelierDashboard'
 import DocumentPage from './pages/DocumentPage'
 import './App.css'
 
+// 플랫폼 로그인이 필요해지면 true로 바꿔 기존 인증 화면을 다시 활성화합니다.
+const REQUIRE_PLATFORM_LOGIN = false
+
 function App() {
   // 기존 sessionStorage 토큰으로 새로고침 후에도 화면 흐름을 복원합니다.
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(sessionStorage.getItem('access_token')))
@@ -31,8 +34,8 @@ function App() {
     setLoginNotice('')
   }
 
-  // 인증 전에는 Dashboard와 시나리오 화면을 표시하지 않습니다.
-  if (!isAuthenticated) {
+  // 설정이 켜진 경우에만 기존 로그인·회원가입 화면을 먼저 표시합니다.
+  if (REQUIRE_PLATFORM_LOGIN && !isAuthenticated) {
     if (showSignup) {
       return (
         <SignupPage
