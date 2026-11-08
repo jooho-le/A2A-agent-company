@@ -10,6 +10,17 @@
 .atelier-dashboard .office3d-heading p { margin:0; font-size:10px; color:#a0a7b1; line-height:1.5; }
 .atelier-dashboard .office3d-mock { flex-shrink:0; font-size:10px; padding:5px 8px; border:1px solid #d4ff2444; border-radius:20px; color:#d4ff24; }
 .atelier-dashboard .office3d-disclaimer { margin:0; padding:4px 18px 14px; color:#a0a7b1; font-size:10px; line-height:1.6; }
+.atelier-dashboard .office3d-mode { display:flex; flex-wrap:wrap; gap:6px; padding:0 18px 8px; }
+.atelier-dashboard .office3d-mode button[aria-pressed=true] { border-color:#d4ff2488; color:#d4ff24; }
+.atelier-dashboard .office3d-live-summary { margin:0 12px 12px; padding:10px 12px; border:1px solid #34404e; border-radius:8px; font-size:11px; overflow-wrap:anywhere; }
+.atelier-dashboard .office3d-live-summary p { margin:0 0 8px; color:#c0c9d6; line-height:1.6; }
+.atelier-dashboard .office3d-live-summary ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:0; margin:0; list-style:none; }
+.atelier-dashboard .office3d-live-summary li { line-height:1.6; color:#aab2bd; }
+.atelier-dashboard .office3d-live-summary [data-state=working] { color:#d4ff24; }
+.atelier-dashboard .office3d-agent-label[data-state=succeeded] .status-dot { background:#9dc88f; }
+.atelier-dashboard .office3d-live-summary [data-state=failed] { color:#ffb8b8; }
+.atelier-dashboard .office3d-agent-label[data-state=failed] .status-dot { background:#ff9699; }
+.atelier-dashboard .office3d-bubble[data-mode=actual] .office3d-bubble-track { display:none; }
 .atelier-dashboard .office3d-lead-summary { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; margin:0 12px 10px; padding:10px 12px; border:1px solid #75613c; border-radius:8px; background:#24241d; }
 .atelier-dashboard .office3d-lead-summary strong { color:#ead29a; font-size:11px; font-weight:600; }
 .atelier-dashboard .office3d-lead-summary>span { color:#bec2c9; font-size:10px; line-height:1.6; }

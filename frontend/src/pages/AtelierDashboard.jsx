@@ -1,12 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { AtelierIcons } from '../components/atelier/AtelierArtwork'
 import { AtelierHeader, AtelierSidebar, OfficeDate } from '../components/atelier/AtelierChrome'
 import AgentOffice3D from '../components/atelier/AgentOffice3D'
+import AgentRunMonitor from '../components/atelier/AgentRunMonitor'
+import { buildAgentRunDisplayState } from '../components/atelier/agentRunDisplayState'
 import AtelierDialog from '../components/atelier/AtelierDialog'
 import { HomeView, OutputsView, ProjectsView, TeamView, WorkflowView } from '../components/atelier/AtelierViews'
 import { artifactContent, initialActivities, initialProjects, viewCopy } from '../components/atelier/atelierMock'
 import useAtelierMotion, { useMediaQuery } from '../components/atelier/useAtelierMotion'
+import useAgentRunMonitor from '../hooks/useAgentRunMonitor'
 import './AtelierDashboard.css'
+
+const runEventLimit = 20
+
+function runQueryReducer(state, action) {
+  if (action.type === 'select') return { runId: action.runId, offset: 0, followLatest: Boolean(action.runId) }
+  if (action.type === 'refresh') return { ...state, followLatest: true }
+  if (action.type === 'page') return { ...state, offset: action.offset, followLatest: false }
+  // 사용자가 조회·새로고침할 때 최신 구간을 한 번 결정합니다. 자동 갱신은 선택한 페이지를 유지합니다.
+  if (action.type === 'latest' && state.runId === action.runId && state.followLatest) {
+    return { ...state, offset: Math.max(0, action.total - runEventLimit), followLatest: false }
+  }
+  return state
+}
 
 function readView() {
   const route = window.location.hash.startsWith('#/') ? window.location.hash.slice(2) : 'home'
@@ -32,6 +48,19 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const [motionRequested, setMotionRequested] = useState(true)
   const [handoffStep, setHandoffStep] = useState(0)
   const [celebration, setCelebration] = useState(null)
+  // 실제 Run 조회는 Dashboard에서 한 번만 수행하며 목업 프로젝트·3D와 독립적으로 관리합니다.
+  const [runQuery, dispatchRunQuery] = useReducer(runQueryReducer, { runId: '', offset: 0, followLatest: false })
+  const [officeModeChoice, setOfficeModeChoice] = useState({ runId: '', mode: 'mock' })
+  const officeMode = officeModeChoice.runId === runQuery.runId ? officeModeChoice.mode : runQuery.runId ? 'actual' : 'mock'
+  const runMonitor = useAgentRunMonitor(runQuery.runId, { limit: runEventLimit, offset: runQuery.offset, includeArchitecture: true,
+    polling: view === 'home' && officeMode === 'actual' })
+  const pollingLabels = { idle: 'Run 선택 전', inactive: '목업 또는 다른 화면에서 중지', paused: '일시정지',
+    finished: 'Run 종료로 중지', not_multi: '멀티 Run이 아니므로 중지', active: '3초 간격',
+    retrying: `연결 오류 · ${runMonitor.polling.delayMs / 1000}초 후 재시도(기존 데이터 유지)` }
+  // 공유할 실제 데이터를 표시용으로만 변환하고 기존 목업 시연에는 반영하지 않습니다.
+  const runDisplayState = buildAgentRunDisplayState(runMonitor)
+  const eventTotal = runMonitor.pagination.total
+  const eventQueryStatus = runMonitor.status.events
   const mobile = useMediaQuery('(max-width:760px)')
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const motion = motionRequested && !reducedMotion
@@ -39,6 +68,12 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const copy = viewCopy[view]
 
   useAtelierMotion(rootRef, { enabled: motion, view, mode: 'multi', project, projectCount: projects.length, onStep: setHandoffStep })
+
+  useEffect(() => {
+    if (runQuery.followLatest && eventTotal !== null && (eventQueryStatus === 'success' || eventQueryStatus === 'empty')) {
+      dispatchRunQuery({ type: 'latest', runId: runQuery.runId, total: eventTotal })
+    }
+  }, [runQuery.followLatest, runQuery.runId, eventTotal, eventQueryStatus])
 
   useEffect(() => {
     function restoreView() { setView(readView()); setDrawerOpen(false) }
@@ -69,6 +104,14 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   }, [])
 
   function requestNew() { openModal('new') }
+  function refreshRun() {
+    dispatchRunQuery({ type: 'refresh' })
+    void runMonitor.refresh()
+  }
+  function selectRun(runId) {
+    if (runId === runQuery.runId) refreshRun()
+    else dispatchRunQuery({ type: 'select', runId })
+  }
   function notify(message) {
     clearTimeout(toastTimer.current)
     setToast(message)
@@ -164,13 +207,13 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
         <main className="main"><AtelierHeader view={view} drawerOpen={mobile && drawerOpen} onMenu={() => setDrawerOpen(!drawerOpen)} motion={motion} reducedMotion={reducedMotion} onMotion={() => setMotionRequested(!motionRequested)} onNew={requestNew} />
           <div className="content"><header className="page-header"><div><p className="eyebrow">{copy[1]}</p><h1 id="page-title" tabIndex={-1} key={view}>{(copy[2].match(/\S+\s*/g) || []).map((word, index) => <span className="headline-word" style={{ '--word-index': index }} key={index}>{word}</span>)}</h1><p className="page-description">{copy[3]}</p></div><OfficeDate /></header>
             <div>
-            <div id="home-view" className="view" hidden={view !== 'home'}><HomeView officeScene={view === 'home' ? <AgentOffice3D requestText={project.description} motionEnabled={motion} /> : null} mode="multi" projects={projects} project={project} activities={activities} onSelect={selectProject} onCreate={createProject} onNew={() => openModal('new')} onEmployee={(index) => openModal('employee', { index })} onPlan={(projectId) => openModal('plan', { projectId })} onAdvance={advance} onWorklog={() => openModal('worklog')} /></div>
+            <div id="home-view" className="view" hidden={view !== 'home'}><HomeView officeScene={view === 'home' ? <AgentOffice3D requestText={project.description} motionEnabled={motion} runDisplayState={runDisplayState} displayMode={officeMode} onDisplayModeChange={(mode) => setOfficeModeChoice({ runId: runQuery.runId, mode })} /> : null} mode="multi" projects={projects} project={project} activities={activities} onSelect={selectProject} onCreate={createProject} onNew={() => openModal('new')} onEmployee={(index) => openModal('employee', { index })} onPlan={(projectId) => openModal('plan', { projectId })} onAdvance={advance} onWorklog={() => openModal('worklog')} /><p className="arm-note" role="status" data-run-polling={runMonitor.polling.state}>자동 갱신: {pollingLabels[runMonitor.polling.state]} <button type="button" className="button" disabled={!runQuery.runId || officeMode !== 'actual' || ['finished', 'not_multi'].includes(runMonitor.polling.state)} onClick={runMonitor.polling.state === 'paused' ? runMonitor.resumePolling : runMonitor.pausePolling}>{runMonitor.polling.state === 'paused' ? '자동 갱신 재개' : '자동 갱신 일시정지'}</button></p><AgentRunMonitor monitor={runMonitor} query={runQuery} onSelectRun={selectRun} onRefresh={refreshRun} onChangePage={(offset) => dispatchRunQuery({ type: 'page', offset })} onClear={() => dispatchRunQuery({ type: 'select', runId: '' })} /></div>
             <section id="workflow-view" className="view" aria-label="팀의 업무 흐름" hidden={view !== 'workflow'}><WorkflowView project={project} activeStep={handoffStep} onStep={focusStep} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="projects-view" className="view" aria-label="전체 프로젝트" hidden={view !== 'projects'}><ProjectsView projects={projects} search={search} onSearch={setSearch} onSelect={(id) => { selectProject(id); changeView('home') }} /></section>
             <section id="team-view" className="view" aria-label="직원 소개" hidden={view !== 'team'}><TeamView project={project} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="outputs-view" className="view" aria-label="결과물 보관함" hidden={view !== 'outputs'}><OutputsView projects={projects} project={project} onSelect={selectProject} onFile={(index) => openModal('file', { index })} onDownload={download} /></section>
             </div>
-            <footer className="page-footer"><span>DESIGN MOCKUP · 입력한 내용은 새로고침하면 초기화됩니다.</span><span>AI 에이전트 회사 — a company of your own.</span></footer>
+            <footer className="page-footer"><span>목업 프로젝트·3D는 시연용입니다. 실제 실행 정보는 오피스의 Run 조회 영역에서 확인하세요.</span><span>AI 에이전트 회사 — a company of your own.</span></footer>
           </div>
         </main>
       </div>

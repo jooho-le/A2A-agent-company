@@ -1,4 +1,4 @@
-// 모든 동작은 재생 위치에서 계산하는 목업입니다. 가구와 실제 실행 상태는 변경하지 않습니다.
+// 기존 목업 연출과 역할별 오류 표정을 제공합니다. 가구와 서버의 실행 상태는 변경하지 않습니다.
 export const finaleOptions = [
   { value: 'team', label: '1. 기존 협업 포즈' },
   { value: 'cheer', label: '2. 서류 던지기 · 박수' },
@@ -106,30 +106,37 @@ export function createOfficePerformance(office, engine) {
   }
   const expressions = office.agents.map(makeExpression)
 
+  function setExpression(index, expression, local) {
+    const agent = office.agents[index]
+    const face = expressions[index]
+    face.original.forEach((part) => { part.visible = true })
+    Object.values(face.groups).forEach(({ group }) => { group.visible = false })
+    agent.eyes.scale.x = 1
+    agent.eyes.rotation.z = 0
+    agent.g.userData.expression = 'normal'
+    if (expression === 'normal') return
+    const { group, drops } = face.groups[expression]
+    face.original.forEach((part) => { part.visible = false })
+    group.visible = true
+    agent.eyes.scale.y = expression === 'angry' ? .66 : expression === 'sweat' ? .86 : 1.15
+    agent.head.rotation.z += expression === 'worried' ? .10 : expression === 'angry' ? -.035 : .06
+    agent.head.rotation.x = expression === 'angry' ? -.08 : -.04
+    agent.head.rotation.y += .25
+    if (expression === 'sweat') drops.forEach((drop, n) => {
+      drop.position.y = [.25,.06,.17][n] - ((local * .35 + n * .2) % .3)
+    })
+    agent.g.userData.expression = expression
+  }
+
   function errorFace(time, bubble) {
     let expression = 'normal'
-    office.agents.forEach((agent, index) => {
-      const face = expressions[index]
-      face.original.forEach((part) => { part.visible = true })
-      Object.values(face.groups).forEach(({ group }) => { group.visible = false })
-      agent.eyes.scale.x = 1
-      agent.eyes.rotation.z = 0
-      agent.g.userData.expression = 'normal'
-      if (bubble?.tone !== 'error' || bubble.agent !== index) return
+    for (let index = 0; index < office.agents.length; index++) {
       const local = time - At[index].start - 2 * pt
-      expression = ['worried', 'angry', 'sweat'][Math.min(2, Math.max(0, Math.floor(local / 1.8)))]
-      const { group, drops } = face.groups[expression]
-      face.original.forEach((part) => { part.visible = false })
-      group.visible = true
-      agent.eyes.scale.y = expression === 'angry' ? .66 : expression === 'sweat' ? .86 : 1.15
-      agent.head.rotation.z += expression === 'worried' ? .10 : expression === 'angry' ? -.035 : .06
-      agent.head.rotation.x = expression === 'angry' ? -.08 : -.04
-      agent.head.rotation.y += .25
-      if (expression === 'sweat') drops.forEach((drop, n) => {
-        drop.position.y = [.25,.06,.17][n] - ((local * .35 + n * .2) % .3)
-      })
-      agent.g.userData.expression = expression
-    })
+      const kind = bubble?.tone === 'error' && bubble.agent === index
+        ? ['worried', 'angry', 'sweat'][Math.min(2, Math.max(0, Math.floor(local / 1.8)))] : 'normal'
+      setExpression(index, kind, local)
+      if (kind !== 'normal') expression = kind
+    }
     return expression
   }
 
@@ -280,5 +287,16 @@ export function createOfficePerformance(office, engine) {
     return expression
   }
 
-  return { update }
+  // 실제 모드는 같은 오류 표정만 재사용하고 전체 협업 완료 연출은 호출하지 않습니다.
+  function updateActual(agents) {
+    papers.forEach(paper => { paper.visible = false })
+    office.confetti.groupRoot.visible = false
+    office.agents.forEach((agent, index) => {
+      agent.lower.scale.set(1, 1, 1)
+      setExpression(index, agents[index].expression, 0)
+    })
+    office.root.updateMatrixWorld(true)
+  }
+
+  return { update, updateActual }
 }
