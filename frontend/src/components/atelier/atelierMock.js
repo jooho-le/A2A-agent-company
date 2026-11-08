@@ -1,18 +1,18 @@
 // 원본 디자인의 예시 데이터입니다. 실제 Run·Artifact·검증 결과가 아닙니다.
-export const portraits = {"planner": "/characters/deer_01.png", "developer": "/characters/개발_고양이_06.png", "qa": "/characters/qa_dog_01.png", "security": "/characters/security_rabbit_01.png"}
+import { humanAgents } from './humanAgents'
 
-export const motionPortraits = {
-    planner: {working: ["/characters/deer_04.png"], warning: "/characters/deer_06.png", done: "/characters/deer_07.png"},
-    developer: {working: ["/characters/개발_고양이_05.png"], warning: "/characters/개발_고양이_09.png", done: "/characters/개발_고양이_08.png"},
-    qa: {working: ["/characters/qa_dog_10.png"], warning: "/characters/qa_dog_03.png", done: "/characters/qa_dog_09.png"},
-    security: {working: ["/characters/security_rabbit_07.png"], warning: "/characters/security_rabbit_10.png", done: "/characters/security_rabbit_08.png"}
-  }
+export const portraits = Object.fromEntries(humanAgents.map((agent) => [agent.id, agent.portrait]))
+
+// 이번에 제공된 이미지는 역할당 1장이므로 상태가 달라져도 같은 사람 이미지를 유지합니다.
+export const motionPortraits = Object.fromEntries(humanAgents.map((agent) => [agent.id, {
+  working: [agent.portrait], warning: agent.portrait, done: agent.portrait,
+}]))
 
 export const employees = [
-    {id:'planner',name:'사슴',initial:'사',job:'기획 담당',role:'Planner',quote:'“복잡한 생각도, 차근차근 정리해볼게요.”',personality:'차분한 정리왕 · 꼼꼼한 기록가',purpose:'대표님의 요청을 이해하고, 만들 기능과 작업 순서를 정리합니다.',responsibilities:['업무 요청 분석 및 기능 명세 정리','작업 분해와 개발 순서 제안','대표님 피드백을 반영한 기획 수정']},
-    {id:'developer',name:'고양이',initial:'고',job:'개발 담당',role:'Developer',quote:'“좋아요. 직접 작동하는 모습으로 보여드릴게요.”',personality:'묵묵한 실행가 · 만들기를 좋아함',purpose:'승인된 계획에 따라 화면과 기능을 만들고, 필요한 코드를 수정합니다.',responsibilities:['승인된 기능과 화면 구현','기존 코드 개선 및 수정 요청 반영','빌드와 변경 파일 정리']},
-    {id:'qa',name:'강아지',initial:'강',job:'품질 담당',role:'QA',quote:'“사용하는 사람 입장에서 한 번 더 볼게요.”',personality:'호기심 많은 관찰자 · 디테일에 강함',purpose:'완성된 기능이 기대한 대로 작동하는지 사용자 관점에서 확인합니다.',responsibilities:['요구사항에 따른 확인 항목 정리','기능 테스트와 예외 상황 점검','발견한 문제와 재검토 결과 보고']},
-    {id:'security',name:'토끼',initial:'토',job:'보안 담당',role:'Security',quote:'“안심하고 쓸 수 있도록, 빈틈을 살펴볼게요.”',personality:'신중한 수호자 · 원칙을 소중히 여김',purpose:'접근 권한, 입력 처리, 정보 보호에 문제가 없는지 살펴봅니다.',responsibilities:['코드와 접근 권한 점검','취약점과 정보 노출 가능성 확인','보완 요청 및 수정 내용 재검토']}
+    {id:'planner',name:humanAgents[0].name,initial:humanAgents[0].initial,job:'기획 총괄',role:'Planner',leadership:humanAgents[0].leadership,quote:'“개발 방향은 제가 정리할게요. 함께 완성해봅시다.”',personality:'차분한 판단 · 팀을 이끄는 기획 총괄',purpose:'대표님의 요청을 개발 계획으로 정리하고, 각 전문 역할의 협업 방향을 조율하는 기획 총괄입니다.',responsibilities:['요구사항 분석과 개발 계획 수립','개발·QA·보안 역할의 업무 방향 정리','대표님 피드백과 검토 의견을 다음 계획에 반영']},
+    {id:'developer',name:humanAgents[1].name,initial:humanAgents[1].initial,job:'개발 담당',role:'Developer',quote:'“좋아요. 직접 작동하는 모습으로 보여드릴게요.”',personality:'묵묵한 실행가 · 만들기를 좋아함',purpose:'승인된 계획에 따라 화면과 기능을 만들고, 필요한 코드를 수정합니다.',responsibilities:['승인된 기능과 화면 구현','기존 코드 개선 및 수정 요청 반영','빌드와 변경 파일 정리']},
+    {id:'qa',name:humanAgents[2].name,initial:humanAgents[2].initial,job:'품질 담당',role:'QA',quote:'“사용하는 사람 입장에서 한 번 더 볼게요.”',personality:'호기심 많은 관찰자 · 디테일에 강함',purpose:'완성된 기능이 기대한 대로 작동하는지 사용자 관점에서 확인합니다.',responsibilities:['요구사항에 따른 확인 항목 정리','기능 테스트와 예외 상황 점검','발견한 문제와 재검토 결과 보고']},
+    {id:'security',name:humanAgents[3].name,initial:humanAgents[3].initial,job:'보안 담당',role:'Security',quote:'“안심하고 쓸 수 있도록, 빈틈을 살펴볼게요.”',personality:'신중한 수호자 · 원칙을 소중히 여김',purpose:'접근 권한, 입력 처리, 정보 보호에 문제가 없는지 살펴봅니다.',responsibilities:['코드와 접근 권한 점검','취약점과 정보 노출 가능성 확인','보완 요청 및 수정 내용 재검토']}
   ]
 
 export const initialProjects = [
@@ -24,12 +24,12 @@ export const initialProjects = [
 export const initialActivities = [
     {employee:1,text:'문의 폼의 화면 구조를 정리했어요. 입력 기능을 만들고 있어요.',projectId:'orbit',time:'방금 전'},
     {employee:0,text:'업무 보드 기획안이 준비됐어요. 대표님의 확인을 기다려요.',projectId:'flow',time:'8분 전'},
-    {employee:2,text:'토끼과 함께 기능 동작과 접근 권한을 확인하고 있어요.',projectId:'desk',time:'14분 전'}
+    {employee:2,text:'보안 에이전트와 함께 기능 동작과 접근 권한을 확인하고 있어요.',projectId:'desk',time:'14분 전'}
   ]
 
 export function agentStates(project){
     if(project.needsApproval)return [{state:'done',label:'기획 완료',task:'기획안을 정리했어요. 대표님의 확인을 기다려요.'},{state:'',label:'승인 대기',task:'기획안이 승인되면 바로 개발을 시작할게요.'},{state:'',label:'대기',task:'구현 후 기능을 차근차근 확인할게요.'},{state:'',label:'대기',task:'검토할 코드가 준비되면 합류할게요.'}];
-    if(project.phase===0)return [{state:'active',label:'기획 중',task:'대표님의 요청을 기능과 작업으로 나누고 있어요.'},{state:'',label:'대기',task:'사슴의 기획안이 준비되기를 기다려요.'},{state:'',label:'대기',task:'만들어질 기능을 확인할 준비를 해요.'},{state:'',label:'대기',task:'검토할 코드가 준비되면 합류할게요.'}];
+    if(project.phase===0)return [{state:'active',label:'기획 중',task:'대표님의 요청을 기능과 작업으로 나누고 있어요.'},{state:'',label:'대기',task:'기획 에이전트의 기획안이 준비되기를 기다려요.'},{state:'',label:'대기',task:'만들어질 기능을 확인할 준비를 해요.'},{state:'',label:'대기',task:'검토할 코드가 준비되면 합류할게요.'}];
     if(project.phase===1)return [{state:'done',label:'완료',task:'기능 명세와 작업 순서를 정리했어요.'},{state:'active',label:'개발 중',task:'계획에 맞춰 화면과 기능을 만들고 있어요.'},{state:'',label:'준비 중',task:'확인해야 할 주요 항목을 정리하고 있어요.'},{state:'',label:'대기',task:'개발이 끝나면 보안을 확인할게요.'}];
     if(project.phase===2)return [{state:'done',label:'완료',task:'기능 명세와 작업 순서를 정리했어요.'},{state:'done',label:'완료',task:'화면과 기능 구현을 마쳤어요.'},{state:'active',label:'검토 중',task:'사용자 입장에서 기능을 확인하고 있어요.'},{state:'active',label:'검토 중',task:'접근 권한과 정보 보호를 확인하고 있어요.'}];
     return employees.map((employee,index)=>({state:'done',label:'완료',task:['기능 명세와 작업 순서를 정리했어요.','화면과 기능 구현을 마쳤어요.','주요 기능 확인을 마쳤어요.','보안 검토를 마쳤어요.'][index]}));

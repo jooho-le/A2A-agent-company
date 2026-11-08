@@ -1,0 +1,61 @@
+/* 실제 Run 조회 영역에만 적용하며 기존 목업·3D 스타일은 변경하지 않습니다. */
+.atelier-dashboard .agent-run-monitor { margin-top:32px; padding:22px; border:1px solid #43536b; border-radius:12px; background:#10151d; scroll-margin-top:90px; }
+.atelier-dashboard .arm-heading, .atelier-dashboard .arm-section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.atelier-dashboard .arm-heading h2 { font-size:18px; }
+.atelier-dashboard .arm-source { flex-shrink:0; padding:5px 9px; border:1px solid #7694c1; border-radius:20px; color:#c8dcff; font-size:10px; }
+.atelier-dashboard .arm-intro { margin:12px 0 20px; color:#b7c2d3; font-size:12px; }
+.atelier-dashboard .arm-form { display:grid; gap:8px; }
+.atelier-dashboard .arm-form label { font-size:12px; font-weight:600; }
+.atelier-dashboard .arm-input-row { display:flex; gap:12px; align-items:stretch; }
+.atelier-dashboard .arm-input-row input { width:100%; flex:1; padding:10px 12px; background:#0b1017; border:1px solid #4b5769; border-radius:7px; color:#eef2f8; font:12px/1.6 ui-monospace,monospace; }
+.atelier-dashboard .arm-input-row input[aria-invalid=true] { border-color:#e49d9d; }
+.atelier-dashboard .arm-note, .atelier-dashboard .arm-empty { margin:0; color:#a5b1c1; font-size:11px; line-height:1.8; }
+.atelier-dashboard .arm-validation { margin:0; color:#ffc1c1; font-size:11px; }
+.atelier-dashboard .arm-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-top:16px; }
+.atelier-dashboard .arm-query-status { flex:1; min-width:180px; font-size:11px; color:#c1cbd9; }
+.atelier-dashboard .arm-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.atelier-dashboard .arm-actions .button { min-height:34px; padding:6px 10px; font-size:11px; }
+.atelier-dashboard .arm-section { margin-top:22px; padding-top:20px; border-top:1px solid #2c3544; }
+.atelier-dashboard .arm-section-heading { margin-bottom:14px; }
+.atelier-dashboard .arm-section-heading h3 { margin:0; font-size:14px; font-weight:600; }
+.atelier-dashboard .arm-section-heading>span { color:#99acc7; font-size:10px; }
+.atelier-dashboard .arm-error { display:flex; flex-direction:column; align-items:flex-start; gap:4px; margin:0 0 14px; padding:12px; border:1px solid #75444a; border-radius:8px; background:#281b22; color:#ffc1c1; font-size:11px; overflow-wrap:anywhere; }
+.atelier-dashboard .arm-error small { font-size:10px; }
+.atelier-dashboard .arm-run-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0 0 12px; }
+.atelier-dashboard .arm-run-fields>div { padding:12px; border:1px solid #2f3b4d; border-radius:8px; background:#151d28; min-width:0; }
+.atelier-dashboard .arm-run-fields>div:first-child { grid-column:1/-1; }
+.atelier-dashboard .arm-run-fields dt { color:#9caec6; font-size:10px; margin-bottom:4px; }
+.atelier-dashboard .arm-run-fields dd { margin:0; color:#eef3fb; font-size:12px; overflow-wrap:anywhere; }
+.atelier-dashboard .arm-run-fields [data-final-success=true] { border-color:#809956; }
+.atelier-dashboard .arm-agent-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-top:12px; }
+.atelier-dashboard .arm-agent { min-width:0; padding:14px; border:1px solid #354052; border-radius:10px; background:#151c26; }
+.atelier-dashboard .arm-agent[data-running=true] { border-color:#9bad69; }
+.atelier-dashboard .arm-agent h4 { margin:0 0 12px; color:#edf1f8; font-size:13px; font-weight:600; }
+.atelier-dashboard .arm-agent h4 small { display:block; margin-top:3px; color:#94a6bf; font-size:9px; }
+.atelier-dashboard .arm-step-list { list-style:none; padding:0; margin:0; }
+.atelier-dashboard .arm-step-list>li+li { margin-top:16px; padding-top:14px; border-top:1px solid #354052; }
+.atelier-dashboard .arm-step-status { display:block; margin-bottom:10px; color:#b2c3d9; font-size:11px; overflow-wrap:anywhere; }
+.atelier-dashboard .arm-step-status[data-step-status=RUNNING] { color:#d4e6a4; }
+.atelier-dashboard .arm-step-status[data-step-status=FAILED] { color:#ffc1c1; }
+.atelier-dashboard .arm-step-status[data-step-status=SUCCEEDED] { color:#a9d6bd; }
+.atelier-dashboard .arm-agent dl { display:grid; gap:8px; margin:0; }
+.atelier-dashboard .arm-agent dt { font-size:9px; color:#98a9bf; }
+.atelier-dashboard .arm-agent dd { margin:2px 0 0; font-size:10px; color:#d9e1ed; overflow-wrap:anywhere; }
+.atelier-dashboard .agent-run-monitor code { font:inherit; font-family:ui-monospace,monospace; overflow-wrap:anywhere; }
+.atelier-dashboard .arm-event-list { display:grid; gap:10px; padding:0; margin:12px 0; list-style:none; max-height:440px; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.atelier-dashboard .arm-event-list>li { padding:12px; border:1px solid #303b4d; border-radius:8px; background:#131b26; min-width:0; }
+.atelier-dashboard .arm-event-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:6px; color:#e2ebf8; font-size:11px; }
+.atelier-dashboard .arm-event-heading time { flex-shrink:0; color:#a8b7cd; font-size:10px; }
+.atelier-dashboard .arm-event-list p { margin:3px 0 0; color:#a7b6cb; font-size:10px; }
+.atelier-dashboard .arm-event-pages { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:12px; }
+@media(max-width:1200px) {
+  .atelier-dashboard .arm-agent-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:600px) {
+  .atelier-dashboard .agent-run-monitor { padding:16px; }
+  .atelier-dashboard .arm-heading { align-items:flex-start; flex-direction:column; }
+  .atelier-dashboard .arm-input-row { flex-direction:column; }
+  .atelier-dashboard .arm-agent-grid, .atelier-dashboard .arm-run-fields { grid-template-columns:minmax(0,1fr); }
+  .atelier-dashboard .arm-event-heading { flex-direction:column; gap:4px; }
+  .atelier-dashboard .arm-event-heading time { white-space:normal; }
+}

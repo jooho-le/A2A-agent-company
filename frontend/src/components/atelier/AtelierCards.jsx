@@ -10,6 +10,7 @@ export function Portrait({ employee, index, state = '' }) {
   return (
     <span className="portrait" data-person={employee.id}>
       <span className="portrait-number">STAFF / 0{index + 1}</span>
+      {employee.leadership && <span className="leader-portrait-badge">{employee.leadership.badge}</span>}
       {failedSource !== source ? <img src={source} alt={`${employee.name} 캐릭터`} onError={() => setFailedSource(source)} /> : (
         <svg className="person-placeholder" viewBox="0 0 120 130" aria-hidden="true"><circle cx="60" cy="39" r="24" /><path d="M9 134v-22c0-29 22-46 51-46s51 17 51 46v22Z" /></svg>
       )}
@@ -19,10 +20,11 @@ export function Portrait({ employee, index, state = '' }) {
 
 export function EmployeeCard({ employee, index, state, profile = false, onEmployee, portrait }) {
   return (
-      <button key={employee.id} type="button" className={`agent-card ${state.state}${profile ? ' staff-profile' : ''}`} onClick={() => onEmployee(index)} aria-label={`${employee.name} ${employee.job} 직원 상세`}>
+      <button key={employee.id} type="button" className={`agent-card ${state.state}${profile ? ' staff-profile' : ''}`} data-lead={Boolean(employee.leadership)} onClick={() => onEmployee(index)} aria-label={`${employee.name} ${employee.job} 직원 상세`}>
         {portrait || <Portrait employee={employee} index={index} state={profile ? '' : state.state} />}
         <span className="employee-body">
           <span className="employee-name-line"><span className="employee-name">{employee.name}</span>{!profile && <span className="agent-status">{state.label}</span>}</span>
+          {employee.leadership && <span className="leader-rank">{employee.leadership.title} · {employee.leadership.badge}</span>}
           <span className="employee-role">{employee.roleLabel || `${employee.job} · ${employee.role} AI`}</span>
           {profile ? <><span className="employee-quote">{employee.quote}</span><span className="personality-tag">{employee.personality}</span></> : <span className="agent-task">{state.task}</span>}
           <span className="employee-link">{profile ? '직원 소개 보기' : '작업 자세히 보기'}<Icon name="chevron" /></span>
@@ -75,8 +77,8 @@ export function RequestForm({ mode = 'multi', onMode, modal = false, onCreate, o
   const fields = <>
     <label className={modal ? 'field-label' : 'sr-only'} htmlFor={`${prefix}-name`}>{modal ? '프로젝트 이름' : '새 업무의 프로젝트 이름'}</label>
     <input id={`${prefix}-name`} name="projectName" className={modal ? 'field' : 'request-name'} placeholder={modal ? '예: 우리 팀의 업무 도구' : '프로젝트 이름'} maxLength={60} required autoComplete="off" />
-    {modal ? <div className="blue-field"><label className="field-label" htmlFor={`${prefix}-request`}>업무 요청</label><textarea id={`${prefix}-request`} name="request" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." maxLength={1600} rows={5} required /><span>{planner.job} {planner.name}이 요청을 받아 계획을 정리합니다.</span></div> : <textarea id={`${prefix}-text`} name="request" className="request-text" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." maxLength={1600} rows={2} required />}
+    {modal ? <div className="blue-field"><label className="field-label" htmlFor={`${prefix}-request`}>업무 요청</label><textarea id={`${prefix}-request`} name="request" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." maxLength={1600} rows={5} required /><span>{planner.name} · 요청을 받아 계획을 정리합니다.</span></div> : <textarea id={`${prefix}-text`} name="request" className="request-text" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." maxLength={1600} rows={2} required />}
   </>
   if (modal) return <form id="new-form" onSubmit={submit}><div className="dialog-body">{fields}<p className="dialog-note">디자인 목업입니다. 실제 서버에 요청을 보내지 않습니다.</p></div><div className="dialog-footer"><button className="button" type="button" onClick={onClose}>취소</button><button className="button start" type="submit">{mode === 'single' ? '목업 업무 시작' : '업무 시작'}<Icon name="arrow" /></button></div></form>
-  return <form className="request-composer" id={`${prefix}-form`} onSubmit={submit}><div className="composer-top"><label htmlFor={`${prefix}-text`}><Icon name="plan" />직원들에게 새 업무 맡기기</label><span>{mode === 'single' ? '한 AI와 차근차근, 처음부터 끝까지.' : '기획부터 결과 보고까지, 한 팀으로.'}</span></div>{onMode && <ModeSelector mode={mode} onMode={onMode} />}{fields}<div className="composer-office" data-scene-review={String(deskRole.includes('QA') || deskRole.includes('Security'))}><OfficeDesk role={deskRole} /></div><div className="composer-bottom"><p><span className="mini-avatar">{planner.initial}</span>{mode === 'single' ? '싱글 AI가 기획 → 개발 → QA → 보안 검토를 순차 수행합니다.' : <>{planner.job} <strong>{planner.name}</strong>이 먼저 요청을 정리할게요.</>}</p><button className="button start" type="submit">{mode === 'single' ? '목업 업무 시작' : '업무 시작'}<Icon name="arrow" /></button></div></form>
+  return <form className="request-composer" id={`${prefix}-form`} onSubmit={submit}><div className="composer-top"><label htmlFor={`${prefix}-text`}><Icon name="plan" />직원들에게 새 업무 맡기기</label><span>{mode === 'single' ? '한 AI와 차근차근, 처음부터 끝까지.' : '기획부터 결과 보고까지, 한 팀으로.'}</span></div>{onMode && <ModeSelector mode={mode} onMode={onMode} />}{fields}<div className="composer-office" data-scene-review={String(deskRole.includes('QA') || deskRole.includes('Security'))}><OfficeDesk role={deskRole} /></div><div className="composer-bottom"><p><span className="mini-avatar">{planner.initial}</span>{mode === 'single' ? '싱글 AI가 기획 → 개발 → QA → 보안 검토를 순차 수행합니다.' : <><strong>{planner.leadership?.title || planner.name}</strong> · 개발 계획과 협업 방향을 정리할게요.</>}</p><button className="button start" type="submit">{mode === 'single' ? '목업 업무 시작' : '업무 시작'}<Icon name="arrow" /></button></div></form>
 }
