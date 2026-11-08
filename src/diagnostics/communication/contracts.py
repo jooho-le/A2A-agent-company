@@ -1,0 +1,282 @@
+"""Bounded diagnostic inputs, independent oracles, and observation summaries."""
+
+from dataclasses import dataclass, field
+import hashlib
+import json
+from math import ceil
+from time import perf_counter_ns
+from typing import Literal
+from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from orchestrator.core.security import redact_text
+
+
+SCENARIOS = (
+    "normal", "request_change", "response_change", "grounding_error",
+    "slow_sender", "slow_agent", "no_response",
+    "request_truncate", "requirement_drop", "array_reorder", "type_change",
+    "unicode_change", "metadata_change", "response_requirement_drop",
+    "response_limit_change", "permission_swap", "invented_evidence",
+    "context_spoof", "foreign_artifact",
+    "invented_decision", "message_id_change",
+)
+
+
+class CheckOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: Literal[
+        "normal", "request_change", "response_change", "grounding_error",
+        "slow_sender", "slow_agent", "no_response",
+        "request_truncate", "requirement_drop", "array_reorder", "type_change",
+        "unicode_change", "metadata_change", "response_requirement_drop",
+        "response_limit_change", "permission_swap", "invented_evidence",
+        "context_spoof", "foreign_artifact",
+        "invented_decision", "message_id_change",
+    ] = "normal"
+    architecture: Literal["MULTI_AGENT", "SINGLE_AGENT"] = "MULTI_AGENT"
+    profile: Literal["basic", "signup", "documents", "mystery"] = "signup"
+    fault_target: Literal["PLANNER", "DEVELOPER", "QA", "SECURITY"] = "DEVELOPER"
+    padding_kib: int = Field(default=0, strict=True, ge=0, le=128)
+    value: int = Field(default=100, strict=True, ge=-1_000_000, le=1_000_000)
+    label: str = Field(default="진단 목업 · 한글과 숫자 전달", max_length=120)
+    rounds: int = Field(default=3, strict=True, ge=1, le=5)
+    processing_ms: int = Field(default=0, strict=True, ge=0, le=1000)
+    sender_delay_ms: int = Field(default=0, strict=True, ge=0, le=10_000)
+
+    @field_validator("label")
+    @classmethod
+    def safe_label(cls, value: str) -> str:
+        return redact_text(value)
+
+    @model_validator(mode="after")
+    def require_rich_fixture_for_semantic_faults(self):
+        if self.profile == "basic" and self.scenario in {
+            "request_truncate", "requirement_drop", "array_reorder", "type_change",
+            "unicode_change", "response_requirement_drop", "response_limit_change",
+            "permission_swap", "invented_evidence", "invented_decision",
+        }:
+            raise ValueError("이 오류 주입에는 복합 사용자 요청 자료가 필요합니다.")
+        return self
+
+
+def now() -> int:
+    return perf_counter_ns()
+
+
+def normalized(value):
+    """Project comparison: Struct's 100.0 and JSON's 100 are the same number.
+
+    Not an RFC canonicalization implementation. Booleans remain distinct from
+    numbers, strings stay exact, and lists preserve order. Lab inputs have only
+    bounded integers, so protobuf's double range cannot lose integer precision.
+    """
+    if isinstance(value, dict):
+        return {key: normalized(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [normalized(item) for item in value]
+    if type(value) is float and value.is_integer():
+        return int(value)
+    return value
+
+
+def fingerprint(value) -> str:
+    data = json.dumps(normalized(value), sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
+
+
+def differences(expected, actual, path: str = "$") -> list[dict]:
+    expected, actual = normalized(expected), normalized(actual)
+    if type(expected) is not type(actual):
+        return [{"path": path, "kind": "TYPE_CHANGED", "expected": expected, "actual": actual}]
+    result = []
+    if isinstance(expected, dict):
+        for key in sorted(expected.keys() | actual.keys()):
+            pointer = path + "/" + key.replace("~", "~0").replace("/", "~1")
+            if key not in actual:
+                result.append({"path": pointer, "kind": "MISSING", "expected": expected[key]})
+            elif key not in expected:
+                result.append({"path": pointer, "kind": "ADDED", "actual": actual[key]})
+            else:
+                result.extend(differences(expected[key], actual[key], pointer))
+    elif isinstance(expected, list):
+        if len(expected) != len(actual):
+            result.append({"path": path, "kind": "LENGTH_CHANGED", "expected": len(expected), "actual": len(actual)})
+        for index, (left, right) in enumerate(zip(expected, actual)):
+            result.extend(differences(left, right, path + "/" + str(index)))
+    elif expected != actual:
+        result.append({"path": path, "kind": "VALUE_CHANGED", "expected": expected, "actual": actual})
+    return result
+
+
+def compare(expected, actual) -> dict:
+    if expected is None or actual is None:
+        return {"status": "UNVERIFIED", "differences": []}
+    diff = differences(expected, actual)
+    return {"status": "FAIL" if diff else "PASS", "differences": diff,
+            "expectedHash": fingerprint(expected), "actualHash": fingerprint(actual)}
+
+
+def grounding(response, payload, role=None) -> dict:
+    """Only declared claims, against an independent observed-input oracle.
+
+    This is not a general natural-language/LLM hallucination detector. A valid
+    schema, matching hashes or the model's self-assessment cannot establish it.
+    """
+    if response is None or payload is None:
+        return {"status": "UNVERIFIED", "differences": [], "scope": "DECLARED_FIELDS_ONLY"}
+    sample = payload["sample"]
+    expected = {
+        "value": sample["value"], "label": sample["label"],
+        "requirementCount": len(sample["requirementIds"]),
+        "upstreamHash": fingerprint(payload["upstream"]) if payload["upstream"] is not None else None,
+    }
+    if payload.get("profile", "basic") != "basic" and role is not None:
+        from diagnostics.communication.workloads import expected_specification
+        expected["specification"] = expected_specification(payload["profile"], role)
+    actual = response.get("claims")
+    if not isinstance(actual, dict):
+        return {"status": "FAIL", "differences": [{"path": "$/claims", "kind": "MISSING_CLAIMS"}], "scope": "DECLARED_FIELDS_ONLY"}
+    verdict = compare(expected, actual)
+    verdict["scope"] = "FROZEN_FIXTURE_CONTRACT" if "specification" in expected else "DECLARED_FIELDS_ONLY"
+    verdict["freeTextStatus"] = "UNVERIFIED"
+    for item in verdict["differences"]:
+        if item["kind"] == "ADDED":
+            item["kind"] = "UNSUPPORTED_CLAIM"
+    return verdict
+
+
+@dataclass
+class ProbeRecord:
+    role: str
+    round: int
+    position: int
+    scenario: str
+    fault_target: str = "DEVELOPER"
+    probe_id: str = field(default_factory=lambda: str(uuid4()))
+    phase: str = "PLANNED"
+    payload: dict | None = None
+    wire_sent: dict | None = None
+    wire_received: dict | None = None
+    admitted: dict | None = None
+    received: dict | None = None
+    metadata_sent: dict | None = None
+    metadata_received: dict | None = None
+    metadata_response: dict | None = None
+    response_sent: dict | None = None
+    response_received: dict | None = None
+    task_id: str | None = None
+    context_id: str | None = None
+    message_id: str | None = None
+    receiver_task_id: str | None = None
+    receiver_context_id: str | None = None
+    receiver_message_id: str | None = None
+    wire_bytes: int | None = None
+    response_http_status: int | None = None
+    points: dict = field(default_factory=dict)
+    injection: str | None = None
+    error: str | None = None
+    cleanup_state: str | None = None
+    identity_valid: bool | None = None
+    injected_processing_ms: int = 0
+    executor_invocations: int = 0
+    observer_overhead_ns: int = 0
+    notify: object = field(default=None, repr=False)
+
+    def changed(self):
+        if self.notify is not None:
+            started = now()
+            self.notify(self)
+            self.observer_overhead_ns += now() - started
+
+    def mark(self, key, phase=None):
+        self.points[key] = now()
+        if phase is not None:
+            self.phase = phase
+        self.changed()
+
+    def ms(self, start, end):
+        if start not in self.points or end not in self.points:
+            return None
+        return round((self.points[end] - self.points[start]) / 1_000_000, 3)
+
+    def view(self) -> dict:
+        request_checks = {
+            "serialized": compare(self.payload, self.wire_sent),
+            "network": compare(self.wire_sent, self.wire_received),
+            "admission": compare(self.wire_received, self.admitted),
+            "executor": compare(self.admitted, self.received),
+            "endToEnd": compare(self.payload, self.received),
+        }
+        return {
+            "id": self.probe_id, "role": self.role, "round": self.round,
+            "position": self.position, "phase": self.phase,
+            "taskId": self.task_id, "contextId": self.context_id, "messageId": self.message_id,
+            "receiverIdentity": {"taskId": self.receiver_task_id, "contextId": self.receiver_context_id,
+                                 "messageId": self.receiver_message_id},
+            "wireBytes": self.wire_bytes, "httpStatus": self.response_http_status,
+            "executorInvocations": self.executor_invocations,
+            "observerCallbackMs": round(self.observer_overhead_ns / 1_000_000, 3),
+            "injection": self.injection, "error": self.error,
+            "cleanupState": self.cleanup_state,
+            "observations": {"intended": self.payload, "wireSent": self.wire_sent,
+                             "wireReceived": self.wire_received, "admitted": self.admitted,
+                             "executorReceived": self.received, "responseSent": self.response_sent,
+                             "responseReceived": self.response_received},
+            "checks": {"request": request_checks,
+                       "response": compare(self.response_sent, self.response_received),
+                       "metadata": compare(self.metadata_sent, self.metadata_received),
+                       "responseMetadata": compare(self.metadata_sent, self.metadata_response),
+                       "identity": "UNVERIFIED" if self.identity_valid is None else "PASS" if self.identity_valid else "FAIL",
+                       "grounding": grounding(self.response_sent, self.received, self.role),
+                       "sourceGrounding": grounding(self.response_received, self.payload, self.role)},
+            "timings": {"orchestratorPrepareMs": self.ms("prepare", "cardStart"),
+                        "cardLookupMs": self.ms("cardStart", "cardEnd"),
+                        "serializationMs": self.ms("cardEnd", "clientSend"),
+                        "requestTransferMs": self.ms("clientSend", "serverReceived"),
+                        "queueMs": self.ms("serverReceived", "executorStart"),
+                        "agentProcessingMs": self.ms("executorStart", "responseReady"),
+                        "ackRoundTripMs": self.ms("clientSend", "ack"),
+                        "resultObservationMs": self.ms("responseReady", "observed"),
+                        "totalMs": self.ms("prepare", "finish")},
+            "injectedProcessingMs": self.injected_processing_ms,
+        }
+
+
+def summarize(rows: list[ProbeRecord]) -> dict:
+    views = [row.view() for row in rows]
+    issues = []
+    for view in views:
+        checks = view["checks"]
+        failures = ["request" for check in checks["request"].values() if check["status"] == "FAIL"]
+        failures += [key for key in ("response", "metadata", "responseMetadata", "grounding", "sourceGrounding") if checks[key]["status"] == "FAIL"]
+        if checks["identity"] == "FAIL":
+            failures.append("identity")
+        if failures or view["phase"] in {"TIMEOUT", "ERROR", "CANCELED"}:
+            issues.append({"id": view["id"], "role": view["role"], "checks": sorted(set(failures)), "phase": view["phase"]})
+    roles = {}
+    for role in dict.fromkeys(row.role for row in rows):
+        role_views = [view for view in views if view["role"] == role]
+        values = sorted(view["timings"]["agentProcessingMs"] for view in role_views if view["timings"]["agentProcessingMs"] is not None)
+        roles[role] = {"completed": sum(v["phase"] == "COMPLETED" for v in role_views),
+                       "samples": len(values),
+                       "p50Ms": values[max(0, ceil(len(values) * .5) - 1)] if values else None,
+                       "p95Ms": values[max(0, ceil(len(values) * .95) - 1)] if values else None}
+    verified = sum(
+        all(check["status"] == "PASS" for check in view["checks"]["request"].values())
+        and all(view["checks"][key]["status"] == "PASS" for key in ("response", "metadata", "responseMetadata", "grounding", "sourceGrounding"))
+        and view["checks"]["identity"] == "PASS" for view in views
+    )
+    unverified = sum(
+        any(check["status"] == "UNVERIFIED" for check in view["checks"]["request"].values())
+        or any(view["checks"][key]["status"] == "UNVERIFIED" for key in ("response", "metadata", "responseMetadata", "grounding", "sourceGrounding"))
+        or view["checks"]["identity"] == "UNVERIFIED" for view in views
+    )
+    return {"planned": len(rows), "verifiedRequests": verified, "unverifiedRequests": unverified,
+            "sent": sum(r.wire_sent is not None for r in rows),
+            "received": sum(r.received is not None for r in rows),
+            "responses": sum(r.response_received is not None for r in rows),
+            "issueCount": len(issues), "issues": issues, "roles": roles}

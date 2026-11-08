@@ -1,0 +1,296 @@
+{
+  "fixtureId": "signup",
+  "requestFingerprint": "1bfe3f4561621a626c02c2392299a364d955f55d3e688871a03f980a265ed02e",
+  "common": {
+    "fixtureId": "signup",
+    "coverageIds": [
+      "REQ-SU-01",
+      "REQ-SU-02",
+      "REQ-SU-03",
+      "REQ-SU-04",
+      "REQ-SU-05",
+      "REQ-SU-06",
+      "REQ-SU-07",
+      "REQ-SU-08",
+      "REQ-SU-09",
+      "REQ-SU-10",
+      "REQ-SU-11",
+      "REQ-SU-12",
+      "REQ-SU-13",
+      "REQ-SU-14"
+    ],
+    "constraints": {
+      "maxItems": 100,
+      "maxUploadBytes": 20971520,
+      "deployAllowed": false,
+      "databaseResetAllowed": false,
+      "externalNetworkAllowed": false,
+      "unresolvedPolicy": "ASK_USER",
+      "retentionDays": 30
+    },
+    "unresolvedQuestionIds": [
+      "SIGNUP-Q01",
+      "SIGNUP-Q02"
+    ],
+    "requestFingerprint": "1bfe3f4561621a626c02c2392299a364d955f55d3e688871a03f980a265ed02e",
+    "accessMatrix": [
+      {
+        "subject": "SELF",
+        "action": "VIEW_ACCOUNT",
+        "allowed": true
+      },
+      {
+        "subject": "OTHER_USER",
+        "action": "VIEW_ACCOUNT",
+        "allowed": false
+      },
+      {
+        "subject": "ADMIN",
+        "action": "VIEW_STATUS",
+        "allowed": true
+      },
+      {
+        "subject": "ADMIN",
+        "action": "ELEVATE_ROLE",
+        "allowed": false
+      },
+      {
+        "subject": "GUEST",
+        "action": "VIEW_ACCOUNT",
+        "allowed": false
+      }
+    ],
+    "executionEvidence": {
+      "build": "NOT_EXECUTED",
+      "qa": "NOT_EXECUTED",
+      "security": "NOT_EXECUTED",
+      "deployment": "NOT_REQUESTED"
+    }
+  },
+  "roles": {
+    "PLANNER": {
+      "dependencyEdges": [
+        [
+          "REQ-SU-01",
+          "REQ-SU-02"
+        ],
+        [
+          "REQ-SU-02",
+          "REQ-SU-03"
+        ],
+        [
+          "REQ-SU-01",
+          "REQ-SU-04"
+        ],
+        [
+          "REQ-SU-01",
+          "REQ-SU-05"
+        ],
+        [
+          "REQ-SU-01",
+          "REQ-SU-06"
+        ],
+        [
+          "REQ-SU-01",
+          "REQ-SU-07"
+        ],
+        [
+          "REQ-SU-01",
+          "REQ-SU-08"
+        ],
+        [
+          "REQ-SU-08",
+          "REQ-SU-09"
+        ],
+        [
+          "REQ-SU-03",
+          "REQ-SU-10"
+        ],
+        [
+          "REQ-SU-04",
+          "REQ-SU-10"
+        ],
+        [
+          "REQ-SU-01",
+          "REQ-SU-11"
+        ],
+        [
+          "REQ-SU-10",
+          "REQ-SU-11"
+        ],
+        [
+          "REQ-SU-06",
+          "REQ-SU-12"
+        ],
+        [
+          "REQ-SU-03",
+          "REQ-SU-13"
+        ],
+        [
+          "REQ-SU-07",
+          "REQ-SU-13"
+        ],
+        [
+          "REQ-SU-11",
+          "REQ-SU-14"
+        ],
+        [
+          "REQ-SU-12",
+          "REQ-SU-14"
+        ]
+      ],
+      "decision": "CLARIFICATION_REQUIRED"
+    },
+    "DEVELOPER": {
+      "files": [
+        "web/SignupForm.jsx",
+        "api/signup.py",
+        "api/account_permissions.py"
+      ],
+      "policy": {
+        "emailNormalization": "TRIM_AND_LOWERCASE",
+        "displayNameNormalization": "PRESERVE_EXACT",
+        "displayNameMin": 1,
+        "displayNameMax": 40,
+        "duplicateStatus": 409,
+        "invalidInputStatus": 422,
+        "minorAgePolicy": null,
+        "credentialPolicy": null,
+        "idempotencyConflictStatus": 409
+      },
+      "implementationState": "NOT_EXECUTED"
+    },
+    "QA": {
+      "caseIds": [
+        "SIGNUP-CASE-01",
+        "SIGNUP-CASE-02",
+        "SIGNUP-CASE-03",
+        "SIGNUP-CASE-04",
+        "SIGNUP-CASE-05",
+        "SIGNUP-CASE-06",
+        "SIGNUP-CASE-07",
+        "SIGNUP-CASE-08",
+        "SIGNUP-CASE-09",
+        "SIGNUP-CASE-10",
+        "SIGNUP-CASE-11",
+        "SIGNUP-CASE-12",
+        "SIGNUP-CASE-13",
+        "SIGNUP-CASE-14",
+        "SIGNUP-CASE-15",
+        "SIGNUP-CASE-16",
+        "SIGNUP-CASE-17",
+        "SIGNUP-CASE-18"
+      ],
+      "expectedOutcomes": {
+        "SIGNUP-CASE-01": {
+          "status": 201,
+          "canonicalEmail": "user@example.test"
+        },
+        "SIGNUP-CASE-02": {
+          "status": 409
+        },
+        "SIGNUP-CASE-03": {
+          "status": 422
+        },
+        "SIGNUP-CASE-04": {
+          "status": 422
+        },
+        "SIGNUP-CASE-05": {
+          "status": 422
+        },
+        "SIGNUP-CASE-06": {
+          "status": 201
+        },
+        "SIGNUP-CASE-07": {
+          "status": 422
+        },
+        "SIGNUP-CASE-08": {
+          "effect": "REUSE_RESULT"
+        },
+        "SIGNUP-CASE-09": {
+          "status": 409
+        },
+        "SIGNUP-CASE-10": {
+          "status": 200
+        },
+        "SIGNUP-CASE-11": {
+          "status": 403
+        },
+        "SIGNUP-CASE-12": {
+          "status": 401
+        },
+        "SIGNUP-CASE-13": {
+          "exactEcho": "가"
+        },
+        "SIGNUP-CASE-14": {
+          "exactEcho": "café"
+        },
+        "SIGNUP-CASE-15": {
+          "decision": "UNRESOLVED"
+        },
+        "SIGNUP-CASE-16": {
+          "decision": "UNRESOLVED"
+        },
+        "SIGNUP-CASE-17": {
+          "accountsCreated": 0
+        },
+        "SIGNUP-CASE-18": {
+          "deployment": "NOT_REQUESTED"
+        }
+      },
+      "requirementByCase": {
+        "SIGNUP-CASE-01": "REQ-SU-01",
+        "SIGNUP-CASE-02": "REQ-SU-03",
+        "SIGNUP-CASE-03": "REQ-SU-04",
+        "SIGNUP-CASE-04": "REQ-SU-04",
+        "SIGNUP-CASE-05": "REQ-SU-05",
+        "SIGNUP-CASE-06": "REQ-SU-05",
+        "SIGNUP-CASE-07": "REQ-SU-05",
+        "SIGNUP-CASE-08": "REQ-SU-07",
+        "SIGNUP-CASE-09": "REQ-SU-07",
+        "SIGNUP-CASE-10": "REQ-SU-08",
+        "SIGNUP-CASE-11": "REQ-SU-08",
+        "SIGNUP-CASE-12": "REQ-SU-08",
+        "SIGNUP-CASE-13": "REQ-SU-05",
+        "SIGNUP-CASE-14": "REQ-SU-05",
+        "SIGNUP-CASE-15": "REQ-SU-06",
+        "SIGNUP-CASE-16": "REQ-SU-12",
+        "SIGNUP-CASE-17": "REQ-SU-10",
+        "SIGNUP-CASE-18": "REQ-SU-14"
+      },
+      "executionState": "NOT_EXECUTED"
+    },
+    "SECURITY": {
+      "accessMatrix": [
+        {
+          "subject": "SELF",
+          "action": "VIEW_ACCOUNT",
+          "allowed": true
+        },
+        {
+          "subject": "OTHER_USER",
+          "action": "VIEW_ACCOUNT",
+          "allowed": false
+        },
+        {
+          "subject": "ADMIN",
+          "action": "VIEW_STATUS",
+          "allowed": true
+        },
+        {
+          "subject": "ADMIN",
+          "action": "ELEVATE_ROLE",
+          "allowed": false
+        },
+        {
+          "subject": "GUEST",
+          "action": "VIEW_ACCOUNT",
+          "allowed": false
+        }
+      ],
+      "executionState": "NOT_EXECUTED",
+      "deploymentState": "NOT_REQUESTED"
+    }
+  },
+  "reviewNote": "합성 시나리오의 고정 참조 계약. 실제 고객 요구 검증·도구 실행 증거가 아님. 요청 데이터와 분리되며 실행기는 이 파일을 읽지 않는다."
+}

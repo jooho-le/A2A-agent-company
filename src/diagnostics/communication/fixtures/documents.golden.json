@@ -1,0 +1,375 @@
+{
+  "fixtureId": "documents",
+  "requestFingerprint": "5f4ce6d41d09eedc875aa5e51104852a3b365cd70871ec7f88da9ce8ff882a51",
+  "common": {
+    "fixtureId": "documents",
+    "coverageIds": [
+      "REQ-DOC-01",
+      "REQ-DOC-02",
+      "REQ-DOC-03",
+      "REQ-DOC-04",
+      "REQ-DOC-05",
+      "REQ-DOC-06",
+      "REQ-DOC-07",
+      "REQ-DOC-08",
+      "REQ-DOC-09",
+      "REQ-DOC-10",
+      "REQ-DOC-11",
+      "REQ-DOC-12",
+      "REQ-DOC-13",
+      "REQ-DOC-14",
+      "REQ-DOC-15",
+      "REQ-DOC-16"
+    ],
+    "constraints": {
+      "maxItems": 100,
+      "maxUploadBytes": 20971520,
+      "deployAllowed": false,
+      "databaseResetAllowed": false,
+      "externalNetworkAllowed": false,
+      "unresolvedPolicy": "ASK_USER",
+      "retentionDays": 30
+    },
+    "unresolvedQuestionIds": [
+      "DOCUMENTS-Q01",
+      "DOCUMENTS-Q02"
+    ],
+    "requestFingerprint": "5f4ce6d41d09eedc875aa5e51104852a3b365cd70871ec7f88da9ce8ff882a51",
+    "accessMatrix": [
+      {
+        "subject": "OWNER",
+        "action": "VIEW",
+        "allowed": true
+      },
+      {
+        "subject": "OWNER",
+        "action": "DOWNLOAD",
+        "allowed": true
+      },
+      {
+        "subject": "REVIEWER_SHARED",
+        "action": "DOWNLOAD",
+        "allowed": true
+      },
+      {
+        "subject": "REVIEWER_LIST_ONLY",
+        "action": "DOWNLOAD",
+        "allowed": false
+      },
+      {
+        "subject": "OTHER_TENANT",
+        "action": "DOWNLOAD",
+        "allowed": false
+      },
+      {
+        "subject": "GUEST",
+        "action": "DOWNLOAD",
+        "allowed": false
+      },
+      {
+        "subject": "ADMIN",
+        "action": "VIEW_STATUS",
+        "allowed": true
+      },
+      {
+        "subject": "ADMIN",
+        "action": "DELETE",
+        "allowed": false
+      },
+      {
+        "subject": "REVOKED_REVIEWER",
+        "action": "DOWNLOAD",
+        "allowed": false
+      }
+    ],
+    "executionEvidence": {
+      "build": "NOT_EXECUTED",
+      "qa": "NOT_EXECUTED",
+      "security": "NOT_EXECUTED",
+      "deployment": "NOT_REQUESTED"
+    }
+  },
+  "roles": {
+    "PLANNER": {
+      "dependencyEdges": [
+        [
+          "REQ-DOC-01",
+          "REQ-DOC-02"
+        ],
+        [
+          "REQ-DOC-01",
+          "REQ-DOC-03"
+        ],
+        [
+          "REQ-DOC-01",
+          "REQ-DOC-04"
+        ],
+        [
+          "REQ-DOC-04",
+          "REQ-DOC-05"
+        ],
+        [
+          "REQ-DOC-05",
+          "REQ-DOC-06"
+        ],
+        [
+          "REQ-DOC-04",
+          "REQ-DOC-07"
+        ],
+        [
+          "REQ-DOC-06",
+          "REQ-DOC-07"
+        ],
+        [
+          "REQ-DOC-05",
+          "REQ-DOC-08"
+        ],
+        [
+          "REQ-DOC-06",
+          "REQ-DOC-09"
+        ],
+        [
+          "REQ-DOC-01",
+          "REQ-DOC-10"
+        ],
+        [
+          "REQ-DOC-06",
+          "REQ-DOC-11"
+        ],
+        [
+          "REQ-DOC-03",
+          "REQ-DOC-12"
+        ],
+        [
+          "REQ-DOC-04",
+          "REQ-DOC-12"
+        ],
+        [
+          "REQ-DOC-12",
+          "REQ-DOC-13"
+        ],
+        [
+          "REQ-DOC-10",
+          "REQ-DOC-14"
+        ],
+        [
+          "REQ-DOC-01",
+          "REQ-DOC-15"
+        ],
+        [
+          "REQ-DOC-02",
+          "REQ-DOC-15"
+        ],
+        [
+          "REQ-DOC-13",
+          "REQ-DOC-16"
+        ],
+        [
+          "REQ-DOC-15",
+          "REQ-DOC-16"
+        ]
+      ],
+      "decision": "CLARIFICATION_REQUIRED"
+    },
+    "DEVELOPER": {
+      "files": [
+        "web/DocumentList.jsx",
+        "api/document_upload.py",
+        "api/document_access.py"
+      ],
+      "policy": {
+        "maxFileBytes": 20971520,
+        "allowedExtension": "pdf",
+        "extensionCaseSensitive": false,
+        "emptyFileAllowed": false,
+        "crossTenantAccess": false,
+        "maxActiveDocuments": 100,
+        "shareExpiryWhenNull": null,
+        "fileNameUse": "DISPLAY_ONLY",
+        "opaqueIdType": "STRING"
+      },
+      "implementationState": "NOT_EXECUTED"
+    },
+    "QA": {
+      "caseIds": [
+        "DOCUMENTS-CASE-01",
+        "DOCUMENTS-CASE-02",
+        "DOCUMENTS-CASE-03",
+        "DOCUMENTS-CASE-04",
+        "DOCUMENTS-CASE-05",
+        "DOCUMENTS-CASE-06",
+        "DOCUMENTS-CASE-07",
+        "DOCUMENTS-CASE-08",
+        "DOCUMENTS-CASE-09",
+        "DOCUMENTS-CASE-10",
+        "DOCUMENTS-CASE-11",
+        "DOCUMENTS-CASE-12",
+        "DOCUMENTS-CASE-13",
+        "DOCUMENTS-CASE-14",
+        "DOCUMENTS-CASE-15",
+        "DOCUMENTS-CASE-16",
+        "DOCUMENTS-CASE-17",
+        "DOCUMENTS-CASE-18",
+        "DOCUMENTS-CASE-19",
+        "DOCUMENTS-CASE-20",
+        "DOCUMENTS-CASE-21",
+        "DOCUMENTS-CASE-22",
+        "DOCUMENTS-CASE-23",
+        "DOCUMENTS-CASE-24"
+      ],
+      "expectedOutcomes": {
+        "DOCUMENTS-CASE-01": {
+          "status": 422
+        },
+        "DOCUMENTS-CASE-02": {
+          "status": 201
+        },
+        "DOCUMENTS-CASE-03": {
+          "status": 201
+        },
+        "DOCUMENTS-CASE-04": {
+          "status": 201
+        },
+        "DOCUMENTS-CASE-05": {
+          "status": 413
+        },
+        "DOCUMENTS-CASE-06": {
+          "status": 201
+        },
+        "DOCUMENTS-CASE-07": {
+          "status": 415
+        },
+        "DOCUMENTS-CASE-08": {
+          "status": 415
+        },
+        "DOCUMENTS-CASE-09": {
+          "allowed": true
+        },
+        "DOCUMENTS-CASE-10": {
+          "allowed": true
+        },
+        "DOCUMENTS-CASE-11": {
+          "allowed": true
+        },
+        "DOCUMENTS-CASE-12": {
+          "allowed": false
+        },
+        "DOCUMENTS-CASE-13": {
+          "allowed": false
+        },
+        "DOCUMENTS-CASE-14": {
+          "allowed": false
+        },
+        "DOCUMENTS-CASE-15": {
+          "allowed": true
+        },
+        "DOCUMENTS-CASE-16": {
+          "allowed": false
+        },
+        "DOCUMENTS-CASE-17": {
+          "allowed": false
+        },
+        "DOCUMENTS-CASE-18": {
+          "status": 201
+        },
+        "DOCUMENTS-CASE-19": {
+          "status": 409
+        },
+        "DOCUMENTS-CASE-20": {
+          "decision": "UNRESOLVED"
+        },
+        "DOCUMENTS-CASE-21": {
+          "exactId": "9007199254740993"
+        },
+        "DOCUMENTS-CASE-22": {
+          "fileNameUse": "DISPLAY_ONLY"
+        },
+        "DOCUMENTS-CASE-23": {
+          "exactName": "2026 Q4_최종(검토본)📄.pdf"
+        },
+        "DOCUMENTS-CASE-24": {
+          "retentionDays": 30
+        }
+      },
+      "requirementByCase": {
+        "DOCUMENTS-CASE-01": "REQ-DOC-02",
+        "DOCUMENTS-CASE-02": "REQ-DOC-02",
+        "DOCUMENTS-CASE-03": "REQ-DOC-02",
+        "DOCUMENTS-CASE-04": "REQ-DOC-02",
+        "DOCUMENTS-CASE-05": "REQ-DOC-02",
+        "DOCUMENTS-CASE-06": "REQ-DOC-01",
+        "DOCUMENTS-CASE-07": "REQ-DOC-01",
+        "DOCUMENTS-CASE-08": "REQ-DOC-01",
+        "DOCUMENTS-CASE-09": "REQ-DOC-05",
+        "DOCUMENTS-CASE-10": "REQ-DOC-05",
+        "DOCUMENTS-CASE-11": "REQ-DOC-06",
+        "DOCUMENTS-CASE-12": "REQ-DOC-06",
+        "DOCUMENTS-CASE-13": "REQ-DOC-07",
+        "DOCUMENTS-CASE-14": "REQ-DOC-05",
+        "DOCUMENTS-CASE-15": "REQ-DOC-08",
+        "DOCUMENTS-CASE-16": "REQ-DOC-08",
+        "DOCUMENTS-CASE-17": "REQ-DOC-09",
+        "DOCUMENTS-CASE-18": "REQ-DOC-10",
+        "DOCUMENTS-CASE-19": "REQ-DOC-10",
+        "DOCUMENTS-CASE-20": "REQ-DOC-11",
+        "DOCUMENTS-CASE-21": "REQ-DOC-04",
+        "DOCUMENTS-CASE-22": "REQ-DOC-03",
+        "DOCUMENTS-CASE-23": "REQ-DOC-03",
+        "DOCUMENTS-CASE-24": "REQ-DOC-13"
+      },
+      "executionState": "NOT_EXECUTED"
+    },
+    "SECURITY": {
+      "accessMatrix": [
+        {
+          "subject": "OWNER",
+          "action": "VIEW",
+          "allowed": true
+        },
+        {
+          "subject": "OWNER",
+          "action": "DOWNLOAD",
+          "allowed": true
+        },
+        {
+          "subject": "REVIEWER_SHARED",
+          "action": "DOWNLOAD",
+          "allowed": true
+        },
+        {
+          "subject": "REVIEWER_LIST_ONLY",
+          "action": "DOWNLOAD",
+          "allowed": false
+        },
+        {
+          "subject": "OTHER_TENANT",
+          "action": "DOWNLOAD",
+          "allowed": false
+        },
+        {
+          "subject": "GUEST",
+          "action": "DOWNLOAD",
+          "allowed": false
+        },
+        {
+          "subject": "ADMIN",
+          "action": "VIEW_STATUS",
+          "allowed": true
+        },
+        {
+          "subject": "ADMIN",
+          "action": "DELETE",
+          "allowed": false
+        },
+        {
+          "subject": "REVOKED_REVIEWER",
+          "action": "DOWNLOAD",
+          "allowed": false
+        }
+      ],
+      "executionState": "NOT_EXECUTED",
+      "deploymentState": "NOT_REQUESTED"
+    }
+  },
+  "reviewNote": "합성 시나리오의 고정 참조 계약. 실제 고객 요구 검증·도구 실행 증거가 아님. 요청 데이터와 분리되며 실행기는 이 파일을 읽지 않는다."
+}

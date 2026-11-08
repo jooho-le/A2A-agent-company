@@ -30,5 +30,6 @@ where = ["src"]
 dev = ["pytest>=8,<9", "sqlalchemy>=2,<3", "argon2-cffi>=23,<26"]
 
 [tool.setuptools.package-data]
+"diagnostics.communication" = ["dashboard.html", "fixtures/*.json"]
 evaluation = ["contracts/*.json", "contracts/README.md", "security/*.json",
               "protected_tests/suite.json", "protected_tests/tests/signup/*.py"]

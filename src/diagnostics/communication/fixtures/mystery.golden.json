@@ -1,0 +1,256 @@
+{
+  "fixtureId": "mystery",
+  "requestFingerprint": "f2244d0f7cc56fcdf9bf8b78b37a3f9f97b520489bb104f0771d0311c4a8b7e5",
+  "common": {
+    "fixtureId": "mystery",
+    "coverageIds": [
+      "REQ-GAME-01",
+      "REQ-GAME-02",
+      "REQ-GAME-03",
+      "REQ-GAME-04",
+      "REQ-GAME-05",
+      "REQ-GAME-06",
+      "REQ-GAME-07",
+      "REQ-GAME-08",
+      "REQ-GAME-09",
+      "REQ-GAME-10",
+      "REQ-GAME-11",
+      "REQ-GAME-12"
+    ],
+    "constraints": {
+      "maxItems": 100,
+      "maxUploadBytes": 20971520,
+      "deployAllowed": false,
+      "databaseResetAllowed": false,
+      "externalNetworkAllowed": false,
+      "unresolvedPolicy": "ASK_USER",
+      "retentionDays": 30
+    },
+    "unresolvedQuestionIds": [
+      "MYSTERY-Q01",
+      "MYSTERY-Q02"
+    ],
+    "requestFingerprint": "f2244d0f7cc56fcdf9bf8b78b37a3f9f97b520489bb104f0771d0311c4a8b7e5",
+    "accessMatrix": [
+      {
+        "subject": "NEW_PLAYER",
+        "action": "START",
+        "allowed": true
+      },
+      {
+        "subject": "NO_CLUES",
+        "action": "OPEN_SAFE",
+        "allowed": false
+      },
+      {
+        "subject": "BOTH_CLUES",
+        "action": "OPEN_SAFE",
+        "allowed": true
+      },
+      {
+        "subject": "SAFE_OPEN",
+        "action": "EXIT",
+        "allowed": true
+      },
+      {
+        "subject": "HINT_DISABLED",
+        "action": "REQUEST_HINT",
+        "allowed": false
+      }
+    ],
+    "executionEvidence": {
+      "build": "NOT_EXECUTED",
+      "qa": "NOT_EXECUTED",
+      "security": "NOT_EXECUTED",
+      "deployment": "NOT_REQUESTED"
+    }
+  },
+  "roles": {
+    "PLANNER": {
+      "dependencyEdges": [
+        [
+          "REQ-GAME-01",
+          "REQ-GAME-02"
+        ],
+        [
+          "REQ-GAME-02",
+          "REQ-GAME-03"
+        ],
+        [
+          "REQ-GAME-03",
+          "REQ-GAME-04"
+        ],
+        [
+          "REQ-GAME-03",
+          "REQ-GAME-05"
+        ],
+        [
+          "REQ-GAME-04",
+          "REQ-GAME-05"
+        ],
+        [
+          "REQ-GAME-01",
+          "REQ-GAME-06"
+        ],
+        [
+          "REQ-GAME-06",
+          "REQ-GAME-07"
+        ],
+        [
+          "REQ-GAME-05",
+          "REQ-GAME-08"
+        ],
+        [
+          "REQ-GAME-01",
+          "REQ-GAME-09"
+        ],
+        [
+          "REQ-GAME-07",
+          "REQ-GAME-10"
+        ],
+        [
+          "REQ-GAME-01",
+          "REQ-GAME-11"
+        ],
+        [
+          "REQ-GAME-08",
+          "REQ-GAME-12"
+        ],
+        [
+          "REQ-GAME-09",
+          "REQ-GAME-12"
+        ]
+      ],
+      "decision": "CLARIFICATION_REQUIRED"
+    },
+    "DEVELOPER": {
+      "files": [
+        "web/GameBoard.jsx",
+        "game/state_machine.py",
+        "game/puzzle_rules.py"
+      ],
+      "policy": {
+        "safeCode": "007",
+        "hintsEnabled": false,
+        "remainingHints": 0,
+        "initialScore": 0,
+        "timeLimitSeconds": null,
+        "requiredItems": [
+          "LIBRARY_NOTE",
+          "WORKSHOP_KEY"
+        ],
+        "completionState": "ESCAPED",
+        "restartKeepsInventory": false,
+        "solutionPath": [
+          "START",
+          "LIBRARY",
+          "WORKSHOP",
+          "SAFE",
+          "EXIT"
+        ]
+      },
+      "implementationState": "NOT_EXECUTED"
+    },
+    "QA": {
+      "caseIds": [
+        "MYSTERY-CASE-01",
+        "MYSTERY-CASE-02",
+        "MYSTERY-CASE-03",
+        "MYSTERY-CASE-04",
+        "MYSTERY-CASE-05",
+        "MYSTERY-CASE-06",
+        "MYSTERY-CASE-07",
+        "MYSTERY-CASE-08",
+        "MYSTERY-CASE-09",
+        "MYSTERY-CASE-10",
+        "MYSTERY-CASE-11",
+        "MYSTERY-CASE-12"
+      ],
+      "expectedOutcomes": {
+        "MYSTERY-CASE-01": {
+          "allowed": false
+        },
+        "MYSTERY-CASE-02": {
+          "allowed": false
+        },
+        "MYSTERY-CASE-03": {
+          "allowed": true
+        },
+        "MYSTERY-CASE-04": {
+          "allowed": false
+        },
+        "MYSTERY-CASE-05": {
+          "allowed": false
+        },
+        "MYSTERY-CASE-06": {
+          "hintUsed": false
+        },
+        "MYSTERY-CASE-07": {
+          "score": 0
+        },
+        "MYSTERY-CASE-08": {
+          "decision": "UNRESOLVED"
+        },
+        "MYSTERY-CASE-09": {
+          "newItems": []
+        },
+        "MYSTERY-CASE-10": {
+          "terminal": "ESCAPED"
+        },
+        "MYSTERY-CASE-11": {
+          "allowed": false
+        },
+        "MYSTERY-CASE-12": {
+          "exactNote": "가\n\"단서\""
+        }
+      },
+      "requirementByCase": {
+        "MYSTERY-CASE-01": "REQ-GAME-03",
+        "MYSTERY-CASE-02": "REQ-GAME-03",
+        "MYSTERY-CASE-03": "REQ-GAME-03",
+        "MYSTERY-CASE-04": "REQ-GAME-04",
+        "MYSTERY-CASE-05": "REQ-GAME-04",
+        "MYSTERY-CASE-06": "REQ-GAME-06",
+        "MYSTERY-CASE-07": "REQ-GAME-10",
+        "MYSTERY-CASE-08": "REQ-GAME-11",
+        "MYSTERY-CASE-09": "REQ-GAME-09",
+        "MYSTERY-CASE-10": "REQ-GAME-08",
+        "MYSTERY-CASE-11": "REQ-GAME-05",
+        "MYSTERY-CASE-12": "REQ-GAME-02"
+      },
+      "executionState": "NOT_EXECUTED"
+    },
+    "SECURITY": {
+      "accessMatrix": [
+        {
+          "subject": "NEW_PLAYER",
+          "action": "START",
+          "allowed": true
+        },
+        {
+          "subject": "NO_CLUES",
+          "action": "OPEN_SAFE",
+          "allowed": false
+        },
+        {
+          "subject": "BOTH_CLUES",
+          "action": "OPEN_SAFE",
+          "allowed": true
+        },
+        {
+          "subject": "SAFE_OPEN",
+          "action": "EXIT",
+          "allowed": true
+        },
+        {
+          "subject": "HINT_DISABLED",
+          "action": "REQUEST_HINT",
+          "allowed": false
+        }
+      ],
+      "executionState": "NOT_EXECUTED",
+      "deploymentState": "NOT_REQUESTED"
+    }
+  },
+  "reviewNote": "합성 시나리오의 고정 참조 계약. 실제 고객 요구 검증·도구 실행 증거가 아님. 요청 데이터와 분리되며 실행기는 이 파일을 읽지 않는다."
+}
