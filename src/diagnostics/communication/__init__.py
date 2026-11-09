@@ -1,1 +1,1 @@
-"""Real loopback A2A transport with controlled mock work and measured receipts."""
+"""Real OpenAI/A2A communication diagnostics and independently measured receipts."""

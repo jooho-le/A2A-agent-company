@@ -1,0 +1,58 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><title>실제 OpenAI A2A 통신 검증</title>
+<style>body{font:15px/1.8 -apple-system,'Apple SD Gothic Neo',sans-serif;background:#f2f5f9;color:#182330;margin:40px}main{max-width:1280px;margin:auto;background:white;padding:32px;border-radius:16px}h1{font-size:28px}table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:10px;text-align:left;border-bottom:1px solid #d9e1e9}th{background:#eef3fa}.note{padding:18px;background:#eef4ff;border-left:3px solid #1558c9}code,pre{overflow-wrap:anywhere}pre{white-space:pre-wrap;background:#f2f5f9;padding:16px;border-radius:8px;font-size:12px}@media(max-width:800px){body{margin:12px}main{padding:16px}.table{overflow:auto}}</style>
+<main><p>atelier. / REAL OPENAI · A2A DIAGNOSTICS</p><h1>실제 모델 호출 결과</h1>
+<p>선택 모델 <code>gpt-4.1-mini-2025-04-14</code> · API 호출 시도 5회 · 전체 판정 FAIL_OR_INCOMPLETE</p>
+<p><b>API HTTP 200: 5/5 · 송수신 일치: 5/5 · 고정 계약 일치: 4/5</b></p>
+<p class="note">합성 요청을 실제 A2A 서버로 전달한 뒤 OpenAI Responses API를 호출했습니다. 요구사항·정책·권한 값은 모델이 작성하고 고정 참조로 대조합니다. 해시·ID는 호스트의 전송 증거입니다. 제품 코드 생성·빌드·QA·보안 검사와 자유 서술 전체의 사실성은 검증하지 않았습니다.</p>
+<div class="table"><table><thead><tr><th>역할</th><th>Task 상태</th><th>API HTTP</th><th>송수신</th><th>고정 계약</th><th>API 왕복 ms</th><th>전체 ms</th><th>토큰</th><th>오류 코드</th></tr></thead><tbody><tr><td>PLANNER</td><td>COMPLETED</td><td>200</td><td>PASS</td><td>PASS</td><td>5366.419</td><td>5499.988</td><td>4796</td><td>—</td></tr><tr><td>DEVELOPER</td><td>COMPLETED</td><td>200</td><td>PASS</td><td>PASS</td><td>3510.099</td><td>3642.26</td><td>5407</td><td>—</td></tr><tr><td>QA</td><td>COMPLETED</td><td>200</td><td>PASS</td><td>PASS</td><td>6148.235</td><td>6376.651</td><td>6337</td><td>—</td></tr><tr><td>SECURITY</td><td>COMPLETED</td><td>200</td><td>PASS</td><td>PASS</td><td>3807.437</td><td>3998.968</td><td>5234</td><td>—</td></tr><tr><td>SINGLE_AGENT</td><td>COMPLETED</td><td>200</td><td>PASS</td><td>FAIL</td><td>8889.017</td><td>9033.846</td><td>6347</td><td>—</td></tr></tbody></table></div>
+<h3>SINGLE_AGENT의 계약 불일치</h3><p>차이 23개 항목. 앞 8개를 표시하며 전체는 report.json에 보관합니다.</p><pre>[
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges&quot;,
+    &quot;kind&quot;: &quot;LENGTH_CHANGED&quot;,
+    &quot;expected&quot;: 17,
+    &quot;actual&quot;: 14
+  },
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges/0&quot;,
+    &quot;kind&quot;: &quot;LENGTH_CHANGED&quot;,
+    &quot;expected&quot;: 2,
+    &quot;actual&quot;: 0
+  },
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges/1&quot;,
+    &quot;kind&quot;: &quot;LENGTH_CHANGED&quot;,
+    &quot;expected&quot;: 2,
+    &quot;actual&quot;: 1
+  },
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges/1/0&quot;,
+    &quot;kind&quot;: &quot;VALUE_CHANGED&quot;,
+    &quot;expected&quot;: &quot;REQ-SU-02&quot;,
+    &quot;actual&quot;: &quot;REQ-SU-01&quot;
+  },
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges/2/0&quot;,
+    &quot;kind&quot;: &quot;VALUE_CHANGED&quot;,
+    &quot;expected&quot;: &quot;REQ-SU-01&quot;,
+    &quot;actual&quot;: &quot;REQ-SU-02&quot;
+  },
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges/2/1&quot;,
+    &quot;kind&quot;: &quot;VALUE_CHANGED&quot;,
+    &quot;expected&quot;: &quot;REQ-SU-04&quot;,
+    &quot;actual&quot;: &quot;REQ-SU-03&quot;
+  },
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges/3&quot;,
+    &quot;kind&quot;: &quot;LENGTH_CHANGED&quot;,
+    &quot;expected&quot;: 2,
+    &quot;actual&quot;: 1
+  },
+  {
+    &quot;path&quot;: &quot;$/specification/roleContract/roles/PLANNER/dependencyEdges/4&quot;,
+    &quot;kind&quot;: &quot;LENGTH_CHANGED&quot;,
+    &quot;expected&quot;: 2,
+    &quot;actual&quot;: 1
+  }
+]</pre>
+<p>원본: <a href="report.json">report.json</a> · 인증·과금·모델 오류 시 추가 호출을 중단하며 자동 재시도하지 않습니다. 실패·미완료는 성공으로 집계하지 않습니다.</p></main></html>

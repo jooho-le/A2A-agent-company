@@ -350,23 +350,16 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.run_host \
 
 기본은 파일 검사이며 서버·모델을 시작하지 않습니다. 승인 설정·환경변수·Docker를 준비한 뒤 같은 명령에 `--start`를 추가하면 Orchestrator와 Single 두 서버를 실행합니다. `--architecture`를 생략하면 기존 Multi 모드입니다. Security 자체 테스트 scope도 양쪽 Host가 같은 정책으로 전달하며, 미확인 근거를 PASS로 처리하지 않습니다. 실제 환경 실행과 독립 비교 실험은 아직 수행하지 않았습니다.
 
-## Agent 통신 검증실 — 57번
+## 실제 OpenAI 통신 검증 — 59번
 
-[57번 통신 검증 안내](docs/57-agent-communication-lab.md)는 프로젝트 A2A 클라이언트와 인증된 Agent 서버를 실제 로컬 HTTP로 연결해 송신·수신값, 지정 필드의 근거, 구간별 시간을 확인하는 화면입니다. 업무 실행기는 목업이며 실제 LLM의 할루시네이션과 제품 개발 품질은 미검증입니다. API 키·Docker 없이 실행합니다.
+[59번 실행 안내](docs/59-live-openai-communication.md)는 루트 `.env`의 `OPENAI_API_KEY`를 읽고 명시한 모델로 최대 5회 호출하는 A2A 진단 CLI입니다. [실제 호출 PDF 보고서](docs/reports/agent-communication-openai-2026-11-08/report.pdf)와 [결과 화면](docs/reports/agent-communication-openai-2026-11-08/report.html)에 API·송수신 5/5 정상, 구조화 계약 4/5 일치 및 싱글 의존 관계 불일치를 기록했습니다.
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m diagnostics.communication
+PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
+  --model gpt-4.1-mini-2025-04-14 --out /tmp/a2a-openai-new-run
 ```
 
-http://127.0.0.1:8766/ 에서 정상 전달, 값·응답 변형, 근거 없는 주장, 10초/1초 지연, 응답 누락을 선택해 볼 수 있습니다. 완료 결과는 JSON으로 저장합니다. 종료는 실행 터미널에서 `Ctrl+C`입니다.
-
-최신 측정 보고서와 원본 근거는 아래 58번 엄격 검증에 정리했습니다.
-
-## 복잡한 사용자 요청 기반 엄격 통신 검증 — 58번
-
-[58번 엄격 검증 안내](docs/58-strict-agent-communication-validation.md)와 [최신 결과 PDF v2](docs/reports/agent-communication-strict-v2-2026-11-08/report.pdf)에 합성 요청 3개(요구사항 42개·합격 기준 54개), 고정 정답 참조, 18종 오류 주입을 정리했습니다. 전체 행렬 86/86조건과 별도 프로토콜 4개 검사를 통과했습니다. 정상 조건 338건·의도한 오류 84건·크기 초과 거절 6건을 구분하며, 실제 LLM의 할루시네이션은 미검증입니다.
-
-대시보드에서 요청 자료·오류 대상 역할·본문 크기를 선택할 수 있습니다. 재현 명령은 `PYTHONPATH=src .venv/bin/python -m diagnostics.communication.strict_suite --out /tmp/a2a-strict-new-run`입니다. 기존 근거를 덮어쓰지 않도록 새 출력 폴더를 사용합니다.
+모델과 새 결과 폴더를 명시해야 호출하며 자동 재시도·대체 모델은 사용하지 않습니다. 합성 입력 자료와 고정 참조는 실제 응답 검증에 필요하므로 포함합니다. 목업 전용 대시보드·오류 주입 실행·보고서는 제거했습니다.
 
 ## 테스트
 
