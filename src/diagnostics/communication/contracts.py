@@ -8,58 +8,24 @@ from time import perf_counter_ns
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.core.security import redact_text
-
-
-SCENARIOS = (
-    "normal", "request_change", "response_change", "grounding_error",
-    "slow_sender", "slow_agent", "no_response",
-    "request_truncate", "requirement_drop", "array_reorder", "type_change",
-    "unicode_change", "metadata_change", "response_requirement_drop",
-    "response_limit_change", "permission_swap", "invented_evidence",
-    "context_spoof", "foreign_artifact",
-    "invented_decision", "message_id_change",
-)
 
 
 class CheckOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    scenario: Literal[
-        "normal", "request_change", "response_change", "grounding_error",
-        "slow_sender", "slow_agent", "no_response",
-        "request_truncate", "requirement_drop", "array_reorder", "type_change",
-        "unicode_change", "metadata_change", "response_requirement_drop",
-        "response_limit_change", "permission_swap", "invented_evidence",
-        "context_spoof", "foreign_artifact",
-        "invented_decision", "message_id_change",
-    ] = "normal"
     architecture: Literal["MULTI_AGENT", "SINGLE_AGENT"] = "MULTI_AGENT"
-    profile: Literal["basic", "signup", "documents", "mystery"] = "signup"
-    fault_target: Literal["PLANNER", "DEVELOPER", "QA", "SECURITY"] = "DEVELOPER"
-    padding_kib: int = Field(default=0, strict=True, ge=0, le=128)
+    profile: Literal["signup", "documents", "mystery"] = "signup"
     value: int = Field(default=100, strict=True, ge=-1_000_000, le=1_000_000)
-    label: str = Field(default="진단 목업 · 한글과 숫자 전달", max_length=120)
-    rounds: int = Field(default=3, strict=True, ge=1, le=5)
-    processing_ms: int = Field(default=0, strict=True, ge=0, le=1000)
-    sender_delay_ms: int = Field(default=0, strict=True, ge=0, le=10_000)
+    label: str = Field(default="실제 OpenAI · 한글과 숫자 전달", max_length=120)
+    rounds: int = Field(default=1, strict=True, ge=1, le=5)
 
     @field_validator("label")
     @classmethod
     def safe_label(cls, value: str) -> str:
         return redact_text(value)
-
-    @model_validator(mode="after")
-    def require_rich_fixture_for_semantic_faults(self):
-        if self.profile == "basic" and self.scenario in {
-            "request_truncate", "requirement_drop", "array_reorder", "type_change",
-            "unicode_change", "response_requirement_drop", "response_limit_change",
-            "permission_swap", "invented_evidence", "invented_decision",
-        }:
-            raise ValueError("이 오류 주입에는 복합 사용자 요청 자료가 필요합니다.")
-        return self
 
 
 def now() -> int:
@@ -154,8 +120,6 @@ class ProbeRecord:
     role: str
     round: int
     position: int
-    scenario: str
-    fault_target: str = "DEVELOPER"
     probe_id: str = field(default_factory=lambda: str(uuid4()))
     phase: str = "PLANNED"
     payload: dict | None = None
@@ -177,13 +141,12 @@ class ProbeRecord:
     wire_bytes: int | None = None
     response_http_status: int | None = None
     points: dict = field(default_factory=dict)
-    injection: str | None = None
     error: str | None = None
     cleanup_state: str | None = None
     identity_valid: bool | None = None
-    injected_processing_ms: int = 0
     executor_invocations: int = 0
     observer_overhead_ns: int = 0
+    model_observation: dict | None = None
     notify: object = field(default=None, repr=False)
 
     def changed(self):
@@ -220,7 +183,8 @@ class ProbeRecord:
             "wireBytes": self.wire_bytes, "httpStatus": self.response_http_status,
             "executorInvocations": self.executor_invocations,
             "observerCallbackMs": round(self.observer_overhead_ns / 1_000_000, 3),
-            "injection": self.injection, "error": self.error,
+            "model": self.model_observation,
+            "error": self.error,
             "cleanupState": self.cleanup_state,
             "observations": {"intended": self.payload, "wireSent": self.wire_sent,
                              "wireReceived": self.wire_received, "admitted": self.admitted,
@@ -242,7 +206,6 @@ class ProbeRecord:
                         "ackRoundTripMs": self.ms("clientSend", "ack"),
                         "resultObservationMs": self.ms("responseReady", "observed"),
                         "totalMs": self.ms("prepare", "finish")},
-            "injectedProcessingMs": self.injected_processing_ms,
         }
 
 
@@ -280,3 +243,12 @@ def summarize(rows: list[ProbeRecord]) -> dict:
             "received": sum(r.received is not None for r in rows),
             "responses": sum(r.response_received is not None for r in rows),
             "issueCount": len(issues), "issues": issues, "roles": roles}
+
+
+def row_clean(row: dict) -> bool:
+    """A result is clean only when every observed boundary/contract passed."""
+    checks = row["checks"]
+    return (row["phase"] == "COMPLETED" and checks["identity"] == "PASS"
+            and all(item["status"] == "PASS" for item in checks["request"].values())
+            and all(checks[key]["status"] == "PASS" for key in (
+                "response", "metadata", "responseMetadata", "grounding", "sourceGrounding")))

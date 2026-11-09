@@ -1,8 +1,7 @@
-"""Fixed synthetic customer briefs, separate gold, and deterministic role mock.
+"""Synthetic API inputs, independent references, and value-free output schemas.
 
-Gold is read by the host's verifier only. `mock_specification` must not read the
-gold file: it extracts a structured contract from the actual received request.
-This tests data/contract grounding, not a real LLM's natural-language reasoning.
+Gold is read by the host verifier only. Schema generation uses request field
+types without constructing an answer or reading a reference answer.
 """
 
 from copy import deepcopy
@@ -11,7 +10,7 @@ from importlib.resources import files
 import json
 
 
-PROFILES = ("basic", "signup", "documents", "mystery")
+PROFILES = ("signup", "documents", "mystery")
 ROLE_NAMES = ("PLANNER", "DEVELOPER", "QA", "SECURITY")
 
 
@@ -24,7 +23,7 @@ def request_digest(value):
 
 @lru_cache(maxsize=3)
 def _asset(profile, kind):
-    if profile not in PROFILES[1:] or kind not in ("request", "golden"):
+    if profile not in PROFILES or kind not in ("request", "golden"):
         raise ValueError("UNKNOWN_DIAGNOSTIC_FIXTURE")
     raw = files("diagnostics.communication").joinpath("fixtures", profile + "." + kind + ".json").read_text(encoding="utf-8")
     return json.loads(raw)
@@ -44,45 +43,62 @@ def expected_specification(profile, role):
     return result
 
 
-def mock_specification(request, role):
-    """Fixture-only role response generated without a reference answer."""
-    requirements = request["requirements"]
-    common = {
-        "fixtureId": request["fixtureId"],
-        "coverageIds": [item["id"] for item in requirements],
-        "constraints": deepcopy(request["constraints"]),
-        "unresolvedQuestionIds": [item["id"] for item in request["openQuestions"]],
-        "requestFingerprint": request_digest(request),
-        "accessMatrix": deepcopy(request["accessMatrix"]),
-        "executionEvidence": {"build": "NOT_EXECUTED", "qa": "NOT_EXECUTED",
-                              "security": "NOT_EXECUTED", "deployment": "NOT_REQUESTED"},
-    }
+def object_schema(properties):
+    return {"type": "object", "properties": properties, "required": list(properties),
+            "additionalProperties": False}
+
+
+def shape_only(value):
+    """Field/type structure only: no enum, const or expected scalar values."""
+    if isinstance(value, dict):
+        return object_schema({k: shape_only(v) for k, v in value.items()})
+    if isinstance(value, list):
+        variants = []
+        for item in value:
+            candidate = shape_only(item)
+            if candidate not in variants:
+                variants.append(candidate)
+        items = variants[0] if len(variants) == 1 else {"anyOf": variants} if variants else {"type": "string"}
+        return {"type": "array", "items": items}
+    if value is None:
+        return {"type": ["string", "null"]}
+    return {"type": {bool: "boolean", int: "integer", float: "number", str: "string"}[type(value)]}
+
+
+def specification_schema(request, role):
+    """Create output types directly; answer values must come from the model."""
+    string = {"type": "string"}
+    strings = {"type": "array", "items": string}
 
     def contract(name):
         if name == "PLANNER":
-            return {"dependencyEdges": [[dependency, item["id"]] for item in requirements for dependency in item["dependsOn"]],
-                    "decision": "CLARIFICATION_REQUIRED" if request["openQuestions"] else "READY"}
+            return object_schema({"dependencyEdges": {"type": "array", "items": strings}, "decision": string})
         if name == "DEVELOPER":
-            return {"files": deepcopy(request["targetFiles"]), "policy": deepcopy(request["domainPolicy"]),
-                    "implementationState": "NOT_EXECUTED"}
+            return object_schema({"files": shape_only(request["targetFiles"]),
+                                  "policy": shape_only(request["domainPolicy"]), "implementationState": string})
         if name == "QA":
             cases = request["acceptanceCases"]
-            return {"caseIds": [case["id"] for case in cases],
-                    "expectedOutcomes": {case["id"]: deepcopy(case["expected"]) for case in cases},
-                    "requirementByCase": {case["id"]: case["requirementId"] for case in cases},
-                    "executionState": "NOT_EXECUTED"}
+            return object_schema({"caseIds": strings,
+                                  "expectedOutcomes": object_schema({c["id"]: shape_only(c["expected"]) for c in cases}),
+                                  "requirementByCase": object_schema({c["id"]: string for c in cases}),
+                                  "executionState": string})
         if name == "SECURITY":
-            return {"accessMatrix": deepcopy(request["accessMatrix"]), "executionState": "NOT_EXECUTED",
-                    "deploymentState": "NOT_REQUESTED"}
+            return object_schema({"accessMatrix": shape_only(request["accessMatrix"]),
+                                  "executionState": string, "deploymentState": string})
         raise ValueError("UNKNOWN_PROBE_ROLE")
 
-    common["roleContract"] = contract(role) if role != "SINGLE_AGENT" else {"roles": {name: contract(name) for name in ROLE_NAMES}}
-    return common
+    role_schema = contract(role) if role != "SINGLE_AGENT" else object_schema({
+        "roles": object_schema({name: contract(name) for name in ROLE_NAMES})})
+    return object_schema({
+        "fixtureId": string, "coverageIds": strings,
+        "constraints": shape_only(request["constraints"]), "unresolvedQuestionIds": strings,
+        "accessMatrix": shape_only(request["accessMatrix"]),
+        "executionEvidence": object_schema({k: string for k in ("build", "qa", "security", "deployment")}),
+        "roleContract": role_schema,
+    })
 
 
 def fixture_statistics(profile):
-    if profile == "basic":
-        return {"profile": profile, "requirements": 2, "cases": 0}
     doc = load_request(profile)
     raw = json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode()
     return {"profile": profile, "requirements": len(doc["requirements"]),
