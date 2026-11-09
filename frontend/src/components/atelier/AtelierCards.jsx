@@ -11,7 +11,7 @@ export function Portrait({ employee, index, state = '' }) {
     <span className="portrait" data-person={employee.id}>
       <span className="portrait-number">STAFF / 0{index + 1}</span>
       {employee.leadership && <span className="leader-portrait-badge">{employee.leadership.badge}</span>}
-      {failedSource !== source ? <img src={source} alt={`${employee.name} 캐릭터`} onError={() => setFailedSource(source)} /> : (
+      {source && failedSource !== source ? <img src={source} alt={`${employee.name} 캐릭터`} onError={() => setFailedSource(source)} /> : (
         <svg className="person-placeholder" viewBox="0 0 120 130" aria-hidden="true"><circle cx="60" cy="39" r="24" /><path d="M9 134v-22c0-29 22-46 51-46s51 17 51 46v22Z" /></svg>
       )}
     </span>
@@ -25,7 +25,7 @@ export function EmployeeCard({ employee, index, state, profile = false, onEmploy
         <span className="employee-body">
           <span className="employee-name-line"><span className="employee-name">{employee.name}</span>{!profile && <span className="agent-status">{state.label}</span>}</span>
           {employee.leadership && <span className="leader-rank">{employee.leadership.title} · {employee.leadership.badge}</span>}
-          <span className="employee-role">{employee.roleLabel || `${employee.job} · ${employee.role} AI`}</span>
+          {!employee.leadership && <span className="employee-role">{employee.roleLabel || `${employee.job} · ${employee.role} AI`}</span>}
           {profile ? <><span className="employee-quote">{employee.quote}</span><span className="personality-tag">{employee.personality}</span></> : <span className="agent-task">{state.task}</span>}
           <span className="employee-link">{profile ? '직원 소개 보기' : '작업 자세히 보기'}<Icon name="chevron" /></span>
         </span>
@@ -42,7 +42,7 @@ export function ProjectOptions({ projects, selectedId, onSelect, id }) {
   return <select id={id} value={selectedId} onChange={(event) => onSelect(event.target.value)}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
 }
 
-export function ProjectCard({ project, onSelect, status = projectStatus(project), amount = progress(project), staffCount = 4 }) {
+export function ProjectCard({ project, onSelect, status = projectStatus(project), amount = progress(project), staffCount = 5 }) {
   return (
     <button type="button" className="project-card" onClick={() => onSelect(project.id)} aria-label={`${project.name} 업무 보기`}>
       <span className="project-card-top"><span className={`project-monogram ${['flow', 'desk'].includes(project.id) ? project.id : ''}`}>{({ orbit: 'O', flow: 'F', desk: 'D' })[project.id] || '+'}</span><span className={`badge ${status.kind}`}>{status.text}</span></span>

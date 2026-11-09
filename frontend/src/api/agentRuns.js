@@ -1,3 +1,5 @@
+import { popupArtifacts, popupIssues } from './agentRunResults.js'
+
 function apiError(message, { status = null, detail = null, code = 'INVALID_RESPONSE', cause } = {}) {
   const error = new Error(message)
   error.name = 'AgentRunApiError'
@@ -129,4 +131,21 @@ export async function getAgentRunEvents(runId, { limit = 100, offset = 0, signal
     throw apiError('서버 응답에서 Event 목록과 페이지 정보를 확인할 수 없습니다.')
   }
   return data
+}
+
+// 목록 API가 Report 본문도 반환하므로 상세 API를 다시 호출하지 않습니다.
+export async function getAgentRunArtifacts(runId, { signal } = {}) {
+  const data = await requestJson(`${runPath(runId)}/artifacts`, { method: 'GET', signal }, '산출물 조회 실패')
+  if (data?.runId !== runId || !Array.isArray(data.artifacts) || data.artifacts.some(row => !row || row.runId !== runId)) {
+    throw apiError('서버 응답에서 산출물을 확인할 수 없습니다.')
+  }
+  return { runId, artifacts: popupArtifacts(data.artifacts) }
+}
+
+export async function getAgentRunIssues(runId, { signal } = {}) {
+  const data = await requestJson(`${runPath(runId)}/issues`, { method: 'GET', signal }, 'Issue 조회 실패')
+  if (data?.runId !== runId || !Array.isArray(data.issues) || data.issues.some(row => !row || row.runId !== runId)) {
+    throw apiError('서버 응답에서 Issue를 확인할 수 없습니다.')
+  }
+  return { runId, issues: popupIssues(data.issues) }
 }

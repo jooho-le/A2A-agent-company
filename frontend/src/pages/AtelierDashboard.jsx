@@ -53,6 +53,7 @@ export default function AtelierDashboard({ onRunScenario, onOpenDocuments, onLog
   const [officeModeChoice, setOfficeModeChoice] = useState({ runId: '', mode: 'mock' })
   const officeMode = officeModeChoice.runId === runQuery.runId ? officeModeChoice.mode : runQuery.runId ? 'actual' : 'mock'
   const runMonitor = useAgentRunMonitor(runQuery.runId, { limit: runEventLimit, offset: runQuery.offset, includeArchitecture: true,
+    collectEvents: view === 'home' && officeMode === 'actual',
     polling: view === 'home' && officeMode === 'actual' })
   const pollingLabels = { idle: 'Run 선택 전', inactive: '목업 또는 다른 화면에서 중지', paused: '일시정지',
     finished: 'Run 종료로 중지', not_multi: '멀티 Run이 아니므로 중지', active: '3초 간격',

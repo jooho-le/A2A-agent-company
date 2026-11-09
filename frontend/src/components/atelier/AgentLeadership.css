@@ -1,26 +1,32 @@
-.atelier-dashboard .agent-leadership { margin:0 0 24px; padding:18px; border:1px solid #62563c; border-radius:12px; background:#12171d; }
+.atelier-dashboard .agent-leadership { --branch-gap:14px; --branch-stem:13px; margin:0 0 24px; padding:18px; border:1px solid #62563c; border-radius:12px; background:#12171d; }
 .atelier-dashboard .leadership-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; }
 .atelier-dashboard .leadership-heading strong { color:#e2d1a9; font-size:13px; font-weight:550; }
 .atelier-dashboard .leadership-heading>span { font-size:9px; color:#9da6b3; white-space:nowrap; }
-.atelier-dashboard .leadership-leader { position:relative; display:flex; align-items:center; justify-content:center; gap:12px; width:fit-content; min-width:220px; margin:0 auto 26px; padding:12px 22px; border:1px solid #a58d59; border-radius:9px; background:#28271f; }
-.atelier-dashboard .leadership-mark { display:grid; place-items:center; width:34px; height:34px; border:1px solid #c0a364; border-radius:8px; color:#ead29a; font-size:16px; font-weight:650; }
+.atelier-dashboard .leadership-leader { position:relative; display:flex; align-items:center; justify-content:center; gap:12px; width:fit-content; min-width:220px; margin:0 auto 26px; padding:12px 22px; border:1px solid #a58d59; border-radius:9px; background:#28271f; text-align:center; }
 .atelier-dashboard .leadership-leader strong { color:#eee0bd; font-size:15px; font-weight:600; }
 .atelier-dashboard .leadership-leader small { display:block; margin-top:4px; font-size:10px; color:#c5b183; font-weight:450; }
 .atelier-dashboard .leadership-leader p { margin:6px 0 0; font-size:10px; color:#b5bcc5; }
-.atelier-dashboard .leadership-leader::after { content:''; position:absolute; left:50%; top:100%; height:15px; border-left:1px solid #8b7850; }
-.atelier-dashboard .leadership-branches { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
-.atelier-dashboard .leadership-branches::before { content:''; position:absolute; top:-12px; left:16.666%; right:16.666%; border-top:1px solid #8b7850; }
+.atelier-dashboard .leadership-leader::after { content:''; position:absolute; left:50%; top:100%; height:calc(var(--branch-stem) + 1px); border-left:1px solid #8b7850; pointer-events:none; }
+.atelier-dashboard .leadership-branches { position:relative; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--branch-gap); }
+/* 네 카드의 실제 너비와 간격으로 양끝 중심을 계산합니다. */
+.atelier-dashboard .leadership-branches::before { content:''; position:absolute; top:calc(0px - var(--branch-stem)); left:calc((100% - 3 * var(--branch-gap)) / 8); right:calc((100% - 3 * var(--branch-gap)) / 8); border-top:1px solid #8b7850; pointer-events:none; }
 .atelier-dashboard .leadership-member { position:relative; padding:11px; text-align:center; border:1px solid #3a444f; border-radius:8px; background:#171e26; min-width:0; }
-.atelier-dashboard .leadership-member::before { content:''; position:absolute; top:-12px; left:50%; height:11px; border-left:1px solid #8b7850; }
+.atelier-dashboard .leadership-member::before { content:''; position:absolute; top:calc(-1px - var(--branch-stem)); left:50%; height:calc(var(--branch-stem) + 1px); border-left:1px solid #8b7850; pointer-events:none; }
 .atelier-dashboard .leadership-member strong { display:block; color:#e0e6ed; font-size:12px; font-weight:550; }
 .atelier-dashboard .leadership-member small { display:block; margin-top:4px; color:#9dacbd; font-size:10px; font-weight:450; }
 .atelier-dashboard .leadership-member>span { display:block; margin-top:7px; color:#aeb7c3; font-size:10px; }
 .atelier-dashboard .leadership-note { margin:13px 0 0; color:#8f9aa9; font-size:10px; line-height:1.6; }
 @media(max-width:600px) {
-  .atelier-dashboard .agent-leadership { padding:14px; }
+  .atelier-dashboard .agent-leadership { --branch-gap:8px; --branch-row-gap:26px; padding:14px; }
   .atelier-dashboard .leadership-heading { flex-wrap:wrap; gap:6px; }
   .atelier-dashboard .leadership-leader { min-width:0; width:fit-content; max-width:100%; padding:11px 18px; }
-  .atelier-dashboard .leadership-branches { gap:8px; }
+  .atelier-dashboard .leadership-branches { grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:1fr; gap:var(--branch-row-gap) var(--branch-gap); }
+  .atelier-dashboard .leadership-branches::before { left:calc((100% - var(--branch-gap)) / 4); right:calc((100% - var(--branch-gap)) / 4); }
+  /* 두 줄로 배치된 카드에도 중앙 줄기와 가로 가지를 이어 줍니다. */
+  .atelier-dashboard .leadership-branches::after { content:''; position:absolute; left:50%; top:calc(0px - var(--branch-stem)); height:calc(50% + var(--branch-row-gap) / 2); border-left:1px solid #8b7850; pointer-events:none; }
+  .atelier-dashboard .leadership-member:nth-child(n+3)::after { content:''; position:absolute; top:calc(-1px - var(--branch-stem)); width:calc(50% + var(--branch-gap) / 2 + 1px); border-top:1px solid #8b7850; pointer-events:none; }
+  .atelier-dashboard .leadership-member:nth-child(3)::after { left:50%; }
+  .atelier-dashboard .leadership-member:nth-child(4)::after { right:50%; }
   .atelier-dashboard .leadership-member { padding:10px 5px; }
   .atelier-dashboard .leadership-member small { font-size:9px; }
 }
