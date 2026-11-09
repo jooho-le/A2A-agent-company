@@ -352,7 +352,7 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.run_host \
 
 ## 실제 OpenAI 통신 검증 — 59번
 
-[59번 실행 안내](docs/59-live-openai-communication.md)는 루트 `.env`의 `OPENAI_API_KEY`를 읽고 명시한 모델로 최대 5회 호출하는 A2A 진단 CLI입니다. [실제 호출 PDF 보고서](docs/reports/agent-communication-openai-2026-11-08/report.pdf)와 [결과 화면](docs/reports/agent-communication-openai-2026-11-08/report.html)에 API·송수신 5/5 정상, 구조화 계약 4/5 일치 및 싱글 의존 관계 불일치를 기록했습니다.
+[59번 실행 안내](docs/59-live-openai-communication.md)는 루트 `.env`의 `OPENAI_API_KEY`를 읽고 명시한 모델로 최대 5회 호출하는 A2A 진단 CLI입니다. [정리된 회원가입 입력의 기존 PDF](docs/reports/agent-communication-openai-2026-11-08/structured-signup-communication-report.pdf)에 송수신 5/5 일치, 내용 기준 4/5 충족, 싱글의 연결 관계 작성 오류, 역할별 시간과 후속 작업을 정리했습니다. 공유용 보고서는 PDF만 유지합니다.
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
@@ -360,6 +360,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 ```
 
 모델과 새 결과 폴더를 명시해야 호출하며 자동 재시도·대체 모델은 사용하지 않습니다. 합성 입력 자료와 고정 참조는 실제 응답 검증에 필요하므로 포함합니다. 목업 전용 대시보드·오류 주입 실행·보고서는 제거했습니다.
+
+### 자연어 요청 3종 검증 — 60번
+
+[60번 실행·평가 안내](docs/60-natural-language-communication.md)는 블로그·문서 서비스·추리게임의 자연어 원문을 입력합니다. 모델에 정리된 요구사항이나 평가 기준을 주지 않고, 요청당 멀티 4회·싱글 1회로 최대 15번 호출합니다. [새 PDF 보고서](docs/reports/agent-communication-natural-2026-11-10/natural-language-3cases-report.pdf)에 실제 송수신 15/15 일치, 미승인 조건의 검사 기준화, 역할 필드 혼입과 시간 차이를 기록했습니다.
+
+입력은 [자연어 요청 폴더](src/diagnostics/communication/fixtures/natural)에, 최신 재실행의 실제 입출력 증거는 Git에서 제외되는 `.data/diagnostics/natural-language-3cases-2026-11-10-redo-01/`에 있습니다. 제품 코드 생성·빌드·실제 QA·보안 스캔은 이번 진단 범위 밖입니다.
 
 ## 테스트
 

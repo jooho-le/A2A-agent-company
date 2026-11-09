@@ -66,6 +66,10 @@ class CommunicationLab:
         references = requirement_ids or [uuid4() for _ in row.payload["sample"]["requirementIds"]]
         row.payload["requirementRefs"] = [{"externalId": external, "a2aId": str(a2a)}
                                           for external, a2a in zip(row.payload["sample"]["requirementIds"], references)]
+        return await self.send_probe(row, run_id, scenario_id, references, context_id)
+
+    async def send_probe(self, row, run_id, scenario_id, references, context_id=None):
+        """Share the authenticated transport without imposing fixture answers."""
         metadata = A2AWorkflowMetadata(runId=run_id, workflowStepId=uuid4(),
                                        scenarioId=scenario_id, attempt=0, requirementIds=references)
         row.metadata_sent = metadata.to_a2a_json()
@@ -233,9 +237,11 @@ class CommunicationLab:
 
 
 @asynccontextmanager
-async def running_lab(model_runtime):
+async def running_lab(model_runtime, *, lab=None, executor_factory=None):
     """Separate ephemeral TCP ports and DBs, with existing authenticated APIs."""
-    lab = CommunicationLab(model_runtime=model_runtime)
+    lab = lab if lab is not None else CommunicationLab(model_runtime=model_runtime)
+    if lab.model_runtime is not model_runtime:
+        raise ValueError("DIAGNOSTIC_RUNTIME_MISMATCH")
     servers, tasks, sockets = [], [], []
     with TemporaryDirectory(prefix="a2a-communication-") as directory:
         try:
@@ -256,7 +262,7 @@ async def running_lab(model_runtime):
                     llm_provider=None, llm_model_id=None, llm_model_revision=None,
                 )
                 from diagnostics.communication.live import OpenAIProbeExecutor
-                executor = OpenAIProbeExecutor(lab.records, model_runtime)
+                executor = (executor_factory or OpenAIProbeExecutor)(lab.records, model_runtime)
                 app = create_agent_app(settings, executor=executor)
                 observed = ReceiverObserver(app, lab.records, token)
                 server = EmbeddedServer(uvicorn.Config(observed, host="127.0.0.1", port=port,
