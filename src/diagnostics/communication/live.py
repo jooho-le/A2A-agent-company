@@ -157,6 +157,12 @@ class LiveRuntime:
         if self.fatal_error or needed > self.max_model_calls - len(self.calls):
             raise ValueError("LIVE_MODEL_CALL_BUDGET_UNAVAILABLE")
 
+    def output_contract(self, payload, role):
+        return answer_contract(payload, role)
+
+    def role_prompt(self, role):
+        return system_prompt(role)
+
     async def complete(self, payload, row):
         if self.fatal_error or len(self.calls) >= self.max_model_calls:
             raise LLMRuntimeError(LLMErrorCode.BUDGET)
@@ -165,14 +171,14 @@ class LiveRuntime:
                        "status": "REQUESTING", "httpStatus": None, "usage": None}
         self.calls.append(observation)
         row.model_observation = observation
-        output = answer_contract(payload, row.role)
+        output = self.output_contract(payload, row.role)
         items = [{"role": "user", "content": json_text({"received": payload})}]
         transport = ObservedOpenAITransport(observation, fingerprint(items),
                                             self.transport_factory() if self.transport_factory else None)
         provider = OpenAIResponsesProvider(self.api_key, transport=transport)
         request = LLMRequest(
             model=ModelConfiguration(provider="openai", modelId=self.model_id, temperature=self.temperature),
-            system_prompt=system_prompt(row.role), input_items_json=json_text(items), tools=(),
+            system_prompt=self.role_prompt(row.role), input_items_json=json_text(items), tools=(),
             output=output, max_output_tokens=self.max_output_tokens, timeout_seconds=self.timeout_seconds,
         )
         started = perf_counter()

@@ -166,6 +166,9 @@ class ProbeRecord:
             return None
         return round((self.points[end] - self.points[start]) / 1_000_000, 3)
 
+    def content_checks(self, response, payload):
+        return grounding(response, payload, self.role)
+
     def view(self) -> dict:
         request_checks = {
             "serialized": compare(self.payload, self.wire_sent),
@@ -195,8 +198,8 @@ class ProbeRecord:
                        "metadata": compare(self.metadata_sent, self.metadata_received),
                        "responseMetadata": compare(self.metadata_sent, self.metadata_response),
                        "identity": "UNVERIFIED" if self.identity_valid is None else "PASS" if self.identity_valid else "FAIL",
-                       "grounding": grounding(self.response_sent, self.received, self.role),
-                       "sourceGrounding": grounding(self.response_received, self.payload, self.role)},
+                       "grounding": self.content_checks(self.response_sent, self.received),
+                       "sourceGrounding": self.content_checks(self.response_received, self.payload)},
             "timings": {"orchestratorPrepareMs": self.ms("prepare", "cardStart"),
                         "cardLookupMs": self.ms("cardStart", "cardEnd"),
                         "serializationMs": self.ms("cardEnd", "clientSend"),
