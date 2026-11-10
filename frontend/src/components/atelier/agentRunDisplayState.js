@@ -1,6 +1,8 @@
+import { confirmedHandoffs } from './officeHandoffEvents.js'
+
 // API 원본 상태를 3D 표시용 데이터로만 변환합니다. 조회·모션·진행률·세리머니는 처리하지 않습니다.
 const roles = [
-  ['PLANNER', '기획'], ['DEVELOPER', '개발'], ['QA', 'QA'], ['SECURITY', '보안'],
+  ['PLANNER', '계획에이전트'], ['DEVELOPER', '개발에이전트'], ['QA', 'QA에이전트'], ['SECURITY', '보안에이전트'],
 ]
 const runStates = new Set([
   'RECEIVED', 'PLANNING', 'WAITING_INPUT', 'IMPLEMENTING', 'SNAPSHOT_READY',
@@ -102,6 +104,10 @@ export function buildAgentRunDisplayState(monitor = {}) {
     // 오류 원본과 Event 페이지 정보를 보존하지만 캐릭터 상태 결정에는 사용하지 않습니다.
     errors: { ...monitor.errors },
     pagination: { ...monitor.pagination },
+    trace: monitor.trace ?? null,
+    popupResults: monitor.popupResults?.runId === runId ? monitor.popupResults : null,
+    traceSteps: Array.isArray(monitor.steps) ? monitor.steps : [],
+    handoffs: confirmedHandoffs(monitor.events, monitor.steps, runId),
     run: {
       status: runAvailable ? run.status : null,
       verdict: runAvailable ? run.verdict : null,

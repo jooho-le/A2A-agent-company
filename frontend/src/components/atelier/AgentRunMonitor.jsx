@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import './AgentRunMonitor.css'
 
 const agents = [
-  { role: 'PLANNER', label: '기획' },
-  { role: 'DEVELOPER', label: '개발' },
-  { role: 'QA', label: 'QA' },
-  { role: 'SECURITY', label: '보안' },
+  { role: 'PLANNER', label: '계획에이전트' },
+  { role: 'DEVELOPER', label: '개발에이전트' },
+  { role: 'QA', label: 'QA에이전트' },
+  { role: 'SECURITY', label: '보안에이전트' },
 ]
 const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const queryLabels = { idle: '조회 전', loading: '조회 중', success: '조회 완료', empty: '빈 목록', error: '조회 실패', cancelled: '조회 취소' }
@@ -82,7 +82,7 @@ export default function AgentRunMonitor({ monitor, query, onSelectRun, onRefresh
       {monitor.architecture && <p className="arm-note">설정에서 확인한 실행 방식: {monitor.architecture}</p>}
       {run ? <>
         <dl className="arm-run-fields"><div><dt>Run ID</dt><dd><code>{run.runId}</code></dd></div><div><dt>실행 상태 (status)</dt><dd><code>{run.status}</code></dd></div><div data-final-success={finalSuccess}><dt>최종 판정 (verdict)</dt><dd><strong>{run.verdict ?? '아직 최종 판정 없음'}</strong></dd></div><div><dt>코드 버전</dt><dd>{run.codeVersion ?? '아직 코드 버전 없음'}</dd></div><div><dt>수정 시도</dt><dd>{run.fixAttempt}</dd></div></dl>
-        <p className="arm-note">{finalSuccess ? '최종 성공이 확인되었습니다. 이번 단계에서는 3D 세리머니를 실행하지 않습니다.' : run.status === 'FINISHED' ? '실행이 종료되었습니다. FINISHED만으로 성공을 뜻하지 않으며 최종 판정을 확인해야 합니다.' : '전체 실행 상태와 최종 판정은 별개입니다. 아직 실행 중이거나 최종 확인이 필요할 수 있습니다.'}</p>
+        <p className="arm-note">{finalSuccess ? '최종 성공이 확인되었습니다. 3D 실제 Run 모드에서 실행 방식·조회 상태와 재생 기록을 확인한 후 성공 세리머니를 표시합니다.' : run.status === 'FINISHED' ? '실행이 종료되었습니다. FINISHED만으로 성공을 뜻하지 않으며 최종 판정을 확인해야 합니다.' : '전체 실행 상태와 최종 판정은 별개입니다. 아직 실행 중이거나 최종 확인이 필요할 수 있습니다.'}</p>
         {run.terminationReason && <p className="arm-note">종료 사유: {run.terminationReason}</p>}
       </> : !errors.run && <p className="arm-empty">{status.run === 'loading' ? 'Run 상태를 조회하고 있습니다.' : status.run === 'cancelled' ? 'Run 조회를 취소했습니다.' : '조회할 Run이 선택되지 않았습니다.'}</p>}
     </section>
@@ -94,7 +94,7 @@ export default function AgentRunMonitor({ monitor, query, onSelectRun, onRefresh
       {status.steps === 'empty' && <p className="arm-empty">아직 생성된 Step이 없습니다.</p>}
       <div className="arm-agent-grid">{agents.map(agent => {
         const agentSteps = steps?.filter(step => step.agentRole === agent.role) ?? []
-        return <article key={agent.role} className="arm-agent" data-agent-role={agent.role} data-running={agentSteps.some(step => step.status === 'RUNNING')}><h4>{agent.label} Agent <small>{agent.role}</small></h4>{agentSteps.length ? <ul className="arm-step-list">{agentSteps.map(step => <li key={step.workflowStepId}>
+        return <article key={agent.role} className="arm-agent" data-agent-role={agent.role} data-running={agentSteps.some(step => step.status === 'RUNNING')}><h4>{agent.label} <small>{agent.role}</small></h4>{agentSteps.length ? <ul className="arm-step-list">{agentSteps.map(step => <li key={step.workflowStepId}>
           <span className="arm-step-status" data-step-status={step.status}>{stepLabels[step.status] ?? '상태 확인'} · <code>{step.status}</code></span>
           <dl><div><dt>Step ID</dt><dd><code>{step.workflowStepId}</code></dd></div><div><dt>시도 (attempt)</dt><dd>{step.attempt}</dd></div><div><dt>코드 버전</dt><dd>{step.codeVersion ?? '-'}</dd></div><div><dt>A2A 상태</dt><dd><code>{step.a2aTaskState ?? '-'}</code></dd></div></dl>
         </li>)}</ul> : <p className="arm-empty">{stepsLoaded ? '아직 Step 미생성' : queryLabels[status.steps]}</p>}</article>

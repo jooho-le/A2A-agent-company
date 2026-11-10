@@ -1,3 +1,7 @@
+import { artifactCatalog } from './agentArtifactCatalog.js'
+import { popupArtifacts, popupIssues } from './agentRunResults.js'
+import { publicRunConfiguration, runUuid } from './agentRunSubmission.js'
+
 function apiError(message, { status = null, detail = null, code = 'INVALID_RESPONSE', cause } = {}) {
   const error = new Error(message)
   error.name = 'AgentRunApiError'
@@ -59,29 +63,39 @@ function runPath(runId) {
   return `/api/v1/runs/${encodeURIComponent(runId)}`
 }
 
-// 기존 2·3개 인자 호출을 유지합니다. 네 번째 인자는 요청 취소에만 사용합니다.
-// 승인 configuration은 아직 전달받지 않았으므로 모델·실행 환경을 임의로 채우지 않습니다.
-export async function createAgentRun(scenarioId, requestText, architecture = 'MULTI_AGENT', { signal } = {}) {
-  if (architecture !== 'MULTI_AGENT' && architecture !== 'SINGLE_AGENT') {
-    throw apiError('architecture는 MULTI_AGENT 또는 SINGLE_AGENT여야 합니다.', { code: 'INVALID_ARGUMENT' })
+// 실제 생성은 승인된 공개 설정을 명시적으로 전달한 MULTI_AGENT 경로에서만 허용합니다.
+export async function createAgentRun(scenarioId, requestText, architecture = 'MULTI_AGENT', { signal, configuration, approved = false } = {}) {
+  if (approved !== true || architecture !== 'MULTI_AGENT' || !runUuid.test(scenarioId)
+    || typeof requestText !== 'string' || !requestText.trim()) {
+    throw apiError('승인된 실제 실행 요청이 필요합니다.', { code: 'INVALID_ARGUMENT' })
   }
+  const publicConfiguration = publicRunConfiguration(configuration)
 
   const data = await requestJson('/api/v1/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       scenarioId,
-      requestText,
-      configuration: { architecture },
+      requestText: requestText.trim(),
+      configuration: publicConfiguration,
     }),
     signal,
   }, 'Agent 실행 요청 실패')
 
-  if (!data?.run?.runId) {
-    throw apiError('서버 응답에서 Run ID를 찾을 수 없습니다.')
+  if (!runUuid.test(data?.run?.runId) || data.run.scenarioId !== scenarioId
+    || !['SCHEDULED', 'NOT_CONFIGURED'].includes(data.dispatchStatus)) {
+    throw apiError('서버의 Run 생성 응답을 확인할 수 없습니다.')
   }
 
   return data
+}
+
+export async function getAgentRunScenarios() {
+  const data = await requestJson('/api/v1/scenarios', { method: 'GET' }, '등록 시나리오 조회 실패')
+  if (!Array.isArray(data?.scenarios) || data.scenarios.some(item => !runUuid.test(item?.scenarioId))) {
+    throw apiError('등록 시나리오 응답을 확인할 수 없습니다.')
+  }
+  return data.scenarios.map(item => ({ scenarioId: item.scenarioId }))
 }
 
 // GET 응답은 { run: ... }으로 감싸지 않은 Run 객체 자체입니다.
@@ -129,4 +143,21 @@ export async function getAgentRunEvents(runId, { limit = 100, offset = 0, signal
     throw apiError('서버 응답에서 Event 목록과 페이지 정보를 확인할 수 없습니다.')
   }
   return data
+}
+
+// 목록 API가 Report 본문도 반환하므로 상세 API를 다시 호출하지 않습니다.
+export async function getAgentRunArtifacts(runId, { signal } = {}) {
+  const data = await requestJson(`${runPath(runId)}/artifacts`, { method: 'GET', signal }, '산출물 조회 실패')
+  if (data?.runId !== runId || !Array.isArray(data.artifacts) || data.artifacts.some(row => !row || row.runId !== runId)) {
+    throw apiError('서버 응답에서 산출물을 확인할 수 없습니다.')
+  }
+  return { runId, artifacts: popupArtifacts(data.artifacts), catalog: artifactCatalog(data.artifacts, runId) }
+}
+
+export async function getAgentRunIssues(runId, { signal } = {}) {
+  const data = await requestJson(`${runPath(runId)}/issues`, { method: 'GET', signal }, 'Issue 조회 실패')
+  if (data?.runId !== runId || !Array.isArray(data.issues) || data.issues.some(row => !row || row.runId !== runId)) {
+    throw apiError('서버 응답에서 Issue를 확인할 수 없습니다.')
+  }
+  return { runId, issues: popupIssues(data.issues) }
 }

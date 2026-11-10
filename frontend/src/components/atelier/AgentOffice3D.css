@@ -16,15 +16,30 @@
 .atelier-dashboard .office3d-live-summary p { margin:0 0 8px; color:#c0c9d6; line-height:1.6; }
 .atelier-dashboard .office3d-live-summary ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:0; margin:0; list-style:none; }
 .atelier-dashboard .office3d-live-summary li { line-height:1.6; color:#aab2bd; }
+.atelier-dashboard [data-office3d="trace-recent"] { padding-left:18px; margin:8px 0; }
+.atelier-dashboard [data-office3d="trace-recent"] li { margin:3px 0; overflow-wrap:anywhere; }
 .atelier-dashboard .office3d-live-summary [data-state=working] { color:#d4ff24; }
 .atelier-dashboard .office3d-agent-label[data-state=succeeded] .status-dot { background:#9dc88f; }
 .atelier-dashboard .office3d-live-summary [data-state=failed] { color:#ffb8b8; }
 .atelier-dashboard .office3d-agent-label[data-state=failed] .status-dot { background:#ff9699; }
 .atelier-dashboard .office3d-bubble[data-mode=actual] .office3d-bubble-track { display:none; }
+/* 실제 업무 팝업은 캔버스 밖 고정 카드에 표시해 얼굴·카메라·세리머니를 가리지 않습니다. */
+.atelier-dashboard .office3d-actual-popups { padding:0 12px 12px; }
+.atelier-dashboard .office3d-popup-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr)); gap:8px; }
+.atelier-dashboard .office3d-work-popup { min-width:0; height:166px; box-sizing:border-box; padding:10px 12px; border:1px solid #546588; border-radius:12px; background:#101723; overflow:hidden; }
+.atelier-dashboard .office3d-work-popup[data-tone=error] { border-color:#a85b64; background:#301c25; }
+.atelier-dashboard .office3d-popup-heading { display:flex; justify-content:space-between; gap:6px; align-items:center; font-size:11px; }
+.atelier-dashboard .office3d-popup-heading span { color:#b9c9dd; font-size:10px; }
+.atelier-dashboard .office3d-work-popup small { display:block; margin-top:6px; font-size:9px; color:#a6b2c5; }
+.atelier-dashboard .office3d-work-popup h4 { margin:6px 0; font-size:13px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.atelier-dashboard .office3d-work-popup p { margin:0; color:#d1d9e9; font-size:11px; line-height:1.6; overflow-wrap:anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden; }
+/* 조회 안내가 바뀌어도 카드와 캔버스 위치를 유지합니다. 긴 오류 안내는 내부에서 스크롤합니다. */
+.atelier-dashboard .office3d-popup-notice { height:3.2em; margin:0 0 8px; overflow:auto; color:#b9c9dd; font-size:11px; line-height:1.6; }
 .atelier-dashboard .office3d-lead-summary { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; margin:0 12px 10px; padding:10px 12px; border:1px solid #75613c; border-radius:8px; background:#24241d; }
 .atelier-dashboard .office3d-lead-summary strong { color:#ead29a; font-size:11px; font-weight:600; }
 .atelier-dashboard .office3d-lead-summary>span { color:#bec2c9; font-size:10px; line-height:1.6; }
-.atelier-dashboard .office3d-workflow { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; padding:0 12px 12px; }
+.atelier-dashboard .office3d-workflow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:4px; padding:0 12px 12px; }
+.atelier-dashboard .office3d-handoff-note { margin:0 12px 12px; }
 .atelier-dashboard .agent-office-3d .office3d-step { display:flex; justify-content:center; align-items:center; gap:6px; color:#a0a7b1; border-color:transparent; background:transparent; padding:8px 3px; }
 .atelier-dashboard .office3d-step span { display:grid; place-items:center; width:19px; height:19px; border:1px solid #77808e60; border-radius:50%; font-size:10px; }
 .atelier-dashboard .agent-office-3d .office3d-step.current { background:#1558c92b; border-color:#1558c978; color:#edf2ff; }
@@ -80,6 +95,8 @@
 .atelier-dashboard .agent-office-3d:fullscreen { display:flex; flex-direction:column; margin:0; overflow:auto; border-radius:0; }
 .atelier-dashboard .agent-office-3d:fullscreen .office3d-stage { flex:1; min-height:240px; height:auto; }
 @media(max-width:600px) {
+  .atelier-dashboard .office3d-workflow { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .atelier-dashboard .office3d-workflow [data-agent-index="4"] { grid-column:1/-1; }
   .atelier-dashboard .office3d-stage { height:390px; }
   .atelier-dashboard .office3d-agent-label small { display:none; }
   .atelier-dashboard .office3d-controls { gap:8px; }

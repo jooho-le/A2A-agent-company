@@ -1,4 +1,6 @@
 // 기존 목업 연출과 역할별 오류 표정을 제공합니다. 가구와 서버의 실행 상태는 변경하지 않습니다.
+import { applyTeamRun } from './office3dTeamRun.js'
+
 export const finaleOptions = [
   { value: 'team', label: '1. 기존 협업 포즈' },
   { value: 'cheer', label: '2. 서류 던지기 · 박수' },
@@ -20,7 +22,7 @@ export function createOfficePerformance(office, engine) {
   const center = new P()
 
   // 수납장 아래 빈틈에는 고정 받침을 두어 바닥 위에 떠 보이지 않게 합니다.
-  for (let index = 0; index < 4; index++) {
+  for (let index = 0; index < office.agents.length; index++) {
     const storage = office.workspace.getObjectByName(`flush_storage_${index}`)
     if (!storage) continue
     for (const x of [-.24,.24]) for (const z of [-.36,.36]) {
@@ -131,7 +133,7 @@ export function createOfficePerformance(office, engine) {
   function errorFace(time, bubble) {
     let expression = 'normal'
     for (let index = 0; index < office.agents.length; index++) {
-      const local = time - At[index].start - 2 * pt
+      const local = time - (At[index]?.start ?? 0) - 2 * pt
       const kind = bubble?.tone === 'error' && bubble.agent === index
         ? ['worried', 'angry', 'sweat'][Math.min(2, Math.max(0, Math.floor(local / 1.8)))] : 'normal'
       setExpression(index, kind, local)
@@ -182,7 +184,12 @@ export function createOfficePerformance(office, engine) {
     const turn = smooth(9.3, 11.7, elapsed) * Math.PI * .4
     const linking = smooth(8.9, 9.3, elapsed)
     const circleMotion = smooth(9.3, 9.6, elapsed) * (1 - smooth(11.3, 11.7, elapsed))
-    const next = [2, 0, 3, 1], previous = [1, 3, 0, 2]
+    const around = slots.map((angle, index) => ({ angle: (angle + Math.PI * 2) % (Math.PI * 2), index })).sort((a, b) => a.angle - b.angle)
+    const next = [], previous = []
+    around.forEach(({ index }, place) => {
+      next[index] = around[(place + 1) % around.length].index
+      previous[index] = around[(place - 1 + around.length) % around.length].index
+    })
 
     // 새 자리 배치가 있으면 책상 옆 통로와 역할별 출발 시간을 사용합니다.
     // 배치 정보가 없는 기존 장면에서는 원래의 합류 경로를 유지합니다.
@@ -230,7 +237,7 @@ export function createOfficePerformance(office, engine) {
 
       const running = smooth(1, 1.3, local) * (1 - smooth(end - .25, end, local))
       const gait = Math.sin(local * 9) * running
-      const circleGait = Math.sin((elapsed - 9.3) * 8 + index * Math.PI / 2) * circleMotion
+      const circleGait = Math.sin((elapsed - 9.3) * 8 + index * Math.PI * 2 / office.agents.length) * circleMotion
       const bounce = elapsed >= 9.3 ? Math.abs(Math.sin((elapsed - 9.3) * 8)) * .012 * circleMotion : Math.abs(gait) * .025
       agent.g.position.set(pose.x, bounce, pose.z)
       agent.legs.forEach((leg, side) => {
@@ -248,7 +255,7 @@ export function createOfficePerformance(office, engine) {
         reach(agent, side, [sign * .28, -.2, .25], standing)
         reach(agent, side, [sign * 1.03, .85, .13], armsOpen)
         const neighbor = side === 0 ? next[index] : previous[index]
-        const pair = Math.min(index, neighbor) * 4 + Math.max(index, neighbor)
+        const pair = Math.min(index, neighbor) * office.agents.length + Math.max(index, neighbor)
         const pat = Math.sin((elapsed - 9.3) * 3 + pair) * .025 * circleMotion
         // 같은 이웃 쌍은 같은 높이로 손을 움직이며 서로를 감싸는 원을 만듭니다.
         reach(agent, side, [sign * reunion.radius / 2, .56 + pat, reunion.radius / 2 + .03], linking)
@@ -273,6 +280,9 @@ export function createOfficePerformance(office, engine) {
   function update(time, finale, bubble, motionEnabled) {
     papers.forEach((paper) => { paper.visible = false })
     office.agents.forEach((agent) => { agent.lower.scale.set(1, 1, 1) })
+    if (time >= En && finale === 'team' && office.seating?.teamRoute) {
+      office.agents.forEach(agent => applyTeamRun(agent, office.seating.teamRoute(agent.i, time - En)))
+    }
     if (time >= En && finale !== 'team') {
       office.book.scale.setScalar(.0001)
       office.cup.position.copy(office.cupOnDesk)
@@ -293,10 +303,10 @@ export function createOfficePerformance(office, engine) {
     office.confetti.groupRoot.visible = false
     office.agents.forEach((agent, index) => {
       agent.lower.scale.set(1, 1, 1)
-      setExpression(index, agents[index].expression, 0)
+      setExpression(index, agents[index]?.expression ?? 'normal', 0)
     })
     office.root.updateMatrixWorld(true)
   }
 
-  return { update, updateActual }
+  return { update, updateActual, traceExpression: (index, progress) => setExpression(index, 'worried', progress) }
 }
