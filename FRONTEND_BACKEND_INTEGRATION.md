@@ -1,6 +1,6 @@
 # 프론트엔드·백엔드 연동 안내
 
-확인 기준: 2026-11-09의 현재 로컬 코드입니다. 역할 3의 React 화면, FastAPI 제품 백엔드, Orchestrator를 연결할 때 필요한 정보를 정리합니다. 아래 명령은 실행 안내이며 이번 문서 작업에서 서버·LLM·Docker를 실행했다는 뜻은 아닙니다.
+최근 갱신: 2026-11-10. 파란색 업무 요청창 통합, 프로젝트·결과물 보관함의 실제 Run 연결, 3D 역할 표시 번호 1~5와 승인 Configuration 공급 차단 상태를 반영했습니다. 아래 명령은 실행 안내입니다. 이번 문서 갱신에서 테스트·서버·LLM·Docker를 실행했다는 의미는 아닙니다.
 
 ## 1. 세 시스템의 역할과 주소
 
@@ -8,7 +8,8 @@
 | --- | --- | --- | --- |
 | React 개발 서버 | `frontend/` | `http://localhost:5173` | 화면, 입력, 토큰 보관, API 요청 |
 | 제품 FastAPI 백엔드 | `backend/` | `http://127.0.0.1:8000` | 회원가입·로그인·JWT·전자문서 |
-| Orchestrator | `src/orchestrator/` | Vite 프록시 대상 `http://127.0.0.1:8001` | Agent Run·Step·Event·산출물 관리 |
+| 기존 Orchestrator | `src/orchestrator/` | 기본 프록시 대상 `http://127.0.0.1:8001` | 기존 Run 저장·조회 및 구성된 실행계 연결 |
+| 실제 Multi Agent Host | `src/agents/platform/` | 선택 대상 `http://127.0.0.1:8002` (아직 미실행) | Host 자체 Orchestrator와 Agent `8101~8104`, 승인 설정 검증 |
 
 ```text
 브라우저의 React
@@ -19,7 +20,7 @@
 
 제품 백엔드와 Orchestrator는 별도 서버·DB 계약입니다. 제품 서버를 실행해도 Agent 서버는 시작되지 않습니다. 제품 JWT를 Orchestrator·A2A 공통 인증으로 전달하는 기능도 현재 UI에는 연결되어 있지 않습니다.
 
-실제 Owned Host의 포트는 승인된 실행 설정을 따릅니다. 기본 `8000`을 사용하면 제품 서버와 충돌할 수 있으므로 현재 프록시 대상인 `8001`과 맞는지 담당자와 확인해야 합니다.
+8001과 Host 8002는 별도 앱·설정된 저장소를 사용하며 자동으로 데이터를 공유하지 않습니다. 실제 Host에서 생성한 Run·Step·Trace·Issue·Artifact/Report는 같은 Host 8002에서 조회해야 합니다. 두 서버 통합 없이 프록시 대상으로 선택할 수 있으며, 대상 전환 자체는 Run/DB를 복사하지 않습니다.
 
 ## 2. 설치·실행 순서
 
@@ -67,20 +68,25 @@ Orchestrator·Agent를 실제 실행하려면 별도의 승인된 Host 설정·�
 | [LoginPage.jsx](frontend/src/pages/LoginPage.jsx) | 실제 로그인 API, `access_token` 저장 |
 | [SignupPage.jsx](frontend/src/pages/SignupPage.jsx) | 실제 회원가입 API, 성공 후 로그인 이동 |
 | [DocumentPage.jsx](frontend/src/pages/DocumentPage.jsx) | 실제 문서 업로드·제출/배정 목록·다운로드 |
-| [AtelierDashboard.jsx](frontend/src/pages/AtelierDashboard.jsx) | 목업 프로젝트와 실제 Run 선택·공유 Hook·모드·Event 페이지 관리 |
+| [AtelierDashboard.jsx](frontend/src/pages/AtelierDashboard.jsx) | 실제 Run 자동 선택·공유 Hook·3D·프로젝트·보관함 연결 |
 | [useAgentRunMonitor.js](frontend/src/hooks/useAgentRunMonitor.js) | Run·Step·Event·실행 방식 조회, 취소·부분 오류·3초 폴링 |
-| [AgentRunMonitor.jsx](frontend/src/components/atelier/AgentRunMonitor.jsx) | 상위 조회 결과 표시, UUID 입력·수동 갱신·페이지 이동 |
+| [useOfficeRunSubmission.js](frontend/src/hooks/useOfficeRunSubmission.js) | 기존 파란색 요청창의 승인 기반 제출·오류 상태. 별도 생성 폼은 미렌더링 |
+| [agentRunSubmission.js](frontend/src/api/agentRunSubmission.js) | 공개 설정 검사·등록 시나리오 확인·중복 제출 방지 |
+| [agentRunEventFeed.js](frontend/src/hooks/agentRunEventFeed.js) | 신규 Run 초기 및 증분 Trace 수집, 기존 Run 과거 재생 방지 |
+| [agentRunProject.js](frontend/src/components/atelier/agentRunProject.js) | 현재 요청의 이름·Run ID·Run/Step 상태를 프로젝트에 연결 |
+| [agentArtifactCatalog.js](frontend/src/api/agentArtifactCatalog.js) | 기존 Artifact 응답에서 보관함용 공개 등록 정보·요약 추출 |
+| [AtelierViews.jsx](frontend/src/components/atelier/AtelierViews.jsx) | 실제 프로젝트·결과물 카드, 빈 상태·오류·메타데이터 펼침 |
 | [agentRunDisplayState.js](frontend/src/components/atelier/agentRunDisplayState.js) | 네 역할 표시 상태와 확인된 전달 Event 변환 |
 | [AgentOffice3D.jsx](frontend/src/components/atelier/AgentOffice3D.jsx) | 실제/목업 표시 모드와 3D 런타임 수명 주기 |
-| [PipelinePage.jsx](frontend/src/pages/PipelinePage.jsx) | 실제 Run 생성 및 Run·Step·Event 조회 |
+| [PipelinePage.jsx](frontend/src/pages/PipelinePage.jsx) | 보존된 개발용 화면. 현재 사용자 메뉴에서 진입하지 않음 |
 | [agentRuns.js](frontend/src/api/agentRuns.js) | 생성·Run·Step·Event·실행 방식 조회. GET 함수는 Dashboard Hook에서 사용 |
 | [vite.config.js](frontend/vite.config.js) | `/api/v1`, `/health`를 Orchestrator로 전달 |
 
-현재 기본 설정은 `App.jsx`의 `REQUIRE_PLATFORM_LOGIN = false`입니다. 첫 화면은 로그인 없이 열리는 AI 에이전트 회사 오피스이며, 사이드바 하단 대표님 계정 메뉴에서 `Agent Pipeline 열기`와 `전자문서 관리`를 선택합니다. 로그인 화면으로 직접 이동하는 메뉴는 현재 기본 흐름에 없습니다.
+현재 기본 설정은 `App.jsx`의 `REQUIRE_PLATFORM_LOGIN = false`입니다. 첫 화면은 파란색 업무 요청창과 5인 3D 오피스이며 기존 헤더·사이드바를 유지합니다. 헤더와 계정 메뉴의 `새 업무`는 같은 요청창으로 이동합니다. 계정 메뉴의 전자문서 관리는 유지하며, 별도 Run 생성·UUID 조회·개발용 상세 패널과 Pipeline 진입은 사용자 화면에서 제거했습니다.
 
 기존 로그인 흐름으로 계정 연동을 검증하려면 해당 설정을 `true`로 사용하는 절차를 팀과 정합니다. 이 경우 회원가입 → 로그인 → 오피스로 이어집니다. 이 문서 작업에서는 설정을 변경하지 않았습니다. 공개 오피스 진입은 서버의 문서 인증·권한 검사를 해제하지 않습니다.
 
-오피스의 업무 시작·승인·수정 요청·진행률·예시 결과물과 105초 3D 시연은 목업입니다. 기존 Run UUID를 조회한 실제 모드에서는 Run·Step·Event·Configuration GET 응답이 3D 동작과 성공 세리머니 조건에 반영됩니다. 별도 Pipeline의 Run ID는 Dashboard와 자동 공유하지 않으므로 실제 3D에 표시하려면 오피스에서 UUID를 조회합니다. 목업 완료 연출·예시 파일 다운로드는 실제 Run 성공이나 Artifact 생성의 증거가 아닙니다.
+업무 시작은 승인 설정을 확인하는 실제 생성 경로이며 실패를 목업 성공으로 표시하지 않습니다. 프로젝트·보관함은 현재 화면에서 접수한 Run만 표시하고 없으면 빈 상태를 보여줍니다. 105초 시연·역할 소개의 예시는 실제 업무 결과와 별개입니다. 3D 역할 버튼은 1 오케스트레이터, 2 계획, 3 개발, 4 QA, 5 보안이며 번호만 변경했고 내부 인덱스·캐릭터·모션은 유지했습니다.
 
 우리 직원과 3D에는 리더인 오케스트레이터와 계획·개발·QA·보안의 다섯 캐릭터를 표시합니다. 실제 `AgentRole`과 Step 역할은 `PLANNER`, `DEVELOPER`, `QA`, `SECURITY` 네 가지입니다. 리더는 관리 서버를 시각화한 것이며 별도 LLM Agent·Step·제품 사용자를 추가하지 않습니다. 직원 카드는 현재 모델의 정면 렌더링 `office-*.png`를 사용하며, 모델 외형 변경 시 카드 이미지도 갱신해야 합니다.
 
@@ -207,7 +213,7 @@ SQLite의 외래키 선언과 실행 시 강제 검사는 별개입니다. 현�
 | --- | --- |
 | `http://127.0.0.1:8000/api/auth/*` | 제품 서버로 직접 요청. CORS 적용 |
 | `http://127.0.0.1:8000/api/documents...` | 제품 서버로 직접 요청. CORS 적용 |
-| `/api/v1/...` | Vite에서 `http://127.0.0.1:8001`로 경로를 유지해 전달 |
+| `/api/v1/...` | Vite의 `ORCHESTRATOR_PROXY_TARGET`으로 전달. 기본 `http://127.0.0.1:8001` |
 | `/health` | 같은 Orchestrator로 전달. 제품 서버 실행 확인 URL이 아님 |
 
 제품 서버의 `allow_origins`는 `http://localhost:5173`과 `http://localhost:5174`입니다. `allow_credentials=True`, 메서드·헤더는 모두 허용하지만 모든 출처를 허용하지는 않습니다. 이 설정은 Cookie 로그인을 구현했다는 뜻이 아니며 현재는 Authorization 헤더를 사용합니다.
@@ -215,6 +221,14 @@ SQLite의 외래키 선언과 실행 시 강제 검사는 별개입니다. 현�
 `http://127.0.0.1:5173`, `localhost:5175`, HTTPS 주소는 다른 출처입니다. 브라우저 접속 주소와 서버 허용값을 맞춥니다. `/api/auth/*`와 `/api/documents`는 현재 프록시 대상이 아니므로 제품 API만 상대 경로로 변경하면 연결되지 않습니다.
 
 `npm run build`로 만든 정적 파일만으로는 API 전달 서버가 제공되지 않습니다. 배포 시 API 공개 주소, 리버스 프록시, CORS를 별도로 정합니다. 현재는 운영용 공통 API URL 환경변수를 추가한 구성이 아닙니다.
+
+실제 Host 준비 시 프론트엔드 디렉터리에서 다음과 같이 Vite 대상을 선택합니다. 환경변수를 바꾼 뒤에는 Vite만 재시작해야 하며, 이 명령이 Host를 시작하지는 않습니다.
+
+```bash
+ORCHESTRATOR_PROXY_TARGET=http://127.0.0.1:8002 npm run dev
+```
+
+변수를 지정하지 않고 `npm run dev`를 실행하면 기본 `http://127.0.0.1:8001`로 돌아갑니다. `/api/v1`과 `/health`는 항상 같은 대상으로 연결됩니다. 이 변수는 Vite 서버 프로세스에서만 읽으며 브라우저용 `VITE_*` 설정이 아닙니다. 8001·8002 서버는 종료하거나 재시작하지 않습니다.
 
 ## 8. Orchestrator·실제 Run 조회와 3D 연결
 
@@ -224,21 +238,17 @@ SQLite의 외래키 선언과 실행 시 강제 검사는 별개입니다. 현�
 
 | 함수 | HTTP 요청 | 응답과 주요 필드 |
 | --- | --- | --- |
-| `createAgentRun(scenarioId, requestText, architecture = 'MULTI_AGENT', { signal } = {})` | `POST /api/v1/runs` | `run`, `firstStep`, `dispatchStatus` |
+| `createAgentRun(scenarioId, requestText, architecture = 'MULTI_AGENT', { signal, configuration, approved = false } = {})` | `POST /api/v1/runs` | `run`, `firstStep`, `dispatchStatus` |
 | `getAgentRun(runId, { signal } = {})` | `GET /api/v1/runs/{runId}` | Run 객체 자체. `runId`, `scenarioId`, `status`, `verdict`, `codeVersion`, `fixAttempt` 등 |
 | `getAgentRunSteps(runId, { signal } = {})` | `GET /api/v1/runs/{runId}/steps` | `runId`, `steps`. 각 항목의 `workflowStepId`, `agentRole`, `status`, `attempt`, `codeVersion`, `a2aTaskState` 등 |
 | `getAgentRunEvents(runId, { limit = 100, offset = 0, signal } = {})` | `GET /api/v1/runs/{runId}/events?limit=100&offset=0` | `runId`, `events`, `total`, `limit`, `offset`. `limit` 1~500, `offset` 0 이상 |
+| `getAgentRunArtifacts(runId, { signal } = {})` | `GET /api/v1/runs/{runId}/artifacts` | 팝업용 `artifacts`, 보관함용 공개 `catalog`를 함께 반환 |
+| `getAgentRunIssues(runId, { signal } = {})` | `GET /api/v1/runs/{runId}/issues` | 팝업용 안전한 Issue 요약 |
 | `getAgentRunArchitecture(runId, { signal } = {})` | `GET /api/v1/runs/{runId}/configuration` | 서버의 `RUN_CONFIGURATION` Artifact에서 `configuration.architecture`만 추출해 `{ runId, architecture }` 반환 |
 
-생성 함수는 기존 두 인자 호출과 호환되며 `MULTI_AGENT`·`SINGLE_AGENT`만 허용합니다. 현재 멀티 전용 UI가 싱글 화면을 제공한다는 뜻은 아닙니다. 공통 생성 함수의 요청 형식은 다음과 같으며 이 문서에서 실행하지 않습니다.
+생성 함수는 승인된 공개 Configuration을 전달한 `MULTI_AGENT` 요청만 허용합니다. 옵션이 없는 기존 두 인자 호출은 POST 전에 차단됩니다. `getAgentRunScenarios()`로 `GET /api/v1/scenarios`의 등록 여부를 확인한 뒤 본문에 `scenarioId`, `requestText`, 공개 `configuration` 전체를 보냅니다. `{ architecture }`만 보내는 예제는 실제 Host 실행 계약을 충족하지 않습니다.
 
-```json
-{
-  "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
-  "requestText": "회원가입 기능을 구현해주세요.",
-  "configuration": { "architecture": "MULTI_AGENT" }
-}
-```
+실제 승인값이 확정되지 않았으므로 이 문서에는 실행 가능한 모델·예산·이미지·Source 예시를 만들지 않습니다. `approved`는 클라이언트 제출 조건이며 POST 본문이나 서버 승인 증명에 포함되지 않습니다.
 
 기존 Run 조회 응답의 주요 필드 예시는 다음과 같습니다. 자리표시자와 값은 계약 설명용이며 실제 실행 기록이 아닙니다. 실제 응답에는 `workspaceId`, `resumeState`, `terminationReason`, 생성·갱신 시각 등도 포함됩니다.
 
@@ -257,21 +267,21 @@ Step·Event 조회는 각각 `{"runId":"<runId>","steps":[]}`, `{"runId":"<runId
 
 공통 API 계층은 오류의 `status`, `code`, `detail`을 보존하고 `NETWORK_ERROR`·응답 형식 오류·`AbortError`를 구분합니다. 취소 신호는 `signal`로 전달합니다. 주요 HTTP 오류는 404 Run 없음, 422 UUID·입력·승인 구성 오류, 503 실행계 미설정입니다. `dispatchStatus=NOT_CONFIGURED`는 미설정이고 `SCHEDULED`도 성공 판정이 아닙니다.
 
-### Dashboard의 공유 데이터와 목업 분리
+### Dashboard의 공유 데이터와 사용자 화면
 
 ```text
-기존 UUID 선택
-  → AtelierDashboard의 useAgentRunMonitor() 한 번 호출
-      → Run / Step / Event / Configuration 조회
-      → AgentRunMonitor: 상태·오류·페이지 표시
-      → buildAgentRunDisplayState()
-          → AgentOffice3D의 runDisplayState
-              → 네 작업 캐릭터 + 오케스트레이터 리더 표시
+파란색 요청창: 프로젝트 이름 + 요구사항 + 업무 시작
+  → useOfficeRunSubmission → agentRunSubmission: 승인 설정·등록 시나리오 확인
+  → POST /api/v1/runs → run.runId 자동 선택 + traceFromStart: true
+  → useAgentRunMonitor: Run·Step·Event·Configuration·Issue·Artifact 조회
+      → AgentOffice3D: 모션·문서 전달·업무 팝업·세리머니
+      → submittedRunProject: 프로젝트 이름과 Run·Step 상태 연결
+      → artifactCatalog: 보관함의 공개 산출물 등록 정보·요약
 ```
 
-Run 선택·전체 새로고침·조회 취소·해제와 Event 페이지 이동을 제공합니다. Dashboard는 한 페이지 20건이며 최초 조회와 수동 전체 새로고침에서 최신 구간을 선택합니다. 자동 갱신은 선택한 페이지를 유지합니다. Run ID는 메모리 상태로만 보관하며 새로고침 후 재입력합니다. 요청 취소·조회 해제는 서버 Run을 취소하지 않습니다.
+`AtelierDashboard`가 기존 모니터링 Hook을 한 번 호출합니다. 사용자는 UUID를 입력하거나 별도 조회 버튼을 누르지 않습니다. `AgentRunCreate`와 `AgentRunMonitor` 파일은 보존되어 있지만 Dashboard에서 렌더링하지 않습니다. 모니터 내부의 GET·취소·오류 처리·페이지/커서 관리는 유지됩니다.
 
-상단 `업무 시작`은 `AtelierDashboard.jsx`의 `createProject()`로 목업 프로젝트를 추가합니다. `createAgentRun()`을 호출하지 않습니다. 이를 실제 생성에 연결하려면 해당 함수와 입력 폼의 제출 경계에서 승인된 scenario·configuration·Run ID 인계 방식을 먼저 확정해야 합니다. 이때 기존 목업 프로젝트 진행률을 실제 Run 진행률로 재사용하지 않습니다.
+Run의 `FINISHED`는 종료이며 성공 여부는 `verdict`로 판단합니다. Step 실패와 QA Report의 FAIL은 구분합니다. 생성 실패 시 입력과 기존 화면을 보존하고, 최종 상태가 확인되면 이전 실행 예약 안내를 숨깁니다. Run ID와 프로젝트명은 현재 Dashboard 메모리에만 있으므로 새로고침 후 자동 복원되지 않습니다.
 
 ### 네 작업 상태와 리더의 동작
 
@@ -293,29 +303,29 @@ Run 선택·전체 새로고침·조회 취소·해제와 Event 페이지 이동
 
 ### 확인된 Event의 문서 전달
 
-[officeHandoffEvents.js](frontend/src/components/atelier/officeHandoffEvents.js)는 같은 Run의 Event를 `workflowStepId`로 정확히 하나의 Step과 연결하고 `actor`가 Orchestrator임을 확인합니다.
+실제 전달은 `officeTraceEvents.js`와 `agentRunEventFeed.js`를 사용합니다. `A2A_MESSAGE_SENT`가 같은 Run의 유일한 Step과 연결되고 `actor=Orchestrator` 및 코드 버전 조건을 만족할 때만 리더 → 해당 역할의 문서 전달을 만듭니다. 대상이 불명확하면 임의 전달하지 않으며 Task 상태 변경만으로 반대 방향 전달을 생성하지 않습니다. QA·Security의 조건이 맞는 병렬 전달은 유지합니다.
 
-| 실제 기록 | 시각적 전달 |
-| --- | --- |
-| `A2A_MESSAGE_SENT` | 리더 → 해당 Step의 Agent. 호출 요청 |
-| `A2A_TASK_RECEIVED`·`A2A_TASK_STATE_CHANGED`와 `TASK_STATE_COMPLETED`, `TASK_STATE_FAILED`, `TASK_STATE_INPUT_REQUIRED`, `TASK_STATE_REJECTED`, `TASK_STATE_AUTH_REQUIRED` | 해당 Agent → 리더. 상태 응답 |
-| 대상 Step 없음·중복·다른 Run·지원하지 않는 Event | 전달을 만들지 않음 |
+화면의 20건 Event 페이지와 별개인 Trace 커서가 최대 500건씩 조회합니다. 서버의 `sequence` 기준 응답 배열 순서를 그대로 보존하고 `eventId`로 중복을 제거합니다. 클라이언트가 발생 시각이나 역할로 재정렬하지 않습니다.
 
-API의 저장 순서를 유지하며 발생 시각 차이를 반영합니다. 병렬 QA·Security 요청과 실패 후 Developer 재호출을 고정된 역할 순서 없이 처리합니다. 최초 과거 페이지는 기준점으로만 기억하고 같은 페이지에서 새로 관측한 Event만 한 번 연출합니다. Run·페이지 변경 시 과거 기록을 재생하지 않고 조회 오류 시 전달을 멈춥니다. 105초 목업의 전달 시간표는 실제 모드에 사용하지 않습니다.
+- 방금 생성한 Run은 `traceFromStart: true`로 최초 `offset=0`부터 수집해 생성 응답 이전에 저장된 이벤트도 포함합니다.
+- 기존 Run 수동 조회의 과거 이벤트 생략 정책은 내부 코드·테스트에 유지합니다. 현재 사용자 화면에는 UUID 입력·수동 선택 UI가 없습니다.
+- 페이지 묶음 전체가 성공한 뒤에만 커서·중복 처리 상태를 반영합니다. 실패·취소 시 기존 상태를 보존하여 재시도하고, Run 변경 시 이전 큐를 정리합니다.
+- 내부 Event 페이지 처리와 Trace 커서는 독립적이며 현재 사용자 화면에는 페이지 조작 UI가 없습니다. 3초 폴링과 연출 큐 때문에 실제 이벤트 시각과 애니메이션 시작 시각은 다를 수 있습니다.
 
-백엔드 [dispatch.py](src/orchestrator/application/dispatch.py)는 Planner 결과에 따른 Developer 호출, 멀티의 QA·Security 병렬 검토, 조건이 맞는 수정·재검증을 구현합니다. [a2a_tasks.py](src/orchestrator/application/a2a_tasks.py)는 실제 호출·응답 Event를 기록합니다. 이를 사용하지만 문서 아이콘 자체는 실제 파일 전송 증거가 아닙니다. Event에 없는 내부 결정 사유나 Agent 간 직접 전달은 미연결 상태로 둡니다.
+문서 아이콘은 확인된 호출을 시각화하며 실제 파일 바이트 전송의 증거는 아닙니다. 기존 105초 목업의 전달 시간표는 실제 모드에 사용하지 않습니다.
 
-현재 Event 한 페이지의 신규 기록만 연출합니다. 자동 갱신은 현재 offset을 유지하므로 실행이 길어져 페이지 밖에 추가된 모든 Event를 빠짐없이 추적하는 커서·구독은 아직 없습니다. 수동 최신 구간 선택도 페이지가 바뀌면 과거 기준점으로 처리합니다. 실제 로그로 분기·지연·재시도와 누락 없는 최신 추적을 추가 검증해야 합니다.
+백엔드는 `a2a_tasks.py`에서 실제 호출·응답 Trace를 기록하고 같은 Run의 저장소에서 `/events`로 조회합니다. SQLite 조회는 `ORDER BY sequence`를 사용하며 프론트엔드는 응답 배열 순서를 유지합니다. 이 연결의 Mock 검증과 실제 LLM E2E 검증은 구분합니다.
 
 ### 3초 자동 갱신
 
-오피스의 실제 모드와 Run ID가 있을 때 `useAgentRunMonitor()`가 기존 `refresh()`를 재사용합니다. Run·Step·Event와 실행 방식 조회 묶음이 완료된 후 3초 뒤 다음 조회를 예약합니다. 진행 중인 동일 요청은 공유합니다.
+실제 오피스와 프로젝트·결과물 보관함에서 선택된 Run을 자동 조회합니다. 완료된 조회 묶음 후 3초 뒤 다음 조회를 예약하며 진행 중인 같은 요청은 공유합니다.
 
-- `FINISHED`, `ABORTED`에서 중지하며 `FINISHED` 자체가 성공은 아닙니다.
-- 실행 방식이 `SINGLE_AGENT`로 확인되면 중지합니다. 방식 확인 전 초기 조회·재시도는 발생할 수 있습니다.
-- 실패 시 마지막 정상 데이터를 유지하고 재시도 간격을 6·12·24·최대 30초로 늘립니다. 복구 후 3초로 돌아옵니다.
-- 일시정지·재개, 수동 새로고침·조회 취소·해제를 유지합니다.
-- Run 변경·목업 복귀·다른 메뉴 이동·언마운트 시 타이머와 진행 중 GET을 정리합니다. Run ID가 남은 다른 화면에서 초기 조회나 수동 갱신까지 금지하는 것은 아니며 자동 폴링은 중지합니다.
+- 홈 실제 모드에서는 기존 `collectEvents`로 Trace를 수집하고 결과를 함께 조회합니다.
+- 프로젝트·보관함에서는 `includeResults`로 Artifact·Issue 조회를 활성화합니다. 3D Trace 수집과 결과 목록 조회를 분리하여 같은 Hook·API를 재사용합니다.
+- `FINISHED`·`ABORTED` 또는 `SINGLE_AGENT` 확인 시 반복 조회를 중지합니다. `FINISHED` 자체가 성공은 아닙니다.
+- 핵심 조회 실패 시 마지막 데이터를 유지하고 재시도 간격을 6·12·24·최대 30초로 늘립니다. Artifact·Issue 오류는 독립적으로 처리합니다.
+- 프로젝트의 Run 조회 오류와 보관함의 Artifact 조회 오류에는 해당 화면의 `다시 불러오기`를 제공합니다. 이 동작은 GET 재조회이며 새 Run을 만들지 않습니다.
+- 기존 Run 조회·일시정지·페이지 조작 버튼은 사용자 화면에서 제거했습니다. 내부 취소·상태 정리 로직은 유지하며, 화면별 활성 조건·Run 변경·언마운트에 맞춰 요청과 타이머를 정리합니다.
 
 ### 실제 성공과 5인 세리머니
 
@@ -330,13 +340,46 @@ API의 저장 순서를 유지하며 발생 시각 차이를 반영합니다. �
 
 두 기록과 초기화는 독립적입니다. 재생 직전에 실제 이력을 저장하여 같은 Run의 폴링·StrictMode·재진입·새로고침으로 중복 소비하지 않습니다. 저장 실패 시 재생하지 않고 중간에 화면을 나가도 같은 Run을 자동 재생하지 않습니다. 한 탭 기준이며 여러 탭 동시 실행의 잠금은 없습니다.
 
-### 별도 Pipeline과 승인 설정
+### 프로젝트·결과물 보관함의 실제 데이터
 
-`PipelinePage.jsx`의 실행 버튼은 기존 고정 `scenarioId`, `requestText`만 직접 `fetch`로 POST합니다. `configuration`이나 공통 생성 함수는 아직 사용하지 않습니다. 생성 응답의 Run ID로 Run·Step·Event를 병렬 조회하며 수동 새로고침도 이 세 GET만 호출합니다. 이 별도 화면에는 자동 폴링·Event 페이지 이동·Dashboard Run ID 자동 공유가 없습니다. Event는 기본 처음 최대 100건입니다. Artifact·Issue·Usage/Cost는 연결되지 않았고 해당 카드는 미연동을 표시합니다.
+프로젝트는 `useOfficeRunSubmission`에 저장된 이름·요구사항과 생성 응답의 `run.runId`를 `submittedRunProject()`로 연결합니다. 기존 카드·검색 디자인을 재사용하며 Run 상태와 역할별 Step 상태를 표시합니다. QA·Security 병렬 상태도 각각 유지합니다. 실제 근거가 없는 진행률 숫자·진행 막대는 표시하지 않습니다. 실제 Run이 없으면 목업 카드 대신 빈 상태를 보여줍니다.
+
+현재 조회 가능한 범위는 **이 화면에서 생성한 Run**입니다. 전체 Run 목록과 프로젝트명 영구 저장 API가 없으므로 이전 세션의 프로젝트 이력·새로고침 후 복원은 지원하지 않습니다. 프로젝트 카드를 누르면 같은 Run의 실제 3D 오피스로 돌아가며 새 Run을 생성하지 않습니다.
+
+| Host API | 제공 범위와 현재 UI 사용 |
+| --- | --- |
+| `GET /api/v1/runs/{runId}/artifacts` | `runId`, `artifacts`. 산출물 JSON과 실행 설정 Artifact를 반환. 기존 조회 한 번으로 팝업 요약과 보관함용 공개 목록을 생성 |
+| `GET /api/v1/runs/{runId}/artifacts/{artifactId}` | 해당 Artifact JSON. 개별 조회 계약은 있으나 목록 응답에 필요한 정보가 있어 현재 UI는 별도 요청하지 않음 |
+| 소스 파일 원문·바이너리 다운로드 | 현재 HTTP API 미제공. UI에 파일 원문 보기·다운로드 버튼을 만들지 않음 |
+
+`agentArtifactCatalog.js`는 등록 URI의 마지막 경로 부분을 등록명으로 사용하고, 실제 응답의 종류·생성 주체·등록 시각·산출물/코드 버전·보고서 요약을 표시합니다. 이름이 없으면 파일 이름 미제공으로 안내합니다. 목록에 있다는 사실은 등록됨을 뜻하며 검증 성공이나 다운로드 가능을 뜻하지 않습니다.
+
+`SOURCE`는 소스 Snapshot 등록 정보이며 내부 소스 파일 목록·원문이 아닙니다. `CHANGE_REPORT.fileChanges`의 경로와 작업 종류는 변경 보고서 내용으로 표시하며 현재 파일의 존재를 보장하지 않습니다. QA/보안 보고서도 확인된 결과만 요약합니다. `artifact://` URI를 HTTP 링크로 바꾸거나 임의의 소스 파일·다운로드를 생성하지 않습니다.
+
+기존 `getAgentRunArtifacts()`의 팝업용 `artifacts`는 유지하고 공개 `catalog`를 추가해 같은 응답을 재사용합니다. 원본 Configuration·manifest·Host 내부 경로·민감 로그는 목록 상태에 복사하지 않습니다. 조회 실패는 빈 결과와 구분하고 같은 Run의 마지막 정상 목록이 있으면 유지합니다. 재조회는 GET만 수행하며 Run이 바뀌면 이전 목록을 섞지 않습니다.
+
+보관함의 등록 정보 보기는 안전한 메타데이터·요약을 펼치는 기능입니다. 제품 백엔드의 PDF 다운로드 API와 Agent의 코드 산출물은 별개의 계약입니다. 사용자 화면에 예시 파일을 실제 결과물처럼 표시하지 않습니다.
+
+
+### 보존된 Pipeline과 승인 설정
+
+`PipelinePage.jsx`는 보존된 개발용 코드이며 현재 사용자 메뉴에서 열지 않습니다. 이 코드의 고정 scenario·request 직접 POST는 승인 Configuration을 공급하지 않으므로 실제 Host 실행 진입점으로 사용하지 않습니다. 현재 사용자 진입점은 파란색 요청창 → `useOfficeRunSubmission` → 기존 `agentRunSubmission`입니다.
 
 Owned Host는 [host.py](src/agents/platform/host.py)의 `HostConfiguration.approved_configuration`과 `validate_configuration()`을 기준으로 요청을 검증합니다. 승인값은 서버 측 runtime·tools·source 및 관련 검증 설정으로 구성됩니다. 모델·실행 한도·환경·시작 commit/snapshot·scanner 등의 승인값과 요청을 대조하므로 최소 `{ architecture }`만으로 실제 Host 실행이 보장되지 않습니다.
 
-현재 프론트엔드에는 승인 구성 전체를 받아 생성 요청에 전달하는 인터페이스가 없습니다. 팀장과 승인된 비밀정보 없는 configuration의 제공 위치·전달 책임·불일치 처리를 먼저 합의해야 합니다. 모델 ID·실행 제한·Host 설정을 임의 생성하지 않습니다. API Key는 서버의 환경변수에서만 읽고 브라우저에 전달하지 않습니다.
+프론트엔드의 승인 입력 경계는 구현되어 있습니다. `AtelierDashboard`는 `approvedRunSubmission = { approved: true, scenarioId, configuration }`을 받아 `useOfficeRunSubmission`에 전달합니다. 다만 `App.jsx`는 이를 공급하지 않아 현재 기본 `null`이며 실제 POST를 차단합니다. `agentRunSubmission.js`의 공개 필드 검사와 민감정보 패턴 차단은 서버 승인을 대신하지 않습니다.
+
+| 공급·검증 경로 | 현재 지원 범위 |
+| --- | --- |
+| `approved_run_configuration(platform)` | 서버 내부에서 공개 템플릿 반환. HTTP API 아님 |
+| `app.state.approved_host_configuration_json` | Host 내부 보관 정보. 브라우저 조회 계약 아님 |
+| `GET /api/v1/runs/{runId}/configuration` | 기존 Run의 고정 설정. 현재 Host 승인 템플릿의 대체 수단 아님 |
+| Host `validate_configuration()` + 제출 검증기 | 서버 승인 모델·한도·환경·Source·검증 참조 대조와 민감정보 검사 |
+| 일반 Orchestrator의 기본 `submission_validator=None` | Host와 같은 승인 검증을 보장하지 않음 |
+
+공개 Configuration은 모델·제한·이미지 digest·dependency lock hash·네트워크 정책·Source commit/snapshot·검증 참조입니다. OpenAI API 키·A2A 토큰·비밀번호·Host 내부 경로·원본 runtime/tools/source 파일은 서버 전용입니다. 기존 제품 JWT 인증도 Host 승인 검증을 대체하지 않습니다.
+
+**안전한 승인 설정 공급 HTTP 계약은 아직 없습니다.** 팀장과 공개 설정 조회 또는 서버 측 설정 참조 방식, 접근 권한, 설정 변경 시 재검증을 확정해야 합니다. 모델·예산·도구 이미지·Source Snapshot도 승인받아야 합니다. 새 endpoint나 승인값을 임의로 만들지 않았습니다. 프론트엔드의 요청창·결과 표시 연결이 구현되어 있어도 승인 설정 공급 차단은 그대로 유지됩니다.
 
 미설정 싱글 실행은 `503 SINGLE_AGENT_RUNTIME_NOT_CONFIGURED`, 실행 방식 불일치는 `422 RUNTIME_ARCHITECTURE_MISMATCH`, 승인 구성 불일치는 `422 OWNED_AGENT_CONFIGURATION_INVALID`입니다. 제품 JWT와 Agent Run 접근 권한의 공통 연결은 별도 작업이며 `리더` UI가 제품 관리 권한을 의미하지 않습니다.
 
@@ -359,7 +402,9 @@ Owned Host는 [host.py](src/agents/platform/host.py)의 `HostConfiguration.appro
 
 Provider에는 모델, 출력 토큰 한도, 시간제한, 구조화 응답·도구 처리가 구현되어 있습니다. 싱글은 네 직원 중 한 명을 선택하는 방식이 아니라 한 실행 주체가 단계를 바꿔 수행하는 방식입니다. 설정 예제가 있다는 사실은 실제 키·승인 모델·Host가 현재 준비되었다는 증거가 아닙니다.
 
-검증 기록도 구분합니다. [Single 최종 감사 기록:221](docs/56-single-agent-final-audit-runbook.md#L221)은 완성·수정 흐름 검사에 결정적 LLM·Docker 어댑터를 사용했으며 실제 키·Docker daemon·외부 모델 호출·브라우저는 실행하지 않았다고 명시합니다. [최신 통신 검증:164](docs/58-strict-agent-communication-validation.md#L164)도 실제 모델 응답·코드 생성·MCP·빌드 등의 미수행을 명시합니다. 코드 연결과 실제 환경의 성공 검증은 별도로 판단합니다.
+검증 기록도 구분합니다. [Single 최종 감사 기록:221](docs/56-single-agent-final-audit-runbook.md#L221)은 완성·수정 흐름 검사에 결정적 LLM·Docker 어댑터를 사용했으며 실제 키·Docker daemon·외부 모델 호출·브라우저는 실행하지 않았다고 명시합니다. [실제 OpenAI 통신 진단](docs/59-live-openai-communication.md)은 별도 진단 실행기의 실제 API·A2A 송수신 결과를 기록하며, 제품 실행기·MCP·Docker·코드 생성·빌드·제품 테스트 실행은 범위에서 제외합니다. 진단에서 사용한 모델값은 현재 Host의 승인값을 대신하지 않습니다. 코드 연결과 실제 환경의 성공 검증은 별도로 판단합니다.
+
+제품용 실제 실행 경로는 `agents.platform.run_host → create_host → 역할별 실행기 → OpenAI Responses API`입니다. `diagnostics.communication`의 실제 통신 진단 경로는 제품 Host·Run 저장/조회와 별개입니다. 통신 진단의 목업 제거는 프론트엔드 105초 시연 제거를 의미하지 않습니다.
 
 ## 10. 오류 발생 시 확인 순서
 
@@ -395,7 +440,23 @@ npm run lint
 node --test tests/*.test.mjs
 ```
 
-2026-11-09 현재 118개 테스트와 build·lint·공백 검사가 통과했습니다. 앞선 3D·직원 카드 작업의 격리된 브라우저 Mock 검증 48개는 과거 기록입니다. 이번 보안 좌석 화분 제거는 코드로 확인했으며 브라우저 실행은 승인되지 않아 새 브라우저 검증을 수행하지 않았습니다. 실제 서버·LLM 호출도 수행하지 않았습니다. 기존 105초 목업과 `team → cheer → hug` 기록은 유지합니다.
+기존 문서의 2026-11-09 기록에서는 118개 테스트와 build·lint·공백 검사가 통과했습니다. 앞선 3D·직원 카드 작업의 격리된 브라우저 Mock 검증 48개는 과거 기록입니다. 당시 보안 좌석 화분 제거는 코드로 확인했으며 브라우저 실행은 승인되지 않아 새 브라우저 검증을 수행하지 않았습니다. 실제 서버·LLM 호출도 수행하지 않았습니다. 기존 105초 목업과 `team → cheer → hug` 기록은 유지합니다.
+
+최근 신규 Run 연결 작업에서는 `frontend/tests/newAgentRunFlow.test.mjs`의 Mock 테스트 **5개 PASS**가 보고되었습니다. 범위는 생성 응답의 Run ID 자동 연결, 최초 이벤트의 페이지 수집·순서·중복 제거, 기존 Run 과거 재생 방지, 중복 제출·실패 처리입니다. 기존 브라우저 64항목·단위 테스트 103개 PASS는 앞선 작업의 기록이며 현재 전체 테스트 수로 합산하지 않습니다.
+
+승인 Configuration 공급 경로 점검에서는 안전한 HTTP 계약이 없어 코드 변경이나 새 Mock 실행을 하지 않았습니다. 이번 문서 갱신도 문서 정적 확인만 수행하며 기존 테스트·Build/Lint를 재실행하지 않습니다. 실제 Run POST·OpenAI 호출·Host/Docker 실행은 수행하지 않았습니다.
+
+최근 UI·프로젝트/보관함 작업의 검증 기록은 다음과 같습니다. 전체 회귀 결과나 실제 Host E2E 성공으로 해석하지 않습니다.
+
+| 작업 | 제한된 검증 결과 |
+| --- | --- |
+| 파란색 요청창 통합 | `officeRequestUi.test.mjs` 1개 PASS(4개 검사 묶음), 관련 기존 `newAgentRunFlow.test.mjs` 5개 PASS. 단일 입력창·승인 차단·자동 관측·중복/실패 처리 확인 |
+| 프로젝트·보관함 | `projectOutputs.test.mjs` 3개 PASS. 격리 UI의 4개 검사 묶음과 공개 Artifact 변환·Run/Step 매핑 확인 |
+| 변경 파일 정적 확인 | 해당 작업의 ESLint·공백 검사 통과. 전체 Build/Lint는 재실행하지 않음 |
+| 3D 역할 번호 1~5 | 표시식만 변경하고 공백 검사 확인. 내부 인덱스·동작 변경 없음 |
+
+격리 UI 검사는 실제 Dashboard·요청·모니터 Hook과 Mock HTTP를 사용하고 3D 렌더러를 대체했습니다. 따라서 캐릭터 동작·레이아웃 전체를 다시 검증한 것은 아닙니다. 기존 64항목 브라우저·103개 단위 테스트·105초 시연은 재실행하지 않았고, 과거 118개/48개 기록과도 합산하지 않습니다. 이번 문서 갱신에서는 문서 형식·링크만 정적으로 확인합니다. 실제 Run POST·OpenAI·Host·Docker 실행은 하지 않았습니다.
+
 
 제품 백엔드 자동 테스트는 `backend/`에서 실행합니다. 루트의 `tests/`와 구분합니다.
 
@@ -412,7 +473,7 @@ node --test tests/*.test.mjs
 3. A가 B에게 PDF를 제출하고 A의 `submitted`, B의 `assigned`에 표시되는지 확인합니다.
 4. A·B로 원본을 받고 C의 직접 다운로드가 403으로 거절되는지 확인합니다.
 5. 미로그인·만료, 빈 목록, 10MiB 경계, 형식 오류, 존재하지 않는 담당자를 확인합니다.
-6. Orchestrator는 승인 구성·포트·실제 DB 경로·A2A 인증·모델/도구 제한을 담당자와 합의한 뒤 별도 검증합니다. 먼저 기존 Run GET으로 조회·네 역할·리더 상태·폴링을 확인하고, 승인 후 실제 생성·병렬 검토·수정·재검증·최종 판정·산출물·성공 세리머니 1회 재생을 검증합니다. 장시간 Event의 최신 구간 추적도 별도 확인합니다.
+6. Orchestrator는 승인 구성·포트·실제 DB 경로·A2A 인증·모델/도구 제한을 담당자와 합의한 뒤 별도 검증합니다. 승인된 공급 계약과 Host 준비 후 파란색 입력창에서 실제 Run 1건을 생성하여 자동 관측·병렬 검토·수정·재검증·최종 판정과 프로젝트/보관함의 실제 응답을 확인합니다. 현재 사용자 화면은 기존 Run UUID 입력을 제공하지 않습니다. Mock으로 확인한 초기·증분 Trace 순서와 실제 전달 대상을 실제 Run 1건에서 대조합니다. 이벤트 시각과 애니메이션 시작 시각이 동일하다고 가정하지 않습니다.
 
 과거 수동 검증에서는 A의 제출·다운로드, B의 배정 목록·다운로드, C의 403, 문서 ID 2의 원본과 다운로드 파일의 SHA-256 일치가 확인되었습니다. 상세 기록은 [backend/README.md](backend/README.md)에 있습니다. 이번에 새로 실행한 결과가 아니며 최신 UI의 모든 동작이나 실제 LLM·Docker 검증을 보장하지 않습니다.
 

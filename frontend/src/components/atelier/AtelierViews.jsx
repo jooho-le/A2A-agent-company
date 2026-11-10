@@ -3,7 +3,11 @@ import { Icon, OfficeDesk } from './AtelierArtwork'
 import { ActivityList, AgentCards, ProjectCard, ProjectOptions, RequestForm } from './AtelierCards'
 import { agentStates, employees, progress, projectStatus } from './atelierMock'
 
-export function HomeView({ mode, onMode, projects, project, activities, onSelect, onCreate, onNew, onEmployee, onPlan, onWorklog, officeScene, presentation = {} }) {
+export function HomeView({ mode, onMode, projects, project, activities, onSelect, onCreate, onNew, onEmployee, onPlan, onWorklog, officeScene, submission = null, presentation = {} }) {
+  if (mode === 'multi') return <>
+    <RequestForm mode={mode} onCreate={onCreate} submission={submission} />
+    {officeScene}
+  </>
   const status = presentation.status || projectStatus(project)
   const amount = presentation.amount ?? progress(project)
   const prefix = mode === 'single' ? 'single-' : ''
@@ -32,20 +36,50 @@ export function HomeView({ mode, onMode, projects, project, activities, onSelect
   </>
 }
 
-export function ProjectsView({ projects, search, onSearch, onSelect, presentation = {} }) {
+export function ProjectsView({ projects, search, onSearch, onSelect, actual = false, onRetry, presentation = {} }) {
   const matches = projects.filter((project) => `${project.name} ${project.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
-  return <><div className="view-toolbar"><p className="toolbar-note">우리 회사가 함께 만드는 일 <strong>{String(projects.length).padStart(2, '0')}</strong></p><div className="search"><Icon name="search" /><label className="sr-only" htmlFor={presentation.searchId || 'atelier-search'}>프로젝트 검색</label><input id={presentation.searchId || 'atelier-search'} type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="프로젝트 이름 검색" autoComplete="off" /></div></div><div className="project-grid">{matches.length ? matches.map((project) => <ProjectCard key={project.id} project={project} onSelect={onSelect} {...presentation.projectMeta?.(project)} />) : <div className="empty-state"><Icon name="search" /><h2>일치하는 프로젝트가 없어요.</h2><p>검색어를 바꾸거나 새 업무를 만들어보세요.</p></div>}</div></>
+  return <><div className="view-toolbar"><p className="toolbar-note">우리 회사가 함께 만드는 일 <strong>{String(projects.length).padStart(2, '0')}</strong></p><div className="search"><Icon name="search" /><label className="sr-only" htmlFor={presentation.searchId || 'atelier-search'}>프로젝트 검색</label><input id={presentation.searchId || 'atelier-search'} type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="프로젝트 이름 검색" autoComplete="off" /></div></div>{actual && <p className="view-footnote">현재 화면에서 접수한 실제 업무만 표시합니다. 프로젝트 이름과 Run 연결은 새로고침 후 복원되지 않습니다.</p>}{actual && projects.some(item => item.status.text === '상태 조회 오류') && <p role="alert">업무 상태 조회에 실패했습니다. <button className="button" type="button" onClick={onRetry}>다시 불러오기</button></p>}<div className="project-grid">{matches.length ? matches.map((project) => <ProjectCard key={project.id} project={project} onSelect={onSelect} {...presentation.projectMeta?.(project)} />) : <div className="empty-state"><Icon name="search" /><h2>{actual && !projects.length ? '접수한 실제 업무가 없습니다.' : '일치하는 프로젝트가 없어요.'}</h2><p>{actual && !projects.length ? '오피스의 파란색 요청창에서 업무를 시작하면 여기에 표시됩니다.' : '검색어를 바꾸거나 새 업무를 만들어보세요.'}</p></div>}</div></>
 }
 
 export function TeamView({ project, onEmployee, presentation = {} }) {
   return <><div className="team-banner"><div><span className="eyebrow">SMALL TEAM. CLEAR ROLES.</span><h2>{presentation.teamTitle || '오케스트레이터와 네 작업 에이전트.'}</h2><p>{presentation.teamDescription || '리더가 진행을 조율하고, 계획·개발·QA·보안 에이전트가 각 업무를 맡습니다.'}</p></div><span className="headcount"><strong>{String(presentation.staff?.length || 5).padStart(2, '0')}</strong>TEAM MEMBERS</span></div><AgentLeadership /><div className="employee-grid"><AgentCards project={project} agents={presentation.agents} profile onEmployee={onEmployee} /></div><p className="view-footnote">직원 이름·성격·진행 상태는 디자인 시연용 목업입니다.</p></>
 }
 
-export function OutputsView({ projects, project, onSelect, onFile, onDownload, presentation = {} }) {
+export function OutputsView({ projects, project, onSelect, onFile, onDownload, actual = false, catalog, onRetry, presentation = {} }) {
+  if (actual) return <RunOutputs projects={projects} project={project} onSelect={onSelect} catalog={catalog} onRetry={onRetry} />
   return <><div className="view-toolbar"><div><h2>{project.name}</h2><p className="toolbar-note">직원들이 정리한 문서와 코드를 확인하세요.</p></div><label className="output-selector"><span className="sr-only">결과물을 볼 프로젝트</span><ProjectOptions projects={projects} selectedId={project.id} onSelect={onSelect} /></label></div><div className="output-grid">{project.files.map((file, index) => {
     const employee = presentation.staff?.[0] || (file.endsWith('.md') ? employees[0] : file.includes('test') ? employees[2] : employees[1])
     return <article className="output-card" key={file}><div className="output-card-top"><span className="file-icon"><Icon name={file.endsWith('.md') ? 'file' : 'code'} /></span><span className="file-type">{file.endsWith('.md') ? 'DOCUMENT' : file.includes('test') ? 'TEST NOTES' : 'SOURCE CODE'}</span></div><h3>{file.split('/').pop()}</h3><p className="file-path">{file}</p><div className="file-owner"><span className="mini-avatar">{employee.initial}</span>{employee.name} · {employee.job}<span> / 예시 파일</span></div><div className="output-actions"><button type="button" className="button file-open" onClick={() => onFile(index)}>파일 보기<Icon name="chevron" /></button><button type="button" className="button" onClick={() => onDownload(index)} aria-label={`${file.split('/').pop()} 예시 다운로드`}><Icon name="down" />다운로드</button></div></article>
   })}{!project.files.length && <div className="empty-state"><Icon name="file" /><h2>아직 보관된 결과물이 없어요.</h2><p>실제로 생성된 파일이 없습니다. 목업 진행 상태를 결과물로 표시하지 않습니다.</p></div>}</div><p className="view-footnote">{presentation.outputsNote || '디자인 시연용 예시 파일입니다. 실제 AI가 생성하거나 검증한 결과는 아닙니다.'}</p></>
+}
+
+function RunOutputs({ projects, project, onSelect, catalog, onRetry }) {
+  if (!project) return <div className="empty-state"><Icon name="file" /><h2>접수한 실제 업무가 없습니다.</h2><p>업무를 시작하면 해당 Run에 등록된 산출물이 표시됩니다. 예시 파일은 표시하지 않습니다.</p></div>
+  const current = catalog?.runId === project.runId ? catalog : { items: [], status: 'idle' }
+  const failed = current.status === 'error'
+  const loading = ['idle', 'loading', 'cancelled'].includes(current.status)
+  return <>
+    <div className="view-toolbar"><div><h2>{project.name}</h2><p className="toolbar-note">실제 Run에 등록된 산출물 · 등록 여부와 검증 성공은 별개입니다.</p></div>
+      <label className="output-selector"><span className="sr-only">결과물을 볼 프로젝트</span><ProjectOptions id="actual-output-project" projects={projects} selectedId={project.id} onSelect={onSelect} /></label></div>
+    {failed && <p role="alert">산출물을 불러오지 못했습니다. 이전에 확인한 목록이 있으면 유지합니다. <button type="button" className="button" onClick={onRetry}>다시 불러오기</button></p>}
+    {loading && <p role="status">산출물 목록을 확인하고 있습니다.</p>}
+    <div className="output-grid">{current.items.map(item => <article className="output-card" key={item.artifactId}>
+      <div className="output-card-top"><span className="file-icon"><Icon name={item.source ? 'code' : 'file'} /></span><span className="file-type">{item.type}</span></div>
+      <h3>{item.name || item.type}</h3><p className="file-path">{item.name ? 'Artifact 등록명' : '파일 이름 미제공'} · 등록됨</p>
+      <div className="file-owner">{item.author}</div>
+      <details className="artifact-details"><summary>등록 정보 보기</summary>
+        <p>Artifact ID: {item.artifactId}</p>
+        {item.createdAt && <p>등록 시각: <time dateTime={item.createdAt}>{item.createdAt}</time></p>}
+        {item.version !== null && <p>산출물 버전: {item.version}</p>}
+        {item.codeVersion !== null && <p>코드 버전: {item.codeVersion}</p>}
+        {item.details.map((detail, index) => <p key={index}>{detail}</p>)}
+        {!!item.changes.length && <><p>변경 보고서의 파일 경로입니다. 현재 파일의 존재나 내용을 보장하지 않습니다.</p><ul>{item.changes.map((file, index) => <li key={index}>{file.path} · {file.action}</li>)}</ul></>}
+        {item.source && <p>소스 Snapshot 등록 정보입니다. 내부 소스 파일 목록·원문은 이 응답에 포함되지 않습니다.</p>}
+      </details>
+    </article>)}</div>
+    {!failed && !loading && !current.items.length && <div className="empty-state"><Icon name="file" /><h2>아직 등록된 산출물이 없습니다.</h2><p>API에서 확인된 결과물만 표시합니다.</p></div>}
+    <p className="view-footnote">소스 파일 원문 조회·다운로드 API는 제공되지 않습니다. Artifact 등록 URI를 다운로드 주소로 사용하지 않습니다. 현재 화면의 Run 연결은 새로고침 후 복원되지 않습니다.</p>
+  </>
 }
 
 export function WorkflowView({ project, activeStep, onStep, onEmployee, presentation = {} }) {

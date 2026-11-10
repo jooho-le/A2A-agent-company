@@ -12,7 +12,7 @@ function initialState(query) {
   return { query, requestId: null, failures: 0, run: resource(), steps: resource(), events: resource(),
     architecture: query.includeArchitecture ? resource() : { data: null, status: 'idle', error: null },
     trace: query.collectEvents ? resource() : { data: null, status: 'idle', error: null },
-    ...Object.fromEntries(resultNames.map(name => [name, query.collectEvents ? resource() : { data: null, status: 'idle', error: null }])) }
+    ...Object.fromEntries(resultNames.map(name => [name, query.includeResults ? resource() : { data: null, status: 'idle', error: null }])) }
 }
 
 function reducer(state, action) {
@@ -50,9 +50,9 @@ function reducer(state, action) {
  * status는 조회 상태(idle/loading/success/empty/error/cancelled)이고 Run의 실행 status와 별개입니다.
  * refresh()는 진행 중인 같은 조회를 재사용합니다. cancel() 뒤 refresh()로 다시 조회할 수 있습니다.
  */
-export default function useAgentRunMonitor(runId, { limit = 100, offset = 0, includeArchitecture = false, polling = false, collectEvents = false } = {}) {
+export default function useAgentRunMonitor(runId, { limit = 100, offset = 0, includeArchitecture = false, polling = false, collectEvents = false, includeResults = collectEvents, traceFromStart = false } = {}) {
   const normalizedRunId = typeof runId === 'string' ? runId.trim() : ''
-  const query = useMemo(() => ({ runId: normalizedRunId, limit, offset, includeArchitecture, collectEvents }), [normalizedRunId, limit, offset, includeArchitecture, collectEvents])
+  const query = useMemo(() => ({ runId: normalizedRunId, limit, offset, includeArchitecture, collectEvents, includeResults, traceFromStart }), [normalizedRunId, limit, offset, includeArchitecture, collectEvents, includeResults, traceFromStart])
   const [state, dispatch] = useReducer(reducer, query, initialState)
   const activeRequest = useRef(null)
   const sequence = useRef(0)
@@ -79,7 +79,7 @@ export default function useAgentRunMonitor(runId, { limit = 100, offset = 0, inc
     const readTrace = () => traceRequest ??= (async () => {
       // 종료 Run의 마지막 이벤트도 포함하도록 Run 응답 후에 로그를 수집합니다.
       await readRun()
-      return eventFeed.pull(query.runId, getAgentRunEvents, controller.signal)
+      return eventFeed.pull(query.runId, getAgentRunEvents, controller.signal, { fromStart: query.traceFromStart })
     })()
     const loaders = {
       run: readRun,
@@ -94,13 +94,13 @@ export default function useAgentRunMonitor(runId, { limit = 100, offset = 0, inc
       trace: readTrace,
       ...Object.fromEntries(resultNames.map(name => [name, async () => {
         // Trace 수집 후 결과를 조회해 새 이벤트가 참조하는 산출물을 함께 받습니다.
-        try { await readTrace() } catch { /* 결과는 독립적으로 조회합니다. */ }
+        if (query.collectEvents) { try { await readTrace() } catch { /* 결과는 독립적으로 조회합니다. */ } }
         return (name === 'artifacts' ? getAgentRunArtifacts : getAgentRunIssues)(query.runId, { signal: controller.signal })
       }])),
     }
 
     const enabled = allResources.filter(name => (name !== 'architecture' || query.includeArchitecture)
-      && (name !== 'trace' && !resultNames.includes(name) || query.collectEvents))
+      && (name !== 'trace' || query.collectEvents) && (!resultNames.includes(name) || query.includeResults))
     request.promise = Promise.all(enabled.map(async (name) => {
       try {
         const data = await loaders[name]()
@@ -195,6 +195,7 @@ export default function useAgentRunMonitor(runId, { limit = 100, offset = 0, inc
     architecture: current.architecture.data?.architecture ?? null,
     trace: current.trace.data,
     // 부가 결과의 실패는 기존 Trace·성공 판정의 errors/queryStatus에 섞지 않습니다.
+    artifactCatalog: { runId: query.runId, items: current.artifacts.data?.catalog ?? [], status: current.artifacts.status },
     popupResults: { runId: query.runId, artifacts: current.artifacts.data?.artifacts ?? [], issues: current.issues.data?.issues ?? [],
       status: Object.fromEntries(resultNames.map(name => [name, current[name].status])) },
     pagination: { total: eventPage?.total ?? null, limit: eventPage?.limit ?? limit, offset: eventPage?.offset ?? offset },

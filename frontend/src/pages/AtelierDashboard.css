@@ -731,3 +731,14 @@
   90.625%, 96.875% { left: var(--single-relay-x-3, 87.5%); opacity: 1; transform: translate(-50%, -50%); }
   100% { left: var(--single-relay-x-3, 87.5%); opacity: 0; transform: translate(-50%, -50%) rotate(8deg); }
 }
+
+/* 기존 파란색 요청창 안에서만 접수·연결 상태를 안내합니다. */
+.atelier-dashboard .composer-feedback { position: relative; z-index: 1; font-size: 12px; line-height: 1.6; margin-top: 12px; overflow-wrap: anywhere; }
+.atelier-dashboard .composer-feedback p { margin: 4px 0; color: #fff; }
+.atelier-dashboard .composer-feedback [role="alert"] { color: #fff0b3; }
+.atelier-dashboard .request-composer button:disabled { opacity: .6; cursor: not-allowed; animation: none; }
+
+.atelier-dashboard .project-agent-states { display: grid; gap: 6px; margin: 18px 0; font-size: 12px; }
+.atelier-dashboard .project-agent-states small { opacity: .7; line-height: 1.6; }
+.atelier-dashboard .artifact-details { margin-top: 16px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.atelier-dashboard .artifact-details summary { cursor: pointer; }

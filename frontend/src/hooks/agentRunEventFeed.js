@@ -3,8 +3,10 @@ const cancelled = () => new DOMException('조회가 취소되었습니다.', 'Ab
 // 화면의 Trace 페이지와 별개인 append-only offset입니다. 저장 순서는 서버 배열을 따릅니다.
 export function createRunEventFeed() {
   let run = null, epoch = 0, request = 0, state = null, seen = new Set()
+  // 목업 복귀·화면 전환으로 reset되어도 이미 처음부터 수집한 Run은 재생하지 않습니다.
+  const collectedFromStart = new Set()
   function reset() { run = null; epoch++; request++; state = null; seen = new Set() }
-  async function pull(runId, loadPage, signal) {
+  async function pull(runId, loadPage, signal, { fromStart = false } = {}) {
     if (run !== runId) { reset(); run = runId }
     const ticket = ++request, generation = epoch
     const check = () => {
@@ -21,13 +23,16 @@ export function createRunEventFeed() {
       }
       return page
     }
-    if (!state) {
+    const firstCollection = !state && fromStart && !collectedFromStart.has(runId)
+    if (!state && !firstCollection) {
       const page = await read(1, 0)
       // 최초 과거 기록은 재생하지 않습니다. 이후 추가된 행부터 읽습니다.
       state = { runId, epoch, revision: 0, initialized: true, cursor: page.total, fromCursor: page.total, total: page.total, entries: [] }
       return state
     }
-    const start = state, additions = [], ids = new Set(seen)
+    // 신규 Run의 최초 묶음도 페이지 전체 성공 전에는 커서를 확정하지 않습니다.
+    const start = state ?? { runId, epoch, revision: 0, initialized: true, cursor: 0, total: 0, entries: [] }
+    const additions = [], ids = new Set(seen)
     let offset = start.cursor, target = null
     do {
       const page = await read(500, offset)
@@ -47,6 +52,7 @@ export function createRunEventFeed() {
     seen = ids
     state = { ...start, cursor: offset, fromCursor: start.cursor, total: target, revision: start.revision + (additions.length ? 1 : 0),
       entries: additions.length ? [...start.entries, ...additions] : start.entries }
+    if (firstCollection) collectedFromStart.add(runId)
     return state
   }
   return { pull, reset }
