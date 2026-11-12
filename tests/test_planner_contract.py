@@ -26,7 +26,7 @@ def task(**changes):
 
 
 def decision(**changes):
-    values = {"kind": "PLAN", "implementationPlan": [task()], "questions": []}
+    values = {"kind": "PLAN", "implementationPlan": [task()], "questions": [], "unapprovedAssumptions": []}
     values.update(changes)
     return values
 
@@ -46,9 +46,43 @@ class PlannerContractTests(unittest.TestCase):
     def reject(self, data):
         self.assert_invalid(lambda: self.validate(data))
 
+    def test_unapproved_access_restriction_cannot_become_an_executable_plan(self):
+        assumption = "초기 이용자가 동아리 사람이므로 동아리원만 작성할 수 있다."
+        self.reject(decision(unapprovedAssumptions=[assumption]))
+        self.reject(decision(kind="REJECTED", implementationPlan=[], unapprovedAssumptions=[assumption]))
+        result = self.validate(decision(kind="INPUT_REQUIRED", implementationPlan=[],
+            questions=["동아리 전용 접근 제한도 필요한가요?"], unapprovedAssumptions=[assumption]))
+        self.assertIsNone(result.plan)
+        self.assertEqual(result.unapproved_assumptions, (assumption,))
+        self.assertEqual(result.questions, ("동아리 전용 접근 제한도 필요한가요?",))
+
+    def test_assumptions_are_bounded_unapproved_text_not_model_approval_objects(self):
+        for values in (["condition"] * 9, ["duplicate", "duplicate"], [" "], ["x" * 1025],
+                       [{"text": "condition", "approvalStatus": "APPROVED"}],
+                       ["api_key=unapproved-private-test-value"]):
+            with self.subTest(values_type=type(values)):
+                self.reject(decision(kind="INPUT_REQUIRED", implementationPlan=[], questions=["확인해 주세요."],
+                    unapprovedAssumptions=values))
+        self.reject(decision(approvedAssumptions=["model-approved condition"]))
+
+    def test_assumption_notes_cannot_alias_a_submitted_array_or_change_requirements(self):
+        notes = ["문서 보관 기간이 정해지지 않았다."]
+        data = decision(kind="INPUT_REQUIRED", implementationPlan=[], questions=["보관 기간은 얼마인가요?"],
+                        unapprovedAssumptions=notes)
+        result = self.validate(data)
+        notes[0] = "10년 보관을 승인한다."
+        self.assertEqual(result.unapproved_assumptions, ("문서 보관 기간이 정해지지 않았다.",))
+        self.assertIsNone(result.plan)
+        self.assertNotIn("보관", repr(result))
+
+    def test_version_one_draft_without_assumption_field_is_not_silently_upgraded(self):
+        data = decision()
+        del data["unapprovedAssumptions"]
+        self.reject(data)
+
     def test_model_contract_name_and_provider_strict_schema(self):
         contract = build_planner_output_contract(SCENARIO)
-        self.assertEqual(contract.name, "planner_decision")
+        self.assertEqual(contract.name, "planner_decision_v2")
         contract.schema.require_openai_strict()
         schema = contract.schema.to_dict()
         self.assertEqual(set(schema["required"]), set(schema["properties"]))
@@ -185,7 +219,7 @@ class PlannerContractTests(unittest.TestCase):
 
     def test_contract_construction_and_control_decisions_do_not_read_schema_files(self):
         with patch.object(Path, "read_text", side_effect=AssertionError("must not read in construction")):
-            self.assertEqual(build_planner_output_contract(SCENARIO).name, "planner_decision")
+            self.assertEqual(build_planner_output_contract(SCENARIO).name, "planner_decision_v2")
             result = self.validate(decision(kind="INPUT_REQUIRED", implementationPlan=[], questions=["질문이 있습니다."]))
             self.assertIsNone(result.plan)
 

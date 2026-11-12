@@ -34,6 +34,7 @@ def _input_required(role):
     decision = {"kind": "INPUT_REQUIRED", "questions": ["동결 기준을 바꾸지 않고 작업을 계속할까요?"]}
     if role is AgentRole.PLANNER:
         decision["implementationPlan"] = []
+        decision["unapprovedAssumptions"] = []
     elif role is AgentRole.DEVELOPER:
         decision["summary"] = ""
     elif role is AgentRole.QA:

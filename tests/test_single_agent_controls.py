@@ -14,6 +14,7 @@ import httpx
 from a2a.server.context import ServerCallContext
 from a2a.types import Role, TaskState
 from pydantic import SecretStr
+from google.protobuf.json_format import MessageToDict
 
 from agents.core.identity import SingleAgentIdentity
 from agents.llm.budget import LLMLimits
@@ -45,6 +46,7 @@ class _Controls(fix_fixture._SingleFixHarness):
             data = {"kind": "INPUT_REQUIRED", "questions": ["동결 기준 그대로 이어서 진행할까요?"]}
             if role is AgentRole.PLANNER:
                 data["implementationPlan"] = []
+                data["unapprovedAssumptions"] = []
             elif role is AgentRole.DEVELOPER:
                 data["summary"] = ""
             elif role is AgentRole.QA:
@@ -116,6 +118,24 @@ class _Controls(fix_fixture._SingleFixHarness):
 
 
 class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unapproved_planner_assumption_stops_before_developer_and_preserves_baseline(self):
+        h = _Controls(self)
+        condition = "동아리 사람만 가입할 수 있다는 제한을 추정했다."
+        h.selected.script.insert(0, text_response(json.dumps({"kind": "INPUT_REQUIRED", "implementationPlan": [],
+            "questions": ["별도의 가입 제한도 필요한가요?"], "unapprovedAssumptions": [condition]}, ensure_ascii=False)))
+        async with h.running() as client:
+            run_id = await self.start(h, client)
+            run = h.f.repository.get_run(run_id)
+            self.assertIs(run.status, WorkflowStatus.WAITING_INPUT)
+            self.assertIsNone(run.verdict)
+            self.assertEqual(len(h.f.repository.list_steps(run_id)), 1)
+            task = await h.sdk_task(h.step(run_id, AgentRole.PLANNER))
+            data = MessageToDict(task.status.message.parts[0].data)
+            self.assertEqual(data["unapprovedAssumptions"], [condition])
+            self.assertEqual(data["assumptionApprovalStatus"], "UNAPPROVED")
+            self.assertFalse(task.artifacts)
+            self.assertEqual(h.budget(run_id).model_calls, 1)
+
     async def start(self, h, client):
         response = await asyncio.wait_for(client.post("/api/v1/runs", json=h.f.submission()), 40)
         self.assertEqual(response.status_code, 201, response.text)

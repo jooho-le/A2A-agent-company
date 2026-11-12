@@ -4,6 +4,8 @@ import asyncio
 import copy
 from dataclasses import replace
 import inspect
+import os
+from pathlib import Path
 import subprocess
 import sys
 import traceback
@@ -230,7 +232,12 @@ import agents.llm.contracts
 import agents.llm.budget
 import agents.llm.engine
 """
-        result = subprocess.run([sys.executable, "-B", "-c", program], capture_output=True, text=True)
+        # The child does not inherit unittest's sys.path additions and earlier
+        # fixtures may clear the shell environment. Pin the repository import
+        # root while preserving all of the program's I/O prohibitions.
+        environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+        result = subprocess.run([sys.executable, "-B", "-c", program], capture_output=True, text=True,
+                                env=environment)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 

@@ -143,7 +143,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         shutil.copytree(self.seed, Path(record.root_path) / "source", dirs_exist_ok=True)
 
     def providers(self):
-        planner = text_response(json.dumps({"kind": "PLAN", "questions": [], "implementationPlan": [{
+        planner = text_response(json.dumps({"kind": "PLAN", "questions": [], "unapprovedAssumptions": [], "implementationPlan": [{
             "taskId": "TASK-001", "title": "동결 회원가입 기준 구현", "description": "모든 보호된 기준을 구현한다.",
             "requirementIds": [str(value) for value in self.scenario.requirement_ids], "dependsOn": [],
         }]}, ensure_ascii=False))
@@ -568,6 +568,10 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         source, target = sqlite3.connect(stores[AgentRole.QA]), sqlite3.connect(odd)
         try:
             source.backup(target)
+            # A standalone backup has no WAL/SHM companions. Make only this
+            # test copy portable before opening it read-only; never change
+            # the live source or relax the exporter's read-only connection.
+            target.execute("PRAGMA journal_mode=DELETE")
         finally:
             source.close()
             target.close()

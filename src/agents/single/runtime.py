@@ -108,10 +108,13 @@ class SingleAgentExecutor(AgentExecutor):
         return step.agent_role, self._loaders[step.agent_role](context)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, questions=None):
+    async def _status(updater, metadata, state, code, questions=None, unapproved_assumptions=()):
         data = {"code": code}
         if questions is not None:
             data["questions"] = list(questions)
+        if unapproved_assumptions:
+            data["unapprovedAssumptions"] = list(unapproved_assumptions)
+            data["assumptionApprovalStatus"] = "UNAPPROVED"
         await updater.update_status(state, metadata=metadata,
             message=updater.new_agent_message(parts=[new_data_part(data, media_type="application/json")]))
 
@@ -222,7 +225,8 @@ class SingleAgentExecutor(AgentExecutor):
             return
         if decision.kind == "INPUT_REQUIRED":
             await self._status(updater, context.metadata, TaskState.TASK_STATE_INPUT_REQUIRED,
-                               "SINGLE_AGENT_INPUT_REQUIRED", decision.questions)
+                               "SINGLE_AGENT_INPUT_REQUIRED", decision.questions,
+                               decision.unapproved_assumptions if role is AgentRole.PLANNER else ())
             return
         if decision.kind == "REJECTED":
             await self._status(updater, context.metadata, TaskState.TASK_STATE_REJECTED, "SINGLE_AGENT_OUT_OF_SCOPE")

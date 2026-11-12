@@ -367,6 +367,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 입력은 [자연어 요청 폴더](src/diagnostics/communication/fixtures/natural)에, 최신 재실행의 실제 입출력 증거는 Git에서 제외되는 `.data/diagnostics/natural-language-3cases-2026-11-10-redo-01/`에 있습니다. 제품 코드 생성·빌드·실제 QA·보안 스캔은 이번 진단 범위 밖입니다.
 
+### 승인 요구사항 원장·Planner 미승인 가정 분리 — 61·62번
+
+[61번](docs/61-approved-requirement-authority.md)은 Run 생성 때 동결한 요구사항의 출처·ID·해시를 불변 원장으로 식별합니다. [62번](docs/62-planner-unapproved-assumptions.md)은 멀티·싱글 기획 단계에서 `unapprovedAssumptions`를 별도 필드로 받고, 미승인 조건이 표시된 실행 계획을 거절하거나 질문 대기로 남깁니다. 제품 `requirements.json` v1과 A2A·MCP 권한은 유지하고 내부 모델 Draft만 `planner_decision_v2`로 갱신했습니다.
+
+구조적 차단과 실제 모델의 의미 정확성은 구분합니다. 이번 변경으로 작업 설명 속의 모든 숨은 조건을 자동 탐지하거나 실제 API 실험의 개선율을 증명한 것은 아닙니다.
+
 ## 테스트
 
 ```bash

@@ -25,7 +25,7 @@ from test_llm_runtime import FakeProvider, text_response
 
 def _question(*, usage="measured"):
     return text_response(json.dumps({"kind": "INPUT_REQUIRED",
-        "questions": ["동결 요구사항을 유지한 채 계속할까요?"], "implementationPlan": []},
+        "questions": ["동결 요구사항을 유지한 채 계속할까요?"], "implementationPlan": [], "unapprovedAssumptions": []},
         ensure_ascii=False), usage=usage)
 
 

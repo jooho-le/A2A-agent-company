@@ -88,7 +88,7 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
             a2a_artifact_ids=["planner-opaque-artifact"])
         self.requirement_artifact_id = uuid4()
         self.plan = validate_planner_decision({
-            "kind": "PLAN", "questions": [], "implementationPlan": [{
+            "kind": "PLAN", "questions": [], "unapprovedAssumptions": [], "implementationPlan": [{
                 "taskId": "TASK-001", "title": "회원가입 구현", "description": "보호된 모든 기준을 구현한다.",
                 "requirementIds": [str(value) for value in self.scenario.requirement_ids], "dependsOn": [],
             }],
