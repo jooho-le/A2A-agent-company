@@ -5,6 +5,7 @@ from types import MappingProxyType
 
 from mcp_tools.core.policy import ROLE_TOOL_NAMES
 from orchestrator.domain.states import AgentRole
+from orchestrator.domain.role_outputs import ROLE_ARTIFACT_NAMES
 
 
 ROLE_CONTRACT_VERSION = "3"
@@ -151,6 +152,9 @@ ROLE_CONTRACTS = MappingProxyType({
 def get_role_contract(role: AgentRole) -> AgentRoleContract:
     """Select from trusted service settings, never a model/input role override."""
     try:
-        return ROLE_CONTRACTS[AgentRole(role)]
+        contract = ROLE_CONTRACTS[AgentRole(role)]
+        if tuple(output.name for output in contract.outputs) != ROLE_ARTIFACT_NAMES[contract.role]:
+            raise ValueError("Role declaration and Host output set must agree")
+        return contract
     except (ValueError, TypeError, KeyError):
         raise RoleContractError("A supported service Agent role is required") from None

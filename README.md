@@ -379,6 +379,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 기존 제품 Artifact Schema·보호된 평가 테스트 정책·도구 실행 근거는 유지합니다. 기대값 원문 일치는 테스트 코드의 의미 정확성이나 제품 성공을 증명하지 않습니다.
 
+### 역할별 출력·Host 결과 인수 — 65·66번
+
+[65번](docs/65-natural-role-output-contracts.md)은 자연어 진단의 `roleWork`를 역할별 Schema로 제한하고, 응답이 도착했어도 계약을 어기면 후속 Agent로 전달하지 않습니다. Single은 네 관점을 모두 작성하며, 새 기록은 역할별 Schema 해시를 갖는 v2입니다. 기존 실제 API 보고서는 변경하지 않았습니다.
+
+[66번](docs/66-host-artifact-admission.md)은 제품 Host가 역할별 Artifact 이름·개수·중복 ID·Part·project metadata를 먼저 검사하도록 연결했습니다. 추가 결과물을 조용히 무시하지 않고 기존 검토 경로로 돌립니다. 정상 싱글·멀티와 수정 루프를 확인했으며, 인수 통과를 실제 제품 성공으로 사용하지 않습니다.
+
 ## 테스트
 
 ```bash
