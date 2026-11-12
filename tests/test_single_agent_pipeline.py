@@ -129,7 +129,9 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             def measured_ready(request):
                 payload = json.loads(ready(request).output_text)
                 payload["testCases"] = [{"selector": "security-unit", "testId": f"test_security.Security.test_req_{index}",
-                    "requirementId": str(requirement), "title": f"보안 기준 {index}", "expectedResult": "기준 충족"}
+                    "requirementId": str(requirement), "title": f"보안 기준 {index}",
+                    "expectedResult": next(item.acceptance_criteria[0] for item in self.f.scenario.requirements
+                                           if item.requirement_id == requirement)}
                     for index, requirement in enumerate(self.f.scenario.requirement_ids_for(RequirementValidator.SECURITY), 1)]
                 return text_response(json.dumps(payload, ensure_ascii=False))
             script[-1:] = [write, measured_ready]

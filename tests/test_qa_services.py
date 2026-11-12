@@ -89,7 +89,9 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
                 limits=LLMLimits(max_tool_calls=10, tool_timeout_seconds=5)))
         self.bindings = tuple(QACaseBinding(tool_name="run_unit_tests", selector=self.fixture.scope.name,
             test_id=f"tests.TestSignup.test_{index}", requirement_id=requirement_id,
-            title=f"회원가입 기준 {index}", expected_result="보호된 요구사항을 만족한다")
+            title=f"회원가입 기준 {index}", expected_result=next(item["acceptanceCriteria"][0]
+                for item in self.fixture.configuration.scenario_contract["requirements"]
+                if item["requirementId"] == str(requirement_id)))
             for index, requirement_id in enumerate(self.ids))
         self.decision = QADecision(kind="READY", cases=self.bindings, questions=())
         self.set_unit_report()
@@ -157,6 +159,19 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
                               replace(self.configuration, unit_test_configuration=None)):
             with self.subTest(configuration=configuration), self.assertRaises(QAServicesError):
                 QARuntimeServices(self.repository, self.registry, self.artifacts, mcp_configuration=configuration)
+
+    async def test_direct_finalize_rechecks_generated_expectation_before_container_or_report(self):
+        cases = (replace(self.bindings[0], expected_result="가입 응답만 있으면 충분하다."), *self.bindings[1:])
+        with self.assertRaises(QAServicesError) as caught:
+            await self.finish(decision=QADecision(kind="READY", questions=(), cases=cases))
+        self.assertEqual(caught.exception.code, "QA_REPORT_BINDING_INVALID")
+        self.assertEqual(self.docker.calls, [])
+        # Capture tables are lazily created by the first staged input. A
+        # rejected expectation must not stage one or create those tables.
+        with self.repository._connection() as connection:
+            self.assertEqual(connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'qa_test_input_%'"
+            ).fetchall(), [])
 
     async def test_snapshot_scope_is_not_qa_configuration(self):
         configuration = replace(self.configuration, unit_test_configuration=UnitTestConfiguration(
@@ -311,11 +326,15 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
             protected_suite_ref=self.fixture.configuration.configuration.protected_test_suite_ref)
         self.configuration = replace(self.configuration, unit_test_configuration=replace(self.unit_configuration,
             scopes=(self.fixture.scope, protected)))
-        protected_bindings = tuple(replace(case, selector="protected-unit") for case in self.bindings)
+        expected = "승인된 평가 시험지의 세부 경계 조건을 만족한다."
+        protected_bindings = tuple(replace(case, selector="protected-unit", expected_result=expected)
+                                   for case in self.bindings)
         services = self.services(protected_cases=protected_bindings)
         self.assertEqual(services.selectors, {"run_unit_tests": ("qa-unit",)})
         report = self.report(await self.finish(services))
         self.assertEqual(len(report.tests), 2 * len(self.bindings))
+        self.assertTrue(all(case.expected_result == expected for case in report.tests
+                            if case.test_id.startswith("run_unit_tests:protected-unit:")))
         self.assertEqual(self.input_counts(), (2, 4, 2))
         with self.repository._connection() as connection:
             contents = [row[0] for row in connection.execute("SELECT content FROM qa_test_input_files WHERE path='tests/test_signup.py'")]
@@ -362,7 +381,9 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
         path.write_text(json.dumps(data), encoding="utf-8")
         self.decision = QADecision(kind="READY", questions=(), cases=tuple(QACaseBinding(
             tool_name="run_browser_tests", selector=suite.name, test_id=f"signup.{index}",
-            requirement_id=requirement_id, title=f"브라우저 {index}", expected_result="화면 조건 충족")
+            requirement_id=requirement_id, title=f"브라우저 {index}", expected_result=next(item["acceptanceCriteria"][0]
+                for item in self.fixture.configuration.scenario_contract["requirements"]
+                if item["requirementId"] == str(requirement_id)))
             for index, requirement_id in enumerate(self.ids)))
         cases = [{"testId": case["testId"], "outcome": "PASS", "steps": [
             {"index": 1, "action": "goto", "outcome": "PASS", "durationMs": 2},

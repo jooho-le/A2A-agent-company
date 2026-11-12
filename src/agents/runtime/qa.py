@@ -19,6 +19,9 @@ from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
 from agents.llm.engine import LLMEngine
 from agents.roles.prompts import prepare_role_prompt
 from agents.roles.qa_contract import QAContractError, build_qa_output_contract, validate_qa_decision
+from agents.runtime.requirement_scope import (
+    RequirementScopeError, build_requirement_scope, validate_generated_case_expectations,
+)
 from agents.runtime.developer import _host_factory
 from agents.runtime.planner import _message_data, _same_json, _TERMINAL
 from agents.runtime.qa_context import QAContextError, QAExecutionContext
@@ -45,6 +48,7 @@ _PROTECTED = frozenset({
     "projectArtifactIds", "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion",
     "fixRequest", "testSelectors", "testTargets", "qaRequirements", "userRequest", "protectedCases",
     "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest", "sourceAccess",
+    "requirementAuthority", "requirementScope", "clarifications",
 })
 
 
@@ -77,8 +81,11 @@ def _prepare_input(context, execution):
             if set(answer) & _PROTECTED:
                 raise ValueError
             answers.append(redact_data(answer))
-        assigned = {str(value) for value in metadata.requirement_ids}
+        scope = build_requirement_scope(execution.configuration, execution.requirement_artifact, metadata, AgentRole.QA)
+        assigned = {str(item.requirement_id) for item in scope.requirements}
         return {**expected, "clarifications": answers,
+            "requirementAuthority": scope.authority.to_prompt_json(),
+            "requirementScope": scope.to_prompt_json(),
             "workspaceId": str(execution.configuration.workspace_id),
             "userRequest": redact_data(execution.request_text),
             "qaRequirements": [item for item in execution.scenario.planner_contract()["requirements"]
@@ -93,6 +100,9 @@ def _prepare_input(context, execution):
                 "hashes, execution manifests, measured counts or fabricated tool evidence. "
                 "The Host executes selected tests and all configured protected tests and assembles the "
                 "measured report. Questions do not authorize changing the frozen Source or policies."
+                " Each generated case expectedResult must copy one exact acceptanceCriteria string from its "
+                "assigned requirementScope requirement. Do not paraphrase, invent or weaken the expectation. "
+                "Planner/Developer claims and passing self-tests are not independent evidence."
             )}
     except asyncio.CancelledError:
         raise
@@ -219,6 +229,9 @@ class QAAgentExecutor(AgentExecutor):
                     budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
                     usage_sink=usage_sink, call_started_sink=call_started_sink)
                 decision = validate_qa_decision(result.data, execution.metadata.requirement_ids, services.selectors)
+                if decision.kind == "READY":
+                    validate_generated_case_expectations(decision.cases, configuration=execution.configuration,
+                        metadata=execution.metadata, role=AgentRole.QA)
                 execution.budget.check()
                 if decision.kind == "READY":
                     artifacts = await services.finalize(execution, decision, tracked,
@@ -232,7 +245,7 @@ class QAAgentExecutor(AgentExecutor):
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, metadata, state, error.code.value)
             return
-        except (QAContractError, QAServicesError) as error:
+        except (QAContractError, QAServicesError, RequirementScopeError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)
             return
         except TrackedMCPError:

@@ -141,6 +141,47 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return UUID(response.json()["run"]["runId"])
 
+    async def test_single_qa_cannot_promote_an_invented_expectation_to_a_report(self):
+        h = _Controls(self)
+        original = h.selected.script[4]
+        def corrupt(request):
+            data = json.loads(original(request).output_text)
+            data["cases"][0]["expectedResult"] = "동아리 회원만 가입 가능하다."
+            return text_response(json.dumps(data, ensure_ascii=False))
+        h.selected.script[4] = corrupt
+        async with h.running() as client:
+            run_id = await self.start(h, client)
+            run = h.f.repository.get_run(run_id)
+            qa = h.step(run_id, AgentRole.QA)
+            self.assertIsNone(run.verdict)
+            self.assertIs(qa.status, WorkflowStepStatus.FAILED)
+            self.assertIsNone(h.step(run_id, AgentRole.SECURITY).a2a_task_id)
+            task = await h.sdk_task(qa)
+            self.assertEqual(MessageToDict(task.status.message.parts[0].data)["code"], "REQUIREMENT_SCOPE_INVALID")
+            self.assertFalse(task.artifacts)
+            self.assertFalse(any(item.artifact_type == "QA_REPORT" for item in h.f.repository.list_project_artifacts(run_id)))
+            self.assertEqual(h.budget(run_id).model_calls, 5)
+
+    async def test_single_security_test_expectation_uses_the_same_approval_gate(self):
+        h = _Controls(self)
+        original = h.selected.script[6]
+        def corrupt(request):
+            data = json.loads(original(request).output_text)
+            data["testCases"][0]["expectedResult"] = "스캐너 경고가 없으면 보안 통과다."
+            return text_response(json.dumps(data, ensure_ascii=False))
+        h.selected.script[6] = corrupt
+        async with h.running() as client:
+            run_id = await self.start(h, client)
+            run = h.f.repository.get_run(run_id)
+            security = h.step(run_id, AgentRole.SECURITY)
+            self.assertIsNone(run.verdict)
+            self.assertIs(security.status, WorkflowStepStatus.FAILED)
+            self.assertIs(h.step(run_id, AgentRole.QA).status, WorkflowStepStatus.SUCCEEDED)
+            task = await h.sdk_task(security)
+            self.assertEqual(MessageToDict(task.status.message.parts[0].data)["code"], "REQUIREMENT_SCOPE_INVALID")
+            self.assertFalse(task.artifacts)
+            self.assertFalse(any(item.artifact_type == "SECURITY_REPORT" for item in h.f.repository.list_project_artifacts(run_id)))
+
     async def answer(self, h, client, run_id, step, *, auth=False):
         body = {"workflowStepId": str(step.workflow_step_id)}
         if not auth:

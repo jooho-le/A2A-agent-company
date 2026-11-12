@@ -373,6 +373,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 구조적 차단과 실제 모델의 의미 정확성은 구분합니다. 이번 변경으로 작업 설명 속의 모든 숨은 조건을 자동 탐지하거나 실제 API 실험의 개선율을 증명한 것은 아닙니다.
 
+### Developer 요구사항 대조·독립 검증 기준 — 63·64번
+
+[63번](docs/63-developer-requirement-scope.md)은 Developer의 승인 요구사항·Task 연결을 동결 원장과 대조해 내부 모델 입력에 제공합니다. [64번](docs/64-independent-validation-criteria.md)은 QA·Security가 같은 원장의 역할별 기준을 사용하고, 모델 생성 테스트의 `expectedResult`가 해당 Acceptance Criteria 원문과 일치하는지 실행 전 검사합니다. 싱글·멀티와 Host 서비스의 직접 호출 모두 동일 검증을 적용합니다.
+
+기존 제품 Artifact Schema·보호된 평가 테스트 정책·도구 실행 근거는 유지합니다. 기대값 원문 일치는 테스트 코드의 의미 정확성이나 제품 성공을 증명하지 않습니다.
+
 ## 테스트
 
 ```bash

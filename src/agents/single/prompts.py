@@ -16,7 +16,7 @@ from orchestrator.core.security import redact_data
 from orchestrator.domain.scenario_registry import ScenarioDefinition
 
 
-SINGLE_PROMPT_VERSION = "2"
+SINGLE_PROMPT_VERSION = "3"
 MAX_SINGLE_PROMPT_BYTES = 1_048_576
 
 

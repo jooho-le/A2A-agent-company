@@ -7,7 +7,7 @@ from mcp_tools.core.policy import ROLE_TOOL_NAMES
 from orchestrator.domain.states import AgentRole
 
 
-ROLE_CONTRACT_VERSION = "2"
+ROLE_CONTRACT_VERSION = "3"
 ARTIFACT_METADATA_SCHEMA = "schemas/project/developer_artifact_metadata.schema.json"
 
 

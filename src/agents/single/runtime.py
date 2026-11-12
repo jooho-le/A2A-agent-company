@@ -27,6 +27,7 @@ from agents.runtime.planner_context import SQLitePlannerContextLoader
 from agents.runtime.developer_context import SQLiteDeveloperContextLoader
 from agents.runtime.qa_context import SQLiteQAContextLoader
 from agents.runtime.security_context import SQLiteSecurityContextLoader
+from agents.runtime.requirement_scope import RequirementScopeError, validate_generated_case_expectations
 from agents.single.contracts import build_single_draft_contract
 from agents.single.mcp import open_single_model_client
 from agents.single.prompts import prepare_single_prompt
@@ -182,6 +183,11 @@ class SingleAgentExecutor(AgentExecutor):
                     raise SingleExecutionError()
                 decision = await self._model(context, execution, task_input, phase, contract, tools=tools,
                     executor=_SingleTools(tracked, execution, role, services=services, measured=measured), telemetry=telemetry)
+                if decision.kind == "READY" and role in (AgentRole.QA, AgentRole.SECURITY):
+                    cases = decision.cases if role is AgentRole.QA else decision.test_cases
+                    if role is AgentRole.QA or services.test_selectors:
+                        validate_generated_case_expectations(cases, configuration=execution.configuration,
+                            metadata=execution.metadata, role=role)
             execution.budget.check()
             artifacts = ()
             if decision.kind == "READY":
@@ -218,6 +224,9 @@ class SingleAgentExecutor(AgentExecutor):
             state = TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else (
                 TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, context.metadata, state, error.code.value)
+            return
+        except RequirementScopeError as error:
+            await self._status(updater, context.metadata, TaskState.TASK_STATE_FAILED, error.code)
             return
         except Exception:
             # Private journals preserve uncertain effects; no fabricated PASS or retry.
