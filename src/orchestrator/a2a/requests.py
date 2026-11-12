@@ -5,11 +5,12 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import UUID, uuid4
 
-from google.protobuf.json_format import ParseDict, ParseError
+from google.protobuf.json_format import MessageToDict, ParseDict, ParseError
 from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 from a2a.types import SendMessageRequest
 
 from orchestrator.core.security import redact_data
+from orchestrator.domain.json_fingerprint import json_fingerprint
 from orchestrator.domain.snapshot_handoff import SnapshotHandoff
 from orchestrator.domain.states import AgentRole
 
@@ -99,7 +100,13 @@ def build_send_message_request(
         "metadata": metadata.to_a2a_json(),
     }
     try:
-        return ParseDict(wire_request, SendMessageRequest())
+        result = ParseDict(wire_request, SendMessageRequest())
+        # Struct uses doubles. Reject any actual value loss before sending,
+        # rather than hashing an already rounded integer as the intended data.
+        if (json_fingerprint(json_payload) != json_fingerprint(MessageToDict(result.message.parts[0].data))
+                or json_fingerprint(metadata.to_a2a_json()) != json_fingerprint(MessageToDict(result.metadata))):
+            raise ValueError("A2A JSON conversion changed input values")
+        return result
     except (ParseError, TypeError, ValueError) as exc:
         raise A2AProjectContractError("Could not encode SendMessageRequest") from exc
 

@@ -106,7 +106,8 @@ class _FixHarness:
         requirements = self.base.scenario.requirement_ids_for(RequirementValidator.QA)
         return [{"toolName": "run_unit_tests", "selector": "qa-unit",
             "testId": f"test_signup.Signup.test_req_{index}", "requirementId": str(requirement),
-            "title": f"독립 QA 기준 {index}", "expectedResult": "동결 기준을 충족한다."}
+            "title": f"독립 QA 기준 {index}", "expectedResult": next(item.acceptance_criteria[0]
+                for item in self.base.scenario.requirements if item.requirement_id == requirement)}
             for index, requirement in enumerate(requirements, 1)]
 
     def providers(self):

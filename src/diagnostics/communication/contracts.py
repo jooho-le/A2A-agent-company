@@ -1,8 +1,6 @@
 """Bounded diagnostic inputs, independent oracles, and observation summaries."""
 
 from dataclasses import dataclass, field
-import hashlib
-import json
 from math import ceil
 from time import perf_counter_ns
 from typing import Literal
@@ -11,6 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.core.security import redact_text
+from orchestrator.domain.json_fingerprint import json_fingerprint
 
 
 class CheckOptions(BaseModel):
@@ -49,9 +48,7 @@ def normalized(value):
 
 
 def fingerprint(value) -> str:
-    data = json.dumps(normalized(value), sort_keys=True, ensure_ascii=False,
-                      separators=(",", ":"), allow_nan=False).encode("utf-8")
-    return hashlib.sha256(data).hexdigest()
+    return json_fingerprint(value)
 
 
 def differences(expected, actual, path: str = "$") -> list[dict]:
@@ -147,6 +144,10 @@ class ProbeRecord:
     executor_invocations: int = 0
     observer_overhead_ns: int = 0
     model_observation: dict | None = None
+    wire_request: dict | None = field(default=None, repr=False)
+    delivery_receipt: dict | None = field(default=None, repr=False)
+    delivery_check: dict = field(default_factory=lambda: {
+        "status": "UNVERIFIED", "differences": ["RECEIPT_NOT_OBSERVED"]})
     notify: object = field(default=None, repr=False)
 
     def changed(self):
@@ -177,6 +178,19 @@ class ProbeRecord:
             "executor": compare(self.admitted, self.received),
             "endToEnd": compare(self.payload, self.received),
         }
+        transfer_checks = (compare(self.response_sent, self.response_received),
+                           compare(self.metadata_sent, self.metadata_received),
+                           compare(self.metadata_sent, self.metadata_response))
+        mismatch = (self.delivery_check["status"] == "FAIL" or self.identity_valid is False
+                    or any(value["status"] == "FAIL" for value in (*request_checks.values(), *transfer_checks)))
+        stage = ("NOT_DISPATCHED" if self.phase in {"PLANNED", "SKIPPED"} else
+                 "SEND_NOT_OBSERVED" if self.wire_sent is None else
+                 "INTEGRITY_MISMATCH" if mismatch else
+                 "DELIVERY_UNVERIFIED" if self.delivery_check["status"] != "PASS" else
+                 "PERSISTED_ONLY" if self.received is None else
+                 "EXECUTOR_OBSERVED_RESULT_UNVERIFIED" if self.response_received is None else
+                 "RESPONSE_VERIFIED" if self.identity_valid is True and all(value["status"] == "PASS"
+                     for value in (*request_checks.values(), *transfer_checks)) else "RESPONSE_OBSERVED_UNVERIFIED")
         return {
             "id": self.probe_id, "role": self.role, "round": self.round,
             "position": self.position, "phase": self.phase,
@@ -187,6 +201,7 @@ class ProbeRecord:
             "executorInvocations": self.executor_invocations,
             "observerCallbackMs": round(self.observer_overhead_ns / 1_000_000, 3),
             "model": self.model_observation,
+            "delivery": {"stage": stage, "receipt": self.delivery_receipt, "check": self.delivery_check},
             "error": self.error,
             "cleanupState": self.cleanup_state,
             "observations": {"intended": self.payload, "wireSent": self.wire_sent,
@@ -207,6 +222,7 @@ class ProbeRecord:
                         "queueMs": self.ms("serverReceived", "executorStart"),
                         "agentProcessingMs": self.ms("executorStart", "responseReady"),
                         "ackRoundTripMs": self.ms("clientSend", "ack"),
+                        "receiptObservationMs": self.ms("ack", "receiptObserved"),
                         "resultObservationMs": self.ms("responseReady", "observed"),
                         "totalMs": self.ms("prepare", "finish")},
         }
@@ -221,6 +237,10 @@ def summarize(rows: list[ProbeRecord]) -> dict:
         failures += [key for key in ("response", "metadata", "responseMetadata", "grounding", "sourceGrounding") if checks[key]["status"] == "FAIL"]
         if checks["identity"] == "FAIL":
             failures.append("identity")
+        if view["delivery"]["check"]["status"] == "FAIL":
+            failures.append("deliveryReceipt")
+        elif view["phase"] not in {"PLANNED", "SKIPPED"} and view["delivery"]["check"]["status"] == "UNVERIFIED":
+            failures.append("deliveryReceiptUnverified")
         if failures or view["phase"] in {"TIMEOUT", "ERROR", "CANCELED"}:
             issues.append({"id": view["id"], "role": view["role"], "checks": sorted(set(failures)), "phase": view["phase"]})
     roles = {}
@@ -234,14 +254,16 @@ def summarize(rows: list[ProbeRecord]) -> dict:
     verified = sum(
         all(check["status"] == "PASS" for check in view["checks"]["request"].values())
         and all(view["checks"][key]["status"] == "PASS" for key in ("response", "metadata", "responseMetadata", "grounding", "sourceGrounding"))
-        and view["checks"]["identity"] == "PASS" for view in views
+        and view["checks"]["identity"] == "PASS" and view["delivery"]["check"]["status"] == "PASS" for view in views
     )
     unverified = sum(
         any(check["status"] == "UNVERIFIED" for check in view["checks"]["request"].values())
         or any(view["checks"][key]["status"] == "UNVERIFIED" for key in ("response", "metadata", "responseMetadata", "grounding", "sourceGrounding"))
-        or view["checks"]["identity"] == "UNVERIFIED" for view in views
+        or view["checks"]["identity"] == "UNVERIFIED" or view["delivery"]["check"]["status"] == "UNVERIFIED" for view in views
     )
     return {"planned": len(rows), "verifiedRequests": verified, "unverifiedRequests": unverified,
+            "deliveryStages": {stage: sum(view["delivery"]["stage"] == stage for view in views)
+                               for stage in dict.fromkeys(view["delivery"]["stage"] for view in views)},
             "sent": sum(r.wire_sent is not None for r in rows),
             "received": sum(r.received is not None for r in rows),
             "responses": sum(r.response_received is not None for r in rows),
@@ -252,6 +274,7 @@ def row_clean(row: dict) -> bool:
     """A result is clean only when every observed boundary/contract passed."""
     checks = row["checks"]
     return (row["phase"] == "COMPLETED" and checks["identity"] == "PASS"
+            and row["delivery"]["check"]["status"] == "PASS"
             and all(item["status"] == "PASS" for item in checks["request"].values())
             and all(checks[key]["status"] == "PASS" for key in (
                 "response", "metadata", "responseMetadata", "grounding", "sourceGrounding")))

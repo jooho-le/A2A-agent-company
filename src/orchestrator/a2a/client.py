@@ -28,6 +28,7 @@ from orchestrator.a2a.requests import (
 )
 from orchestrator.domain.snapshot_handoff import SnapshotHandoff
 from orchestrator.domain.states import AgentRole
+from orchestrator.a2a.delivery import DeliveryReceipt, DeliveryReceiptError
 
 
 class AgentCardContractError(ValueError):
@@ -304,6 +305,30 @@ class A2AAgentClient:
         if task.id != task_id:
             raise A2AProjectContractError("CancelTask response changed the Agent Task ID")
         return task
+
+    async def get_delivery_receipt(self, message_id: str) -> DeliveryReceipt | None:
+        """Explicit project extension; a missing receipt is not a delivery PASS."""
+        invalid = False
+        try:
+            if type(message_id) is not str or UUID(message_id).version != 4:
+                raise ValueError
+            await self._require_client()
+            response = await self._httpx_client.get(
+                self.interface_url.rstrip("/") + "/project/delivery-receipts/" + quote(message_id, safe=""))
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            if (response.headers.get(VERSION_HEADER) != "1.0"
+                    or response.headers.get("Content-Type", "").partition(";")[0].lower() != A2A_JSON_MEDIA_TYPE):
+                raise ValueError
+            result = DeliveryReceipt.model_validate(response.json())
+            if result.message_id != message_id:
+                raise ValueError
+        except Exception:
+            invalid = True
+        if invalid:
+            raise DeliveryReceiptError() from None
+        return result
 
     async def aclose(self) -> None:
         if self._owns_httpx_client:

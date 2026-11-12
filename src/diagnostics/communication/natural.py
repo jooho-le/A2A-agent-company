@@ -156,6 +156,8 @@ class NaturalRecord(ProbeRecord):
         model = result.get("model") or {}
         reason = ("CONTRACT_ADMITTED" if eligible else
                   "NOT_DISPATCHED" if result["phase"] in {"PLANNED", "SKIPPED"} else
+                  "DELIVERY_RECEIPT_REJECTED" if result["delivery"]["check"]["status"] == "FAIL" else
+                  "DELIVERY_RECEIPT_UNVERIFIED" if result["delivery"]["check"]["status"] != "PASS" else
                   "MODEL_OUTPUT_CONTRACT_REJECTED" if model.get("errorCode") == "LLM_SCHEMA_INVALID" else
                   "CONTENT_CONTRACT_REJECTED" if transport_ok else
                   "RESULT_UNAVAILABLE_OR_TRANSPORT_REJECTED")
@@ -166,6 +168,7 @@ class NaturalRecord(ProbeRecord):
 def transport_passed(row):
     checks = row["checks"]
     return (row["phase"] == "COMPLETED" and checks["identity"] == "PASS"
+            and row["delivery"]["check"]["status"] == "PASS"
             and all(item["status"] == "PASS" for item in checks["request"].values())
             and all(checks[key]["status"] == "PASS" for key in ("response", "metadata", "responseMetadata"))
             and (row.get("model") or {}).get("apiInputMatches") is True)
@@ -240,7 +243,10 @@ class NaturalLab(CommunicationLab):
                     row.phase = "SKIPPED"
                     contract_rejected = any(previous.view()["handoff"]["reason"] in {
                         "CONTENT_CONTRACT_REJECTED", "MODEL_OUTPUT_CONTRACT_REJECTED"} for previous in rows)
-                    row.error = "UPSTREAM_CONTRACT_REJECTED" if contract_rejected else "PREVIOUS_RESULT_UNAVAILABLE"
+                    delivery_rejected = any(previous.phase not in {"PLANNED", "SKIPPED"}
+                        and previous.delivery_check["status"] != "PASS" for previous in rows)
+                    row.error = ("UPSTREAM_DELIVERY_NOT_VERIFIED" if delivery_rejected else
+                                 "UPSTREAM_CONTRACT_REJECTED" if contract_rejected else "PREVIOUS_RESULT_UNAVAILABLE")
 
         try:
             await asyncio.wait_for(work(), timeout=self.model_runtime.run_timeout_seconds)

@@ -37,6 +37,7 @@ from agents.api.task_store import sanitize_task
 from agents.api.validation import parse_workflow_metadata, request_metadata
 from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity, service_identity
 from orchestrator.core.security import redact_data
+from orchestrator.a2a.delivery import build_delivery_receipt, request_sha256
 
 
 _TERMINAL = frozenset({
@@ -255,6 +256,38 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
                 (task_id, self._owner(context)),
             ).fetchone()
         return StoredTask(_load_task(row[0]), TaskVersion(row[1])) if row else None
+
+    async def get_delivery_receipt(self, message_id: str, context: ServerCallContext):
+        """Read a consistent, owner-scoped admission receipt without raw input."""
+        invalid = False
+        try:
+            self._require_started()
+            if type(message_id) is not str or UUID(message_id).version != 4:
+                raise ValueError
+            owner = self._owner(context)
+            with self._connection() as connection:
+                connection.execute("PRAGMA query_only=ON")
+                connection.execute("BEGIN")
+                self._assert_lease(connection)
+                row = connection.execute(
+                    "SELECT r.fingerprint,r.metadata_json,r.task_id,r.context_id,r.request_json,r.created_at,t.payload_json "
+                    "FROM agent_message_receipts r JOIN agent_tasks t ON t.task_id=r.task_id "
+                    "WHERE r.message_id=? AND r.owner=? AND t.owner=?", (message_id, owner, owner)).fetchone()
+                if row is None:
+                    return None
+                params = ParseDict(json.loads(row[4]), SendMessageRequest())
+                task = _load_task(row[6])
+                if (request_sha256(params) != row[0] or params.message.message_id != message_id
+                        or _json(request_metadata(params).to_a2a_json()) != row[1]
+                        or task.id != row[2] or task.context_id != row[3]):
+                    raise ValueError
+                result = build_delivery_receipt(params, task_id=row[2], context_id=row[3],
+                    receiver_role=self.role.value, received_at=row[5])
+        except Exception:
+            invalid = True
+        if invalid:
+            raise AgentTaskStoreError("DELIVERY_RECEIPT_UNAVAILABLE") from None
+        return result
 
     async def save(
         self, task: Task, *, event: object | None, prev: Task | None,

@@ -80,6 +80,10 @@ class ProjectRequestHandler(DefaultRequestHandler):
         if self._closing:
             raise UnsupportedOperationError(message="Agent server is stopping")
 
+    async def on_delivery_receipt(self, message_id, context):
+        self._require_open()
+        return await self._store.get_delivery_receipt(message_id, context)
+
     async def on_message_send(
         self, params: SendMessageRequest, context: ServerCallContext
     ) -> Task:

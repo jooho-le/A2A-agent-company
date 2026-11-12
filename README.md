@@ -385,6 +385,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 [66번](docs/66-host-artifact-admission.md)은 제품 Host가 역할별 Artifact 이름·개수·중복 ID·Part·project metadata를 먼저 검사하도록 연결했습니다. 추가 결과물을 조용히 무시하지 않고 기존 검토 경로로 돌립니다. 정상 싱글·멀티와 수정 루프를 확인했으며, 인수 통과를 실제 제품 성공으로 사용하지 않습니다.
 
+### 수신 기록·전달 무결성 관측 — 67·68번
+
+[67번](docs/67-a2a-delivery-receipts.md)은 Agent DB의 기존 Message 접수 기록을 읽는 프로젝트 조회 API와 Client를 추가하고, SDK JSON 변환 중 payload·metadata의 실제 값 손실을 송신 전에 거절합니다. 원문 대신 식별자·접수 시각·해시를 반환하며, 접수 확인을 실행 성공으로 사용하지 않습니다.
+
+[68번](docs/68-delivery-integrity-observations.md)은 구조화·자연어 통신 진단에서 송신 요청과 실제 DB 접수 기록을 대조합니다. 기록 미관측과 실제 불일치를 구분하고, 응답·Task ID를 보존하면서 미확인 결과의 후속 전달을 차단합니다. 제품 Host 전체의 자동 차단 정책이나 기존 실제 API 보고서를 변경한 것은 아닙니다.
+
 ## 테스트
 
 ```bash

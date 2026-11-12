@@ -12,8 +12,8 @@ from uuid import uuid4
 
 import httpx
 from anyio import CancelScope
-from a2a.types import TaskState
-from google.protobuf.json_format import MessageToDict
+from a2a.types import SendMessageRequest, TaskState
+from google.protobuf.json_format import MessageToDict, ParseDict
 from pydantic import SecretStr
 import uvicorn
 
@@ -23,6 +23,7 @@ from diagnostics.communication.contracts import CheckOptions, ProbeRecord, now, 
 from diagnostics.communication.probe import ReceiverObserver, message_data
 from diagnostics.communication.workloads import load_request, fixture_statistics
 from orchestrator.a2a import A2AAgentClient, A2AWorkflowMetadata
+from orchestrator.a2a.delivery import verify_delivery
 from orchestrator.core.async_control import await_owned
 
 
@@ -81,6 +82,7 @@ class CommunicationLab:
                 raw = await request.aread()
                 row.wire_bytes = len(raw)
                 wire = json.loads(raw)
+                row.wire_request = deepcopy(wire)
                 row.wire_sent = deepcopy(message_data(wire["message"]))
                 row.message_id = wire["message"]["messageId"]
                 row.mark("clientSend", "SENT")
@@ -102,6 +104,16 @@ class CommunicationLab:
                 expected_task_id, expected_context_id = task.id, task.context_id
                 row.task_id, row.context_id = task.id, task.context_id
                 row.mark("ack")
+                try:
+                    receipt = await client.get_delivery_receipt(row.message_id)
+                    row.delivery_receipt = None if receipt is None else receipt.model_dump(mode="json", by_alias=True)
+                    row.delivery_check = verify_delivery(ParseDict(row.wire_request, SendMessageRequest()), task,
+                                                         receipt, receiver_role=row.role)
+                except Exception:
+                    # The Task ID is already retained. Observe/cancel that Task
+                    # normally; never replay a send to obtain a missing receipt.
+                    row.delivery_check = {"status": "UNVERIFIED", "differences": ["RECEIPT_QUERY_UNAVAILABLE"]}
+                row.mark("receiptObserved")
                 deadline = asyncio.get_running_loop().time() + timeout_seconds
                 while task.status.state not in TERMINAL:
                     if asyncio.get_running_loop().time() >= deadline:
@@ -130,7 +142,7 @@ class CommunicationLab:
                     raise ValueError("MISSING_RESULT_ARTIFACT")
                 row.mark("observed")
                 row.mark("finish", "COMPLETED")
-                return row.response_received
+                return row.response_received if row.delivery_check["status"] == "PASS" else None
             except TimeoutError:
                 row.error = "응답 제한시간 초과. 미수신을 성공으로 처리하지 않습니다."
                 row.mark("finish", "TIMEOUT")
