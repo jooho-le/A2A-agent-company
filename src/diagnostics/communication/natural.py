@@ -23,6 +23,7 @@ from diagnostics.communication.contracts import ProbeRecord, fingerprint, now
 from diagnostics.communication.lab import CommunicationLab, ROLES, running_lab
 from diagnostics.communication.live import LiveRuntime, root_api_key
 from diagnostics.communication.probe import ProbeExecutor
+from diagnostics.communication.performance import performance_summary
 from diagnostics.communication.workloads import object_schema
 
 
@@ -217,6 +218,9 @@ class NaturalLab(CommunicationLab):
         # No pre-parsed requirement IDs or expected answers are supplied.
         references = [uuid4()]
         started = now()
+        clock_id = str(uuid4())
+        for row in rows:
+            row.clock_origin_ns, row.clock_id = started, clock_id
 
         async def send(row, upstream=None):
             row.mark("prepare", "PREPARING")
@@ -255,10 +259,11 @@ class NaturalLab(CommunicationLab):
                 if row.phase == "PLANNED":
                     row.phase, row.error = "SKIPPED", "RUN_TIMEOUT"
         views = [row.view() for row in rows]
+        elapsed_ms = round((now() - started) / 1_000_000, 3)
         return {"caseId": case_id, "architecture": architecture, "requestText": request_text,
-                "runId": str(run_id), "elapsedMs": round((now() - started) / 1_000_000, 3),
+                "runId": str(run_id), "elapsedMs": elapsed_ms,
                 "transportPassed": sum(transport_passed(row) for row in views),
-                "rows": views}
+                "rows": views, "performance": performance_summary(views, elapsed_ms=elapsed_ms)}
 
 
 def screen_case(run, criteria):

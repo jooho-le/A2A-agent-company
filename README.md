@@ -391,6 +391,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 [68번](docs/68-delivery-integrity-observations.md)은 구조화·자연어 통신 진단에서 송신 요청과 실제 DB 접수 기록을 대조합니다. 기록 미관측과 실제 불일치를 구분하고, 응답·Task ID를 보존하면서 미확인 결과의 후속 전달을 차단합니다. 제품 Host 전체의 자동 차단 정책이나 기존 실제 API 보고서를 변경한 것은 아닙니다.
 
+### 처리 구간·역할별 지연 관측 — 69·70번
+
+[69번](docs/69-communication-phase-timing.md)은 로컬 통신 진단에서 접수·실행 대기, 모델 준비, API 헤더·본문 수신, 로컬 검증, 결과 확인을 분리합니다. 미관측 시간은 null로 유지하고, 수신 확인 조회 때문에 결과 관측 기한이 늘어나지 않도록 했습니다.
+
+[70번](docs/70-communication-performance-summary.md)은 역할별 완료 표본의 구간 p50·p95와 편차, 토큰 수 참고값, 병렬 요청 구간의 합집합을 제공합니다. 결과 JSON과 기존 구조화 HTML 생성기에 연결했으며, 제품 전체시간이나 구조 간 성능 우열로 사용하지 않습니다. 기존 실제 API 보고서는 변경하지 않았습니다.
+
 ## 테스트
 
 ```bash

@@ -21,6 +21,7 @@ from agents.core.config import AgentSettings
 from agents.main import create_app as create_agent_app
 from diagnostics.communication.contracts import CheckOptions, ProbeRecord, now, summarize
 from diagnostics.communication.probe import ReceiverObserver, message_data
+from diagnostics.communication.performance import performance_summary
 from diagnostics.communication.workloads import load_request, fixture_statistics
 from orchestrator.a2a import A2AAgentClient, A2AWorkflowMetadata
 from orchestrator.a2a.delivery import verify_delivery
@@ -104,6 +105,7 @@ class CommunicationLab:
                 expected_task_id, expected_context_id = task.id, task.context_id
                 row.task_id, row.context_id = task.id, task.context_id
                 row.mark("ack")
+                deadline = asyncio.get_running_loop().time() + timeout_seconds
                 try:
                     receipt = await client.get_delivery_receipt(row.message_id)
                     row.delivery_receipt = None if receipt is None else receipt.model_dump(mode="json", by_alias=True)
@@ -114,7 +116,6 @@ class CommunicationLab:
                     # normally; never replay a send to obtain a missing receipt.
                     row.delivery_check = {"status": "UNVERIFIED", "differences": ["RECEIPT_QUERY_UNAVAILABLE"]}
                 row.mark("receiptObserved")
-                deadline = asyncio.get_running_loop().time() + timeout_seconds
                 while task.status.state not in TERMINAL:
                     if asyncio.get_running_loop().time() >= deadline:
                         raise TimeoutError
@@ -194,6 +195,9 @@ class CommunicationLab:
         requirement_count = fixture_statistics(options.profile)["requirements"]
         requirement_ids = [uuid4() for _ in range(requirement_count)]
         started = now()
+        clock_id = str(uuid4())
+        for row in rows:
+            row.clock_origin_ns, row.clock_id = started, clock_id
         emit({"type": "start", "runId": str(run_id), "options": options.model_dump(),
               "mode": self.mode, "rows": [row.view() for row in rows]})
 
@@ -244,6 +248,7 @@ class CommunicationLab:
                                   "pollIntervalMs": 20, "oneWayScope": "client dispatch + loopback HTTP + server admission",
                                   "resultObservationScope": "store + polling wait + HTTP + deserialization",
                                   "groundingScope": "fixed-fixture claims only; free text unverified"}}
+        report["performance"] = performance_summary(report["rows"], elapsed_ms=report["elapsedMs"])
         emit(report)
         return report
 

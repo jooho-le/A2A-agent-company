@@ -105,3 +105,9 @@ class DeliveryFaultWiringTests(unittest.IsolatedAsyncioTestCase):
                     for skipped in group["rows"][1:]:
                         self.assertEqual(skipped["phase"], "SKIPPED")
                         self.assertEqual(skipped["error"], "UPSTREAM_DELIVERY_NOT_VERIFIED")
+                    profile = group["performance"]
+                    first = profile["roles"][row["role"]]
+                    self.assertEqual(first["completedSamples"], 1)
+                    self.assertEqual(first["deliveryVerifiedSamples"], 0)
+                    self.assertEqual(profile["timeline"]["observedSamples"], 1)
+                    self.assertEqual(sum(value["notExecutedSamples"] for value in profile["roles"].values()), len(group["rows"])-1)

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.core.security import redact_text
 from orchestrator.domain.json_fingerprint import json_fingerprint
+from diagnostics.communication.timing import phase_values, span, timing_view
 
 
 class CheckOptions(BaseModel):
@@ -144,6 +145,8 @@ class ProbeRecord:
     executor_invocations: int = 0
     observer_overhead_ns: int = 0
     model_observation: dict | None = None
+    clock_origin_ns: int | None = field(default=None, repr=False)
+    clock_id: str | None = field(default=None, repr=False)
     wire_request: dict | None = field(default=None, repr=False)
     delivery_receipt: dict | None = field(default=None, repr=False)
     delivery_check: dict = field(default_factory=lambda: {
@@ -163,9 +166,12 @@ class ProbeRecord:
         self.changed()
 
     def ms(self, start, end):
-        if start not in self.points or end not in self.points:
-            return None
-        return round((self.points[end] - self.points[start]) / 1_000_000, 3)
+        return span(self.points, start, end)["durationMs"]
+
+    def mark_time(self, key):
+        # Internal timing points do not call the potentially expensive UI
+        # observer, change the workflow phase, or enter model input.
+        self.points.setdefault(key, now())
 
     def content_checks(self, response, payload):
         return grounding(response, payload, self.role)
@@ -215,16 +221,8 @@ class ProbeRecord:
                        "identity": "UNVERIFIED" if self.identity_valid is None else "PASS" if self.identity_valid else "FAIL",
                        "grounding": self.content_checks(self.response_sent, self.received),
                        "sourceGrounding": self.content_checks(self.response_received, self.payload)},
-            "timings": {"orchestratorPrepareMs": self.ms("prepare", "cardStart"),
-                        "cardLookupMs": self.ms("cardStart", "cardEnd"),
-                        "serializationMs": self.ms("cardEnd", "clientSend"),
-                        "requestTransferMs": self.ms("clientSend", "serverReceived"),
-                        "queueMs": self.ms("serverReceived", "executorStart"),
-                        "agentProcessingMs": self.ms("executorStart", "responseReady"),
-                        "ackRoundTripMs": self.ms("clientSend", "ack"),
-                        "receiptObservationMs": self.ms("ack", "receiptObserved"),
-                        "resultObservationMs": self.ms("responseReady", "observed"),
-                        "totalMs": self.ms("prepare", "finish")},
+            "timings": phase_values(self.points),
+            "timing": timing_view(self.points, origin_ns=self.clock_origin_ns, clock_id=self.clock_id),
         }
 
 
