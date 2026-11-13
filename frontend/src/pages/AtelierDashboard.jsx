@@ -6,6 +6,7 @@ import useOfficeRunSubmission from '../hooks/useOfficeRunSubmission'
 import { initialRunSelection, runEventLimit, runQueryReducer } from '../hooks/agentRunSelection'
 import { savedProjectCards, submittedRunProject } from '../components/atelier/agentRunProject'
 import useSavedProjects from '../hooks/useSavedProjects'
+import { readProjectSelection } from '../hooks/projectSelection'
 import { buildAgentRunDisplayState } from '../components/atelier/agentRunDisplayState'
 import AtelierDialog from '../components/atelier/AtelierDialog'
 import { HomeView, OutputsView, ProjectsView, TeamView, WorkflowView } from '../components/atelier/AtelierViews'
@@ -31,7 +32,11 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
   const [activities, setActivities] = useState(initialActivities)
   const [selectedId, setSelectedId] = useState('orbit')
   const [search, setSearch] = useState('')
-  const [modal, setModal] = useState(null)
+  const [modal, setModal] = useState(() => {
+    const projectId = readProjectSelection()
+    // 후보 ID로 기존 상세 창을 열고 서버 확인 후에만 내용을 표시합니다.
+    return projectId ? { type: 'saved-project', projectId } : null
+  })
   const [toast, setToast] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [motionRequested, setMotionRequested] = useState(true)
@@ -203,7 +208,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
                   onDisplayModeChange={(mode) => setOfficeModeChoice({ runId: runQuery.runId, mode })} /> : null} />
             </div>
             <section id="workflow-view" className="view" aria-label="팀의 업무 흐름" hidden={view !== 'workflow'}><WorkflowView project={project} activeStep={handoffStep} onStep={focusStep} onEmployee={(index) => openModal('employee', { index })} /></section>
-            <section id="projects-view" className="view" aria-label="전체 프로젝트" hidden={view !== 'projects'}><ProjectsView projects={listedProjects} search={search} onSearch={setSearch} onSelect={openActualProject} actual onRetry={runMonitor.refresh} saved={savedProjects} onLogin={onLogin} /></section>
+            <section id="projects-view" className="view" aria-label="전체 프로젝트" hidden={view !== 'projects'}><ProjectsView projects={listedProjects} search={search} onSearch={setSearch} onSelect={openActualProject} actual onRetry={runMonitor.refresh} saved={savedProjects} onLogin={onLogin} onStoredSelect={(projectId) => openModal('saved-project', { projectId })} /></section>
             <section id="team-view" className="view" aria-label="직원 소개" hidden={view !== 'team'}><TeamView project={project} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="outputs-view" className="view" aria-label="결과물 보관함" hidden={view !== 'outputs'}><OutputsView projects={actualProjects} project={actualProject} onSelect={openActualProject} actual catalog={runMonitor.artifactCatalog} onRetry={runMonitor.refresh} /></section>
             </div>
@@ -212,7 +217,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
         </main>
       </div>
     </div>
-    {modal && <AtelierDialog key={modal.type} modal={modal} project={projects.find((item) => item.id === modal.projectId) || project} projects={projects} activities={activities} onClose={() => closeModal(modal.type)} onCreate={requestNew} onApprove={approvePlan} onRevision={() => openModal('revision', { projectId: modal.projectId })} onFeedback={feedback} onDownload={download} returnFocusRef={returnFocusRef} rootRef={rootRef} />}
+    {modal && <AtelierDialog key={`${modal.type}:${modal.projectId}`} onLogin={onLogin} modal={modal} project={projects.find((item) => item.id === modal.projectId) || project} projects={projects} activities={activities} onClose={() => closeModal(modal.type)} onCreate={requestNew} onApprove={approvePlan} onRevision={() => openModal('revision', { projectId: modal.projectId })} onFeedback={feedback} onDownload={download} returnFocusRef={returnFocusRef} rootRef={rootRef} />}
     {toast && <div className="toast" role="status">{toast}</div>}
   </div>
 }

@@ -5,6 +5,7 @@ import PipelinePage from './pages/PipelinePage'
 import AtelierDashboard from './pages/AtelierDashboard'
 import DocumentPage from './pages/DocumentPage'
 import { hasStoredAccessToken } from './api/productRunRequest'
+import { clearProjectSelection } from './hooks/projectSelection'
 import './App.css'
 
 function App() {
@@ -18,6 +19,8 @@ function App() {
   const [loginNotice, setLoginNotice] = useState('')
 
   function handleLoginSuccess() {
+    // 같은 계정의 재로그인을 포함해 새 로그인 세션은 이전 선택을 이어받지 않습니다.
+    clearProjectSelection()
     setHasAccessToken(hasStoredAccessToken())
     setShowLogin(false)
     setShowSignup(false)
@@ -39,6 +42,7 @@ function App() {
   }
 
   function handleLogout() {
+    clearProjectSelection()
     sessionStorage.removeItem('access_token')
     setHasAccessToken(false)
     setShowLogin(false)

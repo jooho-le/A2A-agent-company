@@ -48,7 +48,7 @@ function SignupPage({ onBack, onSignupSuccess }) {
   }
 
   return (
-    <OfficeAuthLayout>
+    <OfficeAuthLayout reviewAccents>
         <section className="auth-card" aria-labelledby="signup-title">
           <header className="auth-heading">
             <p className="office-auth-form-label">우리 회사 시작하기</p>

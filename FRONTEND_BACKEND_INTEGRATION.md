@@ -1,6 +1,6 @@
 # 프론트엔드·백엔드 연동 안내
 
-최근 갱신: 2026-11-13. 제품 프로젝트 DB/API, 인증·소유권 기반 Host GET 중계, 프론트엔드 JWT 준비·로그인 진입·프로젝트 목록 연결과 최신 로그인 디자인을 반영했습니다. 코드에 구현된 범위와 실통신 차단 상태를 구분합니다. 이번 작업은 문서만 수정하며 기존 테스트·서버·LLM·Docker·실제 DB 검증을 다시 실행하지 않습니다.
+최근 갱신: 2026-11-14. 프로젝트 상세·Run 연결 이력과 선택 프로젝트 재조회 복원, 로그인·회원가입 공통 디자인, 오피스 크기·카메라와 JWT 실행 안내를 반영했습니다. 제품 프로젝트 복원과 아직 차단된 실제 Host Run 복원을 구분합니다. 이번에는 문서만 수정하며 기존 테스트·서버·LLM·Docker·실제 DB 검증을 다시 실행하지 않습니다.
 
 ## 1. 세 시스템의 역할과 주소
 
@@ -15,7 +15,8 @@
 브라우저의 React
   ├─ http://127.0.0.1:8000/api/auth/*     → 제품 백엔드 → 사용자 DB
   ├─ http://127.0.0.1:8000/api/documents  → 제품 백엔드 → 문서 DB·로컬 PDF
-  ├─ http://127.0.0.1:8000/api/projects   → 제품 백엔드 → 본인 저장 프로젝트
+  ├─ http://127.0.0.1:8000/api/projects   → 제품 백엔드 → 본인 저장 프로젝트 목록
+  │   └─ /api/projects/{projectId}      → 상세·저장된 Run 연결 이력
   └─ /api/v1/* → Vite 프록시 → 기본 Orchestrator 8001 (제품 JWT 미전송)
 ```
 
@@ -33,11 +34,11 @@
 cd backend
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-export JWT_SECRET="$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export JWT_SECRET="${JWT_SECRET:-$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')}"
 .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-`JWT_SECRET`은 서버 터미널의 환경변수입니다. 생성 명령은 값을 화면에 출력하지 않고 환경변수에 넣습니다. 이미 사용하는 안전한 키가 있다면 이를 유지합니다. 키를 바꾸면 기존 토큰이 더 이상 검증되지 않습니다. 현재 코드가 `.env` 파일을 자동으로 읽는 구조는 아닙니다.
+`JWT_SECRET`은 서버 터미널의 환경변수입니다. 생성 명령은 값을 화면에 출력하지 않고 환경변수에 넣습니다. 이미 사용하는 안전한 키가 있다면 이를 유지합니다. 키를 바꾸면 기존 토큰이 더 이상 검증되지 않습니다. 현재 코드가 `.env` 파일을 자동으로 읽는 구조는 아닙니다. 기존 가입 계정으로 로그인할 때도 서버 실행 전에 같은 터미널에서 설정해야 합니다. 실행 중 서버에는 새 환경변수가 반영되지 않으므로 사용자가 해당 서버를 종료한 뒤 위 환경에서 다시 시작해야 합니다. 키 변경은 기존 JWT를 무효화하지만 DB 계정·비밀번호를 삭제하지 않으며 재로그인하면 됩니다. 자세한 절차는 [백엔드 README](backend/README.md)를 참고합니다.
 
 | 확인 대상 | 주소 |
 | --- | --- |
@@ -68,6 +69,8 @@ Orchestrator·Agent를 실제 실행하려면 별도의 승인된 Host 설정·�
 | [App.jsx](frontend/src/App.jsx) | 공개 오피스·계정 로그인·성공 복귀·입력 초안 보존 |
 | [OfficeAuthLayout.jsx](frontend/src/components/atelier/OfficeAuthLayout.jsx) | 중앙 인증 폼과 기존 모델의 로그인 전용 업무 포즈 이미지 |
 | [projects.js](frontend/src/api/projects.js) · [useSavedProjects.js](frontend/src/hooks/useSavedProjects.js) | 제품 8000의 본인 프로젝트 GET·JWT·취소·오류 처리 |
+| [SavedProjectDetail.jsx](frontend/src/components/atelier/SavedProjectDetail.jsx) · [projectSelection.js](frontend/src/hooks/projectSelection.js) | 상세·Run 이력과 선택 ID 저장·재조회 복원, Host 조회 없음 |
+| [AuthRoleAccent.jsx](frontend/src/components/atelier/AuthRoleAccent.jsx) | 로그인·회원가입 직원별 업무 장식 SVG |
 | [productRunRequest.js](frontend/src/api/productRunRequest.js) | 제품 Run용 보호 전송기 준비, 현재 비활성 |
 | [projects.py](backend/routers/projects.py) | 제품 프로젝트 API 4개·기존 JWT·소유권 확인 |
 | [host_runs.py](backend/routers/host_runs.py) · [host_reads.py](backend/host_reads.py) | 명시적 Host GET 중계와 서비스 인증 미검증 시 503 차단 |
@@ -96,7 +99,9 @@ Orchestrator·Agent를 실제 실행하려면 별도의 승인된 Host 설정·�
 
 우리 직원과 3D에는 리더인 오케스트레이터와 계획·개발·QA·보안의 다섯 캐릭터를 표시합니다. 실제 `AgentRole`과 Step 역할은 `PLANNER`, `DEVELOPER`, `QA`, `SECURITY` 네 가지입니다. 리더는 관리 서버를 시각화한 것이며 별도 LLM Agent·Step·제품 사용자를 추가하지 않습니다. 직원 카드는 현재 모델의 정면 렌더링 `office-*.png`를 사용하며, 모델 외형 변경 시 카드 이미지도 갱신해야 합니다.
 
-로그인·회원가입은 검정 배경·라임색 버튼의 중앙 폼을 공유합니다. 상단 계정·로그인·안내 문구는 가운데 정렬하고 직원 옆 설명 글씨는 제거했습니다. 기존 오피스 모델을 로그인 전용 `login-*.png`로 렌더링해 계획은 양손 차트 확인, 개발은 발판 없는 앉은 노트북 작업, QA는 돋보기 검사, 보안은 방패, 오케스트레이터는 태블릿과 지시 자세를 표시합니다. 긴 머리 뒤 라임색 후광과 작은 화면 배치를 적용했으며 기존 `office-*.png`·3D 모션·Trace·세리머니·인증 API는 변경하지 않았습니다.
+로그인·회원가입은 같은 `OfficeAuthLayout reviewAccents`를 사용합니다. 3D 오피스의 사진 배경 위에 반투명·배경 흐림 중앙 카드를 배치하고 계정·제목·소개, `MY AI COMPANY`와 안내 문구를 가운데 정렬했습니다. 기존 모델로 렌더링한 `login-*.png`는 계획의 양손 차트, 개발의 발판 없는 노트북 작업, QA의 돋보기, 보안의 방패, 오케스트레이터의 손목시계 확인 자세를 사용합니다. 역할별 업무 SVG를 배치하되 오케스트레이터의 태블릿·지휘봉·말풍선·계급도·라임 후광은 제거했습니다. 작은 화면과 움직임 줄이기 설정을 지원하며 인증 API는 유지합니다.
+
+오피스 3D 영역은 일반 화면 높이 490px, 폭 600px 이하 415px이며 넓은 전체 보기에는 1.05배 확대를 적용했습니다. 가로세로 비율을 유지해 좌우 여백을 조금 줄이며 전체 화면 높이는 별도입니다. 개발 근접 카메라는 다른 직원과 같은 거리·높이 기준을 사용합니다. 문서 전달·Trace·세리머니 계약은 바꾸지 않습니다.
 
 ## 4. 제품 인증 계약
 
@@ -123,7 +128,7 @@ JWT는 `HS256`, 유효기간 30분이며 `sub`에 문자열 사용자 ID, `email
 
 ### 브라우저 토큰 사용
 
-로그인 성공 시 기존 화면은 `sessionStorage.setItem('access_token', data.access_token)`으로 저장합니다. 보호된 문서·제품 프로젝트 목록 API에는 다음 헤더를 사용합니다.
+로그인 성공 시 기존 화면은 `sessionStorage.setItem('access_token', data.access_token)`으로 저장합니다. 보호된 문서·제품 프로젝트 목록·상세 API에는 다음 헤더를 사용합니다.
 
 ```http
 Authorization: Bearer <access_token>
@@ -143,7 +148,7 @@ Authorization: Bearer <access_token>
 | --- | --- | --- |
 | `POST /api/projects` | `{name, scenarioId}` → 201, 프로젝트 공개 정보 | 미연결 |
 | `GET /api/projects` | 200, `{projects: [...]}` | 연결 완료 |
-| `GET /api/projects/{projectId}` | 공개 정보와 `runs` 배열 | 미연결 |
+| `GET /api/projects/{projectId}` | 공개 정보와 `runs` 배열 | 상세·선택 프로젝트 재조회 복원 연결 완료 |
 | `PATCH /api/projects/{projectId}` | `{name}`만 → 수정된 공개 정보 | 미연결 |
 
 공개 필드는 `projectId`, `name`, `scenarioId`, `createdAt`, `updatedAt`입니다. 이름은 공백 제거 후 1~60자이며 Project ID는 서버에서 UUIDv4로 생성합니다. 소유자는 JWT 사용자로 고정하고 요청의 추가 필드는 거부합니다. 본인 목록만 반환하며 타 사용자/없는 프로젝트 상세·수정은 모두 404입니다. 상세 `runs`에는 `hostKey`, `runId`, `configurationId`, `linkedAt`만 포함하고 실제 Run 상태는 Host에 둡니다.
@@ -151,6 +156,12 @@ Authorization: Bearer <access_token>
 MVP 생성은 같은 체크아웃의 정적 레지스트리에 등록된 SCN-001 UUID만 허용합니다. 미등록 UUID는 422, 레지스트리 확인 실패는 503입니다. 이는 실행 중인 Host의 등록·승인 Configuration·실행 준비까지 보장하지 않습니다.
 
 React는 프로젝트 메뉴 진입·재시도 시 `getProjects()`로 제품 8000에 직접 GET하고 `sessionStorage.access_token`을 Bearer로 전송합니다. JWT 누락은 요청 전 차단, 401은 기존 로그인 진입 안내, 403/404·네트워크·서버 오류는 각각 구분합니다. 빈 목록은 빈 상태이며 다른 로그인 세션/이탈한 화면의 늦은 응답을 적용하지 않습니다. 카드에는 서버의 ID·이름·시나리오·생성일만 표시하고 실제 Agent 상태·진행률을 만들지 않습니다. 현재 Run 카드는 별도로 보존합니다.
+
+저장된 카드 선택 시 `getProject(projectId)`로 상세를 조회하고 기존 대화상자에 프로젝트 정보와 여러 Run 연결 이력을 표시합니다. 빈 이력은 조회 오류와 구분하며 서버의 `configurationId`를 UUID로 가정하지 않습니다. 상세 응답에서 Host 실행 상태나 성공 여부를 만들지 않습니다.
+
+상세 조회 성공 후 `sessionStorage`의 `ai-company.selected-project-id`에는 ID만 저장합니다. 새로고침 시 이를 조회 후보로 사용하고 기존 JWT로 상세 GET에 성공한 경우에만 최신 이름·이력을 복원합니다. 로그인 성공·로그아웃 시 선택을 비우며 JWT 누락·401/403/404에도 잘못된 복원을 막습니다. 늦은 응답은 취소·세션 변경 여부를 확인해 폐기하고 네트워크 오류에는 재시도를 제공합니다. 이 과정은 Host GET·과거 Trace 재생·ProjectRun 생성을 수행하지 않습니다.
+
+사이드바 프로젝트 개수는 현재 표시 목록(저장 프로젝트와 현재 Run 카드)이 0개이면 숨기고 1개부터 `01`로 표시합니다. 저장 목록은 프로젝트 메뉴 진입 시 조회하므로 초기 숫자 없음만으로 DB가 비어 있다고 판단하지 않습니다. 우리 직원은 `05`를 유지합니다.
 
 ## 5. 전자문서 계약
 
@@ -392,7 +403,7 @@ Run의 `FINISHED`는 종료이며 성공 여부는 `verdict`로 판단합니다.
 
 프로젝트 화면은 제품 `GET /api/projects`의 본인 저장 목록과 `submittedRunProject()`의 현재 Run 카드를 함께 표시합니다. 현재 Run만 Run·Step 및 QA·Security 병렬 상태를 사용하고 저장된 카드에는 실행 상태를 추측하지 않습니다. 기존 디자인을 유지하며 근거 없는 진행률·예시 카드는 표시하지 않습니다.
 
-실제 Run 선택은 현재 화면에서 생성한 Run만 지원합니다. 제품 프로젝트 목록은 새로고침 후 다시 GET할 수 있지만 상세·ProjectRun 선택·이전 Run 복원은 아직 React에 연결하지 않았습니다. 현재 Run 카드는 같은 Run의 3D 오피스로 돌아가고 저장된 Project 카드는 조회 정보만 표시합니다. Project ID와 Run ID를 같다고 가정하거나 자동 연결하지 않습니다.
+실제 Run 모니터 연결은 현재 화면에서 생성한 Run만 지원합니다. 저장된 Project 카드는 상세·Run 연결 이력 대화상자를 열며 선택 ID를 저장해 새로고침 후 제품 API로 다시 조회합니다. 프로젝트 복원은 Host 실행 상태나 과거 Trace 복원이 아닙니다. 현재 Run 카드는 같은 Run의 3D 오피스로 돌아가며 Project ID와 Run ID를 같다고 가정하거나 자동 연결하지 않습니다.
 
 | Host API | 제공 범위와 현재 UI 사용 |
 | --- | --- |
@@ -537,12 +548,15 @@ node --test tests/*.test.mjs
 | 단계 | 이전 작업에서 확인한 결과 | 현재 한계 |
 | --- | --- | --- |
 | 프로젝트 모델 | 임시 SQLite 6개 PASS | 기존 컬럼 변경용 마이그레이션·Submission 없음 |
-| 프로젝트 API | 임시 DB·ASGI 8개 PASS | React는 목록 GET만 연결 |
+| 프로젝트 API | 임시 DB·ASGI 8개 PASS | React에는 목록·상세 GET 연결, 생성·수정 UI 미연결 |
 | Host GET 중계 | Mock Host 4개 PASS | 실통신 차단 유지 |
 | 경로 정합성 | Run·Events·401/404/503 경로 검사 1개 PASS | Vite는 8001 유지 |
 | 제품 JWT 준비 | Mock 3개 PASS | Run 보호 전송기 비활성 |
 | 로그인 진입 | 격리 Mock UI 1개에서 세 가지 핵심 흐름 확인 | 실제 서버 인증 E2E 재검증 아님 |
-| 프로젝트 목록 | Mock 3개 PASS | 상세·ProjectRun 복원·생성 미연결 |
-| 로그인 디자인 | 로컬 렌더링·데스크톱/모바일 배치·변경 파일 정적 검사 | 인증·실제 Agent 전체 회귀 아님 |
+| 프로젝트 목록 | Mock 3개 PASS | 생성·수정 UI와 실제 Run 복원은 후속 범위 |
+| 프로젝트 상세(3단계 F) | `projectDetail.test.mjs` Mock 3개 PASS | 저장된 Run 연결 이력만 표시, Host 상태 조회 없음 |
+| 프로젝트 선택 복원(3단계 G) | `projectSelection.test.mjs` Mock 3개 PASS | ID로 제품 상세 재조회, 과거 Trace·Run 모니터 복원 없음 |
+| 로그인·회원가입 디자인 | 오케스트레이터 PNG·격리 데스크톱 로그인 렌더링 확인, 후속 투명도·공통 스타일은 정적 검사 | 최신 화면의 전체 브라우저·인증 회귀 아님 |
+| 오피스 크기·카메라 | 변경 코드 구문·CSS·공백 정적 검사 | 105초 시연·전체 브라우저 검증 재실행 안 함 |
 
-위 기록을 기존 50/103/64/118개 기록과 합산하지 않습니다. 이번 문서 갱신에서는 문서 링크·형식·공백만 확인했습니다. 다음 개발은 프로젝트 상세/Run 복원, Host 서비스 인증·공개 응답 안전성, 승인 Configuration·시나리오 계약, Submission·Run 생성·ProjectRun 저장 순으로 경계를 정해야 합니다. 실제 LLM E2E는 별도 승인 후에만 검증합니다.
+위 기록을 기존 50/103/64/118개 기록과 합산하지 않습니다. 이번 문서 갱신에서는 문서 링크·형식·공백만 확인했습니다. 프로젝트 상세·선택 복원은 구현되어 있습니다. 남은 개발은 저장된 Run의 모니터 복원, Host 서비스 인증·공개 응답 안전성, 승인 Configuration·시나리오 계약, Submission·Run 생성·ProjectRun 저장 순으로 경계를 정해야 합니다. 실제 LLM E2E는 별도 승인 후에만 검증합니다.

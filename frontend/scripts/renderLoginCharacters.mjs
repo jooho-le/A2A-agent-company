@@ -1,4 +1,4 @@
-// Run explicitly from frontend: node scripts/renderLoginCharacters.mjs
+// Run explicitly from frontend: node scripts/renderLoginCharacters.mjs [orchestrator ...]
 // Offline Chrome/WebGL export only. Does not start Vite or call any API.
 import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,13 +8,16 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { rolldown } from 'rolldown'
 
+const availableRoles = ['planner', 'developer', 'qa', 'security', 'orchestrator']
+const roles = process.argv.length > 2 ? [...new Set(process.argv.slice(2))] : availableRoles
+if (roles.some(role => !availableRoles.includes(role))) throw new Error('Unknown character role')
 const dir = await mkdtemp(join(tmpdir(), 'a2a-login-poses-'))
 try {
   const source = fileURLToPath(new URL('./loginCharacterScene.js', import.meta.url))
   const entry = join(dir, 'entry.js')
   await writeFile(entry, `import { renderLoginCharacters } from ${JSON.stringify(source)};
     const result = document.createElement('pre'); result.id = 'portraits';
-    try { result.textContent = JSON.stringify(renderLoginCharacters()) }
+    try { result.textContent = JSON.stringify(renderLoginCharacters(${JSON.stringify(roles)})) }
     catch(error) { result.textContent = JSON.stringify({error:String(error)}) }
     document.body.append(result);`)
   const build = await rolldown({ input: entry })
@@ -34,7 +37,6 @@ try {
   if (images.error) throw new Error(images.error)
   const out = fileURLToPath(new URL('../public/characters/', import.meta.url))
   await mkdir(out, { recursive: true })
-  const roles = ['planner', 'developer', 'qa', 'security', 'orchestrator']
   for (const role of roles) {
     if (!images[role]?.startsWith('data:image/png;base64,')) throw new Error(`Missing ${role}`)
   }

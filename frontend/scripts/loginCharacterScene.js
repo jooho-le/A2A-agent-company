@@ -120,20 +120,44 @@ function poseSecurity(agent) {
 }
 
 function poseOrchestrator(agent) {
-  agent.g.rotation.y = -.1
-  agent.upper.rotation.set(-.025, -.07, -.06)
-  agent.head.rotation.set(-.06, .16, -.07)
-  arm(agent, 0, [-.35, -.7, .6], [.2, .6, .75])
-  arm(agent, 1, [.8, .55, .2], [.75, .65, .1])
-  agent.legs[0].thigh.rotation.set(-.06, 0, -.14)
-  agent.legs[1].thigh.rotation.set(.22, 0, .2)
-  agent.legs[1].shin.rotation.x = .12
-  tablet(agent.g, [-.44, 1.58, .65]).rotation.set(-.1, -.15, .16)
-  const hand = handPosition(agent, 1)
-  Xo(agent.g, agent.cfg.skin, [hand.toArray(), hand.clone().add(new P(.11, .13, .01)).toArray(), hand.clone().add(new P(.17, .21, .01)).toArray()], .037)
+  agent.g.rotation.y = -.18
+  agent.upper.rotation.set(.025, -.04, -.025)
+  agent.head.rotation.set(.48, -.1, -.035)
+  // 팔꿈치는 몸 곁에 두고 왼쪽 팔뚝을 가로로 들어 손목 위쪽을 바라봅니다.
+  const forearm = new P(.95, .08, .32).normalize()
+  arm(agent, 0, [-.12, -.32, .72], forearm.toArray())
+  // 반대 손은 아래에서 팔을 받쳐, 양 주먹을 든 자세로 보이지 않게 합니다.
+  arm(agent, 1, [.2, -.85, .25], [-.85, .32, .42])
+  agent.legs[0].thigh.rotation.set(-.08, -.04, -.13)
+  agent.legs[0].shin.rotation.x = .08
+  agent.legs[1].thigh.rotation.set(.12, .04, .16)
+  agent.legs[1].shin.rotation.x = .15
+
+  const wrist = handPosition(agent, 0).addScaledVector(forearm, -.14)
+  agent.g.updateWorldMatrix(true, true)
+  const eyes = agent.g.worldToLocal(agent.eyes.getWorldPosition(new P()))
+  // 카메라가 아닌 실제 눈 위치를 향하는 손목의 윗면에 시계판을 붙입니다.
+  const faceNormal = eyes.sub(wrist).normalize()
+  faceNormal.addScaledVector(forearm, -faceNormal.dot(forearm)).normalize()
+  const tangent = new P().crossVectors(forearm, faceNormal).normalize()
+  Xo(agent.g, '#343a42', Array.from({ length: 33 }, (_, i) => {
+    const angle = i / 32 * Math.PI * 2
+    return wrist.clone().addScaledVector(faceNormal, Math.cos(angle) * .12)
+      .addScaledVector(tangent, Math.sin(angle) * .12).toArray()
+  }), .026)
+  const watch = et(agent.g, 'login_leader_watch', wrist.clone().addScaledVector(faceNormal, .135).toArray())
+  watch.quaternion.setFromUnitVectors(new P(0, 0, 1), faceNormal)
+  watch.scale.setScalar(.82)
+  ht(watch, '#b5bbc2', 0, 0, 0, .137, .137, .035)
+  ht(watch, '#152331', 0, 0, .029, .111, .111, .012)
+  for (const [x, y] of [[0, .085], [.085, 0], [0, -.085], [-.085, 0]]) {
+    ht(watch, '#dce2e4', x, y, .041, .009, .009, .004)
+  }
+  Xo(watch, '#e6e9e8', [[-.048, .036, .044], [0, 0, .044], [.024, .066, .044]], .008)
+  ht(watch, '#b5bbc2', .145, 0, 0, .023, .025, .023)
 }
 
-export function renderLoginCharacters() {
+export function renderLoginCharacters(roles = humanAgents.map(agent => agent.id)) {
   const renderer = new engine.wi({ antialias: true, alpha: true, preserveDrawingBuffer: true })
   renderer.setSize(768, 960)
   renderer.setPixelRatio(1)
@@ -158,6 +182,7 @@ export function renderLoginCharacters() {
   const poses = [posePlanner, poseDeveloper, poseQa, poseSecurity, poseOrchestrator]
   const images = {}
   office.agents.forEach((agent, index) => {
+    if (!roles.includes(humanAgents[index].id)) return
     scene.add(agent.g)
     agent.g.position.set(0, 0, 0)
     agent.g.rotation.set(0, 0, 0)

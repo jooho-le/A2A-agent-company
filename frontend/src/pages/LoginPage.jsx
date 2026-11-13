@@ -47,7 +47,7 @@ function LoginPage({ onSignup, onLoginSuccess, onBack, notice = '' }) {
   }
 
   return (
-    <OfficeAuthLayout>
+    <OfficeAuthLayout reviewAccents>
         <section className="auth-card" aria-labelledby="login-title">
           <header className="auth-heading">
             <p className="office-auth-form-label">대표님 계정</p>

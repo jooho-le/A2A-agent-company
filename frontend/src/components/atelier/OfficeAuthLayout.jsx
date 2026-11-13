@@ -1,5 +1,6 @@
 import '../../pages/LoginPage.css'
 import { humanAgents } from './humanAgents'
+import AuthRoleAccent from './AuthRoleAccent'
 
 const staff = [
   { index: 0, side: 'left' },
@@ -31,22 +32,22 @@ function WorkAccent({ role }) {
   </svg>
 }
 
-function StaffSurround({ side }) {
+function StaffSurround({ side, reviewAccents = false }) {
   return <div className={`office-auth-cast office-auth-cast--${side}`} aria-hidden="true">
     {staff.filter(person => person.side === side).map(person => {
       const agent = humanAgents[person.index]
       return <figure className={`office-auth-character office-auth-character--${agent.id}`} key={agent.id}>
-        <WorkAccent role={agent.id} />
+        {reviewAccents ? <AuthRoleAccent role={agent.id} /> : <WorkAccent role={agent.id} />}
         <img src={`/characters/login-${agent.id}.png`} alt="" width="768" height="960" draggable="false" />
-        <span className="office-auth-sparks" />
+        {!reviewAccents && <span className="office-auth-sparks" />}
       </figure>
     })}
   </div>
 }
 
 // 인증 기능은 각 페이지에 두고 오피스의 시각적 스타일만 공유합니다.
-export default function OfficeAuthLayout({ children }) {
-  return <main className="auth-page office-auth">
+export default function OfficeAuthLayout({ children, reviewAccents = false }) {
+  return <main className={`auth-page office-auth${reviewAccents ? ' office-auth--review-accents' : ''}`}>
     <div className="office-auth-shell">
       <header className="office-auth-brand">
         <span className="office-auth-monogram" aria-hidden="true">A</span>
@@ -55,9 +56,9 @@ export default function OfficeAuthLayout({ children }) {
       <div className="office-auth-mobile-team" aria-hidden="true">{[4, 0, 1, 2, 3].map(index =>
         <img key={humanAgents[index].id} src={`/characters/login-${humanAgents[index].id}.png`} alt="" width="768" height="960" draggable="false" />)}</div>
       <div className="office-auth-layout">
-        <StaffSurround side="left" />
+        <StaffSurround side="left" reviewAccents={reviewAccents} />
         <div className="office-auth-form">{children}</div>
-        <StaffSurround side="right" />
+        <StaffSurround side="right" reviewAccents={reviewAccents} />
       </div>
       <footer className="office-auth-footer">AI 에이전트 회사<span>기획 · 개발 · 품질 · 보안</span></footer>
     </div>

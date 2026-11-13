@@ -314,7 +314,7 @@ export function mountAgentOffice(root, {
         camera.clearViewOffset();
         camera.position.copy(homeEye);
         cameraTarget.copy(homeTarget);
-        camera.zoom = Math.min(1, camera.aspect / 1.15);
+        camera.zoom = Math.min(1, camera.aspect / 1.15) * (camera.aspect > 1.6 ? 1.05 : 1);
         camera.updateProjectionMatrix();
       }
       autoCamera = i, controls.enabled = !autoCamera, cameraButton.textContent = autoCamera ? "전체 보기" : "자동 추적", cameraButton.setAttribute("aria-pressed", String(autoCamera)), controls.target.copy(cameraTarget), controls.update();
@@ -399,7 +399,7 @@ export function mountAgentOffice(root, {
       i.code === "Space" && !["INPUT", "SELECT", "BUTTON", "TEXTAREA"].includes(document.activeElement.tagName) && (i.preventDefault(), togglePlayback());
     });
     function resize() {
-      renderer.setSize(Math.max(1, stage.clientWidth), Math.max(1, stage.clientHeight), !1), camera.aspect = Math.max(1, stage.clientWidth) / Math.max(1, stage.clientHeight), camera.zoom = Math.min(1, camera.aspect / 1.45), camera.updateProjectionMatrix();
+      renderer.setSize(Math.max(1, stage.clientWidth), Math.max(1, stage.clientHeight), !1), camera.aspect = Math.max(1, stage.clientWidth) / Math.max(1, stage.clientHeight), camera.zoom = Math.min(1, camera.aspect / 1.45) * (camera.aspect > 1.6 ? 1.05 : 1), camera.updateProjectionMatrix();
     }
     var resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(stage);
@@ -436,7 +436,8 @@ export function mountAgentOffice(root, {
       referenceCamera.updateProjectionMatrix();
       const finaleCamera = finaleTime !== null || displayMode === 'mock' && time >= En;
       const agents = finaleCamera ? office.agents : active >= 0 ? [office.agents[active]] : [];
-      let zoom = baseZoom, offsetX = 0, offsetY = 0;
+      // 넓은 화면의 전체 보기만 소폭 확대합니다. 높이·인물 비율과 세리머니 구도는 유지합니다.
+      let zoom = baseZoom * (camera.aspect > 1.6 ? 1.05 : 1), offsetX = 0, offsetY = 0;
       if (agents.length) {
         let left = Infinity, right = -Infinity, top = -Infinity, bottom = Infinity;
         for (const agent of agents) {

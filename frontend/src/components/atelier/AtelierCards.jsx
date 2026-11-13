@@ -43,15 +43,16 @@ export function ProjectOptions({ projects, selectedId, onSelect, id }) {
 }
 
 export function ProjectCard({ project, onSelect, status = project.status || projectStatus(project), amount = project.actual ? null : progress(project), staffCount = project.actual ? project.agents.filter(agent => agent.assigned).length : 5 }) {
-  const Card = project.stored ? 'article' : 'button'
+  const interactive = !project.stored || typeof onSelect === 'function'
+  const Card = interactive ? 'button' : 'article'
   return (
-    <Card {...(project.stored ? {} : { type: 'button', onClick: () => onSelect(project.id) })} className="project-card" aria-label={project.stored ? project.name : `${project.name} 업무 보기`}>
+    <Card {...(interactive ? { type: 'button', onClick: () => onSelect(project.id) } : {})} className="project-card" aria-label={project.stored ? `${project.name} 상세 보기` : `${project.name} 업무 보기`}>
       <span className="project-card-top"><span className={`project-monogram ${['flow', 'desk'].includes(project.id) ? project.id : ''}`}>{({ orbit: 'O', flow: 'F', desk: 'D' })[project.id] || '+'}</span><span className={`badge ${status.kind}`}>{status.text}</span></span>
       <h2>{project.name}</h2><p>{project.stored && <>프로젝트 ID: {project.projectId}<br /></>}{project.description}</p>
       <span className="project-card-meta"><span>의뢰인 · 대표님</span><span>{project.stored ? <>생성일 · <time dateTime={project.createdAt}>{project.time}</time></> : project.time}</span></span>
       {project.actual ? <span className="project-agent-states">{project.agents.map(agent => <span key={agent.role}>{agent.name} · {agent.label}</span>)}<small>{project.notice}</small></span> : <><span className="progress-meta"><span>프로젝트 진행</span><strong>{amount}%</strong></span>
       <span className="progress-track"><span className="progress-fill" style={{ display: 'block', width: `${amount}%` }} /></span></>}
-      <span className="project-card-footer">{project.stored ? <span>저장 정보 · 목록 조회</span> : <><span>{project.actual ? '확인된 작업 Agent' : '담당 직원'} {staffCount}명</span><Icon name="arrow" /></>}</span>
+      <span className="project-card-footer">{project.stored ? <span>{interactive ? '프로젝트 상세 · Run 연결 이력' : '저장 정보 · 목록 조회'}</span> : <><span>{project.actual ? '확인된 작업 Agent' : '담당 직원'} {staffCount}명</span><Icon name="arrow" /></>}</span>
     </Card>
   )
 }
