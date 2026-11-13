@@ -88,7 +88,7 @@ SINGLE_AGENT는 roleWork 네 키 모두 작성합니다. 한국어로 간결하�
 """
 
 
-def content_screen(response, payload, role):
+def content_screen(response, payload, role, *, contract_factory=output_contract):
     """Detect only declared invariants, never equate quote validity to truth."""
     result = {"status": "UNVERIFIED", "differences": [],
               "scope": "ECHO_QUOTES_IDS_ROLE_AND_EXECUTION_ONLY", "freeTextStatus": "UNVERIFIED"}
@@ -108,7 +108,7 @@ def content_screen(response, payload, role):
         result.update(status="FAIL", differences=[{"kind": "INVALID_ROLE"}])
         return result
     try:
-        output_contract(role).schema.validate(answer)
+        contract_factory(role).schema.validate(answer)
     except Exception:
         issues.append({"kind": "OUTPUT_SCHEMA_INVALID"})
     work = answer.get("roleWork")
@@ -207,12 +207,23 @@ class NaturalExecutor(ProbeExecutor):
 
 
 class NaturalLab(CommunicationLab):
+    record_type = NaturalRecord
+
+    def blocked_reason(self, rows):
+        if any(previous.phase not in {"PLANNED", "SKIPPED"}
+               and previous.delivery_check["status"] != "PASS" for previous in rows):
+            return "UPSTREAM_DELIVERY_NOT_VERIFIED"
+        if any(previous.view()["handoff"]["reason"] in {
+                "CONTENT_CONTRACT_REJECTED", "MODEL_OUTPUT_CONTRACT_REJECTED"} for previous in rows):
+            return "UPSTREAM_CONTRACT_REJECTED"
+        return "PREVIOUS_RESULT_UNAVAILABLE"
+
     @exclusive_execution
     async def execute_case(self, case_id, request_text, architecture):
         self.model_runtime.admit(SimpleNamespace(rounds=1, architecture=architecture))
         self.records.clear()
         roles = ROLES[:4] if architecture == "MULTI_AGENT" else ("SINGLE_AGENT",)
-        rows = [NaturalRecord(role, 1, index) for index, role in enumerate(roles)]
+        rows = [self.record_type(role, 1, index) for index, role in enumerate(roles)]
         for row in rows:
             self.records[row.probe_id] = row
         run_id, scenario_id = uuid4(), uuid4()
@@ -246,14 +257,10 @@ class NaturalLab(CommunicationLab):
                 await asyncio.gather(*(send(row, result) for row in rows[2:]))
             pending = [row for row in rows if row.phase == "PLANNED"]
             if pending:
-                contract_rejected = any(previous.view()["handoff"]["reason"] in {
-                    "CONTENT_CONTRACT_REJECTED", "MODEL_OUTPUT_CONTRACT_REJECTED"} for previous in rows)
-                delivery_rejected = any(previous.phase not in {"PLANNED", "SKIPPED"}
-                    and previous.delivery_check["status"] != "PASS" for previous in rows)
+                blocked_reason = self.blocked_reason(rows)
                 for row in pending:
                     row.phase = "SKIPPED"
-                    row.error = ("UPSTREAM_DELIVERY_NOT_VERIFIED" if delivery_rejected else
-                                 "UPSTREAM_CONTRACT_REJECTED" if contract_rejected else "PREVIOUS_RESULT_UNAVAILABLE")
+                    row.error = blocked_reason
 
         try:
             await asyncio.wait_for(work(), timeout=self.model_runtime.run_timeout_seconds)

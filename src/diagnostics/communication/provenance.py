@@ -10,7 +10,7 @@ import subprocess
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 EXECUTION_PATHS = tuple("src/diagnostics/communication/" + name + ".py" for name in (
-    "natural", "live", "lab", "probe", "contracts", "performance", "timing", "peer_sessions", "workloads", "provenance")) + (
+    "natural", "guarded", "guarded_contracts", "semantic_review", "live", "lab", "probe", "contracts", "performance", "timing", "peer_sessions", "workloads", "provenance")) + (
     "src/agents/llm/openai_responses.py", "src/agents/llm/contracts.py", "src/agents/main.py",
     "src/agents/api/routes.py", "src/agents/api/handler.py", "src/agents/api/sqlite_task_store.py",
     "src/agents/api/validation.py", "src/agents/api/task_store.py", "src/agents/core/config.py",

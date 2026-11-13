@@ -409,6 +409,19 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 [74번](docs/74-communication-revalidation-report.md)과 [새 PDF](docs/reports/agent-communication-revalidation-2026-11-13/revalidation-report.pdf)는 자연어 원문, 송수신 15건, 역할별 시간과 남은 의미 해석 위험을 정리합니다. 블로그의 미승인 조건 검사 기준화와 추리게임의 개인정보 범위 확대 위험이 남아 있어 할루시네이션 부재를 선언하지 않습니다. 과거 보고서는 보존하며 실제 제품 Host·MCP·Docker 전체 흐름과 통제된 성능 비교는 별도 확인 대상입니다.
 
+### 원문 조건·검사 연결·의미 검토와 재실험 — 75~80번
+
+[75번 경로 대조](docs/75-diagnostic-product-path-audit.md), [76번 조건 분리](docs/76-natural-condition-classification.md), [77번 기대값 연결](docs/77-natural-expectation-bindings.md), [78번 의미 검토·인계](docs/78-semantic-review-handoff-gate.md)는 자연어 진단에서 원문 인용·미승인 가정·검사 연결·별도 모델 검토·필드별 근거를 확인합니다. 질문·계약 오류·미검증 결과는 다음 역할로 넘기지 않습니다. 제품 승인 원장을 모델 추출 결과로 대체하지 않습니다.
+
+[79번 회귀](docs/79-guarded-single-multi-regression.md)는 관련 173개 검사를 확인했습니다. [80번 실제 재실험](docs/80-guarded-live-revalidation.md)과 [새 PDF](docs/reports/agent-communication-guarded-2026-11-13/guarded-natural-4cases-report.pdf)는 총 API 38회, 역할 송수신 16/16 일치, 초기 질문·거절·미호출, 검토기가 놓친 개인정보 확대와 보완 후 보류, 회사 소개 최종 5/5 인계를 구분해 기록합니다. 의미 판정 정확성과 보수적인 전달 차단은 같은 지표가 아닙니다.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m diagnostics.communication.guarded \
+  --model gpt-4.1-mini-2025-04-14 --out .data/diagnostics/guarded-new-run
+```
+
+현재 guarded는 역할 답변/검토를 각각 최대 20회로 제한하고 자동 Retry·대체 모델을 사용하지 않습니다. 기존 v2 CLI는 과거 진단 재현용입니다. 실제 제품 Host·MCP·Docker 실행은 81~82번으로 남아 있습니다.
+
 ## 테스트
 
 ```bash
