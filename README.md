@@ -403,6 +403,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 [72번](docs/72-diagnostic-observer-optimization.md)은 구독 없는 CLI의 중간 화면 생성, 최종 행·요약의 중복 계산, 중첩 JSON의 반복 정규화를 줄입니다. 실시간 구독과 모든 최종 검사는 유지합니다. 로컬 비교 함수의 비용 감소를 확인했으며 실제 OpenAI 전체 지연 개선율은 아직 측정하지 않았습니다.
 
+### 보강 후 실제 OpenAI 재검증·보고서 — 73·74번
+
+[73번](docs/73-live-communication-revalidation.md)은 같은 자연어 요청 3개와 같은 모델로 실제 API 15회를 실행하고 선택 실행 소스·환경·Transport·실행 순서를 기록합니다. 송수신·DB 접수·API 실제 입력은 15/15 일치했고 다른 역할 필드 혼입은 0개였습니다.
+
+[74번](docs/74-communication-revalidation-report.md)과 [새 PDF](docs/reports/agent-communication-revalidation-2026-11-13/revalidation-report.pdf)는 자연어 원문, 송수신 15건, 역할별 시간과 남은 의미 해석 위험을 정리합니다. 블로그의 미승인 조건 검사 기준화와 추리게임의 개인정보 범위 확대 위험이 남아 있어 할루시네이션 부재를 선언하지 않습니다. 과거 보고서는 보존하며 실제 제품 Host·MCP·Docker 전체 흐름과 통제된 성능 비교는 별도 확인 대상입니다.
+
 ## 테스트
 
 ```bash

@@ -147,6 +147,10 @@ class NaturalWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(report['runs']),6)
         self.assertEqual(report['status'],'CAPTURED_REVIEW_REQUIRED')
         self.assertEqual(sum(r['transportPassed'] for r in report['runs']),15)
+        self.assertEqual(saved['provenance']['transportMode'],'CUSTOM_TRANSPORT')
+        self.assertEqual(saved['provenance']['sourceStability'],'STABLE')
+        self.assertEqual(len(saved['provenance']['sourceManifestSha256']),64)
+        self.assertEqual(saved['provenance']['comparison'],'DESCRIPTIVE_NOT_CAUSAL')
         self.assertTrue(all(group['performance']['timeline']['status']=='MEASURED' for group in report['runs']))
         self.assertEqual(sum(item['completedSamples'] for group in report['runs']
                              for item in group['performance']['roles'].values()),15)

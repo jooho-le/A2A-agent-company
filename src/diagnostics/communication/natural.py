@@ -24,6 +24,7 @@ from diagnostics.communication.lab import CommunicationLab, ROLES, exclusive_exe
 from diagnostics.communication.live import LiveRuntime, root_api_key
 from diagnostics.communication.probe import ProbeExecutor
 from diagnostics.communication.performance import performance_summary
+from diagnostics.communication.provenance import capture_provenance, finish_provenance
 from diagnostics.communication.workloads import object_schema
 
 
@@ -325,6 +326,7 @@ async def run(args, runtime=None):
     if runtime.model_id != args.model or runtime.max_model_calls != 15:
         raise ValueError("NATURAL_RUNTIME_CONFIGURATION_MISMATCH")
     runtime.evidence, runtime.checkpoint = evidence, checkpoint
+    evidence["provenance"] = capture_provenance(runtime)
     evidence.update(temperature=runtime.temperature, maxOutputTokens=runtime.max_output_tokens,
                     timeoutSeconds=runtime.timeout_seconds)
     checkpoint()
@@ -350,6 +352,7 @@ async def run(args, runtime=None):
         if evidence["status"] == "RUNNING":
             evidence["status"] = "INTERRUPTED_OR_INCOMPLETE"
         evidence["finishedAt"] = datetime.now(timezone.utc).isoformat()
+        finish_provenance(evidence["provenance"])
         checkpoint()
     return evidence
 
