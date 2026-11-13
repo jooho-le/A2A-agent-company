@@ -18,6 +18,7 @@ from orchestrator.domain.scenario_registry import ScenarioDefinition
 
 MAX_PLANNER_TASKS = 128
 MAX_PLANNER_QUESTIONS = 8
+MAX_PLANNER_ASSUMPTIONS = 8
 MAX_PLANNER_JSON_BYTES = 1_048_576
 _KINDS = frozenset({"PLAN", "INPUT_REQUIRED", "REJECTED"})
 _SCHEMA_PATH = Path(__file__).absolute().parents[3] / "schemas" / "project" / "planner_output.schema.json"
@@ -45,6 +46,7 @@ class PlannerDecision:
     kind: str
     plan: PlannerPlan | None = field(repr=False)
     questions: tuple[str, ...] = field(repr=False)
+    unapproved_assumptions: tuple[str, ...] = field(default=(), repr=False)
 
     def __post_init__(self):
         if (type(self.kind) is not str or self.kind not in _KINDS or type(self.questions) is not tuple
@@ -52,6 +54,14 @@ class PlannerDecision:
             raise PlannerContractError()
         for question in self.questions:
             _text(question, 1024)
+        if (type(self.unapproved_assumptions) is not tuple
+                or len(self.unapproved_assumptions) > MAX_PLANNER_ASSUMPTIONS
+                or self.unapproved_assumptions and self.kind != "INPUT_REQUIRED"):
+            raise PlannerContractError()
+        for assumption in self.unapproved_assumptions:
+            _text(assumption, 1024)
+        if len(set(self.unapproved_assumptions)) != len(self.unapproved_assumptions):
+            raise PlannerContractError()
         if ((self.kind == "PLAN" and (not isinstance(self.plan, PlannerPlan) or self.questions))
                 or (self.kind == "INPUT_REQUIRED" and (self.plan is not None or not self.questions))
                 or (self.kind == "REJECTED" and (self.plan is not None or self.questions))):
@@ -80,7 +90,7 @@ def build_planner_output_contract(scenario: ScenarioDefinition) -> StructuredOut
         task_key = {"type": "string", "pattern": r"^TASK-[A-Z0-9_-]{1,64}$", "minLength": 6, "maxLength": 69}
         schema = JsonSchema.from_dict({
             "type": "object", "additionalProperties": False,
-            "required": ["kind", "implementationPlan", "questions"],
+            "required": ["kind", "implementationPlan", "questions", "unapprovedAssumptions"],
             "properties": {
                 "kind": {"type": "string", "enum": ["PLAN", "INPUT_REQUIRED", "REJECTED"]},
                 "implementationPlan": {"type": "array", "maxItems": MAX_PLANNER_TASKS, "items": {
@@ -97,10 +107,12 @@ def build_planner_output_contract(scenario: ScenarioDefinition) -> StructuredOut
                 }},
                 "questions": {"type": "array", "maxItems": MAX_PLANNER_QUESTIONS,
                     "items": {"type": "string", "minLength": 1, "maxLength": 1024}},
+                "unapprovedAssumptions": {"type": "array", "maxItems": MAX_PLANNER_ASSUMPTIONS,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 1024}},
             },
         })
         schema.require_openai_strict()
-        output = StructuredOutput(name="planner_decision", schema=schema)
+        output = StructuredOutput(name="planner_decision_v2", schema=schema)
     except Exception:
         invalid = True
     if invalid:
@@ -154,11 +166,16 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
             raise PlannerContractError()
         kind = copied["kind"]
         tasks, questions = copied["implementationPlan"], copied["questions"]
+        assumptions = copied["unapprovedAssumptions"]
         for task in tasks:
             _text(task["title"], 256)
             _text(task["description"], 4096)
         for question in questions:
             _text(question, 1024)
+        for assumption in assumptions:
+            _text(assumption, 1024)
+        if len(set(assumptions)) != len(assumptions) or assumptions and kind != "INPUT_REQUIRED":
+            raise PlannerContractError()
         if kind == "PLAN":
             if not tasks or questions:
                 raise PlannerContractError()
@@ -180,7 +197,8 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
         elif kind == "INPUT_REQUIRED":
             if tasks or not questions:
                 raise PlannerContractError()
-            result = PlannerDecision(kind=kind, plan=None, questions=tuple(questions))
+            result = PlannerDecision(kind=kind, plan=None, questions=tuple(questions),
+                                     unapproved_assumptions=tuple(assumptions))
         else:
             if tasks or questions:
                 raise PlannerContractError()

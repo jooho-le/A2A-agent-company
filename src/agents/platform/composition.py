@@ -27,6 +27,8 @@ from agents.main import create_app as create_agent_app
 from agents.platform.budgets import RunBudgetRegistry
 from agents.platform.telemetry_store import AgentTelemetryStore
 from agents.platform.telemetry import RuntimeTelemetry
+from agents.semantic_review import ProductSemanticReviewer
+from agents.semantic_store import SemanticReviewStore
 from agents.runtime.developer import DeveloperAgentExecutor
 from agents.runtime.developer_context import SQLiteDeveloperContextLoader
 from agents.runtime.developer_services import DeveloperRuntimeServices
@@ -290,6 +292,7 @@ def create_platform(
     telemetry_store = AgentTelemetryStore(repository.database_path, price_book=price_book)
     budgets = RunBudgetRegistry(repository, limits=limits, telemetry_store=telemetry_store)
     telemetry = RuntimeTelemetry(repository, telemetry_store)
+    semantic_store = SemanticReviewStore(repository.database_path)
 
     def validate_submission(configuration):
         try:
@@ -343,19 +346,23 @@ def create_platform(
     }
     executors = {
         AgentRole.PLANNER: PlannerAgentExecutor(provider=provider_map[AgentRole.PLANNER],
-            context_factory=contexts[AgentRole.PLANNER], telemetry_factory=telemetry.bind),
+            context_factory=contexts[AgentRole.PLANNER], telemetry_factory=telemetry.bind,
+            semantic_reviewer=ProductSemanticReviewer(provider_map[AgentRole.PLANNER], semantic_store)),
         AgentRole.DEVELOPER: DeveloperAgentExecutor(provider=provider_map[AgentRole.DEVELOPER],
             context_factory=contexts[AgentRole.DEVELOPER], services_factory=_bound_services(
                 developer_services_factory, DeveloperRuntimeServices, repository, workspace_registry, artifact_store),
-            telemetry_factory=telemetry.bind),
+            telemetry_factory=telemetry.bind,
+            semantic_reviewer=ProductSemanticReviewer(provider_map[AgentRole.DEVELOPER], semantic_store)),
         AgentRole.QA: QAAgentExecutor(provider=provider_map[AgentRole.QA],
             context_factory=contexts[AgentRole.QA], services_factory=_bound_services(
                 qa_services_factory, QARuntimeServices, repository, workspace_registry, artifact_store),
-            telemetry_factory=telemetry.bind),
+            telemetry_factory=telemetry.bind,
+            semantic_reviewer=ProductSemanticReviewer(provider_map[AgentRole.QA], semantic_store)),
         AgentRole.SECURITY: SecurityAgentExecutor(provider=provider_map[AgentRole.SECURITY],
             context_factory=contexts[AgentRole.SECURITY], services_factory=_bound_services(
                 security_services_factory, SecurityRuntimeServices, repository, workspace_registry, artifact_store),
-            telemetry_factory=telemetry.bind),
+            telemetry_factory=telemetry.bind,
+            semantic_reviewer=ProductSemanticReviewer(provider_map[AgentRole.SECURITY], semantic_store)),
     }
     # Local credentials/Task payloads must not follow HTTP_PROXY/ALL_PROXY.
     # The explicit test seam also stays shared with existing control endpoints.

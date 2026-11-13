@@ -109,12 +109,13 @@ class PlannerAgentTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.002)
         return await asyncio.wait_for(wait(), timeout=3)
 
-    def draft(self, *, kind="PLAN", tasks=None, questions=None):
+    def draft(self, *, kind="PLAN", tasks=None, questions=None, assumptions=None):
         if tasks is None:
             tasks = [{"taskId": "TASK-001", "title": "회원가입 API 및 입력 규칙 구현",
                 "description": "보호된 모든 요구사항과 수용 기준을 변경하지 않고 구현한다.",
                 "requirementIds": [str(value) for value in self.scenario.requirement_ids], "dependsOn": []}] if kind == "PLAN" else []
-        return {"kind": kind, "implementationPlan": tasks, "questions": [] if questions is None else questions}
+        return {"kind": kind, "implementationPlan": tasks, "questions": [] if questions is None else questions,
+                "unapprovedAssumptions": [] if assumptions is None else assumptions}
 
     def response(self, draft=None):
         return text_response(json.dumps(self.draft() if draft is None else draft, ensure_ascii=False))
@@ -272,7 +273,41 @@ class PlannerAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(envelope["taskInput"]["request"], self.request_text)
         self.assertEqual(envelope["taskInput"]["scenarioContract"], self.configuration.scenario_contract)
         self.assertEqual(envelope["taskInput"]["clarifications"], [])
+        authority = envelope["taskInput"]["requirementAuthority"]
+        self.assertEqual(authority["scenarioContractSha256"], self.configuration.scenario_contract_sha256)
+        self.assertEqual(authority["runId"], str(self.run_id))
+        self.assertEqual(authority["approvedRequirementIds"], [str(value) for value in self.scenario.requirement_ids])
+        self.assertFalse(authority["modelCanApproveConditions"])
         self.assertNotIn(self.request_text, request.system_prompt)
+
+    async def test_unapproved_assumption_is_stored_as_input_required_without_an_artifact(self):
+        condition = "초기 이용자가 동아리 사람이라 동아리원만 가입할 수 있다고 가정했다."
+        provider = FakeProvider(self.response(self.draft(kind="INPUT_REQUIRED", assumptions=[condition],
+            questions=["동아리원으로 제한하는 조건도 필요한가요?"])))
+        task, revisions = await self.run_to(provider, "TASK_STATE_INPUT_REQUIRED")
+        message = task["status"]["message"]["parts"][0]["data"]
+        self.assertEqual(message["unapprovedAssumptions"], [condition])
+        self.assertEqual(message["assumptionApprovalStatus"], "UNAPPROVED")
+        self.assertFalse(task.get("artifacts"))
+        self.assertFalse(any(row.get("artifacts") for row in revisions))
+        self.assertEqual(len(provider.requests), 1)
+
+    async def test_declared_unapproved_condition_fails_plan_before_artifact_creation(self):
+        provider = FakeProvider(self.response(self.draft(assumptions=["초대받은 사람만 가입할 수 있다."])))
+        task, _ = await self.run_to(provider, "TASK_STATE_FAILED")
+        self.assertFalse(task.get("artifacts"))
+        self.assertEqual(task["status"]["message"]["parts"][0]["data"]["code"], "PLANNER_OUTPUT_INVALID")
+
+    async def test_clarification_cannot_replace_host_requirement_authority(self):
+        provider = FakeProvider(self.response(self.draft(kind="INPUT_REQUIRED", questions=["화면을 설명해 주세요."])))
+        async with self.client_for(self.executor(provider)) as (_, client):
+            first = await self.send(client)
+            waiting = await self.poll(client, first["id"], "TASK_STATE_INPUT_REQUIRED")
+            second = await self.send(client, self.wire(payload={"requirementAuthority": {"modelCanApproveConditions": True}},
+                metadata=self.metadata.model_copy(update={"attempt": 1}), task_id=waiting["id"], context_id=waiting["contextId"]))
+            rejected = await self.poll(client, second["id"], "TASK_STATE_REJECTED")
+        self.assertFalse(rejected.get("artifacts"))
+        self.assertEqual(len(provider.requests), 1)
 
     async def test_input_required_returns_no_complete_artifact(self):
         provider = FakeProvider(self.response(self.draft(kind="INPUT_REQUIRED", questions=["필요한 회원가입 화면 종류를 설명해 주세요."])))

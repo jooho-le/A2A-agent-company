@@ -19,6 +19,9 @@ from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
 from agents.llm.engine import LLMEngine
 from agents.roles.prompts import prepare_role_prompt
 from agents.roles.qa_contract import QAContractError, build_qa_output_contract, validate_qa_decision
+from agents.runtime.requirement_scope import (
+    RequirementScopeError, build_requirement_scope, validate_generated_case_expectations,
+)
 from agents.runtime.developer import _host_factory
 from agents.runtime.planner import _message_data, _same_json, _TERMINAL
 from agents.runtime.qa_context import QAContextError, QAExecutionContext
@@ -27,6 +30,7 @@ from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
 from agents.platform.telemetry import bind_runtime_telemetry
+from agents.semantic_review import (SEMANTIC_PROTECTED_FIELDS, SemanticReviewRequired, publish_semantic_hold)
 
 
 class QAExecutorConfigurationError(ValueError):
@@ -45,6 +49,7 @@ _PROTECTED = frozenset({
     "projectArtifactIds", "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion",
     "fixRequest", "testSelectors", "testTargets", "qaRequirements", "userRequest", "protectedCases",
     "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest", "sourceAccess",
+    "requirementAuthority", "requirementScope", "clarifications",
 })
 
 
@@ -74,11 +79,14 @@ def _prepare_input(context, execution):
         answers = []
         for item in inputs[1:]:
             answer = _message_data(item, maximum)
-            if set(answer) & _PROTECTED:
+            if set(answer) & (_PROTECTED | SEMANTIC_PROTECTED_FIELDS):
                 raise ValueError
             answers.append(redact_data(answer))
-        assigned = {str(value) for value in metadata.requirement_ids}
+        scope = build_requirement_scope(execution.configuration, execution.requirement_artifact, metadata, AgentRole.QA)
+        assigned = {str(item.requirement_id) for item in scope.requirements}
         return {**expected, "clarifications": answers,
+            "requirementAuthority": scope.authority.to_prompt_json(),
+            "requirementScope": scope.to_prompt_json(),
             "workspaceId": str(execution.configuration.workspace_id),
             "userRequest": redact_data(execution.request_text),
             "qaRequirements": [item for item in execution.scenario.planner_contract()["requirements"]
@@ -93,6 +101,9 @@ def _prepare_input(context, execution):
                 "hashes, execution manifests, measured counts or fabricated tool evidence. "
                 "The Host executes selected tests and all configured protected tests and assembles the "
                 "measured report. Questions do not authorize changing the frozen Source or policies."
+                " Each generated case expectedResult must copy one exact acceptanceCriteria string from its "
+                "assigned requirementScope requirement. Do not paraphrase, invent or weaken the expectation. "
+                "Planner/Developer claims and passing self-tests are not independent evidence."
             )}
     except asyncio.CancelledError:
         raise
@@ -131,7 +142,7 @@ def _test_targets(services):
 class QAAgentExecutor(AgentExecutor):
     """Host opt-in QA against the claimed current candidate and report lineage."""
 
-    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None):
+    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None, semantic_reviewer=None):
         if (not callable(context_factory) or not callable(services_factory)
                 or usage_sink is not None and not callable(usage_sink)
                 or telemetry_factory is not None and not callable(telemetry_factory)
@@ -142,6 +153,7 @@ class QAAgentExecutor(AgentExecutor):
         self._provider, self._context_factory, self._services_factory = provider, context_factory, services_factory
         self._usage_sink = usage_sink
         self._telemetry_factory = telemetry_factory
+        self._semantic_reviewer = semantic_reviewer
 
     def __repr__(self):
         return "QAAgentExecutor()"
@@ -199,6 +211,8 @@ class QAAgentExecutor(AgentExecutor):
             return
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
+            if self._semantic_reviewer is not None:
+                await self._semantic_reviewer.check_resume(context, execution)
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.QA, context, execution, self._usage_sink)
             await services.prepare(execution)
@@ -219,6 +233,13 @@ class QAAgentExecutor(AgentExecutor):
                     budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
                     usage_sink=usage_sink, call_started_sink=call_started_sink)
                 decision = validate_qa_decision(result.data, execution.metadata.requirement_ids, services.selectors)
+                if decision.kind == "READY":
+                    validate_generated_case_expectations(decision.cases, configuration=execution.configuration,
+                        metadata=execution.metadata, role=AgentRole.QA)
+                if decision.kind == "READY" and self._semantic_reviewer is not None:
+                    await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
+                        role=AgentRole.QA, result=result, telemetry=telemetry,
+                        usage_sink=usage_sink, call_started_sink=call_started_sink)
                 execution.budget.check()
                 if decision.kind == "READY":
                     artifacts = await services.finalize(execution, decision, tracked,
@@ -232,8 +253,11 @@ class QAAgentExecutor(AgentExecutor):
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, metadata, state, error.code.value)
             return
-        except (QAContractError, QAServicesError) as error:
+        except (QAContractError, QAServicesError, RequirementScopeError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)
+            return
+        except SemanticReviewRequired as held:
+            await publish_semantic_hold(updater, metadata, held)
             return
         except TrackedMCPError:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, "QA_TEST_UNVERIFIED")

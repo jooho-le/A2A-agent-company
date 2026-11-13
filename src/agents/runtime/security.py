@@ -19,6 +19,9 @@ from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, ToolCall, ToolCo
 from agents.llm.engine import LLMEngine
 from agents.roles.prompts import prepare_role_prompt
 from agents.roles.security_contract import SecurityContractError, build_security_output_contract, validate_security_decision
+from agents.runtime.requirement_scope import (
+    RequirementScopeError, build_requirement_scope, validate_generated_case_expectations,
+)
 from agents.runtime.developer import _host_factory
 from agents.runtime.planner import _message_data, _same_json, _TERMINAL
 from agents.runtime.security_context import SecurityContextError, SecurityExecutionContext
@@ -27,6 +30,7 @@ from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
 from agents.platform.telemetry import bind_runtime_telemetry
+from agents.semantic_review import (SEMANTIC_PROTECTED_FIELDS, SemanticReviewRequired, publish_semantic_hold)
 from orchestrator.workspaces.policy import workspace_uuid
 
 
@@ -47,6 +51,7 @@ _PROTECTED = frozenset({
     "fixRequest", "scannerProfiles", "measuredSecurity", "securityRequirements", "userRequest", "sourcePaths",
     "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest", "sourceAccess",
     "testSelectors", "testTargets",
+    "requirementAuthority", "requirementScope", "clarifications",
 })
 
 
@@ -76,15 +81,18 @@ def _prepare_input(context, execution):
         answers = []
         for item in inputs[1:]:
             answer = _message_data(item, maximum)
-            if set(answer) & _PROTECTED:
+            if set(answer) & (_PROTECTED | SEMANTIC_PROTECTED_FIELDS):
                 raise ValueError
             answers.append(redact_data(answer))
-        assigned = {str(value) for value in metadata.requirement_ids}
+        scope = build_requirement_scope(execution.configuration, execution.requirement_artifact, metadata, AgentRole.SECURITY)
+        assigned = {str(item.requirement_id) for item in scope.requirements}
         return {**expected, "clarifications": answers,
+            "requirementAuthority": scope.authority.to_prompt_json(),
+            "requirementScope": scope.to_prompt_json(),
             "workspaceId": str(execution.configuration.workspace_id),
             "userRequest": redact_data(execution.request_text),
             "securityRequirements": [item for item in execution.scenario.planner_contract()["requirements"]
-                               if item["requirementId"] in assigned],
+                                     if item["requirementId"] in assigned],
             "runtimeInstructions": (
                 "Inspect the measured scanner reports and read the exact frozen Source using the offered tools. "
                 "Return a bounded READY review covering every assigned requirement and Host finding ID exactly once. "
@@ -95,6 +103,9 @@ def _prepare_input(context, execution):
                 "These are proposals, not proven outcomes: only a trusted Host semantic verifier can admit "
                 "PASS/FAIL or CONFIRMED/FALSE_POSITIVE against actual read evidence; otherwise requirements "
                 "stay UNVERIFIED and scanner warnings stay SUSPECTED. Questions cannot change frozen policies."
+                " Use only the approved requirementScope as the acceptance baseline, independently of prior "
+                "role claims. Any generated testCases expectedResult must copy one exact acceptanceCriteria "
+                "string for its own assigned requirement, without extra restrictions or weaker conditions."
             )}
     except asyncio.CancelledError:
         raise
@@ -159,7 +170,7 @@ class _SecurityReadExecutor:
 class SecurityAgentExecutor(AgentExecutor):
     """Host opt-in Security for the claimed current candidate and report lineage."""
 
-    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None):
+    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None, semantic_reviewer=None):
         if (not callable(context_factory) or not callable(services_factory)
                 or usage_sink is not None and not callable(usage_sink)
                 or telemetry_factory is not None and not callable(telemetry_factory)
@@ -170,6 +181,7 @@ class SecurityAgentExecutor(AgentExecutor):
         self._provider, self._context_factory, self._services_factory = provider, context_factory, services_factory
         self._usage_sink = usage_sink
         self._telemetry_factory = telemetry_factory
+        self._semantic_reviewer = semantic_reviewer
 
     def __repr__(self):
         return "SecurityAgentExecutor()"
@@ -227,6 +239,8 @@ class SecurityAgentExecutor(AgentExecutor):
             return
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
+            if self._semantic_reviewer is not None:
+                await self._semantic_reviewer.check_resume(context, execution)
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.SECURITY, context, execution, self._usage_sink)
             await services.prepare(execution)
@@ -258,6 +272,13 @@ class SecurityAgentExecutor(AgentExecutor):
                     usage_sink=usage_sink, call_started_sink=call_started_sink)
                 decision = validate_security_decision(result.data, execution.metadata.requirement_ids, measured.finding_ids,
                                                       measured.source_paths, services.test_selectors or None)
+                if decision.kind == "READY" and services.test_selectors:
+                    validate_generated_case_expectations(decision.test_cases, configuration=execution.configuration,
+                        metadata=execution.metadata, role=AgentRole.SECURITY)
+                if decision.kind == "READY" and self._semantic_reviewer is not None:
+                    await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
+                        role=AgentRole.SECURITY, result=result, telemetry=telemetry,
+                        usage_sink=usage_sink, call_started_sink=call_started_sink)
                 execution.budget.check()
                 if decision.kind == "READY":
                     artifacts = await services.finalize(execution, decision, tracked, measured,
@@ -271,8 +292,11 @@ class SecurityAgentExecutor(AgentExecutor):
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, metadata, state, error.code.value)
             return
-        except (SecurityContractError, SecurityServicesError) as error:
+        except (SecurityContractError, SecurityServicesError, RequirementScopeError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)
+            return
+        except SemanticReviewRequired as held:
+            await publish_semantic_hold(updater, metadata, held)
             return
         except TrackedMCPError:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, "SECURITY_SCAN_UNVERIFIED")

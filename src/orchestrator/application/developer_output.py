@@ -8,6 +8,7 @@ from a2a.types import Task, TaskState
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from pydantic import BaseModel, ConfigDict, ValidationError
+from orchestrator.application.output_envelope import validate_output_envelope
 
 from orchestrator.domain import (
     BuildReportArtifact,
@@ -81,6 +82,7 @@ def parse_developer_output(
 ) -> ValidatedDeveloperOutput:
     """Validate Task identity, three project JSON Artifacts, and cross-links."""
     try:
+        validate_output_envelope(task, AgentRole.DEVELOPER, run_id=run.run_id, workflow_step_id=step.workflow_step_id)
         if task.status is None or TaskState.Name(task.status.state) != "TASK_STATE_COMPLETED":
             raise ValueError("Developer Task is not completed")
         if not task.id.strip() or task.id != step.a2a_task_id:

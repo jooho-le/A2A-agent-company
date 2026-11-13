@@ -5,9 +5,10 @@ from types import MappingProxyType
 
 from mcp_tools.core.policy import ROLE_TOOL_NAMES
 from orchestrator.domain.states import AgentRole
+from orchestrator.domain.role_outputs import ROLE_ARTIFACT_NAMES
 
 
-ROLE_CONTRACT_VERSION = "1"
+ROLE_CONTRACT_VERSION = "3"
 ARTIFACT_METADATA_SCHEMA = "schemas/project/developer_artifact_metadata.schema.json"
 
 
@@ -52,6 +53,7 @@ ROLE_CONTRACTS = MappingProxyType({
             "taskId는 TASK-* 표시용 Key이며 A2A Task ID나 내부 UUID가 아니다.",
             "Task 표시 Key를 중복하지 않고 자기 의존·순환·알 수 없는 Requirement 참조를 만들지 않는다.",
             "범위 또는 기준이 충돌하면 임의 결정하지 않고 필요한 질문을 제시한다.",
+            "추정한 추가 요구·접근 제한·수용 기준은 unapprovedAssumptions로 분리하고 INPUT_REQUIRED로 질문한다. PLAN/REJECTED에서는 빈 배열만 허용한다.",
         ),
         prohibitions=(
             "제품 Source·DB·테스트를 작성하거나 수정하지 않는다.",
@@ -150,6 +152,9 @@ ROLE_CONTRACTS = MappingProxyType({
 def get_role_contract(role: AgentRole) -> AgentRoleContract:
     """Select from trusted service settings, never a model/input role override."""
     try:
-        return ROLE_CONTRACTS[AgentRole(role)]
+        contract = ROLE_CONTRACTS[AgentRole(role)]
+        if tuple(output.name for output in contract.outputs) != ROLE_ARTIFACT_NAMES[contract.role]:
+            raise ValueError("Role declaration and Host output set must agree")
+        return contract
     except (ValueError, TypeError, KeyError):
         raise RoleContractError("A supported service Agent role is required") from None

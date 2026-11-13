@@ -414,6 +414,40 @@ class AgentTelemetryStore:
         except Exception:
             raise TelemetryStoreError() from None
 
+    def append_semantic_review(self, event: TraceEvent, record: dict, model) -> dict:
+        """A review reference is neither a model-call event nor a usage receipt.
+
+        Only a pre-existing immutable private review can supply this event.
+        Existing LLM/MCP append_event schemas remain closed and unchanged.
+        """
+        try:
+            from uuid import UUID
+            if type(event) is not TraceEvent or event.event_type != 'AGENT_SEMANTIC_REVIEWED':
+                raise ValueError()
+            review_id = record['reviewId']
+            if str(UUID(review_id, version=4)) != review_id:
+                raise ValueError()
+            with self._connection() as connection:
+                row = connection.execute('SELECT payload_json FROM agent_semantic_reviews WHERE review_id=?',
+                    (review_id,)).fetchone()
+            if row is None or json.loads(row[0]) != record:
+                raise ValueError()
+            bound = record['binding']
+            public_binding = event.to_trace_json()
+            if any(bound.get(key) != public_binding.get(key) for key in (
+                    'runId', 'workflowStepId', 'a2aTaskId', 'agentContextId', 'attempt', 'codeVersion',
+                    'requirementIds', 'inputArtifactIds')) or bound['actor'] != event.actor:
+                raise ValueError()
+            detail = {'purpose': 'PUBLICATION_SEMANTIC_REVIEW', 'reviewId': review_id,
+                'status': record['status'], 'reasonCode': record['reasonCode'],
+                'resumePolicy': record['resumePolicy'], 'basisSha256': bound['basisSha256'],
+                'candidateSha256': bound['candidateSha256'], 'stepRole': bound['stepRole'],
+                'phase': bound['phase'], 'isRequirementApproval': False, 'requestedModel': _safe_model(model)}
+            detail['modelCallSequences'] = record['modelCallSequences']
+            return self._append(event, public_binding, detail, 'LLM', f'semantic-review:{review_id}', 'EVENT')
+        except Exception:
+            raise TelemetryStoreError() from None
+
     def _append(self, event, binding, detail, kind, key, record_type):
         payload_json = _json({"binding": binding, "detail": detail, "recordType": record_type})
         with self._transaction() as connection:

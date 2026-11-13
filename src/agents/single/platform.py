@@ -19,6 +19,8 @@ from agents.main import create_app as create_agent_app
 from agents.platform.budgets import RunBudgetRegistry
 from agents.platform.telemetry_store import AgentTelemetryStore
 from agents.platform.telemetry import RuntimeTelemetry
+from agents.semantic_review import ProductSemanticReviewer
+from agents.semantic_store import SemanticReviewStore
 from agents.platform.composition import (OwnedAgentPlatform, PlatformEndpoint, PlatformConfigurationError,
     PlatformPreparationError, _ADMISSION_OUTPUT, _Lifecycle, _bound_services, _host_call, _secret)
 from agents.runtime.developer_services import DeveloperRuntimeServices
@@ -137,7 +139,8 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
             (AgentRole.QA, qa_services_factory, QARuntimeServices),
             (AgentRole.SECURITY, security_services_factory, SecurityRuntimeServices))}
     executor = SingleAgentExecutor(repository=repository, budgets=budgets, provider=provider,
-        services_factories=factories, usage_sink=usage_sink, telemetry_factory=telemetry.bind)
+        services_factories=factories, usage_sink=usage_sink, telemetry_factory=telemetry.bind,
+        semantic_reviewer=ProductSemanticReviewer(provider, SemanticReviewStore(repository.database_path)))
     client_factory = a2a_client_factory if a2a_client_factory is not None else agent_client_factory(settings, trust_env=False)
     dispatcher = PlannerRunDispatcher(repository, A2AAgentRegistry.from_settings(settings),
         client_factory=client_factory, before_dispatch=before_dispatch, allow_fix_dispatch=True, single_agent=True)

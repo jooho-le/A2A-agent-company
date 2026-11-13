@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
+from functools import wraps
 import json
 from pathlib import Path
 import secrets
@@ -12,23 +13,39 @@ from uuid import uuid4
 
 import httpx
 from anyio import CancelScope
-from a2a.types import TaskState
-from google.protobuf.json_format import MessageToDict
+from a2a.types import SendMessageRequest, TaskState
+from google.protobuf.json_format import MessageToDict, ParseDict
 from pydantic import SecretStr
 import uvicorn
 
 from agents.core.config import AgentSettings
 from agents.main import create_app as create_agent_app
-from diagnostics.communication.contracts import CheckOptions, ProbeRecord, now, summarize
+from diagnostics.communication.contracts import CheckOptions, ProbeRecord, now, summarize_views
+from diagnostics.communication.peer_sessions import DiagnosticPeerSessions
 from diagnostics.communication.probe import ReceiverObserver, message_data
+from diagnostics.communication.performance import performance_summary
 from diagnostics.communication.workloads import load_request, fixture_statistics
 from orchestrator.a2a import A2AAgentClient, A2AWorkflowMetadata
+from orchestrator.a2a.delivery import verify_delivery
 from orchestrator.core.async_control import await_owned
 
 
 ROLES = ("PLANNER", "DEVELOPER", "QA", "SECURITY", "SINGLE_AGENT")
 TERMINAL = {TaskState.TASK_STATE_COMPLETED, TaskState.TASK_STATE_FAILED,
             TaskState.TASK_STATE_REJECTED, TaskState.TASK_STATE_CANCELED}
+
+
+def exclusive_execution(method):
+    @wraps(method)
+    async def execute(self, *args, **kwargs):
+        if self._executing:
+            raise ValueError("DIAGNOSTIC_RUN_BUSY")
+        self._executing = True
+        try:
+            return await method(self, *args, **kwargs)
+        finally:
+            self._executing = False
+    return execute
 
 
 class EmbeddedServer(uvicorn.Server):
@@ -46,6 +63,24 @@ class CommunicationLab:
         self.endpoints = {}
         self.tokens = {}
         self.model_runtime = model_runtime
+        self._peer_sessions = None
+        self._executing = False
+
+    @asynccontextmanager
+    async def peer_client(self, row, request_hook, response_hook):
+        if self._peer_sessions is not None:
+            async with self._peer_sessions.borrow(row.role, self.endpoints[row.role], self.tokens[row.role],
+                                                  request_hook, response_hook) as (client, observation):
+                row.transport_observation = observation
+                yield client
+        else:
+            # Standalone probes retain their previous per-request ownership.
+            async with httpx.AsyncClient(timeout=8, trust_env=False,
+                    headers={"Authorization": "Bearer " + self.tokens[row.role]},
+                    event_hooks={"request": [request_hook], "response": [response_hook]}) as transport:
+                row.transport_observation = {"scope": "PER_PROBE", "sessionId": None,
+                                             "clientReused": False, "agentCardCached": False}
+                yield A2AAgentClient(self.endpoints[row.role], httpx_client=transport, trust_env=False)
 
     @property
     def mode(self):
@@ -81,6 +116,7 @@ class CommunicationLab:
                 raw = await request.aread()
                 row.wire_bytes = len(raw)
                 wire = json.loads(raw)
+                row.wire_request = deepcopy(wire)
                 row.wire_sent = deepcopy(message_data(wire["message"]))
                 row.message_id = wire["message"]["messageId"]
                 row.mark("clientSend", "SENT")
@@ -90,10 +126,7 @@ class CommunicationLab:
                 row.response_http_status = response.status_code
 
         timeout_seconds = self.model_runtime.timeout_seconds + 10
-        async with httpx.AsyncClient(timeout=8, trust_env=False,
-                                     headers={"Authorization": "Bearer " + self.tokens[row.role]},
-                                     event_hooks={"request": [request_hook], "response": [response_hook]}) as transport:
-            client = A2AAgentClient(self.endpoints[row.role], httpx_client=transport, trust_env=False)
+        async with self.peer_client(row, request_hook, response_hook) as client:
             try:
                 row.mark("cardStart")
                 await client.resolve_agent_card()
@@ -103,6 +136,16 @@ class CommunicationLab:
                 row.task_id, row.context_id = task.id, task.context_id
                 row.mark("ack")
                 deadline = asyncio.get_running_loop().time() + timeout_seconds
+                try:
+                    receipt = await client.get_delivery_receipt(row.message_id)
+                    row.delivery_receipt = None if receipt is None else receipt.model_dump(mode="json", by_alias=True)
+                    row.delivery_check = verify_delivery(ParseDict(row.wire_request, SendMessageRequest()), task,
+                                                         receipt, receiver_role=row.role)
+                except Exception:
+                    # The Task ID is already retained. Observe/cancel that Task
+                    # normally; never replay a send to obtain a missing receipt.
+                    row.delivery_check = {"status": "UNVERIFIED", "differences": ["RECEIPT_QUERY_UNAVAILABLE"]}
+                row.mark("receiptObserved")
                 while task.status.state not in TERMINAL:
                     if asyncio.get_running_loop().time() >= deadline:
                         raise TimeoutError
@@ -130,7 +173,7 @@ class CommunicationLab:
                     raise ValueError("MISSING_RESULT_ARTIFACT")
                 row.mark("observed")
                 row.mark("finish", "COMPLETED")
-                return row.response_received
+                return row.response_received if row.delivery_check["status"] == "PASS" else None
             except TimeoutError:
                 row.error = "응답 제한시간 초과. 미수신을 성공으로 처리하지 않습니다."
                 row.mark("finish", "TIMEOUT")
@@ -168,8 +211,11 @@ class CommunicationLab:
                     row.changed()
         return None
 
-    async def execute(self, options, emit):
+    @exclusive_execution
+    async def execute(self, options, emit=None):
         """One CLI caller owns a run within the explicit model-call budget."""
+        if emit is not None and not callable(emit):
+            raise ValueError("DIAGNOSTIC_OBSERVER_INVALID")
         self.model_runtime.admit(options)
         self.records.clear()
         roles = ROLES[:4] if options.architecture == "MULTI_AGENT" else ("SINGLE_AGENT",)
@@ -177,13 +223,17 @@ class CommunicationLab:
                 for turn in range(options.rounds) for index, role in enumerate(roles)]
         for row in rows:
             self.records[row.probe_id] = row
-            row.notify = lambda changed: emit({"type": "row", "row": changed.view()})
+            row.notify = (lambda changed: emit({"type": "row", "row": changed.view()})) if emit is not None else None
         run_id, scenario_id = uuid4(), uuid4()
         requirement_count = fixture_statistics(options.profile)["requirements"]
         requirement_ids = [uuid4() for _ in range(requirement_count)]
         started = now()
-        emit({"type": "start", "runId": str(run_id), "options": options.model_dump(),
-              "mode": self.mode, "rows": [row.view() for row in rows]})
+        clock_id = str(uuid4())
+        for row in rows:
+            row.clock_origin_ns, row.clock_id = started, clock_id
+        if emit is not None:
+            emit({"type": "start", "runId": str(run_id), "options": options.model_dump(),
+                  "mode": self.mode, "rows": [row.view() for row in rows]})
 
         def skip(row):
             row.error = "이전 단계 응답이 없어 이 단계 요청은 전송하지 않았습니다."
@@ -221,18 +271,23 @@ class CommunicationLab:
         finally:
             for row in rows:
                 row.notify = None
+        views = [row.view() for row in rows]
         report = {"type": "done", "runId": str(run_id), "options": options.model_dump(),
                   "mode": self.mode,
                   "llmUsed": any(row.model_observation and row.model_observation.get("httpStatus") == 200 for row in rows),
                   "llmRequested": True,
                   "fixture": fixture_statistics(options.profile),
                   "elapsedMs": round((now() - started) / 1_000_000, 3),
-                  "summary": summarize(rows), "rows": [row.view() for row in rows],
+                  "summary": summarize_views(views), "rows": views,
                   "measurement": {"clock": "shared-process perf_counter_ns",
                                   "pollIntervalMs": 20, "oneWayScope": "client dispatch + loopback HTTP + server admission",
                                   "resultObservationScope": "store + polling wait + HTTP + deserialization",
-                                  "groundingScope": "fixed-fixture claims only; free text unverified"}}
-        emit(report)
+                                  "groundingScope": "fixed-fixture claims only; free text unverified",
+                                  "observerMode": "LIVE" if emit is not None else "FINAL_ONLY",
+                                  "peerClientScope": "DIAGNOSTIC_SESSION" if self._peer_sessions is not None else "PER_PROBE"}}
+        report["performance"] = performance_summary(report["rows"], elapsed_ms=report["elapsedMs"])
+        if emit is not None:
+            emit(report)
         return report
 
 
@@ -242,6 +297,10 @@ async def running_lab(model_runtime, *, lab=None, executor_factory=None):
     lab = lab if lab is not None else CommunicationLab(model_runtime=model_runtime)
     if lab.model_runtime is not model_runtime:
         raise ValueError("DIAGNOSTIC_RUNTIME_MISMATCH")
+    if lab._peer_sessions is not None:
+        raise ValueError("DIAGNOSTIC_LAB_ALREADY_RUNNING")
+    sessions = DiagnosticPeerSessions()
+    lab._peer_sessions = sessions
     servers, tasks, sockets = [], [], []
     with TemporaryDirectory(prefix="a2a-communication-") as directory:
         try:
@@ -281,6 +340,13 @@ async def running_lab(model_runtime, *, lab=None, executor_factory=None):
             yield lab
         finally:
             async def shutdown():
+                close_failed = False
+                try:
+                    await sessions.aclose()
+                except Exception:
+                    close_failed = True
+                finally:
+                    lab._peer_sessions = None
                 for server in servers:
                     server.should_exit = True
                 if tasks:
@@ -292,6 +358,8 @@ async def running_lab(model_runtime, *, lab=None, executor_factory=None):
                         await asyncio.gather(*tasks, return_exceptions=True)
                 for sock in sockets:
                     sock.close()
+                if close_failed:
+                    raise RuntimeError("DIAGNOSTIC_PEER_CLOSE_UNVERIFIED") from None
 
             # Release each SDK's DB lease before TemporaryDirectory removes its
             # files, including if the CLI's main task receives cancellation.

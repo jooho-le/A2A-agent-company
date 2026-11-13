@@ -21,6 +21,7 @@ from agents.roles.outputs import validate_completed_role_output
 from agents.roles.qa_contract import QACaseBinding, QADecision, validate_qa_decision
 from agents.runtime.qa_test_store import QATestInputStore, _plain
 from agents.runtime.qa_context import validation_cycle, verify_report_predecessor
+from agents.runtime.requirement_scope import validate_generated_case_expectations
 from agents.runtime.evaluation_policy_store import EvaluationPolicyStore, qa_policy_sha256
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration, open_mcp_client
 from mcp_tools.execution_runtime import TrackedMCPExecutor
@@ -265,6 +266,8 @@ class QARuntimeServices:
             # authorize a selector: repeat the closed local Draft validation.
             validated = validate_qa_decision({"kind": decision.kind, "cases": [_case_json(case) for case in decision.cases],
                 "questions": list(decision.questions)}, execution.metadata.requirement_ids, self.selectors)
+            validate_generated_case_expectations(validated.cases, configuration=execution.configuration,
+                metadata=execution.metadata, role=AgentRole.QA)
             cases = validated.cases + self._protected_cases
             pairs = set((case.tool_name, case.selector) for case in cases)
             wanted = {(tool, selector) for tool, names in self._selectors.items() for selector in names}

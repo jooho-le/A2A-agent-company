@@ -185,6 +185,25 @@ def create_protocol_router(settings: AgentSettings, handler: ProjectRequestHandl
         return await dispatch(request, operation)
 
     @router.get(
+        "/project/delivery-receipts/{message_id}", summary="Read a project admission receipt",
+        openapi_extra={"parameters": [VERSION_PARAMETER]},
+    )
+    async def delivery_receipt(message_id: str, request: Request) -> JSONResponse:
+        async def operation() -> dict:
+            from uuid import UUID
+            try:
+                valid = UUID(message_id).version == 4
+            except ValueError:
+                valid = False
+            if not valid or request.query_params:
+                raise InvalidParamsError(message="A UUIDv4 Message ID without query parameters is required")
+            receipt = await handler.on_delivery_receipt(message_id, call_context())
+            if receipt is None:
+                raise TaskNotFoundError()
+            return receipt.model_dump(mode="json", by_alias=True)
+        return await dispatch(request, operation)
+
+    @router.get(
         "/tasks/{id}", summary="Poll an Agent Task",
         openapi_extra={"parameters": [VERSION_PARAMETER]},
     )
