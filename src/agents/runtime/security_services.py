@@ -524,6 +524,7 @@ class SecurityRuntimeServices:
 
     async def finalize(self, execution, decision, tracked, measured, *, task_id, context_id):
         from agents.roles.security_contract import SecurityDecision, validate_security_decision
+        from agents.runtime.requirement_scope import validate_generated_case_expectations
         execution.budget.check()
         self._tracked(tracked, execution)
         self._bundle(measured, execution)
@@ -545,6 +546,9 @@ class SecurityRuntimeServices:
             validated = validate_security_decision(data, execution.metadata.requirement_ids,
                                                   measured.finding_ids, measured.source_paths,
                                                   self._test_selectors or None)
+            if self._test_selectors:
+                validate_generated_case_expectations(validated.test_cases, configuration=execution.configuration,
+                    metadata=execution.metadata, role=AgentRole.SECURITY)
             anchors = {}
             for review in (*validated.requirement_reviews, *validated.finding_reviews):
                 identity = getattr(review, "requirement_id", getattr(review, "finding_id", None))

@@ -17,7 +17,6 @@ import json
 import os
 from pathlib import Path
 import re
-from time import perf_counter
 
 from dotenv import dotenv_values
 import httpx
@@ -30,6 +29,7 @@ from agents.llm.contracts import (
 from agents.llm.openai_responses import OpenAIResponsesProvider
 from diagnostics.communication.contracts import CheckOptions, fingerprint, row_clean
 from diagnostics.communication.probe import ProbeExecutor
+from diagnostics.communication.timing import MODEL_PHASES, phase_values
 from diagnostics.communication.workloads import object_schema, shape_only, specification_schema, request_digest
 from orchestrator.domain.run_configuration import ModelConfiguration
 
@@ -92,12 +92,28 @@ freeText는 현재 역할이 받은 내용을 한국어 한두 문장으로 설�
 """
 
 
+class _ObservedResponseStream(httpx.AsyncByteStream):
+    """Keep body bytes/cancellation unchanged; record only full consumption."""
+
+    def __init__(self, delegate, row):
+        self.delegate, self.row = delegate, row
+
+    async def __aiter__(self):
+        async for chunk in self.delegate:
+            yield chunk
+        self.row.mark_time("apiBodyRead")
+
+    async def aclose(self):
+        await self.delegate.aclose()
+
+
 class ObservedOpenAITransport(httpx.AsyncBaseTransport):
     """Observe safe API metadata; no Authorization or raw error-body logging."""
 
-    def __init__(self, observation: dict, expected_input_hash: str, delegate=None):
+    def __init__(self, observation: dict, expected_input_hash: str, delegate=None, *, row=None):
         self.observation = observation
         self.expected_input_hash = expected_input_hash
+        self.row = row
         self.delegate = delegate if delegate is not None else httpx.AsyncHTTPTransport(retries=0, trust_env=False)
 
     async def handle_async_request(self, request):
@@ -109,7 +125,18 @@ class ObservedOpenAITransport(httpx.AsyncBaseTransport):
         self.observation["apiInputMatches"] = actual_hash == self.expected_input_hash
         if not self.observation["apiInputMatches"]:
             raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+        if self.row is not None:
+            self.row.mark_time("apiDispatched")
         response = await self.delegate.handle_async_request(request)
+        if self.row is not None:
+            self.row.mark_time("apiHeaders")
+            try:
+                response.content
+            except httpx.ResponseNotRead:
+                response.stream = _ObservedResponseStream(response.stream, self.row)
+            else:
+                # Mock/custom transports may already have buffered the body.
+                self.row.mark_time("apiBodyRead")
         self.observation["httpStatus"] = response.status_code
         request_id = response.headers.get("x-request-id", "")
         if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id):
@@ -166,36 +193,46 @@ class LiveRuntime:
     async def complete(self, payload, row):
         if self.fatal_error or len(self.calls) >= self.max_model_calls:
             raise LLMRuntimeError(LLMErrorCode.BUDGET)
+        if row.model_observation is not None:
+            # One probe owns one model attempt. Reusing its first timestamps
+            # for a new paid request would create falsely correlated timings.
+            raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
         observation = {"probeId": row.probe_id, "role": row.role, "requestedModelId": self.model_id,
                        "temperature": self.temperature, "maxOutputTokens": self.max_output_tokens,
                        "status": "REQUESTING", "httpStatus": None, "usage": None}
         self.calls.append(observation)
         row.model_observation = observation
-        output = self.output_contract(payload, row.role)
-        items = [{"role": "user", "content": json_text({"received": payload})}]
-        transport = ObservedOpenAITransport(observation, fingerprint(items),
-                                            self.transport_factory() if self.transport_factory else None)
-        provider = OpenAIResponsesProvider(self.api_key, transport=transport)
-        request = LLMRequest(
-            model=ModelConfiguration(provider="openai", modelId=self.model_id, temperature=self.temperature),
-            system_prompt=self.role_prompt(row.role), input_items_json=json_text(items), tools=(),
-            output=output, max_output_tokens=self.max_output_tokens, timeout_seconds=self.timeout_seconds,
-        )
-        started = perf_counter()
+        row.mark_time("modelStart")
+        provider = None
         try:
+            output = self.output_contract(payload, row.role)
+            items = [{"role": "user", "content": json_text({"received": payload})}]
+            transport = ObservedOpenAITransport(observation, fingerprint(items),
+                self.transport_factory() if self.transport_factory else None, row=row)
+            provider = OpenAIResponsesProvider(self.api_key, transport=transport)
+            request = LLMRequest(
+                model=ModelConfiguration(provider="openai", modelId=self.model_id, temperature=self.temperature),
+                system_prompt=self.role_prompt(row.role), input_items_json=json_text(items), tools=(),
+                output=output, max_output_tokens=self.max_output_tokens, timeout_seconds=self.timeout_seconds,
+            )
+            row.mark_time("modelReady")
             result = await provider.complete(request)
-            observation["reportedModelId"] = result.model_id
-            observation["usage"] = asdict(result.usage) if result.usage else None
-            if result.refused:
-                raise LLMRuntimeError(LLMErrorCode.REFUSAL)
-            if result.status != "completed":
-                raise LLMRuntimeError(LLMErrorCode.INCOMPLETE)
-            if result.tool_calls or not isinstance(result.output_text, str):
-                raise LLMRuntimeError(LLMErrorCode.RESPONSE)
-            answer = parse_json(result.output_text)
-            output.schema.validate(answer)
-            if not observation.get("apiInputMatches"):
-                raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+            row.mark_time("providerReturned")
+            try:
+                observation["reportedModelId"] = result.model_id
+                observation["usage"] = asdict(result.usage) if result.usage else None
+                if result.refused:
+                    raise LLMRuntimeError(LLMErrorCode.REFUSAL)
+                if result.status != "completed":
+                    raise LLMRuntimeError(LLMErrorCode.INCOMPLETE)
+                if result.tool_calls or not isinstance(result.output_text, str):
+                    raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+                answer = parse_json(result.output_text)
+                output.schema.validate(answer)
+                if not observation.get("apiInputMatches"):
+                    raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+            finally:
+                row.mark_time("modelChecked")
             observation["status"] = "COMPLETED"
             return answer
         except LLMRuntimeError as error:
@@ -212,9 +249,20 @@ class LiveRuntime:
             observation["status"] = "CANCELED"
             observation["errorCode"] = "REMOTE_MODEL_COMPLETION_UNVERIFIED"
             raise
+        except Exception:
+            observation["status"] = "FAILED"
+            observation["errorCode"] = "DIAGNOSTIC_PREPARATION_OR_EXECUTION_FAILED"
+            raise
         finally:
-            observation["apiRoundTripMs"] = round((perf_counter() - started) * 1000, 3)
-            await provider.aclose()
+            row.mark_time("modelCallEnd")
+            observation["apiRoundTripMs"] = row.ms("modelReady", "modelCallEnd")
+            try:
+                if provider is not None:
+                    await provider.aclose()
+            finally:
+                row.mark_time("modelFinish")
+                durations = phase_values(row.points)
+                observation["timings"] = {name: durations[name] for name in (*MODEL_PHASES, "providerHeadersMs", "modelTotalMs")}
 
 
 class OpenAIProbeExecutor(ProbeExecutor):
@@ -237,6 +285,7 @@ class OpenAIProbeExecutor(ProbeExecutor):
 
 def write_html(directory, report):
     rows=[]
+    performance_rows=[]
     findings=[]
     transport_passed=0
     contract_passed=0
@@ -244,8 +293,11 @@ def write_html(directory, report):
         for row in run["rows"]:
             model=row.get("model") or {}
             checks=row["checks"]
-            transport_ok=(all(c["status"]=="PASS" for c in checks["request"].values())
-                          and checks["response"]["status"]=="PASS" and checks["identity"]=="PASS")
+            transport_ok=(row['phase']=='COMPLETED'
+                          and all(c["status"]=="PASS" for c in checks["request"].values())
+                          and all(checks[name]["status"]=="PASS" for name in ("response","metadata","responseMetadata"))
+                          and checks["identity"]=="PASS" and model.get('apiInputMatches') is True
+                          and (row.get('delivery') or {}).get('check',{}).get('status')=='PASS')
             transport_passed+=int(transport_ok)
             contract_passed+=int(checks['sourceGrounding']['status']=='PASS')
             if checks['sourceGrounding']['differences']:
@@ -258,6 +310,17 @@ def write_html(directory, report):
                 model.get('apiRoundTripMs','—'),row['timings']['totalMs'],usage.get('total_tokens','—'),
                 model.get('providerErrorCode') or model.get('errorCode') or '—',
             ])+'</tr>')
+        architecture=run.get('architecture') or run.get('options',{}).get('architecture','—')
+        for role, group in (run.get('performance') or {}).get('roles',{}).items():
+            values=[architecture,role,group['completedSamples'],group['incompleteSamples']]
+            values += [group['phases'][name]['p50Ms'] for name in (
+                'admissionAndSchedulingMs','agentProcessingMs','providerExchangeMs','resultObservationMs')]
+            performance_rows.append('<tr>'+''.join('<td>'+escape('미관측' if value is None else str(value))+'</td>'
+                                                    for value in values)+'</tr>')
+    performance_html=('''<h2>단계별 지연 관측</h2><p>정상 완료 호출의 p50입니다. API 교환은 네트워크·서버 처리·본문 수신을 포함하며, 역할별 작업량과 품질은 별도로 확인합니다.</p>
+<div class="table"><table><thead><tr>'''+''.join('<th>'+name+'</th>' for name in (
+        '구조','역할','완료 표본','미완료 표본','접수·실행 대기 ms','Agent 처리 ms','API 교환 ms','결과 확인 ms'))+
+        '</tr></thead><tbody>'+''.join(performance_rows)+'</tbody></table></div>') if performance_rows else ''
     body=f"""<!doctype html><html lang="ko"><meta charset="utf-8"><title>실제 OpenAI A2A 통신 검증</title>
 <style>body{{font:15px/1.8 -apple-system,'Apple SD Gothic Neo',sans-serif;background:#f2f5f9;color:#182330;margin:40px}}main{{max-width:1280px;margin:auto;background:white;padding:32px;border-radius:16px}}h1{{font-size:28px}}table{{width:100%;border-collapse:collapse;font-size:13px}}td,th{{padding:10px;text-align:left;border-bottom:1px solid #d9e1e9}}th{{background:#eef3fa}}.note{{padding:18px;background:#eef4ff;border-left:3px solid #1558c9}}code,pre{{overflow-wrap:anywhere}}pre{{white-space:pre-wrap;background:#f2f5f9;padding:16px;border-radius:8px;font-size:12px}}@media(max-width:800px){{body{{margin:12px}}main{{padding:16px}}.table{{overflow:auto}}}}</style>
 <main><p>atelier. / REAL OPENAI · A2A DIAGNOSTICS</p><h1>실제 모델 호출 결과</h1>
@@ -265,6 +328,7 @@ def write_html(directory, report):
 <p><b>API HTTP 200: {sum(c.get('httpStatus')==200 for c in report['calls'])}/{len(report['calls'])} · 송수신 일치: {transport_passed}/{len(rows)} · 고정 계약 일치: {contract_passed}/{len(rows)}</b></p>
 <p class="note">합성 요청을 실제 A2A 서버로 전달한 뒤 OpenAI Responses API를 호출했습니다. 요구사항·정책·권한 값은 모델이 작성하고 고정 참조로 대조합니다. 해시·ID는 호스트의 전송 증거입니다. 제품 코드 생성·빌드·QA·보안 검사와 자유 서술 전체의 사실성은 검증하지 않았습니다.</p>
 <div class="table"><table><thead><tr>{''.join('<th>'+x+'</th>' for x in ['역할','Task 상태','API HTTP','송수신','고정 계약','API 왕복 ms','전체 ms','토큰','오류 코드'])}</tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+{performance_html}
 {''.join(findings)}
 <p>원본: <a href="report.json">report.json</a> · 인증·과금·모델 오류 시 추가 호출을 중단하며 자동 재시도하지 않습니다. 실패·미완료는 성공으로 집계하지 않습니다.</p></main></html>"""
     (directory/"report.html").write_text(body,encoding="utf-8")
@@ -286,7 +350,7 @@ async def run_live(args, runtime=None):
             if runtime.fatal_error:
                 break
             options=CheckOptions(profile=args.profile,architecture=architecture,rounds=args.rounds)
-            report=await lab.execute(options,lambda event:None)
+            report=await lab.execute(options)
             reports.append(report)
             print(json.dumps({'architecture':architecture,'summary':report['summary'],
                               'calls':len(runtime.calls),'fatalError':runtime.fatal_error},ensure_ascii=False),flush=True)

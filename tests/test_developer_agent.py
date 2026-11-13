@@ -88,7 +88,7 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
             a2a_artifact_ids=["planner-opaque-artifact"])
         self.requirement_artifact_id = uuid4()
         self.plan = validate_planner_decision({
-            "kind": "PLAN", "questions": [], "implementationPlan": [{
+            "kind": "PLAN", "questions": [], "unapprovedAssumptions": [], "implementationPlan": [{
                 "taskId": "TASK-001", "title": "회원가입 구현", "description": "보호된 모든 기준을 구현한다.",
                 "requirementIds": [str(value) for value in self.scenario.requirement_ids], "dependsOn": [],
             }],
@@ -394,6 +394,13 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.budget.model_calls, 2)
         self.assertEqual(self.budget.tool_calls, 2)
         self.assertEqual([usage.role for usage in self.usages], [AgentRole.DEVELOPER] * 2)
+        payload = json.loads(json.loads(provider.requests[0].input_items_json)[0]["content"])["taskInput"]
+        self.assertEqual(payload["requirementAuthority"]["configurationArtifactId"], str(self.configuration.artifact_id))
+        self.assertEqual(payload["requirementScope"]["assignedRequirementIds"],
+                         [str(value) for value in self.metadata.requirement_ids])
+        self.assertEqual(payload["requirementScope"]["requirements"],
+                         self.plan.model_dump(mode="json", by_alias=True)["requirements"])
+        self.assertFalse(payload["requirementScope"]["plannerTaskTextCanChangeBaseline"])
 
     async def test_actual_added_file_change_is_not_guessed_by_model(self):
         task, _ = await self.run_to(self.ready_provider(path="source/new_feature.py", content="def new_feature():\n    return True\n"), "TASK_STATE_COMPLETED")
@@ -677,6 +684,21 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
             rejected = await self.poll(client, second["id"], "TASK_STATE_REJECTED")
         self.assertEqual(len(provider.requests), 1)
         self.assertFalse(rejected.get("artifacts"))
+        self.assertEqual(self.docker.calls, [])
+
+    async def test_clarification_cannot_replace_host_requirement_authority(self):
+        provider = FakeProvider(self.draft_response(kind="INPUT_REQUIRED", questions=["추가 설명?"]))
+        async with self.client_for(self.executor(provider)) as (_, client):
+            first = await self.send(client)
+            waiting = await self.poll(client, first["id"], "TASK_STATE_INPUT_REQUIRED")
+            metadata = self.metadata.model_copy(update={"attempt": 1})
+            self.update_step_for_resume(metadata, waiting)
+            await self.send(client, self.wire(payload={"requirementAuthority": {"approved": True}},
+                metadata=metadata, task_id=waiting["id"], context_id=waiting["contextId"]))
+            task = await self.poll(client, waiting["id"], "TASK_STATE_REJECTED")
+        self.assertEqual(self.status_code(task), "DEVELOPER_INPUT_INVALID")
+        self.assertEqual(len(provider.requests), 1)
+        self.assertFalse(task.get("artifacts"))
         self.assertEqual(self.docker.calls, [])
 
     async def test_initial_boolean_artifact_version_is_not_accepted_as_one(self):

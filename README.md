@@ -367,6 +367,67 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 입력은 [자연어 요청 폴더](src/diagnostics/communication/fixtures/natural)에, 최신 재실행의 실제 입출력 증거는 Git에서 제외되는 `.data/diagnostics/natural-language-3cases-2026-11-10-redo-01/`에 있습니다. 제품 코드 생성·빌드·실제 QA·보안 스캔은 이번 진단 범위 밖입니다.
 
+### 승인 요구사항 원장·Planner 미승인 가정 분리 — 61·62번
+
+[61번](docs/61-approved-requirement-authority.md)은 Run 생성 때 동결한 요구사항의 출처·ID·해시를 불변 원장으로 식별합니다. [62번](docs/62-planner-unapproved-assumptions.md)은 멀티·싱글 기획 단계에서 `unapprovedAssumptions`를 별도 필드로 받고, 미승인 조건이 표시된 실행 계획을 거절하거나 질문 대기로 남깁니다. 제품 `requirements.json` v1과 A2A·MCP 권한은 유지하고 내부 모델 Draft만 `planner_decision_v2`로 갱신했습니다.
+
+구조적 차단과 실제 모델의 의미 정확성은 구분합니다. 이번 변경으로 작업 설명 속의 모든 숨은 조건을 자동 탐지하거나 실제 API 실험의 개선율을 증명한 것은 아닙니다.
+
+### Developer 요구사항 대조·독립 검증 기준 — 63·64번
+
+[63번](docs/63-developer-requirement-scope.md)은 Developer의 승인 요구사항·Task 연결을 동결 원장과 대조해 내부 모델 입력에 제공합니다. [64번](docs/64-independent-validation-criteria.md)은 QA·Security가 같은 원장의 역할별 기준을 사용하고, 모델 생성 테스트의 `expectedResult`가 해당 Acceptance Criteria 원문과 일치하는지 실행 전 검사합니다. 싱글·멀티와 Host 서비스의 직접 호출 모두 동일 검증을 적용합니다.
+
+기존 제품 Artifact Schema·보호된 평가 테스트 정책·도구 실행 근거는 유지합니다. 기대값 원문 일치는 테스트 코드의 의미 정확성이나 제품 성공을 증명하지 않습니다.
+
+### 역할별 출력·Host 결과 인수 — 65·66번
+
+[65번](docs/65-natural-role-output-contracts.md)은 자연어 진단의 `roleWork`를 역할별 Schema로 제한하고, 응답이 도착했어도 계약을 어기면 후속 Agent로 전달하지 않습니다. Single은 네 관점을 모두 작성하며, 새 기록은 역할별 Schema 해시를 갖는 v2입니다. 기존 실제 API 보고서는 변경하지 않았습니다.
+
+[66번](docs/66-host-artifact-admission.md)은 제품 Host가 역할별 Artifact 이름·개수·중복 ID·Part·project metadata를 먼저 검사하도록 연결했습니다. 추가 결과물을 조용히 무시하지 않고 기존 검토 경로로 돌립니다. 정상 싱글·멀티와 수정 루프를 확인했으며, 인수 통과를 실제 제품 성공으로 사용하지 않습니다.
+
+### 수신 기록·전달 무결성 관측 — 67·68번
+
+[67번](docs/67-a2a-delivery-receipts.md)은 Agent DB의 기존 Message 접수 기록을 읽는 프로젝트 조회 API와 Client를 추가하고, SDK JSON 변환 중 payload·metadata의 실제 값 손실을 송신 전에 거절합니다. 원문 대신 식별자·접수 시각·해시를 반환하며, 접수 확인을 실행 성공으로 사용하지 않습니다.
+
+[68번](docs/68-delivery-integrity-observations.md)은 구조화·자연어 통신 진단에서 송신 요청과 실제 DB 접수 기록을 대조합니다. 기록 미관측과 실제 불일치를 구분하고, 응답·Task ID를 보존하면서 미확인 결과의 후속 전달을 차단합니다. 제품 Host 전체의 자동 차단 정책이나 기존 실제 API 보고서를 변경한 것은 아닙니다.
+
+### 처리 구간·역할별 지연 관측 — 69·70번
+
+[69번](docs/69-communication-phase-timing.md)은 로컬 통신 진단에서 접수·실행 대기, 모델 준비, API 헤더·본문 수신, 로컬 검증, 결과 확인을 분리합니다. 미관측 시간은 null로 유지하고, 수신 확인 조회 때문에 결과 관측 기한이 늘어나지 않도록 했습니다.
+
+[70번](docs/70-communication-performance-summary.md)은 역할별 완료 표본의 구간 p50·p95와 편차, 토큰 수 참고값, 병렬 요청 구간의 합집합을 제공합니다. 결과 JSON과 기존 구조화 HTML 생성기에 연결했으며, 제품 전체시간이나 구조 간 성능 우열로 사용하지 않습니다. 기존 실제 API 보고서는 변경하지 않았습니다.
+
+### 진단 연결·반복 계산 비용 축소 — 71·72번
+
+[71번](docs/71-a2a-session-reuse.md)은 같은 로컬 진단 서버 세션에서 역할별 HTTP Client와 Agent Card를 재사용합니다. 자격증명·콜백을 역할별로 격리하고 요청별 수신 확인·새 식별자·명시적 Context·취소·정리는 유지하며, 재사용 상태를 진단 결과에 기록합니다.
+
+[72번](docs/72-diagnostic-observer-optimization.md)은 구독 없는 CLI의 중간 화면 생성, 최종 행·요약의 중복 계산, 중첩 JSON의 반복 정규화를 줄입니다. 실시간 구독과 모든 최종 검사는 유지합니다. 로컬 비교 함수의 비용 감소를 확인했으며 실제 OpenAI 전체 지연 개선율은 아직 측정하지 않았습니다.
+
+### 보강 후 실제 OpenAI 재검증·보고서 — 73·74번
+
+[73번](docs/73-live-communication-revalidation.md)은 같은 자연어 요청 3개와 같은 모델로 실제 API 15회를 실행하고 선택 실행 소스·환경·Transport·실행 순서를 기록합니다. 송수신·DB 접수·API 실제 입력은 15/15 일치했고 다른 역할 필드 혼입은 0개였습니다.
+
+[74번](docs/74-communication-revalidation-report.md)과 [새 PDF](docs/reports/agent-communication-revalidation-2026-11-13/revalidation-report.pdf)는 자연어 원문, 송수신 15건, 역할별 시간과 남은 의미 해석 위험을 정리합니다. 블로그의 미승인 조건 검사 기준화와 추리게임의 개인정보 범위 확대 위험이 남아 있어 할루시네이션 부재를 선언하지 않습니다. 과거 보고서는 보존하며 실제 제품 Host·MCP·Docker 전체 흐름과 통제된 성능 비교는 별도 확인 대상입니다.
+
+### 원문 조건·검사 연결·의미 검토와 재실험 — 75~80번
+
+[75번 경로 대조](docs/75-diagnostic-product-path-audit.md), [76번 조건 분리](docs/76-natural-condition-classification.md), [77번 기대값 연결](docs/77-natural-expectation-bindings.md), [78번 의미 검토·인계](docs/78-semantic-review-handoff-gate.md)는 자연어 진단에서 원문 인용·미승인 가정·검사 연결·별도 모델 검토·필드별 근거를 확인합니다. 질문·계약 오류·미검증 결과는 다음 역할로 넘기지 않습니다. 제품 승인 원장을 모델 추출 결과로 대체하지 않습니다.
+
+[79번 회귀](docs/79-guarded-single-multi-regression.md)는 관련 173개 검사를 확인했습니다. [80번 실제 재실험](docs/80-guarded-live-revalidation.md)과 [새 PDF](docs/reports/agent-communication-guarded-2026-11-13/guarded-natural-4cases-report.pdf)는 총 API 38회, 역할 송수신 16/16 일치, 초기 질문·거절·미호출, 검토기가 놓친 개인정보 확대와 보완 후 보류, 회사 소개 최종 5/5 인계를 구분해 기록합니다. 의미 판정 정확성과 보수적인 전달 차단은 같은 지표가 아닙니다.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m diagnostics.communication.guarded \
+  --model gpt-4.1-mini-2025-04-14 --out .data/diagnostics/guarded-new-run
+```
+
+현재 guarded는 역할 답변/검토를 각각 최대 20회로 제한하고 자동 Retry·대체 모델을 사용하지 않습니다. 기존 v2 CLI는 과거 진단 재현용입니다. 실제 제품 Host·MCP·Docker 실행은 81~82번으로 남아 있습니다.
+
+### 제품 Agent 의미 검토·입력 대기 연결
+
+실제 Multi 네 역할과 Single의 각 단계가 최종 Draft 게시 전에 Host의 동결 기준과 의미를 대조합니다. 근거 부족·범위 확대는 `INPUT_REQUIRED`로 보류하고, 검토 ID·해시·사유·관련 호출 sequence를 SQLite와 Trace에 남깁니다. 검토 호출도 기존 Run 예산에 포함되며 모델 판정은 요구사항 승인이나 제품 성공이 아닙니다. 이미 파일을 쓴 보류 작업은 같은 Task에서 쓰기를 재실행하지 않습니다.
+
+[실행 경로·예산·권한](docs/product-semantic-review-integration.md), [보류 메시지·재개 정책·검증 범위](docs/semantic-review-input-required.md). 81·82번 실제 환경 실행은 별도 작업입니다.
+
 ## 테스트
 
 ```bash

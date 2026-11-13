@@ -20,12 +20,13 @@ from agents.llm.contracts import LLMErrorCode
 from agents.platform.budgets import RunBudgetError, RunBudgetRegistry
 from agents.platform.telemetry_store import AgentTelemetryStore
 from orchestrator.domain import A2ATaskState, AgentRole, WorkflowStatus
-from test_llm_runtime import FakeProvider, text_response
+from semantic_helpers import SemanticFakeProvider as FakeProvider
+from test_llm_runtime import text_response
 
 
 def _question(*, usage="measured"):
     return text_response(json.dumps({"kind": "INPUT_REQUIRED",
-        "questions": ["동결 요구사항을 유지한 채 계속할까요?"], "implementationPlan": []},
+        "questions": ["동결 요구사항을 유지한 채 계속할까요?"], "implementationPlan": [], "unapprovedAssumptions": []},
         ensure_ascii=False), usage=usage)
 
 
@@ -65,20 +66,20 @@ class OwnedAgentTelemetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(binding.get("requirementIds", []), [str(value) for value in step.requirement_ids])
         self.assertEqual(binding.get("inputArtifactIds", []), [str(value) for value in step.input_artifact_ids])
 
-    async def test_actual_four_roles_account_six_models_five_tools_and_physical_attempts_once(self):
+    async def test_actual_four_roles_account_ten_models_five_tools_and_physical_attempts_once(self):
         async with self.base.running_platform() as (client, providers):
             run_id = await self.submit(client)
             usage, telemetry = await self.get_accounting(client, run_id)
             budget = self.base.platform.budgets.resolve(self.base.repository.get_run_configuration(run_id))
-            self.assertEqual((budget.model_calls, budget.tool_calls, budget.total_tokens), (6, 5, 90))
-            self.assertEqual(sum(len(provider.requests) for provider in providers.values()), 6)
-            self.assertEqual(usage["total"], 6)
-            self.assertEqual({record["sequence"] for record in usage["records"]}, set(range(1, 7)))
+            self.assertEqual((budget.model_calls, budget.tool_calls, budget.total_tokens), (10, 5, 150))
+            self.assertEqual(sum(len(provider.requests) for provider in providers.values()), 10)
+            self.assertEqual(usage["total"], 10)
+            self.assertEqual({record["sequence"] for record in usage["records"]}, set(range(1, 11)))
             self.assertEqual({record["role"] for record in usage["records"]}, {role.value for role in AgentRole})
             self.assertEqual({key: usage["summary"][key] for key in
                 ("modelCalls", "toolCalls", "recordedModelCalls", "knownTotalTokens", "totalTokens")},
-                {"modelCalls": 6, "toolCalls": 5, "recordedModelCalls": 6,
-                 "knownTotalTokens": 90, "totalTokens": 90})
+                {"modelCalls": 10, "toolCalls": 5, "recordedModelCalls": 10,
+                 "knownTotalTokens": 150, "totalTokens": 150})
             self.assertTrue(usage["summary"]["usageComplete"])
             self.assertIsNone(usage["summary"]["costUsd"])
             self.assertFalse(usage["summary"]["executionBlocked"])
@@ -92,8 +93,8 @@ class OwnedAgentTelemetryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(record["totalTokens"], 15)
                 self.assertIsNone(record["costUsd"])
             events, _total = self.base.repository.list_events(run_id, limit=500, offset=0)
-            self.assertEqual(sum(event.event_type == "LLM_MODEL_CALLED" for event in events), 6)
-            self.assertEqual(sum(event.event_type == "LLM_CALL_FINISHED" for event in events), 6)
+            self.assertEqual(sum(event.event_type == "LLM_MODEL_CALLED" for event in events), 10)
+            self.assertEqual(sum(event.event_type == "LLM_CALL_FINISHED" for event in events), 10)
             self.assertEqual(sum(event.event_type == "MCP_TOOL_CALLED" for event in events), 5)
             self.assertEqual(sum(event.event_type == "MCP_TOOL_FINISHED" for event in events), 5)
             physical = [row for row in telemetry["events"] if row["kind"] == "MCP"]
@@ -140,7 +141,7 @@ class OwnedAgentTelemetryTests(unittest.IsolatedAsyncioTestCase):
             response = await client.get(f"/api/v1/runs/{run_id}/usage?limit=2&offset=1")
             self.assertEqual(response.status_code, 200, response.text)
             page = response.json()
-            self.assertEqual((page["total"], page["limit"], page["offset"], len(page["records"])), (6, 2, 1, 2))
+            self.assertEqual((page["total"], page["limit"], page["offset"], len(page["records"])), (10, 2, 1, 2))
             self.assertEqual(page["summary"], complete["summary"])
             self.assertEqual(page["records"], complete["records"][1:3])
             tail = await client.get(f"/api/v1/runs/{run_id}/telemetry?limit=1&offset=9999")
@@ -276,13 +277,13 @@ class OwnedAgentTelemetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200, response.text)
             usage, _ = await self.get_accounting(client, run_id)
             planner = [row for row in usage["records"] if row["role"] == "PLANNER"]
-            self.assertEqual(len(planner), 2)
+            self.assertEqual(len(planner), 3)
             self.assertEqual({row["binding"]["attempt"] for row in planner}, {0, 1})
             for row in planner:
                 self.assertEqual((row["binding"]["workflowStepId"], row["binding"]["a2aTaskId"], row["binding"]["agentContextId"]),
                                  (str(before.workflow_step_id), before.a2a_task_id, before.agent_context_id))
             self.assertEqual((usage["summary"]["modelCalls"], usage["summary"]["toolCalls"], usage["summary"]["totalTokens"]),
-                             (7, 5, 105))
+                             (11, 5, 165))
             run = self.base.repository.get_run(run_id)
             self.assertEqual((run.fix_attempt, run.code_version), (0, 1))
             self.assertEqual(self.base.platform.budgets.resolve(self.base.repository.get_run_configuration(run_id)).snapshot.deadline_utc,

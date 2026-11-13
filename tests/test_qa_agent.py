@@ -225,7 +225,8 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
     def cases(self):
         return [{"toolName": self.tool, "selector": self.selector, "testId": identifier,
                  "requirementId": str(requirement), "title": f"QA 독립 검증 {index}",
-                 "expectedResult": "동결 Acceptance Criteria를 충족한다."}
+                 "expectedResult": next(item.acceptance_criteria[0] for item in self.fixture.scenario.requirements
+                                        if item.requirement_id == requirement)}
                 for index, (identifier, requirement) in enumerate(zip(self.case_ids, self.step.requirement_ids), 1)]
 
     def draft_response(self, *, kind="READY", cases=None, questions=None, **extra):
@@ -296,6 +297,26 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.configurations[0][1].name, "qa_decision")
         self.assertEqual({tool.name for tool in provider.requests[0].tools},
                          {"read_project_file", "write_test_file", "read_test_report"})
+        payload = json.loads(json.loads(provider.requests[0].input_items_json)[0]["content"])["taskInput"]
+        self.assertEqual(payload["requirementScope"]["role"], "QA")
+        self.assertEqual(payload["requirementScope"]["taskBindings"], [])
+        self.assertEqual(payload["requirementScope"]["assignedRequirementIds"],
+                         [str(value) for value in self.metadata.requirement_ids])
+        criteria = {row["requirementId"]: row["acceptanceCriteria"]
+                    for row in payload["requirementScope"]["requirements"]}
+        for result in report.tests:
+            self.assertIn(result.expected_result, criteria[str(result.requirement_id)])
+
+    async def test_unapproved_generated_expectation_fails_before_test_execution(self):
+        cases = self.cases()
+        cases[0]["expectedResult"] = "동아리 회원만 가입을 허용해야 한다."
+        provider = FakeProvider(self.write_response(), self.draft_response(cases=cases))
+        task, _ = await self.run_to(provider, "TASK_STATE_FAILED")
+        self.assertEqual(self.status_code(task), "REQUIREMENT_SCOPE_INVALID")
+        self.assertFalse(task.get("artifacts"))
+        self.assertEqual([name for name, _ in self.tool_calls()], ["write_test_file"])
+        self.assertEqual(self.docker.calls, [])
+        self.assertIsNone(self.repository.get_run(self.run.run_id).verdict)
 
     async def test_actual_failure_is_completed_qa_fail_not_infrastructure_retry(self):
         self.set_unit_report(["FAIL", *["PASS"] * (len(self.case_ids) - 1)])
@@ -433,6 +454,22 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
                                                    "agent_context_id": asked["contextId"]})
             self._update_step(self.step)
             await self.send(client, self.wire(payload={"testTargets": [], "answer": "검사 생략"},
+                task_id=asked["id"], context_id=asked["contextId"]))
+            task = await self.poll(client, asked["id"], "TASK_STATE_REJECTED")
+        self.assertEqual(self.status_code(task), "QA_INPUT_INVALID")
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(self.docker.calls, [])
+
+    async def test_clarification_cannot_replace_host_requirement_scope(self):
+        provider = FakeProvider(self.draft_response(kind="INPUT_REQUIRED", questions=["추가 설명?"]))
+        async with self.client_for(self.executor(provider)) as (_, client):
+            first = await self.send(client)
+            asked = await self.poll(client, first["id"], "TASK_STATE_INPUT_REQUIRED")
+            self.metadata = self.metadata.model_copy(update={"attempt": 1})
+            self.step = self.step.model_copy(update={"attempt": 1, "a2a_task_id": asked["id"],
+                                                   "agent_context_id": asked["contextId"]})
+            self._update_step(self.step)
+            await self.send(client, self.wire(payload={"requirementScope": {"requirements": []}},
                 task_id=asked["id"], context_id=asked["contextId"]))
             task = await self.poll(client, asked["id"], "TASK_STATE_REJECTED")
         self.assertEqual(self.status_code(task), "QA_INPUT_INVALID")

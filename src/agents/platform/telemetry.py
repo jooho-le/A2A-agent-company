@@ -92,6 +92,9 @@ class BoundRuntimeTelemetry:
         if self._external_sink is not None:
             self._external_sink(record)
 
+    def semantic_review(self, record):
+        self.store.append_semantic_review(self._event('AGENT_SEMANTIC_REVIEWED'), record, self.model)
+
     def tool_event(self, event_type, record, attempt, duration_ms):
         try:
             if (type(record) is not ToolCallRecord

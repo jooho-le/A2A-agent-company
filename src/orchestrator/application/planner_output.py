@@ -19,6 +19,8 @@ from pydantic import (
 )
 
 from orchestrator.domain.contract_validation import require_json_integer
+from orchestrator.application.output_envelope import validate_output_envelope
+from orchestrator.domain.states import AgentRole
 
 
 class PlannerOutputValidationError(ValueError):
@@ -139,6 +141,7 @@ def parse_planner_output(
 ) -> ValidatedPlannerOutput:
     """Find and validate the single requirements.json Artifact on a completed Task."""
     try:
+        validate_output_envelope(task, AgentRole.PLANNER, run_id=run_id, workflow_step_id=workflow_step_id)
         if TaskState.Name(task.status.state) != "TASK_STATE_COMPLETED":
             raise ValueError("Planner Task is not completed")
         artifacts = [

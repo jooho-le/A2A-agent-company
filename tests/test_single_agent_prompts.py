@@ -26,7 +26,7 @@ class SingleDraftContractTests(unittest.TestCase):
         return {"kind": "PLAN", "implementationPlan": [{
             "taskId": "TASK-001", "title": "회원가입 구현", "description": "고정 요구사항 구현",
             "requirementIds": [str(value) for value in self.scenario.requirement_ids], "dependsOn": [],
-        }], "questions": []}
+        }], "questions": [], "unapprovedAssumptions": []}
 
     def test_planning_uses_the_canonical_requirements_and_cannot_drop_one(self):
         contract = build_single_draft_contract(SinglePhase.PLANNING, scenario=self.scenario)
@@ -35,6 +35,18 @@ class SingleDraftContractTests(unittest.TestCase):
         payload["implementationPlan"][0]["requirementIds"].pop()
         with self.assertRaises(SingleContractError):
             contract.validate(payload)
+
+    def test_single_planning_uses_the_same_unapproved_condition_boundary(self):
+        contract = build_single_draft_contract(SinglePhase.PLANNING, scenario=self.scenario)
+        condition = "초기 이용자 설명을 접근 제한으로 확정할 수 없다."
+        plan = self.plan()
+        plan["unapprovedAssumptions"] = [condition]
+        with self.assertRaises(SingleContractError):
+            contract.validate(plan)
+        decision = contract.validate({"kind": "INPUT_REQUIRED", "implementationPlan": [],
+            "questions": ["접근 제한을 확인해 주세요."], "unapprovedAssumptions": [condition]})
+        self.assertIsNone(decision.plan)
+        self.assertEqual(decision.unapproved_assumptions, (condition,))
 
     def test_implementation_and_fix_are_drafts_without_verdict_authority(self):
         for phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING):

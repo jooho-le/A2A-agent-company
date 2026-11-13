@@ -329,6 +329,7 @@ class LLMResult:
     data_json: str = field(repr=False)
     records: tuple[UsageRecord, ...]
     tool_calls: int
+    executed_tool_names: tuple[str, ...] = ()
 
     @property
     def data(self) -> dict:

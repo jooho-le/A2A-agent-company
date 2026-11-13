@@ -131,6 +131,16 @@ class LiveProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(report['summary']['verifiedRequests'],expected)
                 self.assertTrue(report['llmUsed']);self.assertEqual(report['mode'],'REAL_HTTP_A2A_OPENAI')
                 self.assertTrue(all(r['model']['status']=='COMPLETED' for r in report['rows']))
+                performance = report['performance']
+                self.assertEqual(performance['diagnosticElapsedMs'],report['elapsedMs'])
+                self.assertEqual(performance['timeline']['status'],'MEASURED')
+                self.assertEqual(len({r['timing']['clockId'] for r in report['rows']}),1)
+                self.assertEqual(sum(group['completedSamples'] for group in performance['roles'].values()),expected)
+                for row in report['rows']:
+                    self.assertEqual(row['timing']['ordering'],'PASS')
+                    self.assertEqual(row['timing']['phases']['providerExchangeMs']['status'],'MEASURED')
+                    self.assertIsNotNone(row['timings']['admissionAndSchedulingMs'])
+                    self.assertIsNotNone(row['timings']['resultObservationMs'])
             with self.assertRaises(ValueError):
                 await lab.execute(CheckOptions(rounds=1,architecture='SINGLE_AGENT'),lambda event:None)
         self.assertEqual(len(seen),5)

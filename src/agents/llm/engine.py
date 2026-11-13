@@ -13,6 +13,7 @@ from agents.llm.contracts import (
 )
 from agents.roles.contracts import get_role_contract
 from agents.roles.prompts import PreparedRolePrompt, build_system_prompt
+from agents.semantic_review import PreparedSemanticPrompt, SYSTEM as SEMANTIC_SYSTEM
 from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity, SinglePhase
 from agents.single.prompts import PreparedSinglePrompt, build_single_system_prompt, SINGLE_PROMPT_VERSION
 from mcp_tools.core.policy import SINGLE_PHASE_TOOL_ROLES
@@ -33,6 +34,7 @@ class LLMEngine:
         self, *, role: AgentServiceIdentity, provider: LLMProvider,
         tools: tuple[ToolDefinition, ...] = (), tool_executor: ToolExecutor | None = None,
         single_phase: SinglePhase | None = None,
+        semantic_review: bool = False,
     ):
         single = role is SingleAgentIdentity.SINGLE_AGENT
         if (single and not isinstance(single_phase, SinglePhase)
@@ -41,6 +43,9 @@ class LLMEngine:
         self._single_phase = single_phase
         self._role = role if single else get_role_contract(role).role
         self._provider = provider
+        self._semantic_review = semantic_review
+        if semantic_review and (tools or tool_executor is not None):
+            raise LLMRuntimeError(LLMErrorCode.TOOL_POLICY)
         allowed = SINGLE_PHASE_TOOL_ROLES[single_phase] if single else get_role_contract(role).allowed_tool_names
         if not isinstance(tools, tuple) or any(tool.name not in allowed for tool in tools):
             raise LLMRuntimeError(LLMErrorCode.TOOL_POLICY)
@@ -53,7 +58,7 @@ class LLMEngine:
         self._executor = tool_executor
 
     async def run(
-        self, *, prompt: PreparedRolePrompt | PreparedSinglePrompt, model: ModelConfiguration,
+        self, *, prompt: PreparedRolePrompt | PreparedSinglePrompt | PreparedSemanticPrompt, model: ModelConfiguration,
         output: StructuredOutput, budget: ExecutionBudget,
         workspace_id: str | None = None,
         usage_sink: Callable[[UsageRecord], None] | None = None,
@@ -62,8 +67,15 @@ class LLMEngine:
         records: list[UsageRecord] = []
         seen_calls: set[str] = set()
         executed = 0
+        executed_names = []
         try:
-            if self._role is SingleAgentIdentity.SINGLE_AGENT:
+            if self._semantic_review:
+                review_system = (build_single_system_prompt() if self._role is SingleAgentIdentity.SINGLE_AGENT
+                                 else SEMANTIC_SYSTEM)
+                valid = (type(prompt) is PreparedSemanticPrompt and prompt.actor == self._role
+                         and prompt.phase is self._single_phase and prompt.version == 1
+                         and prompt.system_prompt == review_system and prompt.output == output)
+            elif self._role is SingleAgentIdentity.SINGLE_AGENT:
                 valid = (isinstance(prompt, PreparedSinglePrompt)
                          and prompt.identity is SingleAgentIdentity.SINGLE_AGENT
                          and prompt.phase is self._single_phase and prompt.version == SINGLE_PROMPT_VERSION
@@ -209,6 +221,7 @@ class LLMEngine:
                             raise LLMRuntimeError(LLMErrorCode.TOOL_FAILED) from None
                         budget.account_tool_call(tool_sequence)
                         executed += 1
+                        executed_names.append(call.name)
                         budget.check()
                         definition.output_schema.validate(tool_result)
                         # Transcript copy is redacted, evidence assembly uses host data later.
@@ -225,7 +238,7 @@ class LLMEngine:
                 sanitized = redact_data(data)
                 output.schema.validate(sanitized)
                 budget.check()
-                return LLMResult(json_text(sanitized, max_bytes=limit), tuple(records), executed)
+                return LLMResult(json_text(sanitized, max_bytes=limit), tuple(records), executed, tuple(executed_names))
         except LLMRuntimeError as error:
             raise LLMRuntimeError(error.code, records=tuple(records)) from None
         except asyncio.CancelledError:

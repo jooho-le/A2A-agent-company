@@ -34,6 +34,7 @@ def _input_required(role):
     decision = {"kind": "INPUT_REQUIRED", "questions": ["동결 기준을 바꾸지 않고 작업을 계속할까요?"]}
     if role is AgentRole.PLANNER:
         decision["implementationPlan"] = []
+        decision["unapprovedAssumptions"] = []
     elif role is AgentRole.DEVELOPER:
         decision["summary"] = ""
     elif role is AgentRole.QA:
@@ -179,7 +180,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pipeline_fixture._task_input(harness.selected_providers[AgentRole.PLANNER].requests[1])
                              ["clarifications"], [{"answer": "동결 기준과 실행환경을 그대로 유지하고 진행해 주세요."}])
             self.assert_shared_budget(harness, budget, deadline)
-            self.assertEqual(budget.model_calls, 8)
+            self.assertEqual(budget.model_calls, 12)
 
     async def assert_targeted_validation_resume(self, role, *, revalidation=False):
         harness = _ControlHarness(self, qa_mode="initial-failure" if revalidation else "pass")
@@ -220,7 +221,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(reports), 2)
             self.assertTrue(all(report.execution_manifest == source.execution_manifest() for report in reports))
             self.assert_shared_budget(harness, budget, deadline)
-            self.assertEqual(budget.model_calls, 14 if revalidation else 8)
+            self.assertEqual(budget.model_calls, 21 if revalidation else 12)
 
     async def test_targeted_qa_input_preserves_completed_security_and_same_snapshot(self):
         await self.assert_targeted_validation_resume(AgentRole.QA)
@@ -252,7 +253,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(self.steps(harness, run_id)), 7)
             self.assertEqual(harness.fix_inputs[0]["fixRequest"]["attempt"], 1)
             self.assert_shared_budget(harness, budget, deadline)
-            self.assertEqual(budget.model_calls, 14)
+            self.assertEqual(budget.model_calls, 21)
 
     async def test_llm_auth_resume_uses_out_of_band_role_token_and_neutral_task_data(self):
         harness = _ControlHarness(self)
@@ -494,7 +495,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             configuration = harness.base.repository.get_run_configuration(run_id)
             budget = harness.budget(run_id)
             deadline = budget.deadline_monotonic
-            self.assertEqual(budget.model_calls, 3)
+            self.assertEqual(budget.model_calls, 5)
             response = await asyncio.wait_for(client.post(f"/api/v1/runs/{run_id}/recover", json={}), 20)
             self.assertEqual(response.status_code, 200, response.text)
             run = harness.base.repository.get_run(run_id)
@@ -513,10 +514,10 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(step.a2a_task_id and step.agent_context_id)
             self.assertEqual(harness.base.repository.get_run_configuration(run_id), configuration)
             self.assert_shared_budget(harness, budget, deadline)
-            self.assertEqual(budget.model_calls, 7)
+            self.assertEqual(budget.model_calls, 11)
 
     async def assert_completed_report_observation(self, *, failed, available=False):
-        harness = _ControlHarness(self, model_cap=40 if available else 7,
+        harness = _ControlHarness(self, model_cap=40 if available else 11,
                                   qa_mode="initial-failure" if failed else "pass")
 
         async def stop_before_consume(*_arguments, **_keywords):
@@ -535,7 +536,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
                 for item in harness.base.repository.list_project_artifacts(run_id)))
             budget = harness.budget(run_id)
             deadline = budget.deadline_monotonic
-            self.assertEqual(budget.model_calls, 7)
+            self.assertEqual(budget.model_calls, 11)
             if not available:
                 self.assertEqual(budget.model_calls, budget.limits.max_model_calls)
             http_count = len(harness.http_events)
@@ -573,7 +574,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(harness.base.repository.get_run(run_id), after)
                     self.assertEqual(harness.http_events, old_http)
                     self.assertEqual(len(self.steps(harness, run_id)), 4)
-                    self.assertEqual((budget.deadline_monotonic, budget.model_calls), (deadline, 7))
+                    self.assertEqual((budget.deadline_monotonic, budget.model_calls), (deadline, 11))
                 else:
                     self.assertEqual(explicit.status_code, 200, explicit.text)
                     completed = harness.base.repository.get_run(run_id)
@@ -596,7 +597,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(harness.fix_inputs[0]["fixRequest"]["attempt"], 1)
                     self.assertIs(harness.budget(run_id), budget)
                     self.assert_shared_budget(harness, budget, deadline)
-                    self.assertEqual(budget.model_calls, 13)
+                    self.assertEqual(budget.model_calls, 20)
 
     async def test_completed_reports_recover_at_model_cap_by_get_without_new_execution(self):
         await self.assert_completed_report_observation(failed=False)
@@ -608,7 +609,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
         await self.assert_completed_report_observation(failed=True, available=True)
 
     async def test_duplicate_input_for_selected_completed_qa_is_get_only_at_model_cap(self):
-        harness = _ControlHarness(self, model_cap=7)
+        harness = _ControlHarness(self, model_cap=10)
         harness.interrupt(AgentRole.QA)
         harness.interrupt(AgentRole.SECURITY)
         async with harness.running() as client:
@@ -651,7 +652,7 @@ class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(event[1] == "GET" for event in harness.http_events[http_count:]))
             self.assertEqual({role: len(provider.requests) for role, provider in harness.selected_providers.items()}, calls)
             self.assertEqual(harness.base.repository.list_project_artifacts(run_id), artifacts)
-            self.assertEqual((budget.model_calls, budget.deadline_monotonic), (7, deadline))
+            self.assertEqual((budget.model_calls, budget.deadline_monotonic), (10, deadline))
             self.assertIs(harness.budget(run_id), budget)
             after = harness.base.repository.get_run(run_id)
             self.assertEqual((after.status, after.resume_state, after.code_version, after.fix_attempt),

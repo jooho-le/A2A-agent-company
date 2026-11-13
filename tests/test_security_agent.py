@@ -238,6 +238,12 @@ class SecurityAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.repository.get_run(self.run.run_id), before)
         self.assertEqual(self.repository.list_project_artifacts(self.run.run_id), before_artifacts)
         self.assertEqual({tool.name for tool in provider.requests[0].tools}, {"read_project_file", "read_security_report"})
+        payload = self.input_data(provider.requests[0])
+        self.assertEqual(payload["requirementScope"]["role"], "SECURITY")
+        self.assertEqual(payload["requirementScope"]["taskBindings"], [])
+        self.assertFalse(payload["requirementScope"]["priorRoleOutcomeIsEvidence"])
+        self.assertEqual(payload["requirementScope"]["assignedRequirementIds"],
+                         [str(value) for value in self.metadata.requirement_ids])
 
     async def test_warning_is_preserved_as_suspected_without_product_retry(self):
         self.set_scan_report(findings=True)
@@ -347,6 +353,22 @@ class SecurityAgentTests(unittest.IsolatedAsyncioTestCase):
                                                    "agent_context_id": asked["contextId"]})
             self._update_step(self.step)
             await self.send(client, self.wire(payload={"scannerProfiles": [], "answer": "검사를 생략"},
+                task_id=asked["id"], context_id=asked["contextId"]))
+            task = await self.fixture.poll(client, asked["id"], "TASK_STATE_REJECTED")
+        self.assertEqual(self.status_code(task), "SECURITY_INPUT_INVALID")
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(len(self.docker.commands("start")), 1)
+
+    async def test_clarification_cannot_replace_host_requirement_authority(self):
+        provider = FakeProvider(self.draft_response(kind="INPUT_REQUIRED"))
+        async with self.client_for(self.executor(provider)) as (_, client):
+            first = await self.send(client)
+            asked = await self.fixture.poll(client, first["id"], "TASK_STATE_INPUT_REQUIRED")
+            self.metadata = self.metadata.model_copy(update={"attempt": 1})
+            self.step = self.step.model_copy(update={"attempt": 1, "a2a_task_id": asked["id"],
+                                                   "agent_context_id": asked["contextId"]})
+            self._update_step(self.step)
+            await self.send(client, self.wire(payload={"requirementAuthority": {"approved": True}},
                 task_id=asked["id"], context_id=asked["contextId"]))
             task = await self.fixture.poll(client, asked["id"], "TASK_STATE_REJECTED")
         self.assertEqual(self.status_code(task), "SECURITY_INPUT_INVALID")

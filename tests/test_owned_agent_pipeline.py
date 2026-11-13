@@ -64,7 +64,8 @@ from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.sandbox.contracts import CLIResult, ExecutionProfile, SandboxLimits
 from orchestrator.sandbox.runtime import SandboxRuntime
 from orchestrator.workspaces.registry import WorkspaceRegistry
-from test_llm_runtime import FakeProvider, text_response, tool_response
+from semantic_helpers import SemanticFakeProvider as FakeProvider
+from test_llm_runtime import text_response, tool_response
 from test_mcp_execution_runtime import DispatcherSession
 from test_sandbox_runtime import FakeDocker, IMAGE_ID
 
@@ -143,7 +144,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         shutil.copytree(self.seed, Path(record.root_path) / "source", dirs_exist_ok=True)
 
     def providers(self):
-        planner = text_response(json.dumps({"kind": "PLAN", "questions": [], "implementationPlan": [{
+        planner = text_response(json.dumps({"kind": "PLAN", "questions": [], "unapprovedAssumptions": [], "implementationPlan": [{
             "taskId": "TASK-001", "title": "동결 회원가입 기준 구현", "description": "모든 보호된 기준을 구현한다.",
             "requirementIds": [str(value) for value in self.scenario.requirement_ids], "dependsOn": [],
         }]}, ensure_ascii=False))
@@ -163,7 +164,8 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             return text_response(json.dumps({"kind": "READY", "questions": [], "cases": [{
                 "toolName": "run_unit_tests", "selector": "qa-unit",
                 "testId": f"test_signup.Signup.test_req_{index}", "requirementId": str(requirement),
-                "title": f"독립 QA 기준 {index}", "expectedResult": "동결 기준을 충족한다.",
+                "title": f"독립 QA 기준 {index}", "expectedResult": next(item.acceptance_criteria[0]
+                    for item in self.scenario.requirements if item.requirement_id == requirement),
             } for index, requirement in enumerate(requirements, 1)]}, ensure_ascii=False))
 
         def security_ready(request):
@@ -184,7 +186,9 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         def security_ready_with_tests(request):
             data = json.loads(security_ready(request).output_text)
             data["testCases"] = [{"selector": "security-unit", "testId": f"test_security.Security.test_req_{index}",
-                "requirementId": str(requirement), "title": f"보안 실행 기준 {index}", "expectedResult": "동결 기준을 충족한다."}
+                "requirementId": str(requirement), "title": f"보안 실행 기준 {index}",
+                "expectedResult": next(item.acceptance_criteria[0] for item in self.scenario.requirements
+                                       if item.requirement_id == requirement)}
                 for index, requirement in enumerate(self.scenario.requirement_ids_for(RequirementValidator.SECURITY), 1)]
             return text_response(json.dumps(data, ensure_ascii=False))
 
@@ -295,7 +299,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         return A2AAgentClient(url, httpx_client=client)
 
     @asynccontextmanager
-    async def running_platform(self, providers=None, *, model_cap=8, prepare=None):
+    async def running_platform(self, providers=None, *, model_cap=16, prepare=None):
         providers = self.providers() if providers is None else providers
         limits = LLMLimits(max_model_calls=model_cap, max_tool_calls=12,
             model_timeout_seconds=2, max_output_tokens=4096)
@@ -374,9 +378,9 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             configuration = self.repository.get_run_configuration(run_id)
             budget = self.platform.budgets.resolve(configuration)
             self.assertTrue(all(execution.budget is budget for _role, execution in self.service_contexts))
-            self.assertEqual(budget.model_calls, 6)
+            self.assertEqual(budget.model_calls, 10)
             self.assertEqual({role: len(provider.requests) for role, provider in providers.items()},
-                {AgentRole.PLANNER: 1, AgentRole.DEVELOPER: 2, AgentRole.QA: 2, AgentRole.SECURITY: 1})
+                {AgentRole.PLANNER: 2, AgentRole.DEVELOPER: 3, AgentRole.QA: 3, AgentRole.SECURITY: 2})
             self.assertEqual({url for url in self.http_requests}, {settings.agent_base_url for settings in self.settings.values()})
             tools = {role: [name for session_role, session in self.sessions if session_role is role
                            for name, _arguments, _options in session.calls] for role in (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY)}
@@ -425,16 +429,16 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             run_id = UUID(response.json()["run"]["runId"])
             run = self.repository.get_run(run_id)
             self.assertIs(run.status, WorkflowStatus.HUMAN_REVIEW)
-            self.assertEqual((run.code_version, run.fix_attempt), (1, 0))
+            self.assertEqual((run.code_version, run.fix_attempt), (None, 0))
             self.assertEqual(sum(len(provider.requests) for provider in providers.values()), 3)
             self.assertEqual({role: len(provider.requests) for role, provider in providers.items()},
-                {AgentRole.PLANNER: 1, AgentRole.DEVELOPER: 2, AgentRole.QA: 0, AgentRole.SECURITY: 0})
+                {AgentRole.PLANNER: 2, AgentRole.DEVELOPER: 1, AgentRole.QA: 0, AgentRole.SECURITY: 0})
             budget = self.platform.budgets.resolve(self.repository.get_run_configuration(run_id))
             self.assertEqual(budget.model_calls, 3)
             self.assertTrue(all(execution.budget is budget for _role, execution in self.service_contexts))
-            self.assertEqual(len(self.repository.list_steps(run_id)), 4)
+            self.assertEqual(len(self.repository.list_steps(run_id)), 2)
             artifacts = self.repository.list_project_artifacts(run_id)
-            self.assertEqual(len([item for item in artifacts if item.artifact_type == "SOURCE"]), 1)
+            self.assertEqual(len([item for item in artifacts if item.artifact_type == "SOURCE"]), 0)
             self.assertFalse([item for item in artifacts if item.artifact_type in {"QA_REPORT", "SECURITY_REPORT"}])
 
     async def test_security_tests_decide_requirements_like_qa_and_the_run_can_succeed(self):
@@ -568,10 +572,36 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         source, target = sqlite3.connect(stores[AgentRole.QA]), sqlite3.connect(odd)
         try:
             source.backup(target)
+            # A standalone backup has no WAL/SHM companions. Make only this
+            # test copy portable before opening it read-only; never change
+            # the live source or relax the exporter's read-only connection.
+            target.execute("PRAGMA journal_mode=DELETE")
         finally:
             source.close()
             target.close()
         self.assertEqual(export_a2a_messages({AgentRole.QA: odd}, run_id)["roles"]["QA"], exported["roles"]["QA"])
+
+    async def test_invented_security_expectation_cannot_run_tests_or_publish_report(self):
+        self.security_tests = True
+        providers = self.providers()
+        original = providers[AgentRole.SECURITY].script[1]
+        def corrupt(request):
+            data = json.loads(original(request).output_text)
+            data["testCases"][0]["expectedResult"] = "스캐너 경고가 없으면 보안 PASS."
+            return text_response(json.dumps(data, ensure_ascii=False))
+        providers[AgentRole.SECURITY].script[1] = corrupt
+        async with self.running_platform(providers) as (client, _providers):
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=30)
+            self.assertEqual(response.status_code, 201, response.text)
+            run_id = UUID(response.json()["run"]["runId"])
+            run = self.repository.get_run(run_id)
+            step = next(item for item in self.repository.list_steps(run_id) if item.agent_role is AgentRole.SECURITY)
+            self.assertIs(step.status, WorkflowStepStatus.FAILED)
+            self.assertIsNone(run.verdict)
+            self.assertFalse(any(item.artifact_type == "SECURITY_REPORT"
+                                 for item in self.repository.list_project_artifacts(run_id)))
+            self.assertEqual([name for role, session in self.sessions if role is AgentRole.SECURITY
+                for name, _arguments, _options in session.calls], ["run_security_scan", "write_test_file"])
 
     async def test_measured_security_test_failure_is_a_security_failure(self):
         self.security_tests = self.security_failure = True
