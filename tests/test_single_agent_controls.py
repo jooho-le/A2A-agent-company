@@ -23,7 +23,8 @@ from agents.single.platform import create_single_platform
 from orchestrator.a2a.client import A2AAgentClient
 from orchestrator.application.dispatch import PlannerRunDispatcher
 from orchestrator.domain import AgentRole, A2ATaskState, FinalVerdict, WorkflowStatus, WorkflowStepStatus
-from test_llm_runtime import FakeProvider, text_response
+from semantic_helpers import SemanticFakeProvider as FakeProvider
+from test_llm_runtime import text_response
 import test_single_agent_fix_pipeline as fix_fixture
 
 
@@ -160,7 +161,7 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(MessageToDict(task.status.message.parts[0].data)["code"], "REQUIREMENT_SCOPE_INVALID")
             self.assertFalse(task.artifacts)
             self.assertFalse(any(item.artifact_type == "QA_REPORT" for item in h.f.repository.list_project_artifacts(run_id)))
-            self.assertEqual(h.budget(run_id).model_calls, 5)
+            self.assertEqual(h.budget(run_id).model_calls, 7)
 
     async def test_single_security_test_expectation_uses_the_same_approval_gate(self):
         h = _Controls(self)
@@ -209,12 +210,12 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((run.status, run.verdict, run.fix_attempt), (WorkflowStatus.FINISHED, FinalVerdict.SUCCESS, 0))
             self.assert_identity(before, h.step(run_id, AgentRole.PLANNER))
             self.assertIs(h.budget(run_id), budget)
-            self.assertEqual((budget.model_calls, budget.snapshot.deadline_utc), (8, deadline))
+            self.assertEqual((budget.model_calls, budget.snapshot.deadline_utc), (12, deadline))
             self.assertEqual(h.f.repository.get_run_configuration(run_id), config)
             task = await h.sdk_task(h.step(run_id, AgentRole.PLANNER))
             self.assertEqual(len([message for message in task.history if message.role == Role.ROLE_USER]), 2)
             entries, count = h.platform.telemetry_store.list_usage(run_id)
-            self.assertEqual(count, 8)
+            self.assertEqual(count, 12)
             self.assertEqual({entry["role"] for entry in entries}, {"SINGLE_AGENT"})
 
     async def test_repeated_qa_input_never_dispatches_security_until_same_task_completes(self):
@@ -234,7 +235,7 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(run.verdict, FinalVerdict.SUCCESS)
             self.assert_identity(again, h.step(run_id, AgentRole.QA))
             self.assertEqual(h.step(run_id, AgentRole.SECURITY).agent_context_id, qa.agent_context_id)
-            self.assertEqual(h.budget(run_id).model_calls, 9)
+            self.assertEqual(h.budget(run_id).model_calls, 13)
 
     async def test_security_input_observes_completed_qa_and_keeps_same_candidate(self):
         h = _Controls(self)
@@ -344,14 +345,14 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(h.f.preparations), 1)
 
     async def test_completed_reports_are_recovered_by_get_at_model_cap_without_reexecution(self):
-        h = _Controls(self, cap=7)
+        h = _Controls(self, cap=11)
         async def pause(dispatcher, run, *_args, **_kwargs):
             dispatcher._repository.transition_run_and_record(run.run_id, WorkflowStatus.HUMAN_REVIEW,
                 additional_event_types=("FIXTURE_INTERRUPTED_BEFORE_INGEST",))
         async with h.running() as client:
             with patch.object(PlannerRunDispatcher, "consume_validation_results", pause):
                 run_id = await self.start(h, client)
-            self.assertEqual(h.budget(run_id).model_calls, 7)
+            self.assertEqual(h.budget(run_id).model_calls, 11)
             self.assertTrue(all(step.a2a_task_state is A2ATaskState.COMPLETED
                 for step in h.f.repository.list_steps(run_id)))
         h.selected = FakeProvider()
@@ -362,7 +363,7 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(h.f.repository.get_run(run_id).verdict, FinalVerdict.SUCCESS)
             self.assertEqual(h.http_events.count(("POST", "/message:send")), sends)
             self.assertFalse(h.selected.requests)
-            self.assertEqual(h.platform.telemetry_store.load_budget(run_id).model_calls, 7)
+            self.assertEqual(h.platform.telemetry_store.load_budget(run_id).model_calls, 11)
             self.assertEqual(len(h.f.preparations), 1)
 
     async def test_unconfigured_single_continuation_guard_still_rejects_before_send(self):

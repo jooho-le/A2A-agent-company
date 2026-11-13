@@ -20,7 +20,8 @@ from orchestrator.domain.run_configuration import ExecutionLimits
 from orchestrator.domain.scenario_registry import RequirementValidator
 from orchestrator.domain.validation_artifacts import ValidationOutcome
 from orchestrator.sandbox.contracts import CLIResult
-from test_llm_runtime import FakeProvider, text_response, tool_response
+from semantic_helpers import SemanticFakeProvider as FakeProvider
+from test_llm_runtime import text_response, tool_response
 
 
 class _FixHarness:
@@ -214,7 +215,7 @@ class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, calls = await self.submit(harness)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
             (WorkflowStatus.FINISHED, FinalVerdict.SUCCESS, 1, 2))
-        self.assertEqual((len(steps), calls), (7, 13))
+        self.assertEqual((len(steps), calls), (7, 20))
         self.assertTrue(all(step.status is WorkflowStepStatus.SUCCEEDED for step in steps))
         sources = self.assert_lineage(artifacts, "SOURCE", 2)
         for kind in ("BUILD_REPORT", "CHANGE_REPORT", "QA_REPORT", "SECURITY_REPORT"):
@@ -245,7 +246,7 @@ class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, calls = await self.submit(harness)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
             (WorkflowStatus.FINISHED, FinalVerdict.FAIL, 3, 4))
-        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (13, 25, 3))
+        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (13, 38, 3))
         self.assert_lineage(artifacts, "SOURCE", 4)
         issues = harness.base.repository.list_issue_records(run.run_id)
         self.assertEqual(len(issues), 4)
@@ -257,7 +258,7 @@ class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, calls = await self.submit(harness)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
             (WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW, 2, 3))
-        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (10, 19, 2))
+        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (10, 29, 2))
         self.assert_lineage(artifacts, "SOURCE", 3)
         issues = sorted(harness.base.repository.list_issue_records(run.run_id), key=lambda issue: issue.code_version)
         self.assertEqual([issue.consecutive_repeat_count for issue in issues], [0, 1, 2])
@@ -270,7 +271,7 @@ class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, calls = await self.submit(harness)
         self.assertEqual((run.status, run.fix_attempt, run.code_version), (WorkflowStatus.HUMAN_REVIEW, 1, 2))
         self.assertNotEqual(run.verdict, FinalVerdict.SUCCESS)
-        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (5, 8, 1))
+        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (5, 13, 1))
         sources = self.assert_lineage(artifacts, "SOURCE", 2)
         build = self.assert_lineage(artifacts, "BUILD_REPORT", 2)
         self.assertFalse(build[0].passed)
@@ -283,13 +284,13 @@ class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fix_cannot_reset_budget_after_initial_agents_spend_call_cap(self):
         # Initial Planner(1), Developer(2), QA(2), Security(2) consume all seven
-        # calls. The admitted fix must resolve that exact already-spent budget.
-        harness = _FixHarness(self, model_cap=7)
+        # primary calls plus four reviews. The admitted fix must resolve that exact already-spent budget.
+        harness = _FixHarness(self, model_cap=11)
         run, artifacts, steps, calls = await self.submit(harness)
         self.assertEqual((run.status, run.fix_attempt, run.code_version),
             (WorkflowStatus.HUMAN_REVIEW, 1, 1))
         self.assertNotEqual(run.verdict, FinalVerdict.SUCCESS)
-        self.assertEqual((len(steps), calls), (5, 7))
+        self.assertEqual((len(steps), calls), (5, 11))
         self.assertIn((AgentRole.DEVELOPER, 2), harness.versions)
         self.assertFalse(harness.fix_inputs)
         self.assertEqual(len([item for item in artifacts if item.artifact_type == "SOURCE"]), 1)
@@ -306,7 +307,7 @@ class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, calls = await self.submit(harness)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
             (WorkflowStatus.FINISHED, FinalVerdict.SUCCESS, 2, 3))
-        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (8, 15, 2))
+        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (8, 23, 2))
         sources = self.assert_lineage(artifacts, "SOURCE", 3)
         for kind in ("BUILD_REPORT", "CHANGE_REPORT"):
             self.assert_lineage(artifacts, kind, 3)

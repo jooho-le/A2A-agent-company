@@ -32,6 +32,7 @@ from agents.single.contracts import build_single_draft_contract
 from agents.single.mcp import open_single_model_client
 from agents.single.prompts import prepare_single_prompt
 from agents.platform.telemetry import bind_runtime_telemetry
+from agents.semantic_review import SemanticReviewRequired, publish_semantic_hold
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.domain.states import AgentRole
 
@@ -74,7 +75,7 @@ class _SingleTools:
 
 
 class SingleAgentExecutor(AgentExecutor):
-    def __init__(self, *, repository, budgets, provider, services_factories, usage_sink=None, telemetry_factory=None):
+    def __init__(self, *, repository, budgets, provider, services_factories, usage_sink=None, telemetry_factory=None, semantic_reviewer=None):
         from agents.platform.budgets import RunBudgetRegistry
         from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
         if (type(repository) is not SQLiteWorkflowRepository or type(budgets) is not RunBudgetRegistry
@@ -91,6 +92,7 @@ class SingleAgentExecutor(AgentExecutor):
             (AgentRole.QA, SQLiteQAContextLoader), (AgentRole.SECURITY, SQLiteSecurityContextLoader))}
         self._store, self._usage_sink = None, usage_sink
         self._telemetry_factory = telemetry_factory
+        self._semantic_reviewer = semantic_reviewer
 
     def bind_task_store(self, store):
         if self._store is not None or type(store) is not SQLiteAgentTaskStore or store.role is not SingleAgentIdentity.SINGLE_AGENT:
@@ -130,16 +132,27 @@ class SingleAgentExecutor(AgentExecutor):
             budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
             usage_sink=telemetry.usage if telemetry is not None else self._usage_sink,
             call_started_sink=telemetry.model_started if telemetry is not None else None)
-        return contract.validate(result.data)
+        return contract.validate(result.data), result, prompt
+
+    async def _review(self, context, role, execution, phase, decision, result, telemetry, prompt):
+        if self._semantic_reviewer is not None and decision.kind in {'PLAN', 'READY'}:
+            await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
+                role=role, actor=SingleAgentIdentity.SINGLE_AGENT, phase=phase, result=result,
+                telemetry=telemetry, usage_sink=telemetry.usage if telemetry is not None else self._usage_sink,
+                call_started_sink=telemetry.model_started if telemetry is not None else None, single_prompt=prompt)
 
     async def _work(self, context, role, execution, task_input):
+        if self._semantic_reviewer is not None:
+            await self._semantic_reviewer.check_resume(context, execution)
         phase = (SinglePhase.FIXING if role is AgentRole.DEVELOPER and execution.fix_attempt
                  else _PHASE[role])
         telemetry, _usage, _started = bind_runtime_telemetry(self._telemetry_factory,
             SingleAgentIdentity.SINGLE_AGENT, context, execution, self._usage_sink)
         if role is AgentRole.PLANNER:
             contract = build_single_draft_contract(phase, scenario=execution.scenario)
-            return await self._model(context, execution, task_input, phase, contract, telemetry=telemetry), ()
+            decision, result, prompt = await self._model(context, execution, task_input, phase, contract, telemetry=telemetry)
+            await self._review(context, role, execution, phase, decision, result, telemetry, prompt)
+            return decision, ()
         services = await _host_factory(self._services[role], execution)
         checkpoint = await services.prepare(execution)
         async with services.client_factory(services.configuration) as host:
@@ -181,13 +194,14 @@ class SingleAgentExecutor(AgentExecutor):
                 tools = tuple(tool for tool in tracked.list_tools() if tool.name in wanted)
                 if {tool.name for tool in tools} != wanted:
                     raise SingleExecutionError()
-                decision = await self._model(context, execution, task_input, phase, contract, tools=tools,
+                decision, result, prompt = await self._model(context, execution, task_input, phase, contract, tools=tools,
                     executor=_SingleTools(tracked, execution, role, services=services, measured=measured), telemetry=telemetry)
                 if decision.kind == "READY" and role in (AgentRole.QA, AgentRole.SECURITY):
                     cases = decision.cases if role is AgentRole.QA else decision.test_cases
                     if role is AgentRole.QA or services.test_selectors:
                         validate_generated_case_expectations(cases, configuration=execution.configuration,
                             metadata=execution.metadata, role=role)
+            await self._review(context, role, execution, phase, decision, result, telemetry, prompt)
             execution.budget.check()
             artifacts = ()
             if decision.kind == "READY":
@@ -224,6 +238,9 @@ class SingleAgentExecutor(AgentExecutor):
             state = TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else (
                 TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, context.metadata, state, error.code.value)
+            return
+        except SemanticReviewRequired as held:
+            await publish_semantic_hold(updater, context.metadata, held)
             return
         except RequirementScopeError as error:
             await self._status(updater, context.metadata, TaskState.TASK_STATE_FAILED, error.code)

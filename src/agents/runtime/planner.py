@@ -29,6 +29,7 @@ from orchestrator.core.security import redact_data
 from orchestrator.domain.requirement_authority import freeze_requirement_authority
 from orchestrator.domain.states import AgentRole
 from agents.platform.telemetry import bind_runtime_telemetry
+from agents.semantic_review import (SEMANTIC_PROTECTED_FIELDS, SemanticReviewRequired, publish_semantic_hold)
 
 
 class PlannerExecutorConfigurationError(ValueError):
@@ -165,7 +166,7 @@ def _prepare_input(context, execution):
         clarifications = []
         for item in inputs[1:]:
             answer = _message_data(item, max_bytes)
-            if set(answer) & _PROTECTED_FIELDS:
+            if set(answer) & (_PROTECTED_FIELDS | SEMANTIC_PROTECTED_FIELDS):
                 raise _PlannerInputError()
             clarifications.append(redact_data(answer))
         return {
@@ -201,7 +202,7 @@ class PlannerAgentExecutor(AgentExecutor):
     The existing SDK/SQLite admission owns concurrency, replay and cancellation.
     """
 
-    def __init__(self, *, provider, context_factory, usage_sink=None, telemetry_factory=None):
+    def __init__(self, *, provider, context_factory, usage_sink=None, telemetry_factory=None, semantic_reviewer=None):
         if (not callable(context_factory) or usage_sink is not None and not callable(usage_sink)
                 or telemetry_factory is not None and not callable(telemetry_factory)
                 or not isinstance(getattr(provider, "name", None), str) or not provider.name.strip()
@@ -212,6 +213,7 @@ class PlannerAgentExecutor(AgentExecutor):
         self._context_factory = context_factory
         self._usage_sink = usage_sink
         self._telemetry_factory = telemetry_factory
+        self._semantic_reviewer = semantic_reviewer
 
     def __repr__(self):
         return "PlannerAgentExecutor()"
@@ -273,8 +275,10 @@ class PlannerAgentExecutor(AgentExecutor):
 
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
+            if self._semantic_reviewer is not None:
+                await self._semantic_reviewer.check_resume(context, execution)
             scenario = execution.scenario
-            _, usage_sink, call_started_sink = bind_runtime_telemetry(
+            telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.PLANNER, context, execution, self._usage_sink)
             result = await self._engine.run(
                 prompt=prepare_role_prompt(AgentRole.PLANNER, task_input=task_input, metadata=execution.metadata),
@@ -283,6 +287,10 @@ class PlannerAgentExecutor(AgentExecutor):
                 workspace_id=str(execution.configuration.workspace_id),
             )
             decision = validate_planner_decision(result.data, scenario)
+            if decision.kind == "PLAN" and self._semantic_reviewer is not None:
+                await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
+                    role=AgentRole.PLANNER, result=result, telemetry=telemetry,
+                    usage_sink=usage_sink, call_started_sink=call_started_sink)
             execution.budget.check()
         except asyncio.CancelledError:
             # SDK worker termination precedes its cancel()/shutdown store update.
@@ -293,6 +301,9 @@ class PlannerAgentExecutor(AgentExecutor):
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else
                      TaskState.TASK_STATE_FAILED)
             await self._status(updater, metadata, state, error.code.value)
+            return
+        except SemanticReviewRequired as held:
+            await publish_semantic_hold(updater, metadata, held)
             return
         except PlannerContractError:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, "PLANNER_OUTPUT_INVALID")

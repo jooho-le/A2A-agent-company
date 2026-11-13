@@ -19,7 +19,8 @@ from orchestrator.domain import AgentRole, FinalVerdict, WorkflowStatus, Workflo
 from orchestrator.domain.run_configuration import ExecutionLimits
 from orchestrator.domain.scenario_registry import RequirementValidator
 from orchestrator.sandbox.contracts import CLIResult
-from test_llm_runtime import FakeProvider, ToolCall, text_response, tool_response
+from semantic_helpers import SemanticFakeProvider as FakeProvider
+from test_llm_runtime import ToolCall, text_response, tool_response
 import test_single_agent_pipeline as single_fixture
 import test_owned_agent_pipeline as fixtures
 
@@ -149,7 +150,7 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
                          (WorkflowStatus.FINISHED, FinalVerdict.SUCCESS, 1, 2))
         self.assertEqual(len(steps), 7)
         self.assertTrue(all(step.status is WorkflowStepStatus.SUCCEEDED for step in steps))
-        self.assertEqual((len(h.fix_inputs), len(provider.requests)), (1, 13))
+        self.assertEqual((len(h.fix_inputs), len(provider.requests)), (1, 20))
         self.assert_candidates(artifacts, 2)
         for kind in ("BUILD_REPORT", "QA_REPORT", "SECURITY_REPORT"):
             self.assertEqual(len([item for item in artifacts if item.artifact_type == kind]), 2)
@@ -168,7 +169,7 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, provider = await self.submit(h)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
                          (WorkflowStatus.FINISHED, FinalVerdict.FAIL, 3, 4))
-        self.assertEqual((len(steps), len(h.fix_inputs), len(provider.requests)), (13, 3, 25))
+        self.assertEqual((len(steps), len(h.fix_inputs), len(provider.requests)), (13, 3, 38))
         self.assert_candidates(artifacts, 4)
 
     async def test_same_issue_stops_at_human_review_without_spending_remaining_fix(self):
@@ -176,7 +177,7 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, provider = await self.submit(h)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
                          (WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW, 2, 3))
-        self.assertEqual((len(steps), len(h.fix_inputs), len(provider.requests)), (10, 2, 19))
+        self.assertEqual((len(steps), len(h.fix_inputs), len(provider.requests)), (10, 2, 29))
         self.assert_candidates(artifacts, 3)
         issues = sorted(h.f.repository.list_issue_records(run.run_id), key=lambda item: item.code_version)
         self.assertEqual([item.consecutive_repeat_count for item in issues], [0, 1, 2])
@@ -196,17 +197,17 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         run, artifacts, steps, provider = await self.submit(h)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
                          (WorkflowStatus.FINISHED, FinalVerdict.SUCCESS, 1, 2))
-        self.assertEqual((len(steps), len(provider.requests), len(h.fix_inputs)), (5, 9, 1))
+        self.assertEqual((len(steps), len(provider.requests), len(h.fix_inputs)), (5, 14, 1))
         self.assert_candidates(artifacts, 2)
         builds = sorted((item for item in artifacts if item.artifact_type == "BUILD_REPORT"), key=lambda item: item.code_version)
         self.assertEqual([item.passed for item in builds], [False, True])
         self.assertTrue(all(item.code_version == 2 for item in artifacts if item.artifact_type in {"QA_REPORT", "SECURITY_REPORT"}))
 
     async def test_fix_never_refills_spent_model_budget(self):
-        h = _SingleFixHarness(self, cap=7)
+        h = _SingleFixHarness(self, cap=11)
         run, artifacts, steps, provider = await self.submit(h)
         self.assertEqual((run.status, run.fix_attempt, run.code_version), (WorkflowStatus.HUMAN_REVIEW, 1, 1))
-        self.assertEqual(len(provider.requests), 7)
+        self.assertEqual(len(provider.requests), 11)
         self.assertFalse(h.fix_inputs)
         self.assert_candidates(artifacts, 1)
 
@@ -230,7 +231,7 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(SQLiteDeveloperContextLoader, "__call__", foreign):
             run, artifacts, steps, provider = await self.submit(h)
         self.assertIs(run.status, WorkflowStatus.HUMAN_REVIEW)
-        self.assertEqual((len(provider.requests), len(h.fix_inputs), run.code_version), (7, 0, 1))
+        self.assertEqual((len(provider.requests), len(h.fix_inputs), run.code_version), (11, 0, 1))
         self.assert_candidates(artifacts, 1)
 
     async def test_historical_mapping_is_not_accepted_as_the_latest_single_task(self):
@@ -250,7 +251,7 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(SQLiteDeveloperContextLoader, "__call__", stale):
             run, artifacts, steps, provider = await self.submit(h)
         self.assertIs(run.status, WorkflowStatus.HUMAN_REVIEW)
-        self.assertEqual((len(provider.requests), len(h.fix_inputs), run.code_version), (7, 0, 1))
+        self.assertEqual((len(provider.requests), len(h.fix_inputs), run.code_version), (11, 0, 1))
         self.assert_candidates(artifacts, 1)
 
 

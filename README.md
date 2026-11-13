@@ -422,6 +422,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication.guarded \
 
 현재 guarded는 역할 답변/검토를 각각 최대 20회로 제한하고 자동 Retry·대체 모델을 사용하지 않습니다. 기존 v2 CLI는 과거 진단 재현용입니다. 실제 제품 Host·MCP·Docker 실행은 81~82번으로 남아 있습니다.
 
+### 제품 Agent 의미 검토·입력 대기 연결
+
+실제 Multi 네 역할과 Single의 각 단계가 최종 Draft 게시 전에 Host의 동결 기준과 의미를 대조합니다. 근거 부족·범위 확대는 `INPUT_REQUIRED`로 보류하고, 검토 ID·해시·사유·관련 호출 sequence를 SQLite와 Trace에 남깁니다. 검토 호출도 기존 Run 예산에 포함되며 모델 판정은 요구사항 승인이나 제품 성공이 아닙니다. 이미 파일을 쓴 보류 작업은 같은 Task에서 쓰기를 재실행하지 않습니다.
+
+[실행 경로·예산·권한](docs/product-semantic-review-integration.md), [보류 메시지·재개 정책·검증 범위](docs/semantic-review-input-required.md). 81·82번 실제 환경 실행은 별도 작업입니다.
+
 ## 테스트
 
 ```bash

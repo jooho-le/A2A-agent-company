@@ -37,7 +37,8 @@ from orchestrator.domain import AgentRole, WorkflowStatus, WorkflowStepStatus
 from orchestrator.domain.scenario_registry import RequirementValidator
 from orchestrator.sandbox.contracts import CLIResult
 from orchestrator.sandbox.runtime import SandboxRuntime
-from test_llm_runtime import FakeProvider, ToolCall, text_response, tool_response
+from semantic_helpers import SemanticFakeProvider as FakeProvider
+from test_llm_runtime import ToolCall, text_response, tool_response
 from test_mcp_execution_runtime import DispatcherSession
 from test_sandbox_runtime import FakeDocker, IMAGE_ID
 import test_owned_agent_pipeline as fixtures
@@ -138,7 +139,7 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         return FakeProvider(*script)
 
     @asynccontextmanager
-    async def running(self, *, cap=8, tool_cap=12, provider=None, price_book=None):
+    async def running(self, *, cap=16, tool_cap=12, provider=None, price_book=None):
         provider = provider or self.provider()
         limits = LLMLimits(max_model_calls=cap, max_tool_calls=tool_cap, model_timeout_seconds=2, max_output_tokens=4096)
         selected = self.f.settings[AgentRole.DEVELOPER].model_copy(update={"role": SingleAgentIdentity.SINGLE_AGENT,
@@ -185,8 +186,12 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len({step.a2a_task_id for step in steps}), 4)
         mappings = self.f.repository.list_agent_contexts(run_id)
         self.assertEqual([item.agent_id for item in mappings], ["single_agent"])
-        self.assertEqual({request.system_prompt for request in provider.requests}, {build_single_system_prompt()})
-        payloads = [json.loads(json.loads(request.input_items_json)[0]["content"]) for request in provider.requests]
+        primary = [request for request in provider.requests if request.output.name != 'product_semantic_review_v1']
+        reviews = [request for request in provider.requests if request.output.name == 'product_semantic_review_v1']
+        self.assertEqual({request.system_prompt for request in primary}, {build_single_system_prompt()})
+        self.assertEqual({request.system_prompt for request in reviews}, {build_single_system_prompt()})
+        self.assertEqual(len(reviews), 4)
+        payloads = [json.loads(json.loads(request.input_items_json)[0]["content"]) for request in primary]
         self.assertEqual(list(dict.fromkeys(payload["trusted"]["phase"] for payload in payloads)),
                          ["PLANNING", "IMPLEMENTING", "QA", "SECURITY"])
         self.assertEqual({payload["trusted"]["identity"] for payload in payloads}, {"SINGLE_AGENT"})
@@ -266,7 +271,7 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         async with self.running(provider=provider) as (client, provider):
             run_id = await self.submit(client)
             self.assertIs(self.f.repository.get_run(run_id).status, WorkflowStatus.HUMAN_REVIEW)
-            self.assertEqual(len(provider.requests), 5)
+            self.assertEqual(len(provider.requests), 7)
             self.assertEqual([phase for _kind, phase in self.events], [SinglePhase.IMPLEMENTING, SinglePhase.QA])
 
 

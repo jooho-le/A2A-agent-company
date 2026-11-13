@@ -30,6 +30,7 @@ from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
 from agents.platform.telemetry import bind_runtime_telemetry
+from agents.semantic_review import (SEMANTIC_PROTECTED_FIELDS, SemanticReviewRequired, publish_semantic_hold)
 from orchestrator.workspaces.policy import workspace_uuid
 
 
@@ -80,7 +81,7 @@ def _prepare_input(context, execution):
         answers = []
         for item in inputs[1:]:
             answer = _message_data(item, maximum)
-            if set(answer) & _PROTECTED:
+            if set(answer) & (_PROTECTED | SEMANTIC_PROTECTED_FIELDS):
                 raise ValueError
             answers.append(redact_data(answer))
         scope = build_requirement_scope(execution.configuration, execution.requirement_artifact, metadata, AgentRole.SECURITY)
@@ -169,7 +170,7 @@ class _SecurityReadExecutor:
 class SecurityAgentExecutor(AgentExecutor):
     """Host opt-in Security for the claimed current candidate and report lineage."""
 
-    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None):
+    def __init__(self, *, provider, context_factory, services_factory, usage_sink=None, telemetry_factory=None, semantic_reviewer=None):
         if (not callable(context_factory) or not callable(services_factory)
                 or usage_sink is not None and not callable(usage_sink)
                 or telemetry_factory is not None and not callable(telemetry_factory)
@@ -180,6 +181,7 @@ class SecurityAgentExecutor(AgentExecutor):
         self._provider, self._context_factory, self._services_factory = provider, context_factory, services_factory
         self._usage_sink = usage_sink
         self._telemetry_factory = telemetry_factory
+        self._semantic_reviewer = semantic_reviewer
 
     def __repr__(self):
         return "SecurityAgentExecutor()"
@@ -237,6 +239,8 @@ class SecurityAgentExecutor(AgentExecutor):
             return
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
         try:
+            if self._semantic_reviewer is not None:
+                await self._semantic_reviewer.check_resume(context, execution)
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.SECURITY, context, execution, self._usage_sink)
             await services.prepare(execution)
@@ -271,6 +275,10 @@ class SecurityAgentExecutor(AgentExecutor):
                 if decision.kind == "READY" and services.test_selectors:
                     validate_generated_case_expectations(decision.test_cases, configuration=execution.configuration,
                         metadata=execution.metadata, role=AgentRole.SECURITY)
+                if decision.kind == "READY" and self._semantic_reviewer is not None:
+                    await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
+                        role=AgentRole.SECURITY, result=result, telemetry=telemetry,
+                        usage_sink=usage_sink, call_started_sink=call_started_sink)
                 execution.budget.check()
                 if decision.kind == "READY":
                     artifacts = await services.finalize(execution, decision, tracked, measured,
@@ -286,6 +294,9 @@ class SecurityAgentExecutor(AgentExecutor):
             return
         except (SecurityContractError, SecurityServicesError, RequirementScopeError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)
+            return
+        except SemanticReviewRequired as held:
+            await publish_semantic_hold(updater, metadata, held)
             return
         except TrackedMCPError:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, "SECURITY_SCAN_UNVERIFIED")
