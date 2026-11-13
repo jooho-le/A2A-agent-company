@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from agents.llm.contracts import JsonSchema, StructuredOutput
 from diagnostics.communication.contracts import ProbeRecord, fingerprint, now
-from diagnostics.communication.lab import CommunicationLab, ROLES, running_lab
+from diagnostics.communication.lab import CommunicationLab, ROLES, exclusive_execution, running_lab
 from diagnostics.communication.live import LiveRuntime, root_api_key
 from diagnostics.communication.probe import ProbeExecutor
 from diagnostics.communication.performance import performance_summary
@@ -206,6 +206,7 @@ class NaturalExecutor(ProbeExecutor):
 
 
 class NaturalLab(CommunicationLab):
+    @exclusive_execution
     async def execute_case(self, case_id, request_text, architecture):
         self.model_runtime.admit(SimpleNamespace(rounds=1, architecture=architecture))
         self.records.clear()
@@ -242,13 +243,14 @@ class NaturalLab(CommunicationLab):
                 result = await send(rows[1], result)
             if result is not None:
                 await asyncio.gather(*(send(row, result) for row in rows[2:]))
-            for row in rows:
-                if row.phase == "PLANNED":
+            pending = [row for row in rows if row.phase == "PLANNED"]
+            if pending:
+                contract_rejected = any(previous.view()["handoff"]["reason"] in {
+                    "CONTENT_CONTRACT_REJECTED", "MODEL_OUTPUT_CONTRACT_REJECTED"} for previous in rows)
+                delivery_rejected = any(previous.phase not in {"PLANNED", "SKIPPED"}
+                    and previous.delivery_check["status"] != "PASS" for previous in rows)
+                for row in pending:
                     row.phase = "SKIPPED"
-                    contract_rejected = any(previous.view()["handoff"]["reason"] in {
-                        "CONTENT_CONTRACT_REJECTED", "MODEL_OUTPUT_CONTRACT_REJECTED"} for previous in rows)
-                    delivery_rejected = any(previous.phase not in {"PLANNED", "SKIPPED"}
-                        and previous.delivery_check["status"] != "PASS" for previous in rows)
                     row.error = ("UPSTREAM_DELIVERY_NOT_VERIFIED" if delivery_rejected else
                                  "UPSTREAM_CONTRACT_REJECTED" if contract_rejected else "PREVIOUS_RESULT_UNAVAILABLE")
 
@@ -263,7 +265,9 @@ class NaturalLab(CommunicationLab):
         return {"caseId": case_id, "architecture": architecture, "requestText": request_text,
                 "runId": str(run_id), "elapsedMs": elapsed_ms,
                 "transportPassed": sum(transport_passed(row) for row in views),
-                "rows": views, "performance": performance_summary(views, elapsed_ms=elapsed_ms)}
+                "rows": views, "performance": performance_summary(views, elapsed_ms=elapsed_ms),
+                "measurement": {"observerMode": "FINAL_ONLY",
+                                "peerClientScope": "DIAGNOSTIC_SESSION" if self._peer_sessions is not None else "PER_PROBE"}}
 
 
 def screen_case(run, criteria):

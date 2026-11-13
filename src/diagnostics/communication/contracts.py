@@ -53,7 +53,10 @@ def fingerprint(value) -> str:
 
 
 def differences(expected, actual, path: str = "$") -> list[dict]:
-    expected, actual = normalized(expected), normalized(actual)
+    return _differences_normalized(normalized(expected), normalized(actual), path)
+
+
+def _differences_normalized(expected, actual, path):
     if type(expected) is not type(actual):
         return [{"path": path, "kind": "TYPE_CHANGED", "expected": expected, "actual": actual}]
     result = []
@@ -65,12 +68,12 @@ def differences(expected, actual, path: str = "$") -> list[dict]:
             elif key not in expected:
                 result.append({"path": pointer, "kind": "ADDED", "actual": actual[key]})
             else:
-                result.extend(differences(expected[key], actual[key], pointer))
+                result.extend(_differences_normalized(expected[key], actual[key], pointer))
     elif isinstance(expected, list):
         if len(expected) != len(actual):
             result.append({"path": path, "kind": "LENGTH_CHANGED", "expected": len(expected), "actual": len(actual)})
         for index, (left, right) in enumerate(zip(expected, actual)):
-            result.extend(differences(left, right, path + "/" + str(index)))
+            result.extend(_differences_normalized(left, right, path + "/" + str(index)))
     elif expected != actual:
         result.append({"path": path, "kind": "VALUE_CHANGED", "expected": expected, "actual": actual})
     return result
@@ -145,6 +148,7 @@ class ProbeRecord:
     executor_invocations: int = 0
     observer_overhead_ns: int = 0
     model_observation: dict | None = None
+    transport_observation: dict | None = None
     clock_origin_ns: int | None = field(default=None, repr=False)
     clock_id: str | None = field(default=None, repr=False)
     wire_request: dict | None = field(default=None, repr=False)
@@ -207,6 +211,7 @@ class ProbeRecord:
             "executorInvocations": self.executor_invocations,
             "observerCallbackMs": round(self.observer_overhead_ns / 1_000_000, 3),
             "model": self.model_observation,
+            "transport": self.transport_observation,
             "delivery": {"stage": stage, "receipt": self.delivery_receipt, "check": self.delivery_check},
             "error": self.error,
             "cleanupState": self.cleanup_state,
@@ -215,9 +220,9 @@ class ProbeRecord:
                              "executorReceived": self.received, "responseSent": self.response_sent,
                              "responseReceived": self.response_received},
             "checks": {"request": request_checks,
-                       "response": compare(self.response_sent, self.response_received),
-                       "metadata": compare(self.metadata_sent, self.metadata_received),
-                       "responseMetadata": compare(self.metadata_sent, self.metadata_response),
+                       "response": transfer_checks[0],
+                       "metadata": transfer_checks[1],
+                       "responseMetadata": transfer_checks[2],
                        "identity": "UNVERIFIED" if self.identity_valid is None else "PASS" if self.identity_valid else "FAIL",
                        "grounding": self.content_checks(self.response_sent, self.received),
                        "sourceGrounding": self.content_checks(self.response_received, self.payload)},
@@ -227,7 +232,10 @@ class ProbeRecord:
 
 
 def summarize(rows: list[ProbeRecord]) -> dict:
-    views = [row.view() for row in rows]
+    return summarize_views([row.view() for row in rows])
+
+
+def summarize_views(views) -> dict:
     issues = []
     for view in views:
         checks = view["checks"]
@@ -242,7 +250,7 @@ def summarize(rows: list[ProbeRecord]) -> dict:
         if failures or view["phase"] in {"TIMEOUT", "ERROR", "CANCELED"}:
             issues.append({"id": view["id"], "role": view["role"], "checks": sorted(set(failures)), "phase": view["phase"]})
     roles = {}
-    for role in dict.fromkeys(row.role for row in rows):
+    for role in dict.fromkeys(view["role"] for view in views):
         role_views = [view for view in views if view["role"] == role]
         values = sorted(view["timings"]["agentProcessingMs"] for view in role_views if view["timings"]["agentProcessingMs"] is not None)
         roles[role] = {"completed": sum(v["phase"] == "COMPLETED" for v in role_views),
@@ -259,12 +267,12 @@ def summarize(rows: list[ProbeRecord]) -> dict:
         or any(view["checks"][key]["status"] == "UNVERIFIED" for key in ("response", "metadata", "responseMetadata", "grounding", "sourceGrounding"))
         or view["checks"]["identity"] == "UNVERIFIED" or view["delivery"]["check"]["status"] == "UNVERIFIED" for view in views
     )
-    return {"planned": len(rows), "verifiedRequests": verified, "unverifiedRequests": unverified,
+    return {"planned": len(views), "verifiedRequests": verified, "unverifiedRequests": unverified,
             "deliveryStages": {stage: sum(view["delivery"]["stage"] == stage for view in views)
                                for stage in dict.fromkeys(view["delivery"]["stage"] for view in views)},
-            "sent": sum(r.wire_sent is not None for r in rows),
-            "received": sum(r.received is not None for r in rows),
-            "responses": sum(r.response_received is not None for r in rows),
+            "sent": sum(view["observations"]["wireSent"] is not None for view in views),
+            "received": sum(view["observations"]["executorReceived"] is not None for view in views),
+            "responses": sum(view["observations"]["responseReceived"] is not None for view in views),
             "issueCount": len(issues), "issues": issues, "roles": roles}
 
 

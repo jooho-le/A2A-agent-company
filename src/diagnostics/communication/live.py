@@ -350,7 +350,7 @@ async def run_live(args, runtime=None):
             if runtime.fatal_error:
                 break
             options=CheckOptions(profile=args.profile,architecture=architecture,rounds=args.rounds)
-            report=await lab.execute(options,lambda event:None)
+            report=await lab.execute(options)
             reports.append(report)
             print(json.dumps({'architecture':architecture,'summary':report['summary'],
                               'calls':len(runtime.calls),'fatalError':runtime.fatal_error},ensure_ascii=False),flush=True)

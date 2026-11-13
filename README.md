@@ -397,6 +397,12 @@ PYTHONPATH=src .venv/bin/python -m diagnostics.communication \
 
 [70번](docs/70-communication-performance-summary.md)은 역할별 완료 표본의 구간 p50·p95와 편차, 토큰 수 참고값, 병렬 요청 구간의 합집합을 제공합니다. 결과 JSON과 기존 구조화 HTML 생성기에 연결했으며, 제품 전체시간이나 구조 간 성능 우열로 사용하지 않습니다. 기존 실제 API 보고서는 변경하지 않았습니다.
 
+### 진단 연결·반복 계산 비용 축소 — 71·72번
+
+[71번](docs/71-a2a-session-reuse.md)은 같은 로컬 진단 서버 세션에서 역할별 HTTP Client와 Agent Card를 재사용합니다. 자격증명·콜백을 역할별로 격리하고 요청별 수신 확인·새 식별자·명시적 Context·취소·정리는 유지하며, 재사용 상태를 진단 결과에 기록합니다.
+
+[72번](docs/72-diagnostic-observer-optimization.md)은 구독 없는 CLI의 중간 화면 생성, 최종 행·요약의 중복 계산, 중첩 JSON의 반복 정규화를 줄입니다. 실시간 구독과 모든 최종 검사는 유지합니다. 로컬 비교 함수의 비용 감소를 확인했으며 실제 OpenAI 전체 지연 개선율은 아직 측정하지 않았습니다.
+
 ## 테스트
 
 ```bash
