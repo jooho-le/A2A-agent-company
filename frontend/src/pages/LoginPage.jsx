@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import googleIcon from '../assets/google.svg'
-import githubIcon from '../assets/github.svg'
-import './LoginPage.css'
+import OfficeAuthLayout from '../components/atelier/OfficeAuthLayout'
 
-function LoginPage({ onSignup, onLoginSuccess, notice = '' }) {
+function LoginPage({ onSignup, onLoginSuccess, onBack, notice = '' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState(notice)
@@ -26,6 +24,10 @@ function LoginPage({ onSignup, onLoginSuccess, notice = '' }) {
       const data = await response.json()
 
       if (response.ok) {
+        if (typeof data.access_token !== 'string' || !data.access_token.trim()) {
+          setMessage('로그인 응답을 확인할 수 없습니다. 다시 시도해 주세요.')
+          return
+        }
         sessionStorage.setItem('access_token', data.access_token)
         setMessage('로그인에 성공했습니다.')
         onLoginSuccess()
@@ -45,16 +47,12 @@ function LoginPage({ onSignup, onLoginSuccess, notice = '' }) {
   }
 
   return (
-    <main className="auth-page login-page">
-      <div className="auth-shell">
-        <div className="product-brand auth-brand">
-          <span className="brand-mark" aria-hidden="true">A</span>
-          <span>A2A Agent Company</span>
-        </div>
+    <OfficeAuthLayout>
         <section className="auth-card" aria-labelledby="login-title">
           <header className="auth-heading">
+            <p className="office-auth-form-label">대표님 계정</p>
             <h1 id="login-title">로그인</h1>
-            <p>AI Agent 협업 서비스를 이용하려면 로그인하세요.</p>
+            <p>우리 회사의 업무를 이어서 시작하세요.</p>
           </header>
           <form className="login-form" onSubmit={handleSubmit} noValidate>
             <div className="login-field">
@@ -92,13 +90,6 @@ function LoginPage({ onSignup, onLoginSuccess, notice = '' }) {
                 </button>
               </div>
             </div>
-            <div className="auth-options">
-              <label className="remember-option">
-                <input type="checkbox" disabled />
-                <span>로그인 상태 유지 <small>준비 중</small></span>
-              </label>
-              <button type="button" className="text-button" disabled>비밀번호를 잊으셨나요? (준비 중)</button>
-            </div>
             {message && <p className="auth-message" role="status">{message}</p>}
             <div className="login-actions">
               <button type="submit" className="app-button app-button--primary" disabled={isSubmitting}>
@@ -106,25 +97,13 @@ function LoginPage({ onSignup, onLoginSuccess, notice = '' }) {
               </button>
             </div>
           </form>
-          <div className="auth-divider"><span>또는</span></div>
-          <div className="social-actions">
-            <button type="button" className="app-button social-button" disabled>
-              <img className="social-symbol" src={googleIcon} alt="" aria-hidden="true" />
-              <span>Google로 계속하기</span><small>준비 중</small>
-            </button>
-            <button type="button" className="app-button social-button" disabled>
-              <img className="social-symbol" src={githubIcon} alt="" aria-hidden="true" />
-              <span>GitHub로 계속하기</span><small>준비 중</small>
-            </button>
-          </div>
           <p className="auth-switch">
             계정이 없으신가요?
             <button type="button" className="text-button" onClick={onSignup} disabled={isSubmitting}>회원가입</button>
           </p>
+          {onBack && <p className="auth-switch"><button type="button" className="text-button" onClick={onBack} disabled={isSubmitting}>오피스로 돌아가기</button></p>}
         </section>
-        <p className="auth-footer">AI Agent 협업을 위한 업무 공간</p>
-      </div>
-    </main>
+    </OfficeAuthLayout>
   )
 }
 

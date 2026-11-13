@@ -6,14 +6,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from database import Base, engine
-import models  # 테이블 생성 전에 User와 Document 모델을 Base에 등록합니다.
+import models  # 기존 제품 테이블은 시작 시 생성하고 프로젝트 테이블은 명시적으로 확장합니다.
 from routers.auth import router as auth_router
 from routers.documents import router as documents_router
+from routers.projects import router as projects_router
+from routers.host_runs import router as host_runs_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(
+        bind=engine, tables=[models.User.__table__, models.Document.__table__]
+    )
     yield
 
 
@@ -27,6 +31,8 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(documents_router)
+app.include_router(projects_router)
+app.include_router(host_runs_router)
 
 
 @app.exception_handler(RequestValidationError)

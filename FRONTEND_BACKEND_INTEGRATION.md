@@ -1,26 +1,27 @@
 # 프론트엔드·백엔드 연동 안내
 
-최근 갱신: 2026-11-10. 파란색 업무 요청창 통합, 프로젝트·결과물 보관함의 실제 Run 연결, 3D 역할 표시 번호 1~5와 승인 Configuration 공급 차단 상태를 반영했습니다. 아래 명령은 실행 안내입니다. 이번 문서 갱신에서 테스트·서버·LLM·Docker를 실행했다는 의미는 아닙니다.
+최근 갱신: 2026-11-13. 제품 프로젝트 DB/API, 인증·소유권 기반 Host GET 중계, 프론트엔드 JWT 준비·로그인 진입·프로젝트 목록 연결과 최신 로그인 디자인을 반영했습니다. 코드에 구현된 범위와 실통신 차단 상태를 구분합니다. 이번 작업은 문서만 수정하며 기존 테스트·서버·LLM·Docker·실제 DB 검증을 다시 실행하지 않습니다.
 
 ## 1. 세 시스템의 역할과 주소
 
 | 시스템 | 코드 | 현재 프론트엔드에서 사용하는 주소 | 담당 기능 |
 | --- | --- | --- | --- |
 | React 개발 서버 | `frontend/` | `http://localhost:5173` | 화면, 입력, 토큰 보관, API 요청 |
-| 제품 FastAPI 백엔드 | `backend/` | `http://127.0.0.1:8000` | 회원가입·로그인·JWT·전자문서 |
+| 제품 FastAPI 백엔드 | `backend/` | `http://127.0.0.1:8000` | 회원가입·로그인·JWT·전자문서·프로젝트·Host GET 중계 준비 |
 | 기존 Orchestrator | `src/orchestrator/` | 기본 프록시 대상 `http://127.0.0.1:8001` | 기존 Run 저장·조회 및 구성된 실행계 연결 |
-| 실제 Multi Agent Host | `src/agents/platform/` | 선택 대상 `http://127.0.0.1:8002` (아직 미실행) | Host 자체 Orchestrator와 Agent `8101~8104`, 승인 설정 검증 |
+| 실제 Multi Agent Host | `src/agents/platform/` | 제품 중계의 기본 Host 대상 `http://127.0.0.1:8002` (실행·인증 검증 대기) | Host 자체 Orchestrator와 Agent `8101~8104`, 승인 설정 검증 |
 
 ```text
 브라우저의 React
   ├─ http://127.0.0.1:8000/api/auth/*     → 제품 백엔드 → 사용자 DB
   ├─ http://127.0.0.1:8000/api/documents  → 제품 백엔드 → 문서 DB·로컬 PDF
-  └─ /api/v1/* → Vite 프록시 → Orchestrator → A2A Agent 실행기 → LLM·도구
+  ├─ http://127.0.0.1:8000/api/projects   → 제품 백엔드 → 본인 저장 프로젝트
+  └─ /api/v1/* → Vite 프록시 → 기본 Orchestrator 8001 (제품 JWT 미전송)
 ```
 
-제품 백엔드와 Orchestrator는 별도 서버·DB 계약입니다. 제품 서버를 실행해도 Agent 서버는 시작되지 않습니다. 제품 JWT를 Orchestrator·A2A 공통 인증으로 전달하는 기능도 현재 UI에는 연결되어 있지 않습니다.
+제품 백엔드와 Orchestrator는 별도 서버·DB 계약입니다. 제품 서버를 실행해도 Agent 서버는 시작되지 않습니다. 제품에는 JWT·ProjectRun 소유권 기반 Host GET 중계가 구현되어 있지만 `HOST_SERVICE_AUTH_VERIFIED=False`로 실통신을 막습니다. 프론트엔드의 제품 Run 전송기도 `PRODUCT_RUN_API_READY=false`이며 현재 Vite 기본값은 8001입니다. 이 세 경계를 준비 없이 해제하지 않습니다.
 
-8001과 Host 8002는 별도 앱·설정된 저장소를 사용하며 자동으로 데이터를 공유하지 않습니다. 실제 Host에서 생성한 Run·Step·Trace·Issue·Artifact/Report는 같은 Host 8002에서 조회해야 합니다. 두 서버 통합 없이 프록시 대상으로 선택할 수 있으며, 대상 전환 자체는 Run/DB를 복사하지 않습니다.
+8001과 Host 8002는 별도 앱·저장소이며 자동으로 데이터를 공유하지 않습니다. 실제 Host Run의 원본 Run·Step·Trace·Issue·Artifact/Report는 해당 Host에 있습니다. 최종 서비스 경로는 브라우저 `/api/v1/runs/...` → 제품 8000(JWT·프로젝트 소유권) → Host 8002(서비스 토큰)이며, 아직 활성화하지 않았습니다. 프록시를 Host 8002로 직접 바꾸는 것만으로 이 제품 인증 경로가 완성되지는 않습니다.
 
 ## 2. 설치·실행 순서
 
@@ -44,7 +45,7 @@ export JWT_SECRET="$(.venv/bin/python -c 'import secrets; print(secrets.token_ur
 | Swagger UI | `http://127.0.0.1:8000/docs` |
 | OpenAPI JSON | `http://127.0.0.1:8000/openapi.json` |
 
-`GET /`의 정상 응답은 `{"message":"A2A backend is running"}`입니다. 이 응답만으로 JWT 설정이나 Agent 실행까지 확인되는 것은 아닙니다. 테이블은 시작 시 `create_all()`로 생성하며 기존 테이블을 자동 변경하는 마이그레이션은 없습니다.
+`GET /`의 정상 응답은 `{"message":"A2A backend is running"}`입니다. 이 응답만으로 JWT 설정이나 Agent 실행까지 확인되는 것은 아닙니다. 서버 시작 시 `create_all()` 대상은 기존 `users`·`documents`뿐입니다. `projects`·`project_runs`는 `project_schema.create_project_tables(engine)`으로 명시적으로 추가하며 기존 컬럼 자동 마이그레이션은 없습니다. 이 개발 DB에는 앞선 승인 단계에서 이미 적용했습니다.
 
 ### 프론트엔드: 두 번째 터미널
 
@@ -64,7 +65,12 @@ Orchestrator·Agent를 실제 실행하려면 별도의 승인된 Host 설정·�
 
 | 파일 | 역할과 실제 연결 여부 |
 | --- | --- |
-| [App.jsx](frontend/src/App.jsx) | 상태 기반 페이지 전환, 로그인 진입 설정 |
+| [App.jsx](frontend/src/App.jsx) | 공개 오피스·계정 로그인·성공 복귀·입력 초안 보존 |
+| [OfficeAuthLayout.jsx](frontend/src/components/atelier/OfficeAuthLayout.jsx) | 중앙 인증 폼과 기존 모델의 로그인 전용 업무 포즈 이미지 |
+| [projects.js](frontend/src/api/projects.js) · [useSavedProjects.js](frontend/src/hooks/useSavedProjects.js) | 제품 8000의 본인 프로젝트 GET·JWT·취소·오류 처리 |
+| [productRunRequest.js](frontend/src/api/productRunRequest.js) | 제품 Run용 보호 전송기 준비, 현재 비활성 |
+| [projects.py](backend/routers/projects.py) | 제품 프로젝트 API 4개·기존 JWT·소유권 확인 |
+| [host_runs.py](backend/routers/host_runs.py) · [host_reads.py](backend/host_reads.py) | 명시적 Host GET 중계와 서비스 인증 미검증 시 503 차단 |
 | [LoginPage.jsx](frontend/src/pages/LoginPage.jsx) | 실제 로그인 API, `access_token` 저장 |
 | [SignupPage.jsx](frontend/src/pages/SignupPage.jsx) | 실제 회원가입 API, 성공 후 로그인 이동 |
 | [DocumentPage.jsx](frontend/src/pages/DocumentPage.jsx) | 실제 문서 업로드·제출/배정 목록·다운로드 |
@@ -82,13 +88,15 @@ Orchestrator·Agent를 실제 실행하려면 별도의 승인된 Host 설정·�
 | [agentRuns.js](frontend/src/api/agentRuns.js) | 생성·Run·Step·Event·실행 방식 조회. GET 함수는 Dashboard Hook에서 사용 |
 | [vite.config.js](frontend/vite.config.js) | `/api/v1`, `/health`를 Orchestrator로 전달 |
 
-현재 기본 설정은 `App.jsx`의 `REQUIRE_PLATFORM_LOGIN = false`입니다. 첫 화면은 파란색 업무 요청창과 5인 3D 오피스이며 기존 헤더·사이드바를 유지합니다. 헤더와 계정 메뉴의 `새 업무`는 같은 요청창으로 이동합니다. 계정 메뉴의 전자문서 관리는 유지하며, 별도 Run 생성·UUID 조회·개발용 상세 패널과 Pipeline 진입은 사용자 화면에서 제거했습니다.
+현재 첫 화면은 로그인 없이 열리는 파란색 업무 요청창과 5인 3D 오피스입니다. `REQUIRE_PLATFORM_LOGIN` 플래그는 사용하지 않습니다. 계정 메뉴의 로그인/다시 로그인으로 기존 LoginPage·SignupPage에 진입하고 성공하면 오피스로 복귀합니다. 비로그인 사용자의 프로젝트·보관함·전자문서 메뉴는 로그인으로 안내합니다. 기존 헤더·사이드바를 유지하고 별도 Run 생성·UUID 조회·개발 상세 패널은 표시하지 않습니다.
 
-기존 로그인 흐름으로 계정 연동을 검증하려면 해당 설정을 `true`로 사용하는 절차를 팀과 정합니다. 이 경우 회원가입 → 로그인 → 오피스로 이어집니다. 이 문서 작업에서는 설정을 변경하지 않았습니다. 공개 오피스 진입은 서버의 문서 인증·권한 검사를 해제하지 않습니다.
+프로젝트 이름·요구사항 초안은 App 메모리에 보관해 로그인·회원가입·취소 후 복귀할 때 유지합니다. 새로고침·로그아웃 후 영구 복원은 하지 않으며 로그인 성공만으로 업무를 자동 제출하지 않습니다. 토큰 존재와 유효성은 구분하고 실제 보호 API의 401은 재로그인을 안내합니다.
 
-업무 시작은 승인 설정을 확인하는 실제 생성 경로이며 실패를 목업 성공으로 표시하지 않습니다. 프로젝트·보관함은 현재 화면에서 접수한 Run만 표시하고 없으면 빈 상태를 보여줍니다. 105초 시연·역할 소개의 예시는 실제 업무 결과와 별개입니다. 3D 역할 버튼은 1 오케스트레이터, 2 계획, 3 개발, 4 QA, 5 보안이며 번호만 변경했고 내부 인덱스·캐릭터·모션은 유지했습니다.
+업무 시작은 로그인 토큰 존재와 승인 설정을 확인하는 실제 생성 경로이며 실패를 목업 성공으로 표시하지 않습니다. 현재 승인 설정이 공급되지 않아 실제 POST는 차단됩니다. 프로젝트는 본인 저장 목록과 현재 화면의 Run을 함께 표시하고, 보관함은 현재 Run의 Artifact 등록 정보를 표시합니다. 105초 시연은 실제 업무 결과와 별개입니다. 업무 흐름과 3D 역할 표시는 1 오케스트레이터, 2 계획, 3 개발, 4 QA, 5 보안이며 내부 인덱스·AgentRole 계약은 유지됩니다.
 
 우리 직원과 3D에는 리더인 오케스트레이터와 계획·개발·QA·보안의 다섯 캐릭터를 표시합니다. 실제 `AgentRole`과 Step 역할은 `PLANNER`, `DEVELOPER`, `QA`, `SECURITY` 네 가지입니다. 리더는 관리 서버를 시각화한 것이며 별도 LLM Agent·Step·제품 사용자를 추가하지 않습니다. 직원 카드는 현재 모델의 정면 렌더링 `office-*.png`를 사용하며, 모델 외형 변경 시 카드 이미지도 갱신해야 합니다.
+
+로그인·회원가입은 검정 배경·라임색 버튼의 중앙 폼을 공유합니다. 상단 계정·로그인·안내 문구는 가운데 정렬하고 직원 옆 설명 글씨는 제거했습니다. 기존 오피스 모델을 로그인 전용 `login-*.png`로 렌더링해 계획은 양손 차트 확인, 개발은 발판 없는 앉은 노트북 작업, QA는 돋보기 검사, 보안은 방패, 오케스트레이터는 태블릿과 지시 자세를 표시합니다. 긴 머리 뒤 라임색 후광과 작은 화면 배치를 적용했으며 기존 `office-*.png`·3D 모션·Trace·세리머니·인증 API는 변경하지 않았습니다.
 
 ## 4. 제품 인증 계약
 
@@ -115,7 +123,7 @@ JWT는 `HS256`, 유효기간 30분이며 `sub`에 문자열 사용자 ID, `email
 
 ### 브라우저 토큰 사용
 
-로그인 성공 시 기존 화면은 `sessionStorage.setItem('access_token', data.access_token)`으로 저장합니다. 보호된 문서 API에는 다음 헤더를 사용합니다.
+로그인 성공 시 기존 화면은 `sessionStorage.setItem('access_token', data.access_token)`으로 저장합니다. 보호된 문서·제품 프로젝트 목록 API에는 다음 헤더를 사용합니다.
 
 ```http
 Authorization: Bearer <access_token>
@@ -123,9 +131,26 @@ Authorization: Bearer <access_token>
 
 `sessionStorage`는 같은 출처·탭에서 새로고침 후 유지됩니다. `localhost:5173`과 `localhost:5174`는 다른 출처이므로 토큰이 공유되지 않습니다. 로그아웃은 토큰을 제거하는 프론트 처리이며 서버의 토큰 폐기 API는 없습니다.
 
-현재 앱은 저장된 토큰의 존재로 초기 화면을 판단하며 `/api/auth/me`를 통한 초기 검증·자동 갱신·만료 시 자동 로그아웃은 구현하지 않았습니다. 서버가 최종 인증을 수행합니다. 토큰이 없으면 DocumentPage는 요청을 보내지 않고 로그인 필요를 안내합니다.
+현재 앱의 초기 화면은 토큰과 무관하게 공개 오피스입니다. 저장된 토큰의 존재는 메뉴·업무 제출 안내에 사용하며 `/api/auth/me` 초기 검증·자동 갱신·만료 시 자동 로그아웃은 구현하지 않았습니다. 최종 인증은 제품 서버가 수행합니다. 제품 JWT와 `A2A_HOST_API_TOKEN`은 별개이며 Host 서비스 토큰은 브라우저로 전달하지 않습니다.
 
 실제 토큰·비밀번호·JWT 비밀키를 문서·Git·로그에 남기지 않습니다. `JWT_SECRET`이나 LLM API Key를 프론트엔드 또는 `VITE_*` 변수에 넣지 않습니다.
+
+### 사용자별 프로젝트 계약과 React 연결
+
+제품 서버는 기존 JWT로 다음 API를 제공합니다. Host 호출 없이 제품 DB만 사용합니다.
+
+| 제품 API | 요청·응답 | 현재 React 연결 |
+| --- | --- | --- |
+| `POST /api/projects` | `{name, scenarioId}` → 201, 프로젝트 공개 정보 | 미연결 |
+| `GET /api/projects` | 200, `{projects: [...]}` | 연결 완료 |
+| `GET /api/projects/{projectId}` | 공개 정보와 `runs` 배열 | 미연결 |
+| `PATCH /api/projects/{projectId}` | `{name}`만 → 수정된 공개 정보 | 미연결 |
+
+공개 필드는 `projectId`, `name`, `scenarioId`, `createdAt`, `updatedAt`입니다. 이름은 공백 제거 후 1~60자이며 Project ID는 서버에서 UUIDv4로 생성합니다. 소유자는 JWT 사용자로 고정하고 요청의 추가 필드는 거부합니다. 본인 목록만 반환하며 타 사용자/없는 프로젝트 상세·수정은 모두 404입니다. 상세 `runs`에는 `hostKey`, `runId`, `configurationId`, `linkedAt`만 포함하고 실제 Run 상태는 Host에 둡니다.
+
+MVP 생성은 같은 체크아웃의 정적 레지스트리에 등록된 SCN-001 UUID만 허용합니다. 미등록 UUID는 422, 레지스트리 확인 실패는 503입니다. 이는 실행 중인 Host의 등록·승인 Configuration·실행 준비까지 보장하지 않습니다.
+
+React는 프로젝트 메뉴 진입·재시도 시 `getProjects()`로 제품 8000에 직접 GET하고 `sessionStorage.access_token`을 Bearer로 전송합니다. JWT 누락은 요청 전 차단, 401은 기존 로그인 진입 안내, 403/404·네트워크·서버 오류는 각각 구분합니다. 빈 목록은 빈 상태이며 다른 로그인 세션/이탈한 화면의 늦은 응답을 적용하지 않습니다. 카드에는 서버의 ID·이름·시나리오·생성일만 표시하고 실제 Agent 상태·진행률을 만들지 않습니다. 현재 Run 카드는 별도로 보존합니다.
 
 ## 5. 전자문서 계약
 
@@ -196,7 +221,8 @@ const response = await fetch('http://127.0.0.1:8000/api/documents', {
 | 대상 | 원본·저장 위치 |
 | --- | --- |
 | DB 모델 | [backend/models.py](backend/models.py) |
-| API 모델 | [backend/schemas.py](backend/schemas.py) |
+| API 모델 | [backend/schemas.py](backend/schemas.py), [backend/project_schemas.py](backend/project_schemas.py) |
+| 프로젝트 테이블 확장 | [backend/project_schema.py](backend/project_schema.py) |
 | DB 연결 | [backend/database.py](backend/database.py) |
 | SQLite 파일 | `backend/app.db` |
 | PDF 실체 | `backend/uploads/`의 UUID v4 기반 `.pdf` 파일 |
@@ -207,28 +233,50 @@ const response = await fetch('http://127.0.0.1:8000/api/documents', {
 
 SQLite의 외래키 선언과 실행 시 강제 검사는 별개입니다. 현재 `PRAGMA foreign_keys=ON`은 설정되어 있지 않고 API에서 제출자·담당자를 확인합니다. DB 날짜 열에는 시간대 지정이 없으므로 API 날짜를 임의로 UTC 확정값으로 취급하지 않습니다. 상세 컬럼 제약은 [backend/README.md](backend/README.md)를 참고합니다.
 
+Project는 `users.id`를 소유자로 참조하고 ProjectRun은 `projects.project_id`를 참조합니다. `(host_key, run_id)`는 UNIQUE이며 현재 Host 키는 `local-multi`입니다. 제품 DB에는 Run 연결 식별자만 두고 Run·Step·Trace 원본과 비밀 설정을 복제하지 않습니다. Submission은 상태·요청 식별·Host 중복 생성 계약 미확정으로 모델/테이블을 만들지 않았습니다.
+
+실제 개발 DB의 `projects`·`project_runs`는 앞선 승인 단계에서 SQLite backup API 백업 후 추가했습니다. 당시 users 6건·documents 4건, 기존 스키마 보존과 `integrity_check=ok`를 확인했습니다. 백업 디렉터리는 저장소 외부 `/Users/Shared/A2A-agent-company-backups-songsehwa/`이며 현재 문서 작업에서 DB·백업을 다시 조회하거나 변경하지 않았습니다. FK 강제 정책은 그대로입니다.
+
 ## 7. CORS·Vite 프록시
 
 | 브라우저 요청 | 현재 경로 |
 | --- | --- |
 | `http://127.0.0.1:8000/api/auth/*` | 제품 서버로 직접 요청. CORS 적용 |
 | `http://127.0.0.1:8000/api/documents...` | 제품 서버로 직접 요청. CORS 적용 |
+| `http://127.0.0.1:8000/api/projects` | 제품 서버로 직접 GET. JWT·CORS 적용 |
 | `/api/v1/...` | Vite의 `ORCHESTRATOR_PROXY_TARGET`으로 전달. 기본 `http://127.0.0.1:8001` |
 | `/health` | 같은 Orchestrator로 전달. 제품 서버 실행 확인 URL이 아님 |
 
 제품 서버의 `allow_origins`는 `http://localhost:5173`과 `http://localhost:5174`입니다. `allow_credentials=True`, 메서드·헤더는 모두 허용하지만 모든 출처를 허용하지는 않습니다. 이 설정은 Cookie 로그인을 구현했다는 뜻이 아니며 현재는 Authorization 헤더를 사용합니다.
 
-`http://127.0.0.1:5173`, `localhost:5175`, HTTPS 주소는 다른 출처입니다. 브라우저 접속 주소와 서버 허용값을 맞춥니다. `/api/auth/*`와 `/api/documents`는 현재 프록시 대상이 아니므로 제품 API만 상대 경로로 변경하면 연결되지 않습니다.
+`http://127.0.0.1:5173`, `localhost:5175`, HTTPS 주소는 다른 출처입니다. 브라우저 접속 주소와 서버 허용값을 맞춥니다. `/api/auth/*`·`/api/documents`·`/api/projects`는 현재 프록시 대상이 아니므로 제품 API만 상대 경로로 변경하면 연결되지 않습니다.
 
 `npm run build`로 만든 정적 파일만으로는 API 전달 서버가 제공되지 않습니다. 배포 시 API 공개 주소, 리버스 프록시, CORS를 별도로 정합니다. 현재는 운영용 공통 API URL 환경변수를 추가한 구성이 아닙니다.
 
-실제 Host 준비 시 프론트엔드 디렉터리에서 다음과 같이 Vite 대상을 선택합니다. 환경변수를 바꾼 뒤에는 Vite만 재시작해야 하며, 이 명령이 Host를 시작하지는 않습니다.
+기존 직접 Host 개발 경로에서는 아래처럼 Vite 대상을 선택할 수 있습니다. 다만 이는 제품 소유권 검사를 거치는 최종 서비스 전환 명령이 아니며 지금은 기본 8001을 유지합니다. 환경변수를 바꾼 뒤에는 Vite만 재시작해야 하며, 이 명령이 Host를 시작하지는 않습니다.
 
 ```bash
 ORCHESTRATOR_PROXY_TARGET=http://127.0.0.1:8002 npm run dev
 ```
 
 변수를 지정하지 않고 `npm run dev`를 실행하면 기본 `http://127.0.0.1:8001`로 돌아갑니다. `/api/v1`과 `/health`는 항상 같은 대상으로 연결됩니다. 이 변수는 Vite 서버 프로세스에서만 읽으며 브라우저용 `VITE_*` 설정이 아닙니다. 8001·8002 서버는 종료하거나 재시작하지 않습니다.
+
+### 제품 Host 조회 중계와 전환 조건
+
+```text
+최종 서비스 구조 (현재 비활성)
+브라우저 /api/v1/runs/{runId}/...
+  → 제품 8000: JWT 검증 → local-multi의 ProjectRun 존재 → Project 소유권
+  → Host 8002: 서버의 A2A_HOST_API_TOKEN 검증 → Run 원본 조회
+```
+
+제품이 명시적으로 받는 GET은 `/{runId}`, `/{runId}/steps`, `/{runId}/events`, `/{runId}/issues`, `/{runId}/artifacts` 다섯 개이며 prefix는 `/api/v1/runs`입니다. `/api/runs` 별칭이나 범용 URL 프록시는 없습니다. 무인증은 401, 연결 없음·타 사용자·다른 Host는 404로 Host 요청 전에 종료합니다. Events는 `limit=100`(1~500), `offset=0`(0 이상)을 사용하고 Host의 순서·페이지 구조를 보존합니다.
+
+`backend/host_reads.py`의 `HOST_SERVICE_AUTH_VERIFIED=False` 때문에 소유권 검사를 통과해도 현재 실통신은 503으로 차단합니다. Host 수신 서비스 인증이 아직 확인되지 않았으며 역할별 A2A 인증과도 별개입니다. 준비한 서버 설정은 `A2A_HOST_BASE_URL`(기본 8002)과 `A2A_HOST_API_TOKEN`입니다. 환경변수만 넣어 차단을 해제할 수 없습니다. 클라이언트는 연결/소켓 작업 5초 제한·응답 8MiB 상한·연결 종료를 적용하고 리다이렉트나 자동 재시도를 하지 않습니다. 연결 장애는 안전한 503, Host 404는 고정 404로 처리하며 Agent의 FAILED·최종 판정은 정상 JSON으로 구분합니다.
+
+프론트엔드의 `createProductRunFetch`는 JWT·401·안전한 오류 처리를 준비했지만 `PRODUCT_RUN_API_READY=false`로 비활성입니다. 현재 Run API는 기존 익명 8001 경로를 유지하며 제품 JWT를 추가하지 않습니다. 이는 제품 8000으로 직접 JWT를 보내는 프로젝트 목록 GET과 별개입니다.
+
+제품에는 아직 `POST /api/v1/runs`, `/api/v1/scenarios`, Run `/configuration`, 개별 Artifact, `/health` 중계가 없습니다. 따라서 Vite 대상만 8000으로 바꾸면 전체 프론트 계약이 충족되지 않습니다. Host 서비스 인증, 승인 설정 공급·시나리오/실행 방식 계약, Submission·Run 생성·ProjectRun 연결을 합의하고 필요한 API를 구현한 뒤 프록시와 보호 전송기를 함께 전환해야 합니다. 기존 8001과 8002의 앱·DB 통합은 필요하지 않습니다.
 
 ## 8. Orchestrator·실제 Run 조회와 3D 연결
 
@@ -342,9 +390,9 @@ Run의 `FINISHED`는 종료이며 성공 여부는 `verdict`로 판단합니다.
 
 ### 프로젝트·결과물 보관함의 실제 데이터
 
-프로젝트는 `useOfficeRunSubmission`에 저장된 이름·요구사항과 생성 응답의 `run.runId`를 `submittedRunProject()`로 연결합니다. 기존 카드·검색 디자인을 재사용하며 Run 상태와 역할별 Step 상태를 표시합니다. QA·Security 병렬 상태도 각각 유지합니다. 실제 근거가 없는 진행률 숫자·진행 막대는 표시하지 않습니다. 실제 Run이 없으면 목업 카드 대신 빈 상태를 보여줍니다.
+프로젝트 화면은 제품 `GET /api/projects`의 본인 저장 목록과 `submittedRunProject()`의 현재 Run 카드를 함께 표시합니다. 현재 Run만 Run·Step 및 QA·Security 병렬 상태를 사용하고 저장된 카드에는 실행 상태를 추측하지 않습니다. 기존 디자인을 유지하며 근거 없는 진행률·예시 카드는 표시하지 않습니다.
 
-현재 조회 가능한 범위는 **이 화면에서 생성한 Run**입니다. 전체 Run 목록과 프로젝트명 영구 저장 API가 없으므로 이전 세션의 프로젝트 이력·새로고침 후 복원은 지원하지 않습니다. 프로젝트 카드를 누르면 같은 Run의 실제 3D 오피스로 돌아가며 새 Run을 생성하지 않습니다.
+실제 Run 선택은 현재 화면에서 생성한 Run만 지원합니다. 제품 프로젝트 목록은 새로고침 후 다시 GET할 수 있지만 상세·ProjectRun 선택·이전 Run 복원은 아직 React에 연결하지 않았습니다. 현재 Run 카드는 같은 Run의 3D 오피스로 돌아가고 저장된 Project 카드는 조회 정보만 표시합니다. Project ID와 Run ID를 같다고 가정하거나 자동 연결하지 않습니다.
 
 | Host API | 제공 범위와 현재 UI 사용 |
 | --- | --- |
@@ -420,6 +468,8 @@ Provider에는 모델, 출력 토큰 한도, 시간제한, 구조화 응답·도
 | 413 / 415 | 10MiB 초과 / PDF 서명 불일치 확인 |
 | 422 | 자료형, 필수 입력, `view`, 등록된 `scenarioId`, 승인 구성 등의 `detail` 확인 |
 | 제품 API 500 | `JWT_SECRET`, 저장 폴더, DB를 서버에서 확인. 내부 예외를 사용자에게 그대로 전달하지 않음 |
+| 제품 Host 조회 503 | `HOST_SERVICE_AUTH_VERIFIED=False`, 서비스 인증·연결·응답 오류 확인. Agent 작업 실패와 별개 |
+| 프로젝트 503 | 프로젝트 스키마·저장소 또는 로컬 시나리오 레지스트리 확인 |
 | Orchestrator 503 | 단일 실행계 미설정 등 `detail` 확인. API 존재와 실행계 구동을 구분 |
 | 갱신해도 PENDING | 실행 전달 미설정·실행계 미구동 확인. 3D 재생으로 실제 Step이 진행되지는 않음 |
 
@@ -473,10 +523,26 @@ node --test tests/*.test.mjs
 3. A가 B에게 PDF를 제출하고 A의 `submitted`, B의 `assigned`에 표시되는지 확인합니다.
 4. A·B로 원본을 받고 C의 직접 다운로드가 403으로 거절되는지 확인합니다.
 5. 미로그인·만료, 빈 목록, 10MiB 경계, 형식 오류, 존재하지 않는 담당자를 확인합니다.
-6. Orchestrator는 승인 구성·포트·실제 DB 경로·A2A 인증·모델/도구 제한을 담당자와 합의한 뒤 별도 검증합니다. 승인된 공급 계약과 Host 준비 후 파란색 입력창에서 실제 Run 1건을 생성하여 자동 관측·병렬 검토·수정·재검증·최종 판정과 프로젝트/보관함의 실제 응답을 확인합니다. 현재 사용자 화면은 기존 Run UUID 입력을 제공하지 않습니다. Mock으로 확인한 초기·증분 Trace 순서와 실제 전달 대상을 실제 Run 1건에서 대조합니다. 이벤트 시각과 애니메이션 시작 시각이 동일하다고 가정하지 않습니다.
+6. 제품 Run 생성·Submission·ProjectRun 연결과 Host 서비스 인증·승인 설정 공급 계약을 완성하고 프록시/보호 전송기를 함께 전환한 뒤, 승인 구성·포트·실제 DB 경로·A2A 인증·모델/도구 제한을 담당자와 합의해 별도 검증합니다. 승인된 공급 계약과 Host 준비 후 파란색 입력창에서 실제 Run 1건을 생성하여 자동 관측·병렬 검토·수정·재검증·최종 판정과 프로젝트/보관함의 실제 응답을 확인합니다. 현재 사용자 화면은 기존 Run UUID 입력을 제공하지 않습니다. Mock으로 확인한 초기·증분 Trace 순서와 실제 전달 대상을 실제 Run 1건에서 대조합니다. 이벤트 시각과 애니메이션 시작 시각이 동일하다고 가정하지 않습니다.
 
 과거 수동 검증에서는 A의 제출·다운로드, B의 배정 목록·다운로드, C의 403, 문서 ID 2의 원본과 다운로드 파일의 SHA-256 일치가 확인되었습니다. 상세 기록은 [backend/README.md](backend/README.md)에 있습니다. 이번에 새로 실행한 결과가 아니며 최신 UI의 모든 동작이나 실제 LLM·Docker 검증을 보장하지 않습니다.
 
 인계 시 제품·Orchestrator 주소, 사용 origin, 로그인 설정·만료, 담당자 ID 확인 방법, 승인된 Run 구성, 싱글/멀티 Host 선택, 실제 API와 시연 목업의 구분을 공유합니다. 실제 키·토큰 대신 필요한 환경변수명과 설정 파일 위치를 공유합니다.
 
 상세한 시스템 설명은 [frontend/README.md](frontend/README.md), [backend/README.md](backend/README.md), [Owned Platform 인계](docs/45-owned-platform-handoff.md), [Single 최종 감사](docs/56-single-agent-final-audit-runbook.md)를 참고합니다.
+
+
+### 최근 단계별 검증 기록과 남은 범위
+
+| 단계 | 이전 작업에서 확인한 결과 | 현재 한계 |
+| --- | --- | --- |
+| 프로젝트 모델 | 임시 SQLite 6개 PASS | 기존 컬럼 변경용 마이그레이션·Submission 없음 |
+| 프로젝트 API | 임시 DB·ASGI 8개 PASS | React는 목록 GET만 연결 |
+| Host GET 중계 | Mock Host 4개 PASS | 실통신 차단 유지 |
+| 경로 정합성 | Run·Events·401/404/503 경로 검사 1개 PASS | Vite는 8001 유지 |
+| 제품 JWT 준비 | Mock 3개 PASS | Run 보호 전송기 비활성 |
+| 로그인 진입 | 격리 Mock UI 1개에서 세 가지 핵심 흐름 확인 | 실제 서버 인증 E2E 재검증 아님 |
+| 프로젝트 목록 | Mock 3개 PASS | 상세·ProjectRun 복원·생성 미연결 |
+| 로그인 디자인 | 로컬 렌더링·데스크톱/모바일 배치·변경 파일 정적 검사 | 인증·실제 Agent 전체 회귀 아님 |
+
+위 기록을 기존 50/103/64/118개 기록과 합산하지 않습니다. 이번 문서 갱신에서는 문서 링크·형식·공백만 확인했습니다. 다음 개발은 프로젝트 상세/Run 복원, Host 서비스 인증·공개 응답 안전성, 승인 Configuration·시나리오 계약, Submission·Run 생성·ProjectRun 저장 순으로 경계를 정해야 합니다. 실제 LLM E2E는 별도 승인 후에만 검증합니다.

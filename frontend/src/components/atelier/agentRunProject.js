@@ -5,6 +5,14 @@ const states = { RECEIVED: '요청 접수', PLANNING: '요구사항 분석', IMP
   WAITING_INPUT: '입력 대기', HUMAN_REVIEW: '사람 검토 필요', ABORTED: '실행 중단' }
 const verdicts = { SUCCESS: '업무 완료', FAIL: '종료 · 실패', UNVERIFIED: '종료 · 검증 미완료', HUMAN_REVIEW: '종료 · 사람 검토 필요' }
 
+// 제품 목록 API에는 Run/Step 상태가 없습니다. 실행 상태·진행률·담당 Agent를 추측하지 않습니다.
+export function savedProjectCards(projects) {
+  return projects.map(project => ({ ...project, id: project.projectId, stored: true, actual: true,
+    description: `시나리오 ID: ${project.scenarioId}`, time: project.createdAt.slice(0, 10),
+    status: { text: '저장된 프로젝트', kind: 'active' }, agents: [],
+    notice: '업무 실행 상태는 아직 조회하지 않았습니다.' }))
+}
+
 // 현재 화면에서 접수한 Run만 연결합니다. 전체 Run/프로젝트 목록 API를 가정하지 않습니다.
 export function submittedRunProject(submission, monitor) {
   const accepted = submission?.result?.run
