@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import Dashboard from '../../src/pages/AtelierDashboard.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+sessionStorage.setItem('access_token', 'mock-office-request-only')
 const id = n => `70000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const scenarioId = id(1), runId = id(2), stepId = id(3)
 const approval = { approved: true, scenarioId, configuration: {

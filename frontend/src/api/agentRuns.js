@@ -1,6 +1,7 @@
 import { artifactCatalog } from './agentArtifactCatalog.js'
 import { popupArtifacts, popupIssues } from './agentRunResults.js'
 import { publicRunConfiguration, runUuid } from './agentRunSubmission.js'
+import { loginRequired, ProductRunRequestError, runApiTransport } from './productRunRequest.js'
 
 function apiError(message, { status = null, detail = null, code = 'INVALID_RESPONSE', cause } = {}) {
   const error = new Error(message)
@@ -19,12 +20,15 @@ async function requestJson(path, options, failureMessage) {
 
   let response
   try {
-    response = await fetch(path, options)
+    response = await runApiTransport.fetch(path, options)
   } catch (cause) {
     signal?.throwIfAborted()
     if (cause?.name === 'AbortError') throw cause
+    if (cause instanceof ProductRunRequestError) throw cause
     throw apiError('서버에 연결할 수 없습니다.', { code: 'NETWORK_ERROR', cause })
   }
+
+  if (response.status === 401) throw loginRequired()
 
   let data = null
   try {

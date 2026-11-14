@@ -742,3 +742,15 @@
 .atelier-dashboard .project-agent-states small { opacity: .7; line-height: 1.6; }
 .atelier-dashboard .artifact-details { margin-top: 16px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .atelier-dashboard .artifact-details summary { cursor: pointer; }
+
+/* 저장된 프로젝트 상세: 기존 카드·대화상자 디자인 안에서 공개 연결 정보만 표시합니다. */
+.atelier-dashboard .saved-project-detail { font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.atelier-dashboard .saved-project-fields { display: grid; grid-template-columns: minmax(0, 125px) minmax(0, 1fr); gap: 8px 14px; margin: 16px 0; }
+.atelier-dashboard .saved-project-fields dt { color: var(--muted); }
+.atelier-dashboard .saved-project-fields dd { margin: 0; }
+.atelier-dashboard .saved-project-runs { list-style: none; padding: 0; margin: 0; }
+.atelier-dashboard .saved-project-runs li { border-top: 1px solid var(--border-control); }
+@media (max-width: 480px) {
+  .atelier-dashboard .saved-project-fields { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .atelier-dashboard .saved-project-fields dd { margin-bottom: 10px; }
+}

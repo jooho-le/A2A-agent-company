@@ -4,21 +4,25 @@ import { AtelierHeader, AtelierSidebar, OfficeDate } from '../components/atelier
 import AgentOffice3D from '../components/atelier/AgentOffice3D'
 import useOfficeRunSubmission from '../hooks/useOfficeRunSubmission'
 import { initialRunSelection, runEventLimit, runQueryReducer } from '../hooks/agentRunSelection'
-import { submittedRunProject } from '../components/atelier/agentRunProject'
+import { savedProjectCards, submittedRunProject } from '../components/atelier/agentRunProject'
+import useSavedProjects from '../hooks/useSavedProjects'
+import { readProjectSelection } from '../hooks/projectSelection'
 import { buildAgentRunDisplayState } from '../components/atelier/agentRunDisplayState'
 import AtelierDialog from '../components/atelier/AtelierDialog'
 import { HomeView, OutputsView, ProjectsView, TeamView, WorkflowView } from '../components/atelier/AtelierViews'
 import { artifactContent, initialActivities, initialProjects, viewCopy } from '../components/atelier/atelierMock'
 import useAtelierMotion, { useMediaQuery } from '../components/atelier/useAtelierMotion'
 import useAgentRunMonitor from '../hooks/useAgentRunMonitor'
+import { hasStoredAccessToken } from '../api/productRunRequest'
 import './AtelierDashboard.css'
 
 function readView() {
   const route = window.location.hash.startsWith('#/') ? window.location.hash.slice(2) : 'home'
+  if (['projects', 'outputs'].includes(route) && !hasStoredAccessToken()) return 'home'
   return Object.hasOwn(viewCopy, route) ? route : 'home'
 }
 
-export default function AtelierDashboard({ onOpenDocuments, onLogout, approvedRunSubmission = null }) {
+export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, hasAccessToken = hasStoredAccessToken(), requestDraft, onRequestDraftChange, approvedRunSubmission = null }) {
   const rootRef = useRef(null)
   const returnFocusRef = useRef(null)
   const toastTimer = useRef(null)
@@ -28,7 +32,11 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, approvedRu
   const [activities, setActivities] = useState(initialActivities)
   const [selectedId, setSelectedId] = useState('orbit')
   const [search, setSearch] = useState('')
-  const [modal, setModal] = useState(null)
+  const [modal, setModal] = useState(() => {
+    const projectId = readProjectSelection()
+    // 후보 ID로 기존 상세 창을 열고 서버 확인 후에만 내용을 표시합니다.
+    return projectId ? { type: 'saved-project', projectId } : null
+  })
   const [toast, setToast] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [motionRequested, setMotionRequested] = useState(true)
@@ -97,13 +105,18 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, approvedRu
   const submission = useOfficeRunSubmission(approvedRunSubmission, connectCreatedRun)
   const actualProject = submittedRunProject(submission, runMonitor)
   const actualProjects = actualProject ? [actualProject] : []
+  const savedProjects = useSavedProjects(view === 'projects')
+  // 프로젝트 ID와 Run ID는 별개입니다. 연결 이력 조회 없이 임의로 합치지 않습니다.
+  const listedProjects = [...savedProjectCards(savedProjects.projects), ...actualProjects]
   function openActualProject() {
     if (!actualProject) return
     setOfficeModeChoice({ runId: actualProject.runId, mode: 'actual' })
     changeView('home')
   }
   const workflowStatus = runQuery.runId && officeMode === 'actual'
-    ? Object.values(runMonitor.errors).some(Boolean)
+    ? Object.values(runMonitor.errors).some(error => error?.code === 'AUTH_REQUIRED')
+      ? '로그인이 필요합니다. 기존 로그인 화면에서 로그인해 주세요.'
+      : Object.values(runMonitor.errors).some(Boolean)
       ? '업무 상태를 불러오지 못했습니다. 마지막 상태를 유지하며 연결을 다시 확인합니다.'
       : runMonitor.run?.status === 'FINISHED'
         ? ({ SUCCESS: '업무가 성공적으로 완료되었습니다.', FAIL: '업무가 종료되었으며 최종 판정은 실패입니다.',
@@ -120,6 +133,10 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, approvedRu
   }
   function changeView(next) {
     if (!Object.hasOwn(viewCopy, next)) return
+    if (['projects', 'outputs'].includes(next) && !hasStoredAccessToken()) {
+      onLogin?.()
+      return
+    }
     setView(next); setDrawerOpen(false)
     if (window.location.hash !== `#/${next}`) window.history.pushState(null, '', `#/${next}`)
     window.scrollTo({ top: 0, behavior: 'instant' })
@@ -179,28 +196,28 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, approvedRu
     <button type="button" className="sidebar-dismiss" aria-label="회사 메뉴 닫기" tabIndex={-1} onClick={() => closeDrawer(true)} />
     <AtelierIcons />
     <div className="app"><div className="titlebar"><span className="window-dots" aria-hidden="true"><i /><i /><i /></span><span>AI 에이전트 회사 / company workspace</span><span className="titlebar-note">AI AGENT COMPANY</span></div>
-      <div className="layout"><AtelierSidebar view={view} mode="multi" count={actualProjects.length} onView={changeView} mobile={mobile} open={drawerOpen} onClose={closeDrawer} onRunScenario={requestNew} onOpenDocuments={onOpenDocuments} onLogout={onLogout} />
+      <div className="layout"><AtelierSidebar view={view} mode="multi" count={listedProjects.length} onView={changeView} mobile={mobile} open={drawerOpen} onClose={closeDrawer} onRunScenario={requestNew} onOpenDocuments={onOpenDocuments} onLogout={onLogout} onLogin={onLogin} hasAccessToken={hasAccessToken} />
         <main className="main"><AtelierHeader view={view} drawerOpen={mobile && drawerOpen} onMenu={() => setDrawerOpen(!drawerOpen)} motion={motion} reducedMotion={reducedMotion} onMotion={() => setMotionRequested(!motionRequested)} onNew={requestNew} />
           <div className="content"><header className="page-header"><div><p className="eyebrow">{copy[1]}</p><h1 id="page-title" tabIndex={-1} key={view}>{(copy[2].match(/\S+\s*/g) || []).map((word, index) => <span className="headline-word" style={{ '--word-index': index }} key={index}>{word}</span>)}</h1><p className="page-description">{copy[3]}</p></div><OfficeDate /></header>
             <div>
             <div id="home-view" className="view" hidden={view !== 'home'}>
-              <HomeView mode="multi" projects={projects} project={project} submission={{ ...submission, workflowStatus,
+              <HomeView mode="multi" projects={projects} project={project} submission={{ ...submission, workflowStatus, draft: requestDraft, onDraftChange: onRequestDraftChange,
                 finished: ['FINISHED', 'ABORTED'].includes(runMonitor.run?.status) }} onCreate={submission.submit}
                 officeScene={view === 'home' ? <AgentOffice3D requestText={officeMode === 'actual' ? submission.requestText : project.description}
                   motionEnabled={motion} runDisplayState={runDisplayState} displayMode={officeMode}
                   onDisplayModeChange={(mode) => setOfficeModeChoice({ runId: runQuery.runId, mode })} /> : null} />
             </div>
             <section id="workflow-view" className="view" aria-label="팀의 업무 흐름" hidden={view !== 'workflow'}><WorkflowView project={project} activeStep={handoffStep} onStep={focusStep} onEmployee={(index) => openModal('employee', { index })} /></section>
-            <section id="projects-view" className="view" aria-label="전체 프로젝트" hidden={view !== 'projects'}><ProjectsView projects={actualProjects} search={search} onSearch={setSearch} onSelect={openActualProject} actual onRetry={runMonitor.refresh} /></section>
+            <section id="projects-view" className="view" aria-label="전체 프로젝트" hidden={view !== 'projects'}><ProjectsView projects={listedProjects} search={search} onSearch={setSearch} onSelect={openActualProject} actual onRetry={runMonitor.refresh} saved={savedProjects} onLogin={onLogin} onStoredSelect={(projectId) => openModal('saved-project', { projectId })} /></section>
             <section id="team-view" className="view" aria-label="직원 소개" hidden={view !== 'team'}><TeamView project={project} onEmployee={(index) => openModal('employee', { index })} /></section>
             <section id="outputs-view" className="view" aria-label="결과물 보관함" hidden={view !== 'outputs'}><OutputsView projects={actualProjects} project={actualProject} onSelect={openActualProject} actual catalog={runMonitor.artifactCatalog} onRetry={runMonitor.refresh} /></section>
             </div>
-            <footer className="page-footer"><span>업무 시작으로 요청한 실제 진행 상황은 3D 오피스에 표시됩니다. 프로젝트·보관함은 현재 접수한 실제 업무를 표시하며, 목업 시연·직원 소개·업무 흐름의 역할 예시는 실행 결과와 별개입니다.</span><span>AI 에이전트 회사 — a company of your own.</span></footer>
+            <footer className="page-footer"><span>프로젝트에는 저장된 목록과 현재 접수한 업무를 표시합니다. 3D 오피스·보관함은 현재 Run을 관측하며, 목업 시연·직원 소개·업무 흐름의 역할 예시는 실행 결과와 별개입니다.</span><span>AI 에이전트 회사 — a company of your own.</span></footer>
           </div>
         </main>
       </div>
     </div>
-    {modal && <AtelierDialog key={modal.type} modal={modal} project={projects.find((item) => item.id === modal.projectId) || project} projects={projects} activities={activities} onClose={() => closeModal(modal.type)} onCreate={requestNew} onApprove={approvePlan} onRevision={() => openModal('revision', { projectId: modal.projectId })} onFeedback={feedback} onDownload={download} returnFocusRef={returnFocusRef} rootRef={rootRef} />}
+    {modal && <AtelierDialog key={`${modal.type}:${modal.projectId}`} onLogin={onLogin} modal={modal} project={projects.find((item) => item.id === modal.projectId) || project} projects={projects} activities={activities} onClose={() => closeModal(modal.type)} onCreate={requestNew} onApprove={approvePlan} onRevision={() => openModal('revision', { projectId: modal.projectId })} onFeedback={feedback} onDownload={download} returnFocusRef={returnFocusRef} rootRef={rootRef} />}
     {toast && <div className="toast" role="status">{toast}</div>}
   </div>
 }

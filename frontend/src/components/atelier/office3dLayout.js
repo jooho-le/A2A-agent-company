@@ -76,11 +76,9 @@ export function applyOfficeSeating(office, engine) {
   office.workspace.getObjectByName('shared_planter').position.set(.5, 0, -5.8)
   office.workspace.getObjectByName('shared_sideboard_-1').position.set(-6.8, 0, -.4)
   office.workspace.getObjectByName('shared_sideboard_1').position.set(6.8, 0, -.4)
-  // 보안 좌석과 겹쳐 책상 위에 놓인 것처럼 보이던 오른쪽 수납장의 화분만 숨깁니다.
-  // 수납장 본체와 배경 식물은 유지하고, 숨긴 메시도 장면 해제 시 함께 정리합니다.
-  for (const part of office.workspace.getObjectByName('shared_sideboard_1').children) {
-    if (part.position.y > 1.3) part.visible = false
-  }
+  // 보안 에이전트 몸통과 겹치는 오른쪽 수납장 전체를 숨깁니다.
+  // 장면에는 남겨 두어 해제 시 메시와 재질이 기존 방식으로 정리되게 합니다.
+  office.workspace.getObjectByName('shared_sideboard_1').visible = false
   office.confetti.groupRoot.position.set(office.workspace.position.x + reunion.x * office.workspace.scale.x, 0,
     office.workspace.position.z + (reunion.z - 4.58) * office.workspace.scale.z)
 

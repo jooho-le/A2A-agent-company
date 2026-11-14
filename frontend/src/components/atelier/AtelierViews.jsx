@@ -36,9 +36,20 @@ export function HomeView({ mode, onMode, projects, project, activities, onSelect
   </>
 }
 
-export function ProjectsView({ projects, search, onSearch, onSelect, actual = false, onRetry, presentation = {} }) {
+export function ProjectsView({ projects, search, onSearch, onSelect, actual = false, onRetry, saved = null, onLogin, onStoredSelect, presentation = {} }) {
   const matches = projects.filter((project) => `${project.name} ${project.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
-  return <><div className="view-toolbar"><p className="toolbar-note">우리 회사가 함께 만드는 일 <strong>{String(projects.length).padStart(2, '0')}</strong></p><div className="search"><Icon name="search" /><label className="sr-only" htmlFor={presentation.searchId || 'atelier-search'}>프로젝트 검색</label><input id={presentation.searchId || 'atelier-search'} type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="프로젝트 이름 검색" autoComplete="off" /></div></div>{actual && <p className="view-footnote">현재 화면에서 접수한 실제 업무만 표시합니다. 프로젝트 이름과 Run 연결은 새로고침 후 복원되지 않습니다.</p>}{actual && projects.some(item => item.status.text === '상태 조회 오류') && <p role="alert">업무 상태 조회에 실패했습니다. <button className="button" type="button" onClick={onRetry}>다시 불러오기</button></p>}<div className="project-grid">{matches.length ? matches.map((project) => <ProjectCard key={project.id} project={project} onSelect={onSelect} {...presentation.projectMeta?.(project)} />) : <div className="empty-state"><Icon name="search" /><h2>{actual && !projects.length ? '접수한 실제 업무가 없습니다.' : '일치하는 프로젝트가 없어요.'}</h2><p>{actual && !projects.length ? '오피스의 파란색 요청창에서 업무를 시작하면 여기에 표시됩니다.' : '검색어를 바꾸거나 새 업무를 만들어보세요.'}</p></div>}</div></>
+  const pending = saved && ['idle', 'loading'].includes(saved.status)
+  const failed = saved?.status === 'error'
+  const needsLogin = saved?.error?.code === 'AUTH_REQUIRED'
+  return <>
+    <div className="view-toolbar"><p className="toolbar-note">우리 회사가 함께 만드는 일 <strong>{String(projects.length).padStart(2, '0')}</strong></p><div className="search"><Icon name="search" /><label className="sr-only" htmlFor={presentation.searchId || 'atelier-search'}>프로젝트 검색</label><input id={presentation.searchId || 'atelier-search'} type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="프로젝트 이름 검색" autoComplete="off" /></div></div>
+    {actual && <p className="view-footnote">{saved ? '내 계정에 저장된 프로젝트와 현재 화면에서 접수한 업무입니다. 저장된 프로젝트의 업무 실행 상태는 아직 조회하지 않습니다.' : '현재 화면에서 접수한 실제 업무만 표시합니다. 프로젝트 이름과 Run 연결은 새로고침 후 복원되지 않습니다.'}</p>}
+    {pending && <p role="status">저장된 프로젝트 목록을 불러오는 중입니다.</p>}
+    {failed && <p role="alert">{saved.error.message} {needsLogin ? <button className="button" type="button" onClick={onLogin}>로그인</button> : <button className="button" type="button" onClick={saved.retry}>다시 불러오기</button>}</p>}
+    {actual && projects.some(item => item.status.text === '상태 조회 오류') && <p role="alert">업무 상태 조회에 실패했습니다. <button className="button" type="button" onClick={onRetry}>다시 불러오기</button></p>}
+    <div className="project-grid">{matches.length ? matches.map((project) => <ProjectCard key={`${project.stored ? 'stored' : 'run'}:${project.id}`} project={project} onSelect={project.stored ? onStoredSelect : onSelect} {...presentation.projectMeta?.(project)} />)
+      : !pending && !failed && <div className="empty-state"><Icon name="search" /><h2>{actual && !projects.length ? saved ? '저장된 프로젝트가 없습니다.' : '접수한 실제 업무가 없습니다.' : '일치하는 프로젝트가 없어요.'}</h2><p>{actual && !projects.length ? saved ? '현재 계정에 저장된 프로젝트와 이 화면에서 접수한 업무가 없습니다.' : '오피스의 파란색 요청창에서 업무를 시작하면 여기에 표시됩니다.' : '검색어를 바꿔보세요.'}</p></div>}</div>
+  </>
 }
 
 export function TeamView({ project, onEmployee, presentation = {} }) {
@@ -96,7 +107,7 @@ export function WorkflowView({ project, activeStep, onStep, onEmployee, presenta
   const current = steps[currentIndex].employee
   const detail = employee => details[employee.id] || details[['planner', 'developer', 'qa', 'security'][steps.findIndex(step => step.employee === employee)]] || details.planner
   return <section className="handoff-section" aria-labelledby={presentation.handoffTitleId || 'handoff-title'}>
-    <header className="handoff-heading"><div><p className="eyebrow">FROM ONE DESK TO THE NEXT.</p><h2 id={presentation.handoffTitleId || 'handoff-title'}>{presentation.workflowTitle || '하나의 리더, 네 작업 에이전트.'}</h2><p>{project.name} · {presentation.workflowDescription || '프로젝트 목업의 역할 안내 · 실제 호출 순서는 Run Event로 확인합니다.'}</p></div><span className="scroll-cue" aria-hidden="true"><i />SCROLL TO FOLLOW</span></header>
+    <header className="handoff-heading"><div><p className="eyebrow">FROM ONE DESK TO THE NEXT.</p><h2 id={presentation.handoffTitleId || 'handoff-title'}>{presentation.workflowTitle || '다섯 명의 에이전트, 함께 일하는 하나의 팀.'}</h2><p>{project.name} · {presentation.workflowDescription || '프로젝트 목업의 역할 안내 · 실제 호출 순서는 Run Event로 확인합니다.'}</p></div><span className="scroll-cue" aria-hidden="true"><i />SCROLL TO FOLLOW</span></header>
     <AgentLeadership />
     <div className="handoff-layout"><div className="handoff-sticky">
       <div className="handoff-scene-top"><span className="office-floor-label">AI 에이전트 회사 / TEAM DESK</span><span>{String(currentIndex + 1).padStart(2, '0')} / {String(steps.length).padStart(2, '0')}</span></div>
@@ -104,7 +115,7 @@ export function WorkflowView({ project, activeStep, onStep, onEmployee, presenta
       <div className="handoff-scene-info" key={currentIndex}><p className="eyebrow">역할 안내 · 프로젝트 목업</p><h3>{current.name}</h3><p>{current.purpose}</p></div>
       <div className="handoff-tabs" role="group" aria-label="리더와 작업 역할 살펴보기" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0,1fr))` }}>{steps.map(({ employee }, index) => <button type="button" className="handoff-tab" data-focus-step={index} onClick={onStep} aria-pressed={index === currentIndex} key={employee.id}><span>{String(index + 1).padStart(2, '0')}</span>{detail(employee).label}</button>)}</div>
     </div><div className="handoff-steps">{steps.map(({ employee, state }, index) => <article key={employee.id} className={`handoff-step${index === currentIndex ? ' is-current' : ''}`} data-handoff-step={index} data-lead={Boolean(employee.leadership)}>
-      <span className="handoff-step-number">{employee.id === 'orchestrator' ? 'O' : String(index).padStart(2, '0')}</span>
+      <span className="handoff-step-number">{String(index + 1).padStart(2, '0')}</span>
       <div className="handoff-step-content"><div className="handoff-step-top"><span className="handoff-employee"><Icon name={detail(employee).icon} />{employee.name} · {employee.job}</span><span className="handoff-state" data-state={state.state}>{state.label}</span></div><h3>{detail(employee).title}</h3><p>{employee.purpose}</p><div className="handoff-deliverable"><Icon name="file" /><span>{detail(employee).deliverable}<small>{employee.id === 'orchestrator' ? '리더 · 작업 Step과 구분' : `산출물 예시 · ${employee.role} AI`}</small></span></div><button type="button" className="text-button" onClick={() => onEmployee(employees.findIndex(item => item.id === employee.id))}>{employee.name}의 업무 보기<Icon name="chevron" /></button></div>
     </article>)}</div></div>
     <p className="view-footnote">위 목록은 고정 실행 순서가 아닌 역할 소개입니다. 실제 멀티 Run에서는 오케스트레이터가 QA·Security 병렬 실행과 Developer 재작업·재검증을 관리합니다.</p>

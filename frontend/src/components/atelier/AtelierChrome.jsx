@@ -42,7 +42,7 @@ export function OfficeDate() {
   return <div className="office-date"><time dateTime={date}>{date.replaceAll('-', '. ')}</time><strong>{weekdayFormatter.format(today).toUpperCase()}</strong></div>
 }
 
-export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClose, onRunScenario, onOpenDocuments, onLogout }) {
+export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClose, onRunScenario, onOpenDocuments, onLogout, onLogin, hasAccessToken = false }) {
   const sidebarRef = useRef(null)
   const [accountOpen, setAccountOpen] = useState(false)
   useEffect(() => {
@@ -75,11 +75,11 @@ export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClos
   return <aside ref={sidebarRef} className="sidebar" id="company-sidebar" aria-label="회사 메뉴" inert={mobile && !open ? true : undefined}>
     <a className="company-name" href="#/home" onClick={(event) => { event.preventDefault(); onView('home') }} aria-label="AI 에이전트 회사 홈"><span className="company-monogram">A</span><span>AI 에이전트 회사<small>MY AI COMPANY</small></span></a>
     <span className="nav-caption">WORKSPACE</span>
-    <nav className="nav" aria-label="주 메뉴">{[['home', 'grid'], ['projects', 'folder'], ['team', 'team'], ['workflow', 'arrow'], ['outputs', 'file']].map(([name, icon]) => <button key={name} type="button" className="nav-button" data-view={name} aria-current={view === name ? 'page' : undefined} onClick={() => onView(name)}><Icon name={icon} /><span>{viewCopy[name][0]}</span>{name === 'projects' && <span className="nav-count">{String(count).padStart(2, '0')}</span>}{name === 'team' && <span className="nav-count">{mode === 'single' ? '01' : '05'}</span>}</button>)}</nav>
+    <nav className="nav" aria-label="주 메뉴">{[['home', 'grid'], ['projects', 'folder'], ['team', 'team'], ['workflow', 'arrow'], ['outputs', 'file']].map(([name, icon]) => <button key={name} type="button" className="nav-button" data-view={name} aria-current={view === name ? 'page' : undefined} onClick={() => onView(name)}><Icon name={icon} /><span>{viewCopy[name][0]}</span>{name === 'projects' && count > 0 && <span className="nav-count">{String(count).padStart(2, '0')}</span>}{name === 'team' && <span className="nav-count">{mode === 'single' ? '01' : '05'}</span>}</button>)}</nav>
     <div className="sidebar-memo"><span className="memo-label">OUR WAY OF WORKING</span><p>좋은 아이디어는 대표님이.<br />차근차근 만드는 일은 우리가.</p><span>기획 · 개발 · 품질 · 보안</span></div>
     <div className="atelier-account">
       <button type="button" className="owner-profile" aria-expanded={accountOpen} aria-controls="atelier-account-menu" onClick={() => setAccountOpen(!accountOpen)}><span className="owner-avatar">A</span><span><strong>대표님</strong><small>회사 오너 · Owner</small></span><span className="owner-tag">YOU</span></button>
-      {accountOpen && <div className="atelier-account-menu" id="atelier-account-menu"><p>실제 연동 화면 · 목업과 별개</p><button type="button" onClick={onRunScenario}>새 업무 맡기기</button><button type="button" onClick={onOpenDocuments}>전자문서 관리</button><button type="button" onClick={onLogout}>로그아웃</button></div>}
+      {accountOpen && <div className="atelier-account-menu" id="atelier-account-menu"><p>실제 연동 화면 · 목업과 별개</p><button type="button" onClick={onLogin}>{hasAccessToken ? '다시 로그인' : '로그인'}</button><button type="button" onClick={onRunScenario}>새 업무 맡기기</button><button type="button" onClick={onOpenDocuments}>전자문서 관리</button>{hasAccessToken && <button type="button" onClick={onLogout}>로그아웃</button>}</div>}
     </div>
   </aside>
 }

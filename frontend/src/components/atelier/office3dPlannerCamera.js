@@ -63,10 +63,9 @@ export function createAgentCloseupCamera(office, engine) {
     agent.head.getWorldPosition(target)
     // 머리의 작은 작업 모션은 살리고, 착석 방향을 기준으로 흔들림 없는 정면을 잡습니다.
     forward.set(Math.sin(agent.seatYaw), 0, Math.cos(agent.seatYaw))
-    // 개발자는 노트북에 얼굴이 가리지 않도록 정면의 조금 높은 위치에서 촬영합니다.
-    const developer = agentIndex === 1
-    eye.copy(target).addScaledVector(forward, developer ? 10 : 12)
-    eye.y += developer ? 2.1 : -1.44
+    // 개발자도 다른 직원과 같은 거리·높이로 촬영해 하반신까지 화면에 담습니다.
+    eye.copy(target).addScaledVector(forward, 12)
+    eye.y -= 1.44
     camera.position.copy(eye)
     camera.lookAt(target)
     camera.zoom = 1

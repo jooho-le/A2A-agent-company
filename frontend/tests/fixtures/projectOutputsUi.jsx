@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import Dashboard from '../../src/pages/AtelierDashboard.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+sessionStorage.setItem('access_token', 'mock-project-outputs-only')
 const id = n => `70000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const scenarioId = id(1), runId = id(2), stepId = id(3)
 const approval = { approved: true, scenarioId, configuration: {
@@ -23,7 +24,8 @@ globalThis.fetch = async (url, options = {}) => {
   calls.push({ url, options })
   const parsed = new URL(url, 'http://mock.invalid'), path = parsed.pathname
   let data, status = 200
-  if (path === '/api/v1/scenarios') data = { scenarios: scenario === 'unregistered' ? [] : [{ scenarioId }] }
+  if (path === '/api/projects') data = { projects: [] }
+  else if (path === '/api/v1/scenarios') data = { scenarios: scenario === 'unregistered' ? [] : [{ scenarioId }] }
   else if (path === '/api/v1/runs' && options.method === 'POST') {
     if (scenario === 'failure') { status = 422; data = { detail: 'mock rejection' } }
     else { data = { run, firstStep: step, dispatchStatus: 'SCHEDULED' } }
@@ -76,11 +78,11 @@ async function navigate(view) { await act(async () => document.querySelector(`[d
 async function verify() {
   const checks = []
   await mount(null); await navigate('projects')
-  check(document.querySelector('#projects-view').textContent.includes('접수한 실제 업무가 없습니다'), 'projects empty')
+  check(document.querySelector('#projects-view').textContent.includes('저장된 프로젝트가 없습니다'), 'projects empty')
   check(!document.querySelector('#projects-view .project-card'), 'no demo projects')
   await navigate('outputs')
   check(document.querySelector('#outputs-view').textContent.includes('접수한 실제 업무가 없습니다'), 'outputs empty')
-  check(!document.querySelector('#outputs-view .output-card') && calls.length === 0, 'no demo files or API calls without run')
+  check(!document.querySelector('#outputs-view .output-card') && calls.every(call => call.url === 'http://127.0.0.1:8000/api/projects'), 'no demo files or Run API calls without run')
   checks.push('empty projects and outputs contain no demo data')
 
   scenario = 'ready'; await mount(approval); await navigate('home'); fill(); await submit()

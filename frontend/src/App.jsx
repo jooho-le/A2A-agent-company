@@ -4,38 +4,58 @@ import LoginPage from './pages/LoginPage'
 import PipelinePage from './pages/PipelinePage'
 import AtelierDashboard from './pages/AtelierDashboard'
 import DocumentPage from './pages/DocumentPage'
+import { hasStoredAccessToken } from './api/productRunRequest'
+import { clearProjectSelection } from './hooks/projectSelection'
 import './App.css'
 
-// 플랫폼 로그인이 필요해지면 true로 바꿔 기존 인증 화면을 다시 활성화합니다.
-const REQUIRE_PLATFORM_LOGIN = false
-
 function App() {
-  // 기존 sessionStorage 토큰으로 새로고침 후에도 화면 흐름을 복원합니다.
-  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(sessionStorage.getItem('access_token')))
+  // 토큰 존재는 인증 성공의 보장이 아닙니다. 최초 진입은 공개 오피스입니다.
+  const [hasAccessToken, setHasAccessToken] = useState(hasStoredAccessToken)
+  const [showLogin, setShowLogin] = useState(false)
+  const [requestDraft, setRequestDraft] = useState({ name: '', requestText: '' })
   const [showSignup, setShowSignup] = useState(false)
   const [showPipeline, setShowPipeline] = useState(false)
   const [showDocuments, setShowDocuments] = useState(false)
   const [loginNotice, setLoginNotice] = useState('')
 
   function handleLoginSuccess() {
-    setIsAuthenticated(Boolean(sessionStorage.getItem('access_token')))
+    // 같은 계정의 재로그인을 포함해 새 로그인 세션은 이전 선택을 이어받지 않습니다.
+    clearProjectSelection()
+    setHasAccessToken(hasStoredAccessToken())
+    setShowLogin(false)
     setShowSignup(false)
     setShowPipeline(false)
     setShowDocuments(false)
     setLoginNotice('')
+    window.history.replaceState(null, '', '#/home')
+  }
+
+  function openLogin() {
+    setLoginNotice('로그인 후 업무 요청과 프로젝트 관리를 이용할 수 있습니다.')
+    setShowSignup(false)
+    setShowLogin(true)
+  }
+
+  function openProtected(action) {
+    if (!hasStoredAccessToken()) { openLogin(); return }
+    action()
   }
 
   function handleLogout() {
+    clearProjectSelection()
     sessionStorage.removeItem('access_token')
-    setIsAuthenticated(false)
+    setHasAccessToken(false)
+    setShowLogin(false)
+    setRequestDraft({ name: '', requestText: '' })
     setShowSignup(false)
     setShowPipeline(false)
     setShowDocuments(false)
     setLoginNotice('')
+    window.history.replaceState(null, '', '#/home')
   }
 
-  // 설정이 켜진 경우에만 기존 로그인·회원가입 화면을 먼저 표시합니다.
-  if (REQUIRE_PLATFORM_LOGIN && !isAuthenticated) {
+  // 계정 메뉴에서 선택했을 때만 기존 로그인·회원가입 화면으로 이동합니다.
+  if (showLogin) {
     if (showSignup) {
       return (
         <SignupPage
@@ -51,6 +71,7 @@ function App() {
     return (
       <LoginPage
         notice={loginNotice}
+        onBack={() => { setShowLogin(false); setShowSignup(false) }}
         onSignup={() => {
           setLoginNotice('')
           setShowSignup(true)
@@ -70,9 +91,14 @@ function App() {
 
   return (
     <AtelierDashboard
-      onRunScenario={() => setShowPipeline(true)}
-      onOpenDocuments={() => setShowDocuments(true)}
+      key={hasAccessToken ? 'credential-present' : 'guest'}
+      onRunScenario={() => openProtected(() => setShowPipeline(true))}
+      onOpenDocuments={() => openProtected(() => setShowDocuments(true))}
       onLogout={handleLogout}
+      onLogin={openLogin}
+      hasAccessToken={hasAccessToken}
+      requestDraft={requestDraft}
+      onRequestDraftChange={setRequestDraft}
     />
   )
 }

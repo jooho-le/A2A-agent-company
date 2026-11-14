@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import OfficeAuthLayout from '../components/atelier/OfficeAuthLayout'
 
 function SignupPage({ onBack, onSignupSuccess }) {
   const [email, setEmail] = useState('')
@@ -47,16 +48,12 @@ function SignupPage({ onBack, onSignupSuccess }) {
   }
 
   return (
-    <main className="auth-page">
-      <div className="auth-shell">
-        <div className="product-brand auth-brand">
-          <span className="brand-mark" aria-hidden="true">A</span>
-          <span>A2A Agent Company</span>
-        </div>
+    <OfficeAuthLayout reviewAccents>
         <section className="auth-card" aria-labelledby="signup-title">
           <header className="auth-heading">
+            <p className="office-auth-form-label">우리 회사 시작하기</p>
             <h1 id="signup-title">계정 만들기</h1>
-            <p>계정을 만들고 AI Agent 협업을 시작하세요.</p>
+            <p>대표님의 첫 프로젝트를 함께 준비해요.</p>
           </header>
           <form className="signup-form" onSubmit={handleSubmit} noValidate>
             <div className="signup-field">
@@ -109,9 +106,7 @@ function SignupPage({ onBack, onSignupSuccess }) {
             <button type="button" className="text-button" onClick={onBack} disabled={isSubmitting}>로그인</button>
           </p>
         </section>
-        <p className="auth-footer">AI Agent 협업을 위한 업무 공간</p>
-      </div>
-    </main>
+    </OfficeAuthLayout>
   )
 }
 

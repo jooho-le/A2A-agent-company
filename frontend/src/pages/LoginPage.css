@@ -1,82 +1,177 @@
-/* 단순한 문서 그림과 반투명 유리 카드를 사용합니다. */
-.login-page {
+/* 같은 오피스 모델에 업무 자세를 적용한 로그인 전용 PNG를 배치합니다. */
+.office-auth.auth-page {
+  --bg: #030407;
+  --surface: #111318;
+  --border: #30353e;
+  --text: #aaaeb8;
+  --text-h: #f0f2ec;
+  --accent: #d4ff24;
+  --primary: #d4ff24;
+  --social-bg: #1a1d23;
+  width: 100%;
+  min-height: 100svh;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 32px 32px 22px;
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background: var(--bg);
+  background:
+    radial-gradient(ellipse at 100% 0%, #b5db2525 0, transparent 35%),
+    radial-gradient(ellipse at 0% 100%, #8caa1820 0, transparent 32%),
+    #080b0f;
+  color: var(--text);
+  font: 14px/1.65 "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
 }
 
-/* 배경 그림에만 투명도와 약한 블러를 적용하고 입력창과 글자는 선명하게 유지합니다. */
-.login-page::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background: url('../assets/login-workflow.svg') center / min(1400px, 125vw) auto no-repeat;
-  opacity: 0.42;
-  filter: blur(4px);
-  pointer-events: none;
-}
+.office-auth-shell { width: min(1320px, 100%); min-width: 0; position: relative; z-index: 1; }
+.office-auth-brand { display: flex; justify-content: center; align-items: center; gap: 12px; color: var(--text-h); font-size: 17px; font-weight: 650; }
+.office-auth-brand small { display: block; margin-top: 2px; color: #858b98; font-size: 9px; letter-spacing: .15em; text-align: center; }
+.office-auth-monogram { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid #3a3e46; border-radius: 10px; background: #26292e; font-size: 20px; }
+.office-auth-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 500px) minmax(0, 1fr); align-items: center; gap: 20px; margin: 30px 0 22px; }
+.office-auth-form { min-width: 0; position: relative; z-index: 2; }
 
-.login-page .auth-shell {
-  position: relative;
-  z-index: 1;
+.office-auth .auth-card { padding: 38px; border: 1px solid #434a50; border-radius: 30px; background: linear-gradient(145deg, #171c22ee, #0e1218f5); box-shadow: 0 24px 70px #0008, inset 0 1px 2px #ffffff18; }
+.office-auth .auth-heading { margin-bottom: 26px; text-align: center; }
+.office-auth .auth-heading h1 { margin-bottom: 8px; color: var(--text-h); font-size: 30px; letter-spacing: -.05em; }
+.office-auth .auth-heading .office-auth-form-label { margin-bottom: 8px; color: var(--accent); font-size: 11px; font-weight: 600; }
+.office-auth .auth-heading p { color: var(--text); font-size: 13px; }
+.office-auth .login-field label, .office-auth .signup-field label { font-size: 12px; }
+.office-auth .login-field input, .office-auth .signup-field input, .office-auth .password-input { border-color: #414957; border-radius: 11px; background: #0c0f14; }
+.office-auth .login-field input, .office-auth .signup-field input { min-height: 46px; }
+.office-auth .password-input input { border: 0; background: transparent; }
+.office-auth input::placeholder { color: #858b98; }
+.office-auth .password-toggle { color: #c5c9d0; }
+.office-auth .app-button { border-radius: 12px; font-size: 13px; }
+.office-auth .app-button--primary { min-height: 50px; border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 24px #d4ff2410; color: #030407; font-weight: 750; }
+.office-auth .app-button--primary:not(:disabled):hover { border-color: #e0ff66; background: #e0ff66; }
+.office-auth .text-button { color: var(--accent); }
+.office-auth .auth-message { border-color: #3977df; border-radius: 11px; background: #102447; color: #e0eaff; text-align: center; }
+.office-auth .auth-switch { margin-top: 20px; font-size: 12px; }
+.office-auth--review-accents .auth-card {
+  background: linear-gradient(135deg, #e3edf518, #18233238 45%, #10192350);
+  border: 1px solid #d3e1ef4d;
+  box-shadow: 0 20px 55px #0003, inset 0 1px 0 #ffffff40, inset 0 -1px 0 #ffffff0d;
+  -webkit-backdrop-filter: blur(5px) saturate(110%);
+  backdrop-filter: blur(5px) saturate(110%);
 }
-
-.login-page .auth-card {
-  border: 1px solid rgba(211, 228, 255, 0.38);
-  border-radius: 18px;
-  background: rgba(27, 36, 51, 0.72);
-  -webkit-backdrop-filter: blur(12px) saturate(125%);
-  backdrop-filter: blur(12px) saturate(125%);
-  box-shadow:
-    0 24px 64px rgba(0, 0, 0, 0.45),
-    inset 1px 1px 0 rgba(255, 255, 255, 0.15),
-    inset -1px -1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.login-page .auth-heading {
-  text-align: center;
-}
-
-.login-page .login-field input,
-.login-page .password-input {
-  border-color: rgba(180, 202, 235, 0.25);
-  background: rgba(10, 17, 29, 0.45);
-}
-
-.login-page .password-input input {
-  background: transparent;
-}
-
-.login-page .social-button {
-  border-color: rgba(180, 202, 235, 0.2);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.login-page .social-symbol {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  object-fit: contain;
-}
-
-.login-page .auth-divider::before,
-.login-page .auth-divider::after {
-  background: rgba(180, 202, 235, 0.2);
-}
-
-/* 배경 블러를 지원하지 않는 브라우저에서도 글자를 읽기 쉽게 유지합니다. */
+.office-auth--review-accents .auth-heading p { color: #c4ccd7; }
+.office-auth--review-accents .login-field input,
+.office-auth--review-accents .signup-field input,
+.office-auth--review-accents .password-input { background: #0a121c80; border-color: #c4d5e047; }
+.office-auth--review-accents .password-input input { background: transparent; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .login-page .auth-card {
-    background: rgba(27, 36, 51, 0.95);
-  }
+  .office-auth--review-accents .auth-card { background: #18222eef; }
+}
+.office-auth-footer { max-width: 500px; margin: 0 auto; display: flex; justify-content: space-between; gap: 16px; padding-top: 20px; border-top: 1px solid #292c33; color: #858b98; font-size: 11px; }
+
+/* 장식은 입력 영역과 분리하여 클릭·키보드 이동을 가리지 않습니다. */
+.office-auth::before, .office-auth::after { content: ''; position: absolute; pointer-events: none; z-index: 0; width: 760px; height: 350px; border-radius: 50%; border: 1px solid #d4ff2445; box-shadow: inset 0 10px 50px #b6d91913, 0 -5px 30px #b6d91908; }
+.office-auth::before { top: -265px; right: -180px; transform: rotate(-26deg); }
+.office-auth::after { bottom: -285px; left: -230px; transform: rotate(-22deg); }
+/* 로그인·회원가입에서 같은 3D 오피스 배경과 유리 카드 스타일을 사용합니다. */
+.office-auth--review-accents.auth-page { background: #111820; }
+.office-auth--review-accents::before {
+  inset: -6px; width: auto; height: auto; border: 0; border-radius: 0; box-shadow: none; transform: none;
+  background: url('/agent-office-3d/office-background.png') center 42% / cover no-repeat;
+  opacity: .82; filter: blur(1px) saturate(.8);
+}
+.office-auth--review-accents::after {
+  inset: 0; width: auto; height: auto; border: 0; border-radius: 0; box-shadow: none; transform: none;
+  background: linear-gradient(180deg, #080e1826, #080d1614 60%, #080d1673);
+}
+.office-auth-cast { position: relative; isolation: isolate; min-height: 660px; align-self: stretch; pointer-events: none; user-select: none; }
+.office-auth-character { position: absolute; width: 240px; margin: 0; isolation: isolate; }
+.office-auth-character img { position: relative; z-index: 1; display: block; width: 100%; height: auto; filter: drop-shadow(0 18px 18px #0008); transform: rotate(var(--character-angle)); }
+.office-auth-character--planner { --character-angle: 3deg; top: -30px; right: -10px; width: 285px; }
+.office-auth-character--developer { --character-angle: -4deg; top: 192px; left: -30px; width: 310px; }
+.office-auth-character--orchestrator { --character-angle: 0deg; bottom: -48px; right: -20px; width: 310px; }
+.office-auth-character--qa { --character-angle: -4deg; top: 10px; left: -15px; width: 310px; }
+.office-auth-character--security { --character-angle: 3deg; bottom: -38px; right: -20px; width: 310px; }
+/* 원본 캐릭터는 유지하고 배경광·홀로그램·궤적으로 동작감을 더합니다. */
+.office-auth-work-accent { position: absolute; z-index: 0; width: 124px; top: 15%; left: -38%; transform: rotate(-13deg); filter: drop-shadow(0 0 12px #afbcff40); }
+.office-auth-work-accent .auth-glass { fill: #29334b99; stroke: #b8c4eb; stroke-width: 1.5; }
+.office-auth-work-accent .auth-lime-line { stroke: #d4ff69; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.office-auth-work-accent .auth-muted-line { stroke: #bac6e2; stroke-width: 4; stroke-linecap: round; }
+.office-auth-work-accent .auth-lime-fill { fill: #d4ff69; }
+.office-auth-character--developer .office-auth-work-accent { left: -8%; top: 18%; width: 106px; transform: rotate(12deg); }
+.office-auth-character--qa .office-auth-work-accent { left: 73%; top: 13%; transform: rotate(12deg); }
+.office-auth-cast--left::before { content: ''; position: absolute; z-index: -1; left: 18%; bottom: 0; width: 95%; height: 55%; background: radial-gradient(ellipse at 60% 45%, #dcff6b80 0, #b8de3452 28%, #92b72220 49%, transparent 70%); }
+.office-auth-character--orchestrator img { filter: drop-shadow(-2px 0 2px #e3ff9eaa) drop-shadow(0 0 14px #c8ed3955) drop-shadow(0 18px 18px #0008); }
+.office-auth-character--orchestrator::after { content: ''; position: absolute; z-index: 2; left: -24%; bottom: 19%; width: 132%; height: 58px; border: 3px solid #dfff79; border-top-color: #dfff7930; border-radius: 50%; transform: rotate(-13deg); box-shadow: 0 5px 15px #c4ec4260, inset 0 -3px 8px #c4ec4230; }
+.office-auth-sparks { position: absolute; z-index: 2; right: 18%; top: 0; width: 7px; height: 21px; border-radius: 3px; background: #dfff79; transform: rotate(17deg); box-shadow: 0 0 14px #d4ff2460; }
+.office-auth-sparks::after { content: ''; position: absolute; left: 18px; top: 9px; width: 7px; height: 18px; border-radius: 3px; background: #dfff79; transform: rotate(34deg); }
+.office-auth-character--developer .office-auth-sparks { top: auto; bottom: 9%; right: 75%; transform: rotate(-65deg); }
+.office-auth-character--security .office-auth-sparks { display: none; }
+
+/* 역할별 장식은 캐릭터 뒤에 두고, 폼과 인물의 배치는 유지합니다. */
+.auth-role-art { --role-color: #d4e985; position: absolute; z-index: 0; width: 180px; left: -30%; top: 10%; overflow: visible; pointer-events: none; transform: rotate(-12deg); filter: drop-shadow(0 12px 14px #0006); }
+.auth-role-art .role-panel { fill: #182331f2; stroke: #9aaac5; stroke-width: 1.3; }
+.auth-role-art .role-layer { fill: #29394c80; stroke: #91a5c34d; stroke-width: 1; }
+.auth-role-art .role-divider { stroke: #687d9955; stroke-width: 1; }
+.auth-role-art .role-muted { stroke: #a1b2cb; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.auth-role-art .role-ink, .auth-role-art .role-cursor { stroke: var(--role-color); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.auth-role-art .role-wire { stroke: var(--role-color); stroke-width: 1.5; stroke-dasharray: 4 5; opacity: .6; }
+.auth-role-art .role-block { fill: #354352; stroke: var(--role-color); stroke-width: 1.5; }
+.auth-role-art .role-badge { fill: #233244; stroke: var(--role-color); stroke-width: 1.8; }
+.auth-role-art .role-dot { fill: var(--role-color); }
+.auth-role-art .role-scan { stroke: var(--role-color); stroke-width: 2; stroke-dasharray: 32 12 5 12; transform-origin: 132px 85px; }
+.auth-role-art--developer { --role-color: #c8a9ef; width: 174px; left: -14%; top: 16%; transform: rotate(8deg); }
+.auth-role-art--qa { --role-color: #98d9d0; width: 172px; left: 64%; top: 12%; transform: rotate(10deg); }
+.auth-role-art--security { --role-color: #afc2df; width: 156px; left: 66%; top: 5%; transform: rotate(9deg); }
+.office-auth--review-accents .office-auth-cast--left::before { background: radial-gradient(ellipse at 60% 55%, #a8b7ce1c, transparent 65%); }
+.office-auth--review-accents .office-auth-character--orchestrator img { filter: drop-shadow(-1px 0 1px #bdc9d54d) drop-shadow(0 18px 18px #0008); }
+.office-auth--review-accents .office-auth-character--orchestrator::after,
+.office-auth--review-accents .office-auth-character--orchestrator .office-auth-sparks { display: none; }
+.office-auth--review-accents .office-auth-mobile-team img:first-child { filter: drop-shadow(-1px 0 1px #bdc9d54d) drop-shadow(0 5px 8px #0006); }
+@media (min-width: 1101px) and (prefers-reduced-motion: no-preference) {
+  .auth-role-art .role-wire { animation: auth-role-flow 6s linear infinite; }
+  .auth-role-art .role-scan { animation: auth-role-scan 14s linear infinite; }
+  .auth-role-art .role-pulse, .auth-role-art .role-cursor { animation: auth-role-pulse 3s ease-in-out infinite; }
+}
+@keyframes auth-role-flow { to { stroke-dashoffset: -36; } }
+@keyframes auth-role-scan { to { transform: rotate(360deg); } }
+@keyframes auth-role-pulse { 50% { opacity: .35; } }
+@media (max-width: 1100px) {
+  .auth-role-art { width: 110px; left: -16%; }
+  .auth-role-art--developer { width: 105px; left: -8%; }
+  .auth-role-art--qa, .auth-role-art--security { width: 105px; left: 57%; }
 }
 
-@media (max-width: 720px) {
-  .login-page::before {
-    background-size: 900px auto;
-    background-position: center top;
-    opacity: 0.32;
-  }
+.office-auth-mobile-team { display: none; }
+
+@media (min-width: 1101px) and (prefers-reduced-motion: no-preference) {
+  .office-auth-character { animation: office-auth-float 5s ease-in-out infinite alternate; }
+  .office-auth-work-accent { animation: office-auth-hologram 4s ease-in-out infinite alternate; }
+  .office-auth-character--orchestrator::after { animation: office-auth-orbit 6s ease-in-out infinite alternate; }
+  .office-auth-character--developer, .office-auth-character--qa { animation-delay: -3s; }
+  .office-auth-character--security { animation-delay: -5s; }
+}
+@keyframes office-auth-float { from { translate: 0 -9px; rotate: -1.5deg; } to { translate: 0 9px; rotate: 1.5deg; } }
+@keyframes office-auth-hologram { from { translate: 0 3px; opacity: .65; } to { translate: 0 -5px; opacity: 1; } }
+@keyframes office-auth-orbit { from { transform: rotate(-18deg) scaleX(.95); } to { transform: rotate(-8deg) scaleX(1.05); } }
+
+@media (max-width: 1100px) {
+  .office-auth.auth-page { padding: 28px 20px; }
+  .office-auth-layout { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px) minmax(0, 1fr); gap: 10px; }
+  .office-auth-character { width: 195px; }
+  .office-auth-character--planner, .office-auth-character--orchestrator { right: -15px; }
+  .office-auth-character--developer { left: -20px; top: 210px; }
+  .office-auth-character--qa { left: -15px; }
+  .office-auth-character--security { right: -20px; }
+  .office-auth-work-accent { width: 88px; left: -12%; }
+  .office-auth-character--qa .office-auth-work-accent { left: 57%; width: 88px; }
+  .office-auth-character--developer .office-auth-work-accent { left: -5%; width: 72px; }
+  .office-auth .auth-card { padding: 32px 28px; }
+}
+
+@media (max-width: 800px) {
+  .office-auth.auth-page { padding: 28px 16px; }
+  .office-auth-shell { max-width: 460px; }
+  .office-auth-layout { display: block; margin: 4px 0 24px; }
+  .office-auth-cast { display: none; }
+  .office-auth-mobile-team { display: flex; justify-content: center; align-items: flex-end; gap: 0; height: 106px; margin-top: 16px; overflow: hidden; }
+  .office-auth-mobile-team img { width: 19%; height: 146px; object-fit: cover; object-position: top; transform: translateY(44px); filter: drop-shadow(0 5px 8px #0006); }
+  .office-auth-mobile-team img:first-child { filter: drop-shadow(-1px 0 1px #e3ff9ecc) drop-shadow(0 0 10px #d4ff24aa); }
+  .office-auth .auth-card { padding: 28px 24px; border-radius: 24px; }
+  .office-auth-footer { flex-wrap: wrap; gap: 6px; }
 }
