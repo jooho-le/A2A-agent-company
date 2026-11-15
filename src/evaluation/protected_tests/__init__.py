@@ -43,7 +43,8 @@ SETS = ('practice', 'pilot', 'final')  # 시험지 세 벌(최종 평가는 이 
 ROLES = ('QA', 'SECURITY')  # 검사 관점이자 순환 안에서 그 검사를 실행하는 에이전트 역할
 LOOP_SCOPES = {'QA': 'in-loop-qa', 'SECURITY': 'in-loop-security'}  # 역할별 순환 안 범위
 RESULT_FILES = frozenset({'output.json', 'meta.json', 'summary.md', 'bundle.json', 'regression.json',
-                          'comparison.json', 'check_details.json', 'check_details.md'})  # 실험 결과 폴더(experiments/)에 보관하는 파일 이름(evaluation.experiment)
+                          'comparison.json', 'check_details.json', 'check_details.md',
+                          'axis_scorecard.json', 'axis_scorecard.md'})  # 실험 결과 폴더(experiments/)에 보관하는 파일 이름(evaluation.experiment)
 _SELECTOR = re.compile(r'[a-z][a-z0-9_-]{0,63}\Z')           # dev qa_contract.py와 같은 규칙
 _PATTERN = re.compile(r'[A-Za-z0-9_*?\[\].-]{1,128}\.py\Z')   # dev unit_runner.py와 같은 규칙
 _REQUIREMENT = re.compile(r'REQ-\d{3}\Z')  # 요구사항 이름 모양(예: REQ-001)

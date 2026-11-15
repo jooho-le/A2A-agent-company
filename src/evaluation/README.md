@@ -3,9 +3,15 @@
 4번 담당 강석민의 평가 모듈입니다. 첫 대상은 회원가입 MVP(SCN-001)이고, 공통 계약 기준은 dev `caa4144`(dev `08542c6`까지 계약 변경 없음, 스키마 사본 4개는 `schemas/project` 원본과 같음을 확인)입니다.
 평가 명세는 0.4이며, 이 모듈은 루트 `pyproject.toml`의 공통 패키지에 포함됩니다.
 
+## 현재 상태 (2026-11-15)
+
+순환 중 QA·Security 세부 관찰을 기대조건 없이 개발 에이전트의 수정 요청에 연결했고, 최종 결과에는 요구사항별·세부 항목별·다섯 축별 채점지를 저장합니다. 전체 `tests`·`checks` **5,780개 통과, 실패·오류·건너뜀 0**으로 검증했으며 로컬 Docker 평가 통합 검사 9개도 포함합니다. [최종 검증](../../docs/evaluation/precommit_verification_2026-11-15.md).
+
+현재 비교 대상은 **Single 하나 / Multi Ver1 / Multi Ver2**입니다. Single 자체에는 Ver1·Ver2를 붙이지 않습니다. 기존 계획 파일·실행 절차·비교 집계에는 2×2 조건 가정이 남아 있어 세 조건에 맞춘 실행·분모·비교 정책 정리가 필요합니다. 실제 비교 실험·유료 모델 Run은 아직 실행하지 않았습니다. 아래 날짜별 구현 설명은 이력이며 현행 준비 상태는 [개발진행사항](../../docs/evaluation/development_progress.md)과 [실행 절차](../../docs/evaluation/experiment_runbook.md)를 우선합니다.
+
 ## 이 모듈이 하는 일
 
-Agent가 생성한 최종 결과물을 같은 시험지로 채점해 멀티에이전트 Ver1(순환 안 보호 테스트 + 최종)과 Ver2(순환용 보호 테스트 없이 최종만, 에이전트 자체 검사는 있음)를 비교하는 것이 지금 목적입니다. 10.29 회의록의 Single vs Multi 비교 방안 1·2(방식 검토 중)를 회의 뒤 방침으로 먼저 멀티에이전트에 적용한 것이고, Single 실행기는 주호가 구현했습니다(같은 방안 안에서 구조별 비교). 11.2 회의 뒤에는 Agent별 평가표(작업 정확성·정보 전달·처리시간과 오류)와 실제 API 테스트를 먼저 합니다.
+Agent가 생성한 최종 결과물을 같은 시험지로 채점해 Single 기준선과 멀티에이전트 Ver1(순환 안 보호 테스트 + 최종)·Ver2(순환용 보호 테스트 없이 최종만, 에이전트 자체 검사는 있음)를 비교합니다. 10.29 회의록의 비교 방안 논의와 이후 구현 이력은 현행 세 조건과 구분합니다. Single 실행기는 주호가 구현했습니다. 11.2 회의 뒤에는 Agent별 평가표(작업 정확성·정보 전달·처리시간과 오류)와 실제 API 테스트를 먼저 합니다.
 QA·Security 요구사항을 모두 실행 테스트로 판정합니다. 생성물을 실행하는 회원가입 보호 테스트(D2), 최종 채점기(D5), 실험 도구(설정 쌍·채점 보관·비교)는 구현했고
 합성 서비스와 dev 파이프라인 시험으로 검증했습니다. 2026-11-11에는 최신 dev `c0c8ee8`의 인계 폴더를 받아 채점·Agent 표·버전 비교를 한 번에 만드는 경로를 연결했습니다. 모델·시범 호출/시간 한도는 정해졌으며, 2026-11-15에는 합성 서비스로 실제 Docker 채점·입력 재생·회귀 확인을 수행했습니다. 실제 비교용 시작 커밋·Host 도구 환경 동결과 LLM 생성물 실험은 별도입니다. A2A/API 진단 실행과 생성 서비스 전체의 평가 실험은 구분합니다.
 D1 정적 판정(`assess()`)은 점수에 넣지 않는 보조 점검입니다. 순환 안 Security는 정적 증명 대신 자체·보호 테스트를 실행해 측정 결과로 판정합니다(dev 변경, 4번).
@@ -25,6 +31,7 @@ src/evaluation/
   check_adapters.py unittest-v1 보고서·정적 판정 결과 → CheckResult (결과 어댑터)
   run_metrics.py    dev Run 조회 JSON → 지표(시간·수정·재시도·토큰·비용), 구조별 요약, 비교 가능 여부 검사, Regression
   workflow.py       Host evaluation_export → 파일 무결성 확인 → 모든 버전 채점·Agent 평가표·끝 상태 원인·결과 보관
+  axis_scorecard.py 기존 결과에서 Run별 정확도·속도·비용·과정·안정성 채점지(JSON·Markdown) 생성
   outcomes.py       끝 상태 원인(보류·질문·API 장애·한도 초과·중단)·의미 검토 호출 분리·자동 완료 판정
   parity.py         Single·Multi 도구 권한 합집합·LLM 한도·실행 설정 동일 확인, Run별 고정 설정 해시 대조
   preflight.py      실험 등록값·시작 커밋·시험지 격리·평가 이미지와 패키지 준비 점검
@@ -233,7 +240,7 @@ python -m evaluation.agent_eval --summarize <결과 폴더> ... --out <폴더>  
 
 시작 코드의 현재 공개 연결 조건은 `main.app`(FastAPI), `database.get_db`(SQLAlchemy 세션 의존성), `models.User`의 `email`·`password_hash`, `DATABASE_URL`로 시험 DB 선택, `POST /api/auth/signup`의 `{email, password}` 본문입니다. 이 인터페이스와 요구사항은 공개하되 정답 구현·보호 시험지는 시작 저장소에 넣지 않습니다. 다른 인터페이스를 선택하면 `signup_link.py`를 공식 실험 전에 맞추고 시험지 지문을 다시 동결해야 합니다. 서로 다른 생성 코드라도 같은 공개 요구사항을 만족하는지 평가합니다.
 
-`docker/evaluation/Dockerfile`은 평가 이미지 준비 레시피입니다. 승인한 Linux Python base를 digest로 고정하고 `docker/evaluation/prepared/requirements.lock`(모든 의존성 버전·해시 포함)과 `prepared/wheelhouse/*.whl`을 준비해야 합니다. lock에는 FastAPI·httpx·SQLAlchemy·argon2-cffi와 전이 의존성이 필요하며 생성물의 lock과 같아야 합니다. 이 폴더만 build context로 사용하고, 완성 이미지의 digest를 Host 환경 설정과 평가 실행에 동일하게 등록합니다. 현재 실제 이미지를 빌드·검증한 상태는 아닙니다.
+`docker/evaluation/Dockerfile`은 평가 이미지 준비 레시피입니다. 승인한 Linux Python base를 digest로 고정하고 `docker/evaluation/prepared/requirements.lock`(모든 의존성 버전·해시 포함)과 `prepared/wheelhouse/*.whl`을 준비해야 합니다. lock에는 FastAPI·httpx·SQLAlchemy·argon2-cffi와 전이 의존성이 필요하며 생성물의 lock과 같아야 합니다. 이 폴더만 build context로 사용하고, 완성 이미지의 digest를 Host 환경 설정과 평가 실행에 동일하게 등록합니다. 이 절은 초기 준비 설명입니다. 2026-11-15에는 로컬 Host/D5 공통 고정 이미지를 준비하고 실제 컨테이너 회귀 검사를 통과했습니다. 현재 이미지·시작 커밋과 실제 실험 경계는 [실행 절차](../../docs/evaluation/experiment_runbook.md)를 따릅니다.
 
 Host의 `evaluation_export`는 기본으로 모든 코드 버전을 내보냅니다(`--final-only`를 사용하지 않음). Multi는 네 에이전트 저장소를, Single은 `--store SINGLE_AGENT=...`를 넘깁니다. 이후 한 명령으로 최종/이전 버전 채점과 Agent별 평가표를 만듭니다.
 
@@ -546,11 +553,29 @@ python -m evaluation.experiment_run all --plan examples/evaluation/scn001-pilot.
 
 현재 보호 시험 묶음은 0.7.0이며(0.5.2 앱 import 단계 로그 수집 → 0.6.0 검사별 세부 관찰 기록 → 0.7.0 FAIL 뒤에도 독립 세부 항목 계속 검사, 9개 검사·요구사항·점수 산식은 그대로) 최종 지문은 [최종 시험지](../../docs/evaluation/final_exam.md)에 기록합니다. 0.6.0 이하 설정·채점 결과를 새 지문의 결과와 섞지 않으며, 새 측정 전에 보호 케이스와 실험 등록표를 현재 버전으로 준비합니다(`python -m evaluation.protected_tests export --out configs/experiment/ver1 --force`).
 
+### Run 결과 폴더의 채점지 세 개
+
+Run 하나를 채점하면(`evaluation.workflow`) 결과 폴더에 채점지 세 개가 나옵니다.
+
+| 채점지 | 파일 | 내용 |
+|---|---|---|
+| 1. 요구사항별 채점지 | `summary.md` | 판정, 요구사항별·검사별 결과, 수정 흐름, Run 기록 검사 |
+| 2. 세부 항목별 채점지 | `check_details.md`·`.json` | 검사 9개의 세부 항목별 기대값·실제값·상태 |
+| 3. 정확도·속도·비용·과정·안정성 채점지 | `axis_scorecard.md`·`.json` | 지표 ID(ACC·TIME·COST·PROC·STAB)별 값·상태(측정/미확인/비교에서 계산)·사유 |
+
+3번은 같은 폴더에 이미 쓴 결과(`output.json`·`outcome.json`·`timing_metrics.json`·`process_metrics.json`·`regression.json`·`bundle.json`)에서 모으며 새로 측정하지 않습니다(`axis_scorecard.py`). 지표 ID와 계산은 [최종 시험지 핵심본](../../docs/evaluation/final_exam_core.md) 5·7절을 따릅니다. 정확도의 주 지표는 ACC-01(요구사항 완전 충족률: 검사가 모두 PASS인 요구사항 수 ÷ 7, 하한·상한)이고 `output['score']`의 요구사항별 부분점수는 보조 지표입니다. 없는 값은 0으로 채우지 않고 미확인과 사유 코드로 남깁니다. 채점하지 못한 Run(NO_ARTIFACT 등)도 시간·비용·안정성 칸은 남고, 정확도는 미확인, 제품 통과는 "아님"입니다. 계획 Run 전체가 분모인 비율·분포·변동(STAB-01~06의 비율, TIME-04, COST-03)은 `experiment compare`의 `comparison.md`에서 계산합니다. 사람 보조 재개로 분리된 Run에는 만들지 않습니다.
+
 ### 검사별 세부 결과 (`check_details`, 0.6.0~0.7.0)
 
 최종 채점은 9개 검사마다 세부 항목(응답 상태, 사용자 수 증가량, Argon2 설정값 등)의 기대값·실제값·상태를 `check_details.json`·`check_details.md`로 함께 남깁니다. 비밀번호·해시·이메일·응답 본문은 담지 않고 참/거짓·정수·응답 코드만 담습니다. 공식 판정과 점수는 기존 9개 검사 결과만 쓰며 세부 항목 수로 바뀌지 않습니다. 세부 기록이 없거나 상위 판정과 어긋나면 그 검사의 세부 기록을 미검증으로 표시합니다. 정의와 예시는 [세부 결과 설명](../../docs/evaluation/check_details.md)에 있습니다.
 
 실행기와 dev Host 사이 계약은 가짜 Host뿐 아니라 실제 dev 앱에 붙여서도 시험합니다(`tests/evaluation/test_experiment_run_host_contract.py`: 토큰·중복 방지 키·200 재생·접수 조회 지문·복구).
+
+### 순환 중 개발 에이전트 세부 피드백
+
+Host의 보호 실행 보고서가 기대조건을 제외한 `observations` 또는 `observationError`를 선택 필드로 제공합니다. 불변 실행 기록·QA/Security 보고서를 거쳐 수정 요청의 `fixRequest.validationFeedback`에 실제값·PASS/FAIL/NOT_RUN/UNVERIFIED·사유·개별 증거를 연결합니다. 같은 보고서의 PASS 항목도 포함하며, 기존 규칙이 수정 요청을 만들 때 전달합니다. 추가 모델 호출이나 시험 재실행을 만들지 않습니다.
+
+기대조건은 QA/Security Issue와 보고서의 모델 전달 사본에서도 제거하며 감사 원본은 유지합니다. 세부 계측이 없는 일반 테스트·과거 기록은 `DETAIL_RECORD_MISSING`으로 표시합니다. 현행 SCN-001 순환용 보호 QA 6개·Security 3개가 계측 대상이며 최종 평가의 숨긴 입력·결과를 가져오지 않습니다. [계약·예시](../../docs/evaluation/loop_validation_feedback.md).
 
 ### 점검 수정 (2026-11-15, 0.5.1)
 

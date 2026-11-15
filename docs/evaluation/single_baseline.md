@@ -1,6 +1,6 @@
 # Single-Agent 비교 기준선 (D6, 팀 공유·논의용)
 
-> 현재 실행 상태(2026-11-15): 아래의 회의 근거와 11월 5일 당시 미정 항목은 설계 이력이다. 시범용 공통 시작 커밋·OpenAI 모델·호출/시간 한도·가격표·Host/D5 공통 이미지가 현재 로컬 계획에 고정돼 있으며, Single/Multi × Ver1/Ver2의 준비 검사와 로컬 기동·인증 검사를 통과했다. 실제 유료 모델 Run과 공식 반복 실험은 아직 실행하지 않았다. 현재 값과 네 조합의 채점·비교 명령은 [실행 절차](experiment_runbook.md), 현행 시험 기준은 [최종 시험지](final_exam.md)를 따른다.
+> 현재 실행 상태(2026-11-15): 비교 대상은 **Single 하나·Multi Ver1·Multi Ver2**이며 Single에 Ver1·Ver2는 없다. 시범용 공통 시작 커밋·모델·호출/시간 한도·가격표·Host/D5 이미지가 로컬 설정에 있다. 기존 네 조합의 환경·인증 점검은 이력이며, 실제 세 조건 실행에는 Single 정책·계획·제출·분모·비교 조건 정리가 남아 있다. 실제 유료 모델 비교 Run은 미실행이다. [실행 절차의 적용 범위](experiment_runbook.md), [최신 구현·검증 상태](development_progress.md), [최종 시험지](final_exam.md)를 우선한다. 아래 회의 근거·옛 미정 항목은 당시 설계 이력이다.
 
 작성: 2026-10-14 · 갱신: 2026-11-05 · 4번(강석민) · 상태: **설계 초안. Single 실행기는 주호가 구현해 dev에 병합(2026-11, `src/agents/single`, `architecture` SINGLE_AGENT 허용), 4번은 평가 기준·비교 집계 담당. 평가 쪽은 Single 기록(A2A 저장소 하나)을 받도록 맞췄고, 실제 비교 Run은 아직**
 근거: 개발정의서 11-A, 기업질의응답(Q75~80), 2차 기업미팅 11~12절, dev `run_configuration.py`·`telemetry_store.py`, [evaluation_spec.md](evaluation_spec.md) 13절.

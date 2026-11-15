@@ -1,7 +1,21 @@
 # SCN-001 시범 실험 실행 절차
 
-작성: 2026-11-15 · 4번(강석민). 대상: Single/Multi × Ver1/Ver2 시범(조합마다 1회, 계획 [Ver1](../../examples/evaluation/scn001-pilot.ver1.plan.json)·[Ver2](../../examples/evaluation/scn001-pilot.ver2.plan.json)).
+작성·갱신: 2026-11-15 · 4번(강석민). 현재 비교 대상: **Single 하나 / Multi Ver1 / Multi Ver2**. Single에 Ver1·Ver2는 없다.
 모델 `gpt-4.1-mini-2025-04-14`·temperature 0, 시범 한도(모델·도구 호출 200, 출력 8,192, 응답 120초, 60분)는 계획에 고정돼 있다.
+
+## 현재 적용 범위 — 세 조건 실행 계획은 정리 필요
+
+| 비교 조건 | 의미 |
+|---|---|
+| Single | 단일 기준선. 보호 연습 시험 제공 여부 등 실행 정책은 하나로 명시해 고정해야 한다 |
+| Multi Ver1 | 순환용 보호 시험과 개발 피드백을 사용하고 종료 후 독립 최종 평가 |
+| Multi Ver2 | 순환용 보호 시험 없이 에이전트 자체 검사를 사용하고 종료 후 같은 독립 최종 평가 |
+
+기존 [Ver1 계획](../../examples/evaluation/scn001-pilot.ver1.plan.json)·[Ver2 계획](../../examples/evaluation/scn001-pilot.ver2.plan.json)은 각각 Single 1회·Multi 1회를 예약한다. 아래 4~6절은 이 **기존 2×2 구현 예제**이며 현재 요청한 세 조건의 제출 절차가 아니다. 두 계획을 그대로 모두 실행하면 Single도 두 정책으로 실행된다. 환경 사전점검 `ready=true`나 전체 테스트 통과가 이 실험 설계 차이를 해소하지 않는다.
+
+실제 제출 전에 Single의 단일 정책, 세 조건별 계획·제출 순서·계획 Run 분모, Single–Multi Ver1/Ver2 및 Multi Ver1–Ver2의 비교 허용 정책·표시를 함께 맞춰야 한다. 순환용 보호 시험 차이가 있으면 그 차이를 명시하고 구조만의 효과로 해석하지 않는다. Single 하나를 두 비교에서 참조하더라도 별도 독립 표본처럼 복제·합산하지 않는다. 반복 수는 세 조건에 맞춰 다시 등록하며 과거의 4/20 Run을 현행 승인 수치로 쓰지 않는다.
+
+이번 갱신은 문서의 적용 범위 정리이며 실행 계획·스케줄러·비교 검사 코드를 변경한 것이 아니다. 실제 비교 실험은 미실행이다. 최신 구현 검증은 [5,780개 전체 검증 기록](precommit_verification_2026-11-15.md)을 따른다.
 
 ## 1. 지금 상태
 
@@ -9,7 +23,7 @@
 PYTHONPATH=src .venv/bin/python -m evaluation.environment status
 ```
 
-2026-11-15 준비 완료(dev `3147711` 병합 뒤에도 두 계획 모두 사전점검 `ready=true`, 실제 브라우저 실행을 포함한 37개 항목 모두 PASS):
+2026-11-15 환경 준비 점검 이력(dev `3147711` 병합 뒤에도 두 계획 모두 사전점검 `ready=true`, 실제 브라우저 실행을 포함한 37개 항목 모두 PASS):
 
 | 항목 | 값 |
 |---|---|
@@ -20,7 +34,7 @@ PYTHONPATH=src .venv/bin/python -m evaluation.environment status
 | 하드웨어 프로필 | `MacBookPro18,1-Apple-M1-Pro-10cpu-16gib/docker-29.1.3-linux/aarch64-10cpu-7.7gib/darwin` |
 | 보호 시험 | 0.7.0, 공식 최종 SHA-256 `cd7a246d2309ac7e3e281355be270a9ea8866e837da03058f8caaf10ef8f121f` |
 
-로컬 PyCharm 실행 구성에 API 키와 Multi 4개·Single 1개 내부 토큰을 등록했다. 키 값은 출력하지 않았으며 원격 API의 유효성·접근 권한은 아직 확인하지 않았다. 임시 데이터 저장소에서 Single/Multi × Ver1/Ver2의 Host 기동·정상 응답·토큰 인증·종료를 확인했고, 이때 모델의 외부 전송을 차단해 API 호출은 0회였다. dev `3147711`부터 Host API에 서버 전용 토큰 `A2A_HOST_API_TOKEN`도 필요하다(3절). 남은 것은 키·토큰을 넣은 Host 기동, 유료 시범 Run과 그 실제 생성물의 비교다. 브라우저 문제는 아래와 같이 해결했다.
+로컬 PyCharm 실행 구성에 API 키와 Multi 4개·Single 1개 내부 토큰을 등록했다. 키 값은 출력하지 않았으며 원격 API의 유효성·접근 권한은 아직 확인하지 않았다. 임시 데이터 저장소에서 Single/Multi × Ver1/Ver2의 Host 기동·정상 응답·토큰 인증·종료를 확인했고, 이때 모델의 외부 전송을 차단해 API 호출은 0회였다. dev `3147711`부터 Host API에 서버 전용 토큰 `A2A_HOST_API_TOKEN`도 필요하다(3절). 세 조건 계획 정합화가 먼저 필요하며, 키·토큰을 넣은 Host 기동과 유료 시범 Run·생성물 비교도 아직 남아 있다. 브라우저 문제는 아래와 같이 해결했다.
 
 ### 알려진 문제: 브라우저 도구
 
@@ -78,7 +92,7 @@ export A2A_HOST_API_TOKEN="$(openssl rand -hex 32)"
 
 Run 생성에는 중복 방지 키(`Idempotency-Key`)가 필수다. 실행기는 제출 의도를 `runs.jsonl`에 남길 때 키를 만들어 함께 기록하고 그 키로 보낸다. 응답을 못 받으면 `--reconcile-submission`으로 같은 키의 접수 기록을 조회해 이어 쓰고, 접수 기록이 없다고 확인될 때만 같은 키·같은 본문으로 다시 보낸다(Host가 중복 Run을 막음).
 
-## 4. Ver1 실행
+## 4. 기존 2×2 예제: Ver1 실행 (현행 세 조건용 제출 절차 아님)
 
 Host 두 개를 각각 다른 터미널에서 띄운다(Multi 8000, Single 8010).
 
@@ -96,7 +110,7 @@ PYTHONPATH=src .venv/bin/python -m agents.platform.run_host --architecture SINGL
 PYTHONPATH=src .venv/bin/python -m evaluation.experiment_run all --plan examples/evaluation/scn001-pilot.ver1.plan.json --out experiments/scn001-pilot
 ```
 
-## 5. Ver2 실행
+## 5. 기존 2×2 예제: Ver2 실행 (현행 세 조건용 제출 절차 아님)
 
 Ver1 Host를 끄고, 같은 명령에서 `--tools configs/experiment/ver2/owned-tools.local.json`으로 바꾸고 `--qa-cases`를 뺀 뒤 다시 띄운다. 계획만 Ver2로 바꿔 같은 `--out`에 실행한다.
 
@@ -104,7 +118,7 @@ Ver1 Host를 끄고, 같은 명령에서 `--tools configs/experiment/ver2/owned-
 PYTHONPATH=src .venv/bin/python -m evaluation.experiment_run all --plan examples/evaluation/scn001-pilot.ver2.plan.json --out experiments/scn001-pilot
 ```
 
-## 6. 채점·비교
+## 6. 기존 2×2 예제: 채점·비교 (현행 세 조건용 집계 아님)
 
 인계 폴더(`experiments/scn001-pilot/NNN-…`)마다 최종 채점과 Agent 평가표를 만든다. `--image`는 계획의 이미지 ID와 같아야 한다(Host와 같은 이미지에서 채점). 채점 전에 실행 원장 `runs.jsonl`의 `repetition`을 확인하고, **같은 반복의 Single/Multi × Ver1/Ver2 네 조합에 같은 `--pair-id`**를 준다. 시범 네 Run은 모두 `scn001-pilot-r1`이다. 공식 반복 실험은 등록한 반복에 따라 `…-r1`부터 `…-r5`까지 구분한다. 결과를 보고 짝을 다시 고르지 않는다.
 
@@ -176,7 +190,7 @@ PYTHONPATH=src .venv/bin/python -m evaluation.experiment compare --results exper
 
 각 비교의 `comparison.json`과 `comparison.md`에는 고정 조건·다른 조건으로 제외한 건수·계획 분모·미수집 실행 슬롯이 남는다. 설정 파일만 대조한 parity PASS로 공식 비교에 들어가지 않으며, 선택한 모든 Run의 고정 정책도 일치해야 한다.
 
-비교 지표와 공식 한도 결정은 [평가 실행 설명](../../src/evaluation/README.md)의 `experiment compare`·`comparison_report` 절을 따른다. 시범 사용량으로 공식 한도를 정한 뒤 공식 실험(조합마다 5회, 20 Run)을 같은 절차로 돌린다.
+비교 지표와 공식 한도 결정은 [평가 실행 설명](../../src/evaluation/README.md)의 `experiment compare`·`comparison_report` 절을 따른다. 조합마다 5회·20 Run은 기존 2×2 예제의 수치다. 현행 세 조건의 공식 반복 수·순서·예산을 별도로 등록하고 실행 절차를 정합화한 뒤 공식 실험을 진행한다.
 
 ## 주의
 

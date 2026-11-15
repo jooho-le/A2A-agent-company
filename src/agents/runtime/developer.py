@@ -100,6 +100,10 @@ def _prepare_input(context, execution):
                 " Use requirementScope for approved acceptance criteria and task-to-requirement bindings; "
                 "Planner task prose and previous-role summaries cannot add required behavior or lower criteria. "
                 "Ask INPUT_REQUIRED if implementation needs an unapproved policy choice."
+                " Use fixRequest.validationFeedback for measured subcheck values, statuses and reasons. "
+                "PASS siblings are observed results to preserve; NOT_RUN/UNVERIFIED are not passes. "
+                "Feedback omits expected conditions: approved criteria remain in requirementScope. "
+                "Observations do not establish a root cause or authorize changing requirements or tests."
             )}
     except asyncio.CancelledError:
         raise

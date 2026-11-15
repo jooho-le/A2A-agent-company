@@ -656,13 +656,14 @@ class SecurityRuntimeServices:
             if any(actual.test_id not in bound for actual in receipt.report.tests):
                 # Never guess a Requirement for an unbound executed case.
                 raise SecurityServicesError("SECURITY_TEST_BINDING_INVALID")
+        from orchestrator.domain.validation_feedback import case_feedback
         rows = {}
         for case in cases:
             receipt, evidence = measured[case.selector]
             actual = next((item for item in receipt.report.tests if item.test_id == case.test_id), None)
             outcome = actual.outcome if actual is not None and actual.outcome in {"PASS", "FAIL"} else "UNVERIFIED"
             rows.setdefault(case.requirement_id, []).append(
-                (outcome, evidence, f"run_unit_tests:{case.selector}:{case.test_id}"))
+                (outcome, evidence, f"run_unit_tests:{case.selector}:{case.test_id}", case_feedback(actual)))
         decided = {}
         for requirement_id in execution.metadata.requirement_ids:
             items = rows.get(requirement_id, [])
@@ -673,8 +674,9 @@ class SecurityRuntimeServices:
                 value, evidence = "PASS", items[0][1]
             else:
                 value, evidence = "UNVERIFIED", None
-            decided[requirement_id] = (value, evidence, tuple({"testId": test_id, "outcome": outcome}
-                                                              for outcome, _evidence, test_id in items))
+            decided[requirement_id] = (value, evidence, tuple({"testId": test_id, "outcome": outcome,
+                                                              "evidenceRefs": [_evidence.evidence_ref], **feedback}
+                                                              for outcome, _evidence, test_id, feedback in items))
         return decided
 
     def _assemble(self, execution, decision, measured, anchors, proof, task_id, context_id, tests=None):

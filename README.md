@@ -448,6 +448,8 @@ PYTHONPATH=src uv run --frozen python -m unittest discover -s tests -v
 평가 모듈은 `src/evaluation/`에 있으며 공통 `pyproject.toml`, `uv.lock`, `.venv`를 사용합니다.
 [평가 안내](src/evaluation/README.md)와 [평가 개발진행사항](docs/evaluation/development_progress.md)을 참고하세요.
 
+2026-11-15 현재 순환 중 QA·Security의 세부 실제값·판정·사유를 기대조건 없이 개발 수정 요청에 전달하고, 최종 결과에는 요구사항별·세부 항목별·다섯 축별 채점지를 저장합니다. [순환 피드백](docs/evaluation/loop_validation_feedback.md), [축별 채점지](docs/evaluation/axis_scorecard.md), [전체 5,780개 통과 검증](docs/evaluation/precommit_verification_2026-11-15.md)을 참고하세요. 실제 비교 대상은 Single 하나·Multi Ver1·Multi Ver2이며, 기존 2×2 실행 계획 정리는 남아 있습니다. 실제 비교 실험은 아직 실행하지 않았습니다.
+
 ```bash
 uv sync --frozen
 uv run --frozen python -m pytest

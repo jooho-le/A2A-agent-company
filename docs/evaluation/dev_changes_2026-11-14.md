@@ -1,8 +1,23 @@
 # dev 변경 공유 (2026-11-14)
 
-작성: 4번 · 기준: 공유 dev `ea06d12` (최신 dev `6c7f709`의 `src`·`configs`·`docker`·`tests`도 같음) · 상태: 작업 폴더에 반영, 커밋 전
+작성: 4번 · 최초 기준: 공유 dev `ea06d12` (`6c7f709`의 `src`·`configs`·`docker`·`tests`도 같음) · 최신 갱신: 2026-11-15, dev `3147711` 및 평가 커밋 `059e9eb` 이후 변경 포함
 
 11.14 합의(4번 파트를 구현하는 데 필요한 것은 4번이 정한다)에 따라, 평가에 필요한 dev 변경을 4번이 정해 반영했다. 1~3절은 11.14 변경이고, 4절은 11.13 증거용 수정이다. **11.15 추가 구현은 아래 최신 항목과 개발진행사항을 우선한다.** 이전 검사 수치는 당시 기록이다.
+
+## 2026-11-15 최신 연결 변경·전체 검증
+
+| 연결 지점 | 현재 동작·호환성 |
+|---|---|
+| Host Unit 실행기·보고서·불변 저장소 | PROTECTED 실행에서만 `unittest-v1.tests[]`의 선택 필드 `observations`·`observationError`를 허용한다. 기대조건·원문 문자열을 제외하고 닫힌 형식과 무결성을 검증한다. 기존 필드 없는 보고서도 받으며 검사 수·상위 판정·종료 코드는 유지한다 |
+| QA·Security 실행 서비스 | 현재 Source·보고서·Manifest에 연결된 세부 관찰을 기존 `details` 안에 담는다. Security는 각 검사에 그 검사의 증거를 연결한다 |
+| Orchestrator 수정 요청·Developer | 인증된 보고서에서 `fixRequest.validationFeedback`을 구성해 같은 보고서의 PASS 항목을 포함한 실제값·상태·사유를 보낸다. QA/Security 기대조건은 모델 전달 사본에서 제거한다. 불변 원본·공개 요구사항은 유지하며 추가 Agent나 추가 호출은 없다 |
+| 최종 평가 workflow | `axis_scorecard.md`·`.json`을 기존 결과에서 생성한다. 기대값을 포함하는 최종 `check_details`와 기대조건 없는 순환 피드백을 구분한다. 새 결과 파일도 시험 결과 노출 검사 목록에 포함한다 |
+
+세부 계약은 [순환 피드백](loop_validation_feedback.md), [축별 채점지](axis_scorecard.md)를 따른다. 계측 없는 일반 생성 테스트·과거 기록의 세부 결과는 만들지 않으며 `DETAIL_RECORD_MISSING`으로 표시한다. 상위 판정을 세부 결과로 덮어쓰지 않는다.
+
+최종 검토에서 세부 FAIL/상위 SKIP 모순, 단계 기록 누락, 토큰 구분값 누락, Run 상태 누락 처리를 보완했다. `tests`·`checks` 전체 **5,780 passed / 0 failed / 0 errors / 0 skipped**, 로컬 Docker 평가 통합 검사 9개 포함. 실제 비교 실험·유료 모델 호출은 없었다. [검토 기록](precommit_verification_2026-11-15.md).
+
+현재 요청한 실험 조건은 **Single 하나·Multi Ver1·Multi Ver2**다. 기존 2×2 계획·실행·집계 정합화는 아직 남았으며, 아래 과거 4/20 Run 안내를 현행 계획으로 사용하지 않는다. 기존 공통 Artifact 스키마의 필수 필드는 추가하지 않았다.
 
 ## 2026-11-15 dev `3147711` 병합 (주호 83~88번)
 

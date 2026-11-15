@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 
 from .agent_eval import agent_tables, render_markdown, run_contract
+from .axis_scorecard import build_scorecard, render_scorecard
 from .experiment import ExperimentError, _check_automatic_boundary, _checked_metrics, _write, record_run, score_export
 from .final_evaluation import DockerRunner
 from .outcomes import CLOSED_STATUSES, PAUSED_STATUSES, has_resumed, run_outcome
@@ -132,6 +133,21 @@ def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), addi
         if export.get('packageCompletion') is not None:
             _write(target / 'package_completion_evidence.json', {k: export[k] for k in
                    ('packageCompletion', 'packageManifest')}, False)
+    def scorecard(target, record, state, output=None):
+        # 세 번째 채점지: 정확도·속도·비용·과정·안정성. 같은 폴더에 이미 쓴 결과만 모은다.
+        def optional(name):
+            path = target / name
+            return json.loads(path.read_text(encoding='utf-8')) if path.is_file() else None
+        data = build_scorecard(run_id=run['runId'], architecture=export['handoff'].get('architecture'), exam=exam,
+                               metrics=metrics, record=record, status=state,
+                               report=None if output is None else output['report'],
+                               score=None if output is None else output.get('score'),
+                               trace=None if output is None else output.get('trace'),
+                               timing=optional('timing_metrics.json'), regression=optional('regression.json'),
+                               process=process, tables=tables)
+        _write(target / 'axis_scorecard.json', data, False)
+        _write(target / 'axis_scorecard.md', render_scorecard(data), False)
+
     versions = run.get('exportedCodeVersions')
     final = run.get('finalCodeVersion')
     # 코드가 만들어지기 전에 멈춘 Run(Planner 보류·API 장애·한도 초과 등)은 dev 내보내기에서 최종 버전이 null이고
@@ -170,9 +186,11 @@ def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), addi
             _write(target / 'agent_tables.json', tables, False)
             _write(target / 'agent_tables.md', render_markdown(tables), False)
             _write(target / 'outcome.json', record, False)
-            _write(target / 'evaluation_status.json', {**status, 'status': 'UNVERIFIED',
-                   'reason': 'NO_ARTIFACT' if not versions else 'FINAL_SNAPSHOT_NOT_FOUND', **_status_fields(record)}, False)
+            state = {**status, 'status': 'UNVERIFIED',
+                     'reason': 'NO_ARTIFACT' if not versions else 'FINAL_SNAPSHOT_NOT_FOUND', **_status_fields(record)}
+            _write(target / 'evaluation_status.json', state, False)
             supplement(target)
+            scorecard(target, record, state)
 
         return record_run(Path(results), export['bundle'], pair_id=pair_id, _complete=finish_unscored)
     # 수정 전 버전을 빠뜨린 채 회귀가 없다고 보이지 않도록, 실행 전에 전체 이력을 요구한다.
@@ -183,11 +201,14 @@ def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), addi
         raise ExperimentError('SNAPSHOT_NOT_IN_HANDOFF')
 
     def finish_scored(target):
-        report = json.loads((target / 'output.json').read_text(encoding='utf-8'))['report']
+        output = json.loads((target / 'output.json').read_text(encoding='utf-8'))
+        report = output['report']
         record = run_outcome(export, run, report=report, metrics=metrics)
         _write(target / 'outcome.json', record, False)
-        _write(target / 'evaluation_status.json', {**status, 'status': 'SCORED', **_status_fields(record)}, False)
+        state = {**status, 'status': 'SCORED', **_status_fields(record)}
+        _write(target / 'evaluation_status.json', state, False)
         supplement(target, report)
+        scorecard(target, record, state, output)
 
     return score_export(Path(folder), runner=runner, exam=exam, results=Path(results), contract=contract,
                          bundle=export['bundle'], trace=export['trace'], a2a=export['a2a'], pair_id=pair_id,

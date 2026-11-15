@@ -92,7 +92,7 @@ def _bounded(value, limit):
 class _Result(unittest.TestResult):
     """Aggregate failed subtests into their parent, count class callbacks too."""
 
-    def __init__(self, expected):
+    def __init__(self, expected, capture_observations=False):
         super().__init__()
         self.expected = expected
         self.seen = set()
@@ -102,6 +102,7 @@ class _Result(unittest.TestResult):
         self.started = 0
         self.finished = 0
         self.invalid = False
+        self.capture_observations = capture_observations
 
     def _id(self, test):
         test_id = test.id()
@@ -129,6 +130,29 @@ class _Result(unittest.TestResult):
         test_id = self.active.pop(id(test), None)
         if test_id is None or self.rows[test_id]["outcome"] is None:
             self.invalid = True
+        elif self.capture_observations and hasattr(test, 'detail_recorder'):
+            try:
+                rows = test.detail_recorder.rows
+                if type(rows) is not list or not 1 <= len(rows) <= 256:
+                    raise ValueError()
+                projected = []
+                for row in rows:
+                    value = row['actual']
+                    if not (value is None or type(value) is bool or type(value) is int and abs(value) <= 10 ** 12
+                            or type(value) is list and len(value) <= 100
+                            and all(type(v) is int and 0 <= v <= 999 for v in value)):
+                        raise ValueError()
+                    item = {k: row[k] for k in ('caseId', 'itemId', 'kind', 'actual', 'status', 'reason')}
+                    if any(type(item[k]) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', item[k])
+                           for k in ('caseId', 'itemId', 'kind', 'status')):
+                        raise ValueError()
+                    if item['reason'] is not None and (type(item['reason']) is not str
+                            or not re.fullmatch(r'[A-Z_]{1,64}', item['reason'])):
+                        raise ValueError()
+                    projected.append(item)
+                self.rows[test_id]['observations'] = projected
+            except Exception:
+                self.rows[test_id]['observationError'] = 'DETAIL_RECORD_INVALID'
         self.finished += 1
         super().stopTest(test)
 
@@ -217,7 +241,7 @@ def _expected_cases(suite):
     return expected
 
 
-def run_tests(test_root, source_root, pattern="test_*.py"):
+def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False):
     """Run explicit trusted-fixture tests or, in the Container, mounted tests.
 
     Return (report, exit_code), where report is None and exit is 2 for empty,
@@ -241,7 +265,7 @@ def run_tests(test_root, source_root, pattern="test_*.py"):
         suite = loader.discover(str(root), pattern=pattern, top_level_dir=str(root))
         if loader.errors or not 1 <= suite.countTestCases() <= MAX_CASES or budget[1]:
             raise _HarnessError()
-        result = _Result(_expected_cases(suite))
+        result = _Result(_expected_cases(suite), capture_observations)
         suite.run(result)
         if loader.errors or result.shouldStop or budget[1] or result.testsRun != result.started:
             raise _HarnessError()
@@ -290,7 +314,8 @@ def main(argv=None):
             raise _HarnessError()
         test_root = Path("/snapshot" if options.kind == "SNAPSHOT" else "/inputs") / options.directory
         with _discard_file_descriptors():
-            report, exit_code = run_tests(test_root, Path("/snapshot"), options.pattern)
+            report, exit_code = run_tests(test_root, Path("/snapshot"), options.pattern,
+                                          capture_observations=options.kind == 'PROTECTED')
     except BaseException:
         report, exit_code = None, 2
     payload = report if report is not None else {"error": "TEST_RUNNER_ERROR"}

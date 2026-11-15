@@ -859,11 +859,13 @@ class PlannerRunDispatcher:
     @staticmethod
     def build_fix_payload(run, step, plan, scenario, issues, input_artifacts):
         """Create a recoverable Fix Request with scrubbed, actionable evidence."""
-        return {
+        from orchestrator.domain.validation_feedback import validation_feedback, without_expectations
+        payload = {
             "workspaceId": str(run.workspace_id),
             "plan": redact(plan.model_dump(mode="json", by_alias=True)),
             "fixRequest": {
                 "attempt": run.fix_attempt,
+                "validationFeedback": validation_feedback(input_artifacts),
                 "issues": [redact({
                     "issueId": str(issue.issue_id), "fingerprint": issue.fingerprint,
                     "category": issue.category, "referenceId": issue.reference_id,
@@ -894,6 +896,14 @@ class PlannerRunDispatcher:
             "outputContract": _DEVELOPER_OUTPUT_CONTRACT,
             "scenario": scenario.planner_contract(),
         }
+        fix = payload['fixRequest']
+        for issue in fix['issues']:
+            if issue['category'] in ('QA_ASSERTION_FAILURE', 'SECURITY_REQUIREMENT_FAILURE') or issue['category'].startswith('SECURITY_FINDING_'):
+                issue.pop('expectedResult', None)
+        for artifact in fix['inputArtifacts']:
+            if artifact['artifactType'] in ('QA_REPORT', 'SECURITY_REPORT'):
+                artifact['record'] = without_expectations(artifact['record'])
+        return payload
 
     @staticmethod
     def _build_issue(
