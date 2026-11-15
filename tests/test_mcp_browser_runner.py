@@ -209,7 +209,8 @@ class BrowserRunnerTests(unittest.TestCase):
         parsed = parse_browser_report(json.dumps(data), exit_code)
         self.assertEqual((parsed.total, parsed.passed, parsed.failed), (1, 1, 0))
         self.version.assert_called_once_with("playwright")
-        self.assertEqual(self.manager.launch_options, {"headless": True, "chromium_sandbox": True, "timeout": 100})
+        # 2026-11-15: Chromium 자체 샌드박스 대신 컨테이너 격리를 쓴다(browser_runner.py 주석).
+        self.assertEqual(self.manager.launch_options, {"headless": True, "chromium_sandbox": False, "timeout": 100})
         self.start.assert_called_once_with(host()["service_argv"])
         self.stop.assert_called_once_with(self.service)
         self.assertTrue(self.browser.closed)
@@ -360,7 +361,8 @@ class BrowserRunnerTests(unittest.TestCase):
     def test_browser_launch_failed_no_relaxed_sandbox_retry(self):
         self.manager.launch_error = True
         self.error(self.run_tool(), "BROWSER_START_FAILED")
-        self.assertEqual(self.manager.launch_options["chromium_sandbox"], True)
+        # 실패해도 다른 실행 옵션으로 다시 띄우지 않는다(한 번의 고정 옵션 시도).
+        self.assertEqual(self.manager.launch_options["chromium_sandbox"], False)
         self.factory.assert_called_once_with()
         self.assertTrue(self.manager.exited)
         self.stop.assert_called_once_with(self.service)

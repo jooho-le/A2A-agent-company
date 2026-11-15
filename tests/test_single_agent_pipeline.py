@@ -49,7 +49,9 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.f = fixtures.OwnedAgentPipelineTests("runTest")
         self.f.setUp()
-        self.addCleanup(self.f.doCleanups)
+        for function, arguments, keywords in self.f._cleanups:
+            self.addCleanup(function, *arguments, **keywords)
+        self.f._cleanups.clear()
         self.f.configuration = self.f.configuration.model_copy(update={"architecture": "SINGLE_AGENT"})
         self.model_clients, self.events, self.usage, self.clients = [], [], [], []
         self.measured_security = False
@@ -279,7 +281,9 @@ class SingleModelTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_stdio_view_uses_single_authority_and_existing_private_journal(self):
         setup = single_mcp_fixtures.SingleMCPFileTests("runTest")
         setup.setUp()
-        self.addCleanup(setup.doCleanups)
+        for function, arguments, keywords in setup._cleanups:
+            self.addCleanup(function, *arguments, **keywords)
+        setup._cleanups.clear()
         f = setup.fixture
         host = MCPChildConfiguration(binding=MCPBinding(role=AgentRole.DEVELOPER, agent_role=AgentRole.DEVELOPER,
             run_id=f.run.run_id, workspace_id=f.run.workspace_id), database_path=f.database, workspace_root=f.base)

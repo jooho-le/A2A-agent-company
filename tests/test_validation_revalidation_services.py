@@ -181,7 +181,9 @@ class ValidationRevalidationServicesTests(unittest.IsolatedAsyncioTestCase):
         path.write_text(json.dumps({"format": "browser-suite-v1", "tests": cases}), encoding="utf-8")
         case.decision = QADecision(kind="READY", questions=(), cases=tuple(QACaseBinding(
             tool_name="run_browser_tests", selector=suite.name, test_id=actual["testId"],
-            requirement_id=identity, title="브라우저 기준", expected_result="화면 기준 충족")
+            requirement_id=identity, title="브라우저 기준", expected_result=next(item["acceptanceCriteria"][0]
+                for item in case.fixture.configuration.scenario_contract["requirements"]
+                if item["requirementId"] == str(identity)))
             for identity, actual in zip(case.ids, cases)))
         case.docker.exit_code = 0
         case.docker.start_result = CLIResult(returncode=0, stderr=b"", stdout=json.dumps({

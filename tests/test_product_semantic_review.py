@@ -98,7 +98,9 @@ class ProductSemanticReviewTests(unittest.IsolatedAsyncioTestCase):
     def fixture(self, single=False):
         fixture = (single_fixture.SingleAgentPipelineTests if single else multi_fixture.OwnedAgentPipelineTests)('runTest')
         fixture.setUp()
-        self.addCleanup(fixture.doCleanups)
+        for function, arguments, keywords in fixture._cleanups:
+            self.addCleanup(function, *arguments, **keywords)
+        fixture._cleanups.clear()
         return fixture
 
     async def submit(self, fixture, client):
@@ -151,7 +153,6 @@ class ProductSemanticReviewTests(unittest.IsolatedAsyncioTestCase):
                             if item.artifact_type in {'SOURCE', 'BUILD_REPORT', 'QA_REPORT', 'SECURITY_REPORT'}])
                         self.assertFalse(providers[AgentRole.QA].requests)
                     self.assertEqual(len(record['modelCallSequences']), 1)
-                f.doCleanups()
 
     async def test_missing_review_proof_becomes_input_required_not_success(self):
         f = self.fixture()
@@ -274,7 +275,6 @@ class ProductSemanticReviewTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((budget.model_calls, budget.total_tokens), (2, 30))
                     record = SemanticReviewStore(f.repository.database_path).latest(run_id, step.workflow_step_id, step.a2a_task_id)
                     self.assertEqual(record['reasonCode'], code.value)
-                f.doCleanups()
 
     async def test_canceled_review_preserves_usage_and_never_publishes(self):
         f = self.fixture()

@@ -92,6 +92,8 @@ def _read_store(path: Path, role: AgentRole, run_id: str) -> dict:
         receipts = _rows(connection, f"SELECT message_id, task_id, context_id, metadata_json, request_json "
                                      f"FROM agent_message_receipts WHERE context_id IN ({marks}) ORDER BY created_at, message_id",
                          contexts)
+        from orchestrator.observability import collect_observations
+        observations = collect_observations(connection, run_id)
     except A2AExportError:
         raise
     except (sqlite3.Error, ValueError):
@@ -109,6 +111,7 @@ def _read_store(path: Path, role: AgentRole, run_id: str) -> dict:
                       "metadata": _json(row["metadata_json"]), "request": _json(row["request_json"])} for row in receipts],
         "events": [{"taskId": row["task_id"], "version": row["version"], "reason": row["reason"],
                     "eventType": row["event_type"], "event": _json(row["event_json"])} for row in events],
+        "outputObservations": observations,
     }
 
 

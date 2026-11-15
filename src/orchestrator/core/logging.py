@@ -8,6 +8,26 @@ class SecretRedactionFilter(logging.Filter):
     """Sanitize rendered messages and tracebacks, including preinstalled handlers."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        from orchestrator.observability import observe_log, output_observation_active
+        # Run context exists only during owned execution. The receipt stores
+        # findings/hashes before sanitization, never the rendered secret.
+        if output_observation_active():
+            exception = (''.join(traceback.format_exception(*record.exc_info)) if record.exc_info
+                         else record.exc_text)
+            excluded = {'msg', 'args', 'exc_info', 'exc_text', 'stack_info'}
+            fields, unrenderable = {}, 0
+            for key, value in record.__dict__.items():
+                if key in excluded:
+                    continue
+                try:
+                    fields[key] = str(value)
+                except Exception:
+                    fields[key] = '[UNRENDERABLE_LOG_FIELD]'
+                    unrenderable += 1
+            # Formatters may print these values too. JSON serialization never
+            # receives arbitrary Path/Exception/custom extra objects.
+            observe_log({'message': record.getMessage(), 'exception': exception, 'stack': record.stack_info,
+                         'fields': fields, 'unrenderableFields': unrenderable})
         if isinstance(record.msg, (dict, list, tuple)):
             record.msg = redact_data(record.msg)
         record.msg = redact_text(record.getMessage())

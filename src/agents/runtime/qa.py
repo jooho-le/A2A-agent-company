@@ -231,7 +231,9 @@ class QAAgentExecutor(AgentExecutor):
                     model=execution.model,
                     output=build_qa_output_contract(execution.metadata.requirement_ids, services.selectors),
                     budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
-                    usage_sink=usage_sink, call_started_sink=call_started_sink)
+                    usage_sink=usage_sink, call_started_sink=call_started_sink,
+                    output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                    input_observed_sink=telemetry.model_input if telemetry is not None else None)
                 decision = validate_qa_decision(result.data, execution.metadata.requirement_ids, services.selectors)
                 if decision.kind == "READY":
                     validate_generated_case_expectations(decision.cases, configuration=execution.configuration,

@@ -92,6 +92,27 @@ class BoundRuntimeTelemetry:
         if self._external_sink is not None:
             self._external_sink(record)
 
+    def model_input(self, record):
+        # Evaluation evidence only. A failed hash receipt must not stop the model
+        # call; model_input_assessment reports the missing sequence as UNVERIFIED.
+        try:
+            self.store.append_model_input(self._event('MODEL_INPUT_OBSERVED'), record, self.model)
+        except Exception:
+            return
+
+    def model_output(self, record):
+        from orchestrator.observability import ObservationStore
+        sequence = record.get('sequence')
+        if type(sequence) is not int or sequence < 1:
+            raise RuntimeTelemetryError()
+        try:
+            ObservationStore(self.repository).observe(self.binding['runId'], f'model-output:{sequence}',
+                                                      'LLM_OUTPUT', record)
+        except Exception:
+            # Evidence only: trace_checks expects one LLM_OUTPUT receipt per USAGE
+            # sequence and reports a missing receipt as incomplete coverage.
+            return
+
     def semantic_review(self, record):
         self.store.append_semantic_review(self._event('AGENT_SEMANTIC_REVIEWED'), record, self.model)
 

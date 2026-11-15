@@ -114,6 +114,7 @@ class PlannerRunDispatcher:
         *,
         client_factory: ClientFactory = A2AAgentClient,
         before_dispatch: Callable[[UUID], Awaitable[None]] | None = None,
+        after_dispatch: Callable[[UUID], Awaitable[None]] | None = None,
         allow_fix_dispatch: bool = True,
         single_agent: bool = False,
     ) -> None:
@@ -126,11 +127,21 @@ class PlannerRunDispatcher:
             raise ValueError("DISPATCH_CONFIGURATION_INVALID")
         self._single_agent = single_agent
         self._before_dispatch = before_dispatch
+        self.set_after_dispatch(after_dispatch)
         self._allow_fix_dispatch = allow_fix_dispatch
         self._active_runs: set[UUID] = set()
         self._dispatch_tasks: dict[UUID, asyncio.Task] = {}
         self._dispatch_tokens: dict[UUID, str] = {}
         self._control_stops: set[asyncio.Task] = set()
+
+    def set_after_dispatch(self, callback):
+        if callback is not None and not callable(callback):
+            raise ValueError("DISPATCH_CONFIGURATION_INVALID")
+        self._after_dispatch = callback
+
+    async def notify_settled(self, run_id):
+        if self._after_dispatch is not None:
+            await self._after_dispatch(run_id)
 
     def supports_architecture(self, architecture: str) -> bool:
         return architecture == ("SINGLE_AGENT" if self._single_agent else "MULTI_AGENT")
@@ -165,10 +176,15 @@ class PlannerRunDispatcher:
         self._dispatch_tokens[run_id] = token
 
         async def dispatch_owned():
+            from orchestrator.observability import observe_run
             try:
-                return await operation()
+                with observe_run(self._repository, run_id):
+                    return await operation()
             finally:
-                self._release_owner(run_id, token)
+                try:
+                    await self.notify_settled(run_id)
+                finally:
+                    self._release_owner(run_id, token)
 
         task = asyncio.create_task(dispatch_owned(), name=f"workflow-dispatch:{run_id}")
         self._dispatch_tasks[run_id] = task
@@ -1080,7 +1096,7 @@ class PlannerRunDispatcher:
             self._repository.transition_run_and_record(
                 run_id,
                 WorkflowStatus.HUMAN_REVIEW,
-                additional_event_types=additional_event_types,
+                additional_event_types=(*additional_event_types, 'PROCESS_GATE_REJECTED'),
                 workflow_step_id=workflow_step_id,
                 attempt=attempt,
             )

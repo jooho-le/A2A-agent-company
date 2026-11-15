@@ -106,7 +106,7 @@ def approved_basis(execution, role):
     requirements = [{'requirementId': str(item.requirement_id), 'description': item.description,
         'acceptanceCriteria': list(item.acceptance_criteria)} for item in selected]
     contract = execution.configuration.scenario_contract
-    policies = {name: contract[name] for name in ('excludedFeatures', 'securityPolicy', 'emailPolicy') if name in contract}
+    policies = {name: contract[name] for name in ('excludedFeatures', 'securityPolicy', 'emailPolicy', 'externalContract') if name in contract}
     basis = {'authority': authority.to_prompt_json(), 'requirements': requirements, 'policies': policies}
     if redact_data(basis) != basis:
         raise ValueError('SEMANTIC_REVIEW_SCOPE_INVALID')
@@ -210,7 +210,8 @@ class ProductSemanticReviewer:
                 prompt = PreparedSemanticPrompt(actor, phase, json_text(data), output, system_prompt=system)
                 engine = LLMEngine(role=actor, provider=self.provider, single_phase=phase, semantic_review=True)
                 reviewed = await engine.run(prompt=prompt, model=execution.model, output=output,
-                    budget=execution.budget, usage_sink=usage_sink, call_started_sink=started)
+                    budget=execution.budget, usage_sink=usage_sink, call_started_sink=started,
+                    output_observed_sink=telemetry.model_output if telemetry is not None else None)
                 raw = reviewed.data
                 status, reason = judge_result(raw, fields, basis, **hashes)
         except LLMRuntimeError as failure:

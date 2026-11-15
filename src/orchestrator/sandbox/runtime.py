@@ -340,6 +340,16 @@ class SandboxRuntime:
                 or attached.returncode != state["ExitCode"]
             ):
                 raise SandboxError(SandboxErrorCode.EXECUTION)
+            from orchestrator.observability import ObservationStore
+            observations = ObservationStore(self._repository)
+            try:
+                observations.observe(run_id, f'sandbox:{execution_id}:stdout', 'TOOL_STDOUT', attached.stdout)
+                observations.observe(run_id, f'sandbox:{execution_id}:stderr', 'TOOL_STDERR', attached.stderr)
+            except Exception:
+                # Evaluation evidence only: never turn a receipt-store failure into
+                # a Tool failure. The evaluator expects both receipts for every
+                # finished executionId and reports a missing one as incomplete.
+                pass
             result = SandboxResult(
                 execution_id=execution_id, run_id=run_id, source_artifact_id=source_id,
                 profile_name=profile.name, tool_name=profile.tool_name,

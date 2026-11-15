@@ -294,6 +294,7 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
         prev_version: TaskVersion, context: ServerCallContext,
     ) -> TaskVersion:
         del prev  # The authoritative predecessor is read in the same DB transaction.
+        observed_task = MessageToDict(task)
         task = sanitize_task(task)
         metadata = self._validate_task(task)
         owner = self._owner(context)
@@ -327,7 +328,8 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
                 self._validate_transition(previous, task)
 
             version = row[1] + 1 if row else 1
-            self._persist(connection, task, owner, version, "SDK_TASK_SAVED", previous, event)
+            self._persist(connection, task, owner, version, "SDK_TASK_SAVED", previous, event,
+                          observed_task=observed_task)
             return TaskVersion(version)
 
     async def list(self, params: ListTasksRequest, context: ServerCallContext) -> ListTasksResponse:
@@ -458,7 +460,9 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
     def _persist(
         self, connection: sqlite3.Connection, task: Task, owner: str, version: int,
         reason: str, previous: Task | None, event: object | None = None,
+        *, observed_task=None,
     ) -> None:
+        raw = observed_task if observed_task is not None else MessageToDict(task)
         task = sanitize_task(task)
         self._validate_task(task)
         old_history = list(previous.history) if previous is not None else []
@@ -499,6 +503,22 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
                 "INSERT INTO agent_task_history(task_id, position, payload_json) VALUES (?, ?, ?)",
                 (task.id, index, _json(MessageToDict(task.history[index]))),
             )
+        from orchestrator.observability import append_output
+        # Requests/history are inputs, not Agent output. Inspect status/Artifact
+        # publications before store redaction, in the same revision transaction.
+        # The receipt is evaluation evidence only: a savepoint keeps a failed
+        # receipt from rolling back the Task revision. The evaluator expects one
+        # receipt per task version and reports a missing one as incomplete.
+        connection.execute("SAVEPOINT agent_output_observation")
+        try:
+            append_output(connection, parse_workflow_metadata(MessageToDict(task.metadata)).run_id,
+                          f'task:{task.id}:{version}', 'A2A_OUTPUT',
+                          {'status': raw.get('status'), 'artifacts': raw.get('artifacts'),
+                           'event': MessageToDict(event) if isinstance(event, ProtoMessage) else None})
+        except Exception:
+            connection.execute("ROLLBACK TO SAVEPOINT agent_output_observation")
+        finally:
+            connection.execute("RELEASE SAVEPOINT agent_output_observation")
 
     def _recover(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute(
