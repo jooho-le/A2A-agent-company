@@ -4,6 +4,8 @@ Python 3.10+와 FastAPI를 사용하는 Orchestrator 서비스입니다.
 
 제품 중계용 실제 Host HTTP 계약은 [83번 서비스 인증](docs/83-host-service-authentication.md), [84번 승인 설정 조회](docs/84-host-approved-configuration.md), [85번 중복 생성 방지](docs/85-idempotent-run-submission.md)를 참고하세요. `create_host()`는 별도의 `A2A_HOST_API_TOKEN`을 요구하며 `/api/v1/*` 호출에는 Bearer, Run 생성에는 내부 UUIDv4 `Idempotency-Key`가 필요합니다. 실제 제품 서버·Docker 연결은 별도 확인 단계입니다.
 
+[86번 접수 조회·복구](docs/86-submission-lookup-recovery.md), [87번 불변 Source ZIP](docs/87-immutable-source-zip.md), [88번 제품 서버 API 인계](docs/88-host-product-api-handoff.md)에 응답 유실·현재 상태·다운로드·OpenAPI 계약을 정리했습니다. 접수 조회와 ZIP은 인증된 Host 전용이며 열린 개발용 Bootstrap에서 제공하지 않습니다.
+
 현재 역할 1·2 구현의 사용법·설정·API/Artifact 인계 기준은 [45번 플랫폼 인계 안내](docs/45-owned-platform-handoff.md)에 정리했습니다. **44번은 준비 점검만 완료했고 실제 LLM·Docker 최소 Run 실행은 아직 미수행**입니다. 문서 정리 완료와 실제 시연 성공은 구분합니다.
 
 45번 이후 점검의 Source 비밀정보 반입, Python 3.10 deadline 호환성, RunConfiguration URL Credential, Agent DB WAL 시작 경쟁은 [46번 점검 보완](docs/46-platform-audit-hardening.md)에 기록했습니다. 기존 비밀정보 포함 불변 데이터는 자동 변경하지 않으며 새 검사에서 거부될 수 있습니다.
@@ -26,11 +28,13 @@ GET /health
 GET /api/v1/scenarios
 GET /api/v1/host/approved-configuration?scenarioId={uuid}
 POST /api/v1/runs
+GET /api/v1/submissions/{internalKey}
 GET /api/v1/runs/{runId}
 GET /api/v1/runs/{runId}/steps
 GET /api/v1/runs/{runId}/events
 GET /api/v1/runs/{runId}/artifacts
 GET /api/v1/runs/{runId}/artifacts/{artifactId}
+GET /api/v1/runs/{runId}/artifacts/{artifactId}/download
 GET /api/v1/runs/{runId}/issues
 GET /api/v1/runs/{runId}/configuration
 GET /api/v1/runs/{runId}/workspace

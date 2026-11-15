@@ -71,6 +71,8 @@ Workspaces = Annotated[WorkspaceRegistry, Depends(get_workspace_registry)]
     "",
     response_model=RunSubmissionResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={200: {"model": RunSubmissionResponse, "description": "Replay of a persisted creation receipt"},
+               409: {"description": "Idempotency key already belongs to a different request"}},
 )
 def create_run(
     body: CreateRunRequest,

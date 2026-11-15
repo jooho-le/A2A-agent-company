@@ -102,6 +102,27 @@ class ArtifactStore:
             raise ArtifactAccessError(ArtifactErrorCode.INTEGRITY)
         return staged
 
+    def read_registered_source(self, run_id, artifact_id):
+        """Download registered immutable bytes, never staged/live filesystem content."""
+        run = self._run(run_id)
+        artifact_id = _uuid(artifact_id)
+        try:
+            registered = next((item for item in self._repository.list_project_artifacts(run.run_id)
+                if item.artifact_id == artifact_id and isinstance(item, CodeSnapshotArtifact)), None)
+            if registered is None:
+                raise ArtifactAccessError(ArtifactErrorCode.NOT_FOUND)
+            record = self._contents.get(run.run_id, artifact_id)
+            if not isinstance(record.metadata, CodeSnapshotArtifact):
+                raise ArtifactAccessError(ArtifactErrorCode.INTEGRITY)
+            self._check_source(run, record)
+            if _source_identity(registered) != _source_identity(record.metadata):
+                raise ArtifactAccessError(ArtifactErrorCode.INTEGRITY)
+            return record
+        except ArtifactAccessError:
+            raise
+        except Exception:
+            raise ArtifactAccessError(ArtifactErrorCode.IO) from None
+
     def _check_source(self, run, record):
         source = record.metadata
         try:

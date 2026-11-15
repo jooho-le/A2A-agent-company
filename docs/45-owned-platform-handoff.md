@@ -4,6 +4,8 @@
 
 2026-11-15 후속: 실제 `create_host()` 실행에는 별도의 프로세스 환경 `A2A_HOST_API_TOKEN`이 필요하다. `/api/v1/*` 호출은 서비스 Bearer로 인증하고 Run 생성에는 내부 UUIDv4 `Idempotency-Key`를 추가한다. 공개 설정은 `GET /api/v1/host/approved-configuration?scenarioId={uuid}`로 조회한다. 본문의 과거 공개 payload 예제는 유지하되 헤더 계약은 [83번](83-host-service-authentication.md)~[85번](85-idempotent-run-submission.md)을 적용한다. 제품 연결의 Host 주소는 승인 runtime의 8002로 설정하며 아래 8000 설명은 과거 기본값이다.
 
+같은 날 86~88번: 서버 전용 접수 조회·기존 Run 복구 연결·등록 Source ZIP을 추가했다. 실제 제품 서버 연결 담당자는 [88번 API 인계](88-host-product-api-handoff.md)를 먼저 확인한다. 새 조회·다운로드는 인증 없는 Bootstrap에서 차단한다. 아래의 과거 Artifact metadata-only 설명은 [87번](87-immutable-source-zip.md) HTTP 다운로드 추가 이전 범위다.
+
 ## 1. 지금 어디까지 된 상태인가
 
 | 구분 | 상태 |

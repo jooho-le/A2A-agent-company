@@ -5,6 +5,7 @@ from fastapi import HTTPException, Request
 from orchestrator.a2a import A2AAgentClient, A2AAgentRegistry
 from orchestrator.application import PlannerRunDispatcher
 from orchestrator.application.workflow_controls import WorkflowControlService
+from orchestrator.artifacts.service import ArtifactStore
 from orchestrator.domain import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.workspaces.registry import WorkspaceRegistry
@@ -86,6 +87,16 @@ def agent_client_factory(settings, *, trust_env=True):
         )
 
     return create_client
+
+
+def get_artifact_store(request: Request) -> ArtifactStore:
+    """Reuse the Host's exact content store and limits; never provision folders."""
+    with request.app.state.artifact_store_lock:
+        store = request.app.state.artifact_store
+        if store is None:
+            store = ArtifactStore(get_workflow_repository(request), get_workspace_registry(request))
+            request.app.state.artifact_store = store
+    return store
 
 
 def get_workflow_controls(request: Request) -> WorkflowControlService:

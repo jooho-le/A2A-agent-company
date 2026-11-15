@@ -10,6 +10,8 @@ from orchestrator.api.routes.host import router as host_router
 from orchestrator.api.host_access import HostServiceAuthenticationMiddleware
 from orchestrator.api.routes.runs import router as runs_router
 from orchestrator.api.routes.scenarios import router as scenarios_router
+from orchestrator.api.routes.submissions import router as submissions_router
+from orchestrator.api.routes.downloads import router as downloads_router
 from orchestrator.application import PlannerRunDispatcher
 from orchestrator.core.config import Settings, get_settings
 from orchestrator.core.logging import configure_logging
@@ -38,6 +40,8 @@ def create_app(
     app.state.repository_lock = Lock()
     app.state.workspace_registry = None
     app.state.workspace_registry_lock = Lock()
+    app.state.artifact_store = None
+    app.state.artifact_store_lock = Lock()
     app.state.run_dispatcher = dispatcher
     app.state.agent_client_factory = None
     app.state.control_preflight = None
@@ -57,6 +61,8 @@ def create_app(
     app.include_router(runs_router, prefix=settings.api_prefix)
     app.include_router(scenarios_router, prefix=settings.api_prefix)
     app.include_router(host_router, prefix=settings.api_prefix)
+    app.include_router(submissions_router, prefix=settings.api_prefix)
+    app.include_router(downloads_router, prefix=settings.api_prefix)
     return app
 
 

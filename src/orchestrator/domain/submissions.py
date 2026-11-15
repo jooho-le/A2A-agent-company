@@ -1,11 +1,13 @@
 """Immutable creation receipt, independent of workflow execution/verdict."""
 
 from datetime import datetime
+from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import Field, UUID4
 
 from orchestrator.domain.snapshot_handoff import ImmutableDomainModel
+from orchestrator.domain.models import WorkflowRun, WorkflowStep
 
 
 class RunSubmissionRecord(ImmutableDomainModel):
@@ -21,3 +23,13 @@ class RunSubmissionRecord(ImmutableDomainModel):
 class SubmissionKeyConflict(ValueError):
     def __init__(self):
         super().__init__("IDEMPOTENCY_KEY_CONFLICT")
+
+
+@dataclass(frozen=True)
+class SubmissionView:
+    """One SQLite read snapshot; never expose the Run's request_text in repr."""
+
+    receipt: RunSubmissionRecord = field(repr=False)
+    run: WorkflowRun = field(repr=False)
+    first_step: WorkflowStep = field(repr=False)
+    uncertain_send: bool

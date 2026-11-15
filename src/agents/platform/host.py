@@ -43,7 +43,7 @@ from orchestrator.artifacts.service import ArtifactStore
 from orchestrator.domain.run_configuration import ExecutionLimits, RunConfiguration
 from orchestrator.domain.states import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
-from orchestrator.api.host_access import host_token_from_environment
+from orchestrator.api.host_access import host_token_from_environment, install_host_api_documentation
 from orchestrator.core.security import register_secret_values
 from orchestrator.workspaces.registry import WorkspaceRegistry
 
@@ -390,6 +390,7 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
         platform.orchestrator_app.state.host_api_auth_required = True
         platform.orchestrator_app.state.require_idempotency_key = True
         platform.orchestrator_app.state.approved_configuration_provider = lambda: approved_run_configuration(platform)
+        install_host_api_documentation(platform.orchestrator_app)
         return platform
     except BaseException as error:
         canceled = await _close_allocated(providers.values(), platform)
