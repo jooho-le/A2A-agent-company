@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!prepared/
+!prepared/requirements.lock
+!prepared/wheelhouse/
+!prepared/wheelhouse/*.whl

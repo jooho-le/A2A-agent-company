@@ -39,7 +39,8 @@ def _executable_lines(path):
     lines, stack = set(), [code]
     while stack:
         item = stack.pop()
-        lines.update(line for _start, _end, line in item.co_lines() if line is not None)
+        # CPython's synthetic module entry can have line 0; it is not source.
+        lines.update(line for _start, _end, line in item.co_lines() if line is not None and line > 0)
         stack.extend(const for const in item.co_consts if isinstance(const, types.CodeType))
     return lines
 

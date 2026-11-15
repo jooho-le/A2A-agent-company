@@ -21,6 +21,7 @@ import tempfile
 import threading
 import traceback
 import unittest
+from urllib.parse import quote, unquote
 
 # 연결 규격: (모듈, 이름) 위치, User 필드 이름, 가입 경로
 APP = ("main", "app")
@@ -49,26 +50,38 @@ class Unverified(Exception):
 # 계약(REQ-004)은 길이만 정하므로 lower(소문자만)·digits(숫자만)도 8자 이상이면 받아야 한다.
 PASSWORD_KINDS = {"mixed": string.ascii_letters + string.digits, "lower": string.ascii_lowercase, "digits": string.digits}
 
+# Only the independent evaluator installs a tape. In-loop checks generate fresh
+# values as before. Values never appear in ordinary test messages or reports.
+_TAPE = None
+
+
+def _input(kind, args, produce):
+    return produce() if _TAPE is None else _TAPE.value(kind, args, produce)
+
 
 def new_password(length=12, kind="mixed"):
     # 그 길이·문자 구성(kind)의 시험용 비밀번호를 실행할 때 만든다(코드에 값을 적지 않는다, dev 19번).
-    alphabet = PASSWORD_KINDS[kind]
-    while True:
-        value = "".join(secrets.choice(alphabet) for _ in range(length))
-        if kind != "mixed" or length < 3 or (any(c.islower() for c in value) and any(c.isupper() for c in value)
-                                             and any(c.isdigit() for c in value)):
-            return value
+    def produce():
+        alphabet = PASSWORD_KINDS[kind]
+        while True:
+            value = "".join(secrets.choice(alphabet) for _ in range(length))
+            if kind != "mixed" or length < 3 or (any(c.islower() for c in value) and any(c.isupper() for c in value)
+                                                 and any(c.isdigit() for c in value)):
+                return value
+    return _input("password", {"length": length, "kind": kind}, produce)
 
 
 def new_email(template="user{h}@example.com"):
     # 매번 다른 가입용 이메일. 시험지마다 모양(template, {h}는 무작위 16진수)을 다르게 쓴다.
-    return template.format(h=secrets.token_hex(6))
+    return _input("email", {"template": template}, lambda: template.format(h=secrets.token_hex(6)))
 
 
 def new_emails(*templates):
     # 같은 무작위 값({h})을 넣은 이메일 여러 개. 점·+태그만 다른 주소 짝을 만들 때 쓴다.
-    h = secrets.token_hex(6)
-    return [template.format(h=h) for template in templates]
+    def produce():
+        h = secrets.token_hex(6)
+        return [template.format(h=h) for template in templates]
+    return _input("emails", {"templates": list(templates)}, produce)
 
 
 def variant(email, form):
@@ -180,14 +193,15 @@ class Service:
 
     def _open(self):
         # 연결 순서: 임시 폴더·DATABASE_URL → 출력 수집 → 앞 검사의 생성물 모듈 잊기 → 앱·get_db·User 불러오기 →
-        # 임시 DB 엔진·테이블 → get_db 바꿔 끼우기 → 실제 서버처럼 시작(lifespan).
+        # 읽기 전용 관찰 세션 → 실제 앱 시작(lifespan). 생성물의 DB 초기화·get_db·엔진 설정은 바꾸지 않는다.
         try:
             directory = tempfile.mkdtemp(prefix="signup-eval-")
         except OSError:
             raise Unverified("TEMP_DIRECTORY_UNAVAILABLE") from None
         # 정리 작업은 _undo에 쌓고 close()가 거꾸로 실행한다.
         self._undo.append(lambda: shutil.rmtree(directory, ignore_errors=True))
-        url = "sqlite:///" + os.path.join(directory, "signup.db")
+        self._database_path = os.path.join(directory, "signup.db")
+        self._database_url = url = "sqlite:///" + self._database_path
         previous_url = os.environ.get("DATABASE_URL")
         os.environ["DATABASE_URL"] = url  # 이 값을 읽는 앱이면 import할 때도 임시 DB를 쓴다.
         self._undo.append(lambda: os.environ.pop("DATABASE_URL", None) if previous_url is None
@@ -196,13 +210,33 @@ class Service:
         _forget_project_modules()
         try:
             from fastapi.testclient import TestClient
-            from sqlalchemy import create_engine
+            from sqlalchemy import create_engine, event
+            from sqlalchemy.engine import Engine
             from sqlalchemy.orm import sessionmaker
         except Exception:
             raise Unverified("TEST_LIBRARY_UNAVAILABLE") from None
+        # 실제 앱 엔진을 관찰하고 종료 뒤 정리한다. 관찰용 엔진의 쿼리는 앱 동작으로 세지 않는다.
+        self._owned_engines, app_engines = set(), set()
+        self._database_events, self._database_guard = {True: 0, False: 0}, threading.Lock()
+
+        def observe(conn, cursor, statement, parameters, context, many):
+            if conn.engine not in self._owned_engines:
+                with self._database_guard:
+                    app_engines.add(conn.engine)
+                    self._database_events[self._same_database(conn.engine)] += 1
+
+        def clean_engines():
+            event.remove(Engine, "before_cursor_execute", observe)
+            for engine in app_engines:
+                engine.dispose()
+
+        event.listen(Engine, "before_cursor_execute", observe)
+        self._undo.append(clean_engines)
         # 생성물의 앱·DB 의존성·User 모델을 불러오고 규격에 맞는지 본다.
-        app = _load(APP, "APP_IMPORT_FAILED")
+        # 모듈을 불러오는 중에도 앱 코드가 로그를 남길 수 있다. 앱 import 전부터
+        # 수준 때문에 숨겨진 기록을 관찰하되, 라이브러리의 로그 수준은 유지한다.
         self._log_all(_project_root())
+        app = _load(APP, "APP_IMPORT_FAILED")
         get_db = _load(DB_DEPENDENCY, "DB_DEPENDENCY_MISSING")
         self.User = _load(USER_MODEL, "USER_MODEL_MISSING")
         if inspect.isasyncgenfunction(get_db) or inspect.iscoroutinefunction(get_db):
@@ -212,21 +246,16 @@ class Service:
         if not hasattr(app, "dependency_overrides"):
             raise Unverified("APP_NOT_FASTAPI")
         try:
-            engine = create_engine(url, connect_args={"check_same_thread": False})
+            # mode=ro는 관찰자가 DB 파일·테이블을 만들거나 앱 대신 값을 저장하지 못하게 한다.
+            observer_url = "sqlite:///file:" + quote(self._database_path, safe="/") + "?mode=ro&uri=true"
+            engine = create_engine(observer_url, connect_args={"check_same_thread": False})
+            self._owned_engines.add(engine)
             self._undo.append(engine.dispose)
-            self.User.metadata.create_all(engine)
             self._engine = engine
         except Exception:
             raise Unverified("TEST_DATABASE_SETUP_FAILED") from None
         self.Session = sessionmaker(bind=engine, autoflush=False)
 
-        # 앱의 get_db를 임시 DB 세션으로 바꿔 끼운다.
-        def override():
-            with self.Session() as db:
-                yield db
-
-        app.dependency_overrides[get_db] = override
-        self._undo.append(lambda: app.dependency_overrides.pop(get_db, None))
         # 실제 서버처럼 startup/lifespan을 실행하고 종료도 cleanup에 포함한다.
         self._lifecycle = contextlib.ExitStack()
         self._undo.append(self.stop)
@@ -283,8 +312,8 @@ class Service:
 
     def _log_all(self, root):
         # 앱 폴더(root) 안의 코드가 부른 로그는 수준·logging.disable과 상관없이 모은다.
-        # 기본 수준(WARNING)에 막힌 info·debug 로그도 노출로 본다. 라이브러리 로그는 원래 규칙대로 둔다
-        # (SQLAlchemy가 SQL과 해시 값을 로그로 남기지 않게).
+        # 기본 수준(WARNING)에 막힌 info·debug 로그도 노출로 본다. 라이브러리 로그는 앱의 원래 설정을 따른다
+        # (SQLAlchemy echo=True가 내보내는 SQL·매개변수 로그도 그대로 수집한다).
         if not root:
             return
         original = logging.Logger.isEnabledFor
@@ -312,6 +341,11 @@ class Service:
 
     def send(self, body, client=None):
         # 가입 요청(본문은 JSON 값). 앱이 처리하지 못한 예외는 실제 서버처럼 500으로 보고 traceback을 서버 로그에 남긴다.
+        # Include fixed/invalid/malformed JSON too; a seed cannot describe these
+        # requests or prove that the same values actually reached the service.
+        _input("request", {"method": "POST", "path": SIGNUP_PATH, "body": body}, lambda: None)
+        with self._database_guard:
+            before = dict(self._database_events)
         try:
             response = (client or self.client).post(SIGNUP_PATH, json=body)
         except Exception as error:
@@ -324,10 +358,38 @@ class Service:
         if response.status_code in (404, 405):
             # 가입 경로·메서드가 연결 규격과 다르다. 모든 요청이 4xx가 되어 거부 검사가 거저 통과하지 않게 막는다.
             raise Unverified("SIGNUP_ROUTE_NOT_FOUND")
+        with self._database_guard:
+            # used_database: 이 요청 중 앱이 평가용 DB(DATABASE_URL)에 SQL을 실행했는가(관찰·검사용 엔진은 세지 않음).
+            # 성공 응답인데 행이 없을 때, 실행했으면 저장 누락(FAIL), 실행하지 않았으면 확인 불가(미검증)로 가른다.
+            self.used_database = self._database_events[True] > before[True]
+            elsewhere = self._database_events[False] > before[False] and not self.used_database
+        if response.status_code in SUCCESS and elsewhere:
+            raise Unverified("DATABASE_URL_NOT_USED")
         return response.status_code
+
+    def _same_database(self, engine):
+        if engine.url.get_backend_name() != "sqlite" or not engine.url.database:
+            return False
+        path = engine.url.database
+        if path.startswith("file:"):
+            path = unquote(path[5:].split("?", 1)[0])
+        return os.path.realpath(path) == os.path.realpath(self._database_path)
+
+    def _has_user_table(self):
+        # 앱이 첫 요청에서 DB를 준비하는 것도 허용한다. 관찰 때문에 빈 DB 파일을 먼저 만들지 않는다.
+        if not os.path.isfile(self._database_path):
+            return False
+        from sqlalchemy import inspect as sa_inspect
+        try:
+            table = sa_inspect(self.User).local_table
+            return sa_inspect(self._engine).has_table(table.name, schema=table.schema)
+        except Exception:
+            raise Unverified("TEST_DATABASE_READ_FAILED") from None
 
     def emails(self):
         # DB에 저장된 이메일 목록(가입 결과 확인용)
+        if not self._has_user_table():
+            return []
         try:
             with self.Session() as db:
                 rows = db.query(getattr(self.User, EMAIL_FIELD)).all()
@@ -346,6 +408,8 @@ class Service:
     def rows(self):
         # 사용자 표의 모든 행·모든 칸 값(정렬). 거부된 요청이 기존 계정을 바꾸지 않았는지 비교하는 데 쓴다.
         from sqlalchemy import inspect as sa_inspect
+        if not self._has_user_table():
+            return []
         try:
             mapper = sa_inspect(self.User)
             with self.Session() as db:
@@ -380,7 +444,9 @@ class Service:
         # SQLAlchemy 버전과 상관없이 SQL·값을 담은 DB 오류로 감싸진다. 그다음 실행에서 권한 함수를 풀어 준다.
         import sqlite3
         from sqlalchemy import event
+        from sqlalchemy.engine import Engine
         armed, denied = [True], []
+        self._insert_failure = armed
 
         def deny(action, *args):
             return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_INSERT else sqlite3.SQLITE_OK
@@ -390,6 +456,8 @@ class Service:
                 denied.pop().set_authorizer(None)
 
         def fail(conn, cursor, statement, parameters, context, many):
+            if conn.engine in self._owned_engines or not self._same_database(conn.engine):
+                return
             release()
             if armed[0] and statement.lstrip().upper().startswith("INSERT"):
                 armed[0] = False
@@ -397,19 +465,34 @@ class Service:
                 raw = getattr(raw, "dbapi_connection", None) or getattr(raw, "connection", raw)
                 raw.set_authorizer(deny)
                 denied.append(raw)
-        event.listen(self._engine, "before_cursor_execute", fail)
-        self._undo.append(lambda: (release(), event.remove(self._engine, "before_cursor_execute", fail)))
+        event.listen(Engine, "before_cursor_execute", fail)
+
+        def cleanup():
+            try:
+                release()
+            finally:
+                event.remove(Engine, "before_cursor_execute", fail)
+
+        self._undo.append(cleanup)
+
+    def require_insert_failure(self):
+        if self._insert_failure[0]:
+            raise Unverified("DATABASE_ERROR_NOT_INJECTED")
 
     def db_rejects_duplicate(self, email):
         # 저장된 사용자 행을 복사해 DB에 직접 한 번 더 넣는다(앱의 사전 검사를 거치지 않음).
         # 이메일 칸 UNIQUE로 거부되면 True, 들어가면 False. 다른 이유로 실패하거나 UNIQUE 대상이 이메일 칸 하나가
         # 아니면 Unverified.
-        from sqlalchemy import inspect as sa_inspect
+        from sqlalchemy import create_engine, inspect as sa_inspect
         from sqlalchemy.exc import IntegrityError
+        from sqlalchemy.orm import sessionmaker
+        # 이 검사는 UNIQUE 제약을 직접 확인하므로 관찰 세션과 별개의 쓰기 세션만 잠깐 연다.
+        engine = create_engine(self._database_url, connect_args={"check_same_thread": False})
+        self._owned_engines.add(engine)
         try:
             mapper = sa_inspect(self.User)
             column = mapper.column_attrs[EMAIL_FIELD].columns[0]
-            with self.Session() as db:
+            with sessionmaker(bind=engine, autoflush=False)() as db:
                 rows = [row for row in db.query(self.User).all()
                         if isinstance(getattr(row, EMAIL_FIELD), str) and canonical(getattr(row, EMAIL_FIELD)) == canonical(email)]
                 if len(rows) != 1:
@@ -430,6 +513,9 @@ class Service:
             raise
         except Exception:
             raise Unverified("TEST_DATABASE_WRITE_FAILED") from None
+        finally:
+            engine.dispose()
+            self._owned_engines.discard(engine)
 
     def log_text(self):
         # 서버 로그와 stdout·stderr 출력을 합친 글(노출 검사용)
@@ -464,6 +550,10 @@ class Service:
 class SignupCheck(unittest.TestCase):
     # 보호 테스트의 공통 틀. check(body)는 새 서비스로 body를 실행하고 Unverified를 SKIP으로 바꾼다.
     # subTest 안에서 난 예외는 unittest가 실패로 기록하므로, 하위 사례는 case()로 감싸 SKIP으로 바꾼다.
+    def setUp(self):
+        if _TAPE is not None:
+            _TAPE.begin(self.id())
+
     @contextlib.contextmanager
     def case(self, **params):
         with self.subTest(**params):

@@ -1,10 +1,20 @@
 {
   "schemaVersion": 2,
   "suiteId": "urn:suite:scn-001:signup-protected",
-  "suiteVersion": "0.2.0",
+  "suiteVersion": "0.5.2",
   "scenarioKey": "SCN-001",
   "toolName": "run_unit_tests",
   "sourceDirectory": "tests/signup",
+  "requirements": {
+    "REQ-001": {"description": "유효한 이메일과 비밀번호로 계정을 생성할 수 있어야 함", "acceptanceCriteria": ["정상 입력 시 사용자 1건 생성 및 성공 응답"], "validators": ["QA"]},
+    "REQ-002": {"description": "잘못된 이메일 형식을 거부해야 함", "acceptanceCriteria": ["합의한 이메일 파서에서 invalid인 값이 DB에 저장되지 않고 오류 응답"], "validators": ["QA"]},
+    "REQ-003": {"description": "동일한 canonical email로 중복 계정을 만들 수 없어야 함", "acceptanceCriteria": ["애플리케이션 사전검사와 별개로 DB UNIQUE 제약이 존재하며 동시 요청에서도 중복 생성 불가"], "validators": ["QA", "SECURITY"]},
+    "REQ-004": {"description": "비밀번호는 최소 8자 이상이어야 함", "acceptanceCriteria": ["7자 이하는 거부, 8자 이상 정상 처리"], "validators": ["QA"]},
+    "REQ-005": {"description": "비밀번호는 승인된 Password Hash 정책으로 저장해야 함", "acceptanceCriteria": ["승인한 알고리즘·파라미터 충족, 평문/일반 SHA 계열 저장 없음"], "validators": ["SECURITY"]},
+    "REQ-006": {"description": "평문 비밀번호와 Password Hash가 API 응답, A2A Message/Artifact, 일반 로그, Trace에 노출되지 않아야 함", "acceptanceCriteria": ["지정 출력 전체에서 비밀번호 및 저장 Hash 미노출"], "validators": ["SECURITY"]},
+    "REQ-007": {"description": "실제 가입 처리 결과와 사용자 응답이 일치해야 함", "acceptanceCriteria": ["성공은 성공으로, 검증/중복 실패는 실패로 응답"], "validators": ["QA"]},
+    "REQ-008": {"description": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함", "acceptanceCriteria": ["Trace를 통해 전체 연결 관계 복원 가능"], "validators": ["ORCHESTRATOR"]}
+  },
   "sets": {
     "practice": {"QA": "practice_qa.PracticeQAChecks", "SECURITY": "practice_security.PracticeSecurityChecks"},
     "pilot": {"QA": "exam_pilot.PilotExam", "SECURITY": "exam_pilot.PilotExam"},

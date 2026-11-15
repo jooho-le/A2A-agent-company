@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "priceBookId": "scn001-openai-global-text",
+  "priceBookVersion": "2026-11-15",
+  "sourceRef": "https://developers.openai.com/api/docs/models/gpt-4.1-mini",
+  "currency": "USD",
+  "billingScope": "OPENAI_RESPONSES_GLOBAL_TEXT",
+  "entries": [
+    {
+      "entryId": "gpt-4.1-mini-2025-04-14-default",
+      "provider": "openai",
+      "requestedModelId": "gpt-4.1-mini-2025-04-14",
+      "reportedModelId": "gpt-4.1-mini-2025-04-14",
+      "serviceTier": "default",
+      "minInputTokens": 0,
+      "maxInputTokens": null,
+      "cacheWriteMode": "NOT_APPLICABLE",
+      "inputUsdPerMillion": "0.40",
+      "cachedInputUsdPerMillion": "0.10",
+      "cacheWriteUsdPerMillion": null,
+      "outputUsdPerMillion": "1.60"
+    }
+  ]
+}

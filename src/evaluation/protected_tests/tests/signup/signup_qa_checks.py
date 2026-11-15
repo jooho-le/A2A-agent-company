@@ -12,13 +12,17 @@ def _signup_first(service):
 
 
 def valid_signup(test, data):
-    # QA-SIGNUP-001: 유효한 가입마다 성공 응답, 사용자 1명 증가
+    # QA-SIGNUP-001: 생성물의 실제 DB 연결로 유효한 가입마다 성공 응답, 사용자 1명 증가.
+    # 성공 응답 뒤 행이 없을 때: 앱이 평가용 DB를 썼으면 저장하지 않은 것(커밋 누락 등)이라 FAIL이고,
+    # 평가용 DB를 전혀 쓰지 않았으면(메모리·다른 저장소) 확인할 수 없어 미검증이다.
     def body(service):
         for index, template in enumerate(data["emails"]):
             with test.case(email_case=index):
                 email, before = link.new_email(template), service.count()
                 status = service.signup(email, link.new_password(data["length"]))
                 test.assertIn(status, link.SUCCESS, "유효한 가입 요청이 성공 응답을 받지 못함")
+                if service.count_canonical(email) == 0 and not service.used_database:
+                    raise link.Unverified("DATABASE_URL_NOT_USED")
                 test.assertEqual(service.count(), before + 1, "사용자 수가 1 늘지 않음")
                 test.assertEqual(service.count_canonical(email), 1, "가입한 이메일의 사용자가 1명이 아님")
     test.check(body)

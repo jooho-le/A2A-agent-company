@@ -71,6 +71,27 @@ def test_missing_result_is_unverified_without_invented_execution():
     assert json.loads(row['details'])['errorCode'] == 'RESULT_MISSING'
 
 
+@pytest.mark.parametrize('status', [Status.PASS, Status.FAIL, Status.ERROR, Status.NOT_RUN])
+def test_security_measured_unit_tests_match_current_host_contract(status):
+    """Security's protected test receipts remain usable by the current dev report consumer."""
+    from orchestrator.domain.validation_artifacts import SecurityReportArtifact
+
+    args = inputs('SECURITY', status)
+    args['tool_evidence'][uid(6)]['toolName'] = 'run_unit_tests'
+    report = build_report(**args)
+    typed = SecurityReportArtifact.model_validate(report)
+    row = typed.requirement_results[0]
+    assert row.tool_evidence.tool_name == 'run_unit_tests'
+    assert row.outcome.value == (status.value if status in (Status.PASS, Status.FAIL) else 'UNVERIFIED')
+
+
+def test_security_report_still_rejects_browser_test_receipts():
+    args = inputs('SECURITY')
+    args['tool_evidence'][uid(6)]['toolName'] = 'run_browser_tests'
+    with pytest.raises(ValueError, match='report role'):
+        build_report(**args)
+
+
 @pytest.mark.parametrize('status', [Status.PASS, Status.FAIL])
 def test_product_verdict_without_tool_evidence_rejected(status):
     """PASS·FAIL 판정에 도구 실행 증거가 없으면 "말뿐인 판정"이므로 거부한다."""

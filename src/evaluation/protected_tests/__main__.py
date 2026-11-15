@@ -2,7 +2,7 @@
 #   python -m evaluation.protected_tests export --out <폴더> [--suite-ref <참조>] [--contract <시나리오 JSON>] [--force]
 # 만드는 파일(Ver1에만 쓴다. Ver2는 보호 케이스·보호 범위 없이 Host를 만든다)
 #   owned-protected-cases.local.json 순환 안 보호 케이스(QA-SIGNUP-001~006 + SEC-SIGNUP-002·003·005, 순환용 시험지).
-#                                    Host가 파일 하나로 받아 보호 범위에 적힌 역할(QA·SECURITY)대로 나눈다
+#                                    schemaVersion 2로 케이스마다 역할(QA·SECURITY)을 적고, Host는 그 역할이 보호 범위의 역할과 같을 때만 받는다
 #   unit-protected-scopes.json       dev configs/owned-tools.local.json의 "unit" → "scopes" 목록에 추가할 PROTECTED 범위 두 개
 #   handoff.json                     묶음 이름·버전·범위별 지문(suite SHA-256)과 suite 참조. RunConfiguration의
 #                                    protected_test_suite_ref를 이 값과 맞춘다
@@ -19,7 +19,7 @@ import json  # 설정 파일을 JSON으로 쓰기·읽기
 import sys  # 종료 코드 돌려주기
 from pathlib import Path  # 파일 경로 다루기
 
-from . import LOOP_SCOPES, SCOPES, load_suite, loop_suite_ref, owned_cases, suite_sha256, unit_test_scope  # 같은 폴더 __init__.py의 함수들
+from . import LOOP_SCOPES, SCOPES, load_suite, loop_suite_ref, protected_case_file, suite_sha256, unit_test_scope  # 같은 폴더 __init__.py의 함수들
 
 
 
@@ -37,8 +37,7 @@ def export(out: Path, *, suite_ref=None, contract=None, force=False) -> dict:
     suite = load_suite()
     suite_ref = suite_ref or loop_suite_ref(suite)  # 기본 참조: 묶음 버전 + 순환용 시험지 지문
     documents = {
-        'owned-protected-cases.local.json': {'schemaVersion': 1, 'cases': [
-            case for role in ('QA', 'SECURITY') for case in owned_cases(contract, role, suite)['cases']]},
+        'owned-protected-cases.local.json': protected_case_file(contract, suite=suite),
         'unit-protected-scopes.json': [unit_test_scope(LOOP_SCOPES[role], suite_ref=suite_ref, suite=suite)
                                        for role in ('QA', 'SECURITY')],
         'handoff.json': {'suiteId': suite['suiteId'], 'suiteVersion': suite['suiteVersion'],

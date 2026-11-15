@@ -171,6 +171,7 @@ def not_exposed(test, data):
             service.send(MALFORMED[kind](link.new_email(), password))
         service.fail_next_insert()
         attempt(link.new_email(), link.new_password())
+        service.require_insert_failure()
         secrets = list(used)
         if isinstance(stored, str) and stored:
             secrets.append(stored)

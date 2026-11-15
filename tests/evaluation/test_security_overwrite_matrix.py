@@ -7,8 +7,8 @@
 확인하는 것 세 가지:
   1) 비밀번호 필드(passwd)를 덮어쓰는 모든 조합은 통과(PASS)하지 않는다.
   2) 같은 조합이라도 다른 필드(nickname)만 바꾸거나, 입력이 아닌 다른 객체(db)를 바꾸면 그대로 통과한다. (정상 코드를 거르는 오탐 방지)
-  3) 어느 필드가 바뀌는지 알 수 없는 쓰기(update(다른_사전), 변수 이름의 setattr)는 입력의 별칭에 하면 통과하지 않고, 입력과 상관없는 객체에 하면 통과한다.
-     (단 vars()·__dict__ 같은 이름 공간에 쓰는 것은 승인한 해시 도구를 바꿔치기할 수 있어서 어디에 하든 통과하지 않는다.)
+  3) 어느 필드가 바뀌는지 알 수 없는 쓰기는 입력의 별칭에 하면 통과하지 않는다.
+     vars()·__dict__ 및 동적 setattr은 입력과 다른 객체여도 해시 도구·저장 필드 변경을 배제하지 못하면 미확인이다.
 """
 import pytest
 
@@ -155,7 +155,9 @@ def test_writing_unknown_fields_of_another_object(alias):
     wrong = []
     for write in UNKNOWN_FIELD_WRITES:
         result = _verdict(alias, write[1], 'db', 'passwd')
-        # 이름 공간에 쓰는 코드는 해시 도구를 바꿔치기할 수 있어서 단정하지 않는다. 나머지는 입력과 상관없으므로 통과한다.
-        if (result['REQ-005'] == 'UNVERIFIED') != bool(write[2]) or (not write[2] and result != GOOD_EXPECTED):
+        # 동적 setattr은 대상이 저장 객체가 아니라는 근거가 없다. 이름이 db라는 사실만으로
+        # 비밀번호 저장 필드에 대한 쓰기를 제외할 수 없으므로 이름 공간 변경과 함께 미확인이다.
+        unverified = bool(write[2]) or write[0] == 'setattr with a variable name'
+        if (result['REQ-005'] == 'UNVERIFIED') != unverified or (not unverified and result != GOOD_EXPECTED):
             wrong.append(f'{write[0]}: {result}')
     assert not wrong, f'{alias[0]}: ' + '; '.join(wrong)

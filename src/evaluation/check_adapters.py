@@ -50,7 +50,8 @@ def _valid_report(report) -> bool:
         if not isinstance(row, dict) or not {'testId', 'outcome'} <= set(row) <= {'testId', 'outcome', 'details'}:
             return False
         test_id, outcome = row['testId'], row['outcome']
-        if not isinstance(test_id, str) or not test_id or test_id in seen or outcome not in outcomes:
+        if (not isinstance(test_id, str) or not test_id or test_id in seen
+                or not isinstance(outcome, str) or outcome not in outcomes):
             return False
         if 'details' in row and not isinstance(row['details'], str):
             return False

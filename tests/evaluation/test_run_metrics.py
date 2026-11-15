@@ -30,6 +30,34 @@ def event(run_id, kind, second, **extra):
             'attempt': 0, 'occurredAt': f'2026-10-14T10:00:{second:02d}+09:00', **extra}
 
 
+def mark_resumed(item):
+    run_id = item['run']['runId']
+    item['events'] += [event(run_id, 'WORKFLOW_STATE_CHANGED', 12, workflowState='WAITING_INPUT'),
+                       event(run_id, 'WORKFLOW_RESUMED', 18)]
+    item['eventsTotal'] = len(item['events'])
+    return item
+
+
+def test_assisted_summary_preserves_attempt_and_unknown_boundary_without_scoring_final_code():
+    from tests.evaluation.test_experiment import real_report, outcome_record
+    automatic = run_metrics(bundle(uid(401)))
+    assisted = run_metrics(mark_resumed(bundle(uid(402), cost='7.25')))
+    assisted['outcomeRecord'] = outcome_record(uid(402))  # 구버전의 잘못된 자동 PASS도 원본 사건으로 무시한다.
+    reports = [real_report(uid(number), 'final') for number in (401, 402)]
+    result = experiment_summary([automatic, assisted], {'MULTI_AGENT': 2}, reports)['MULTI_AGENT']
+    assert (result['plannedRuns'], result['recordedRuns'], result['notStarted']) == (2, 2, 0)
+    assert (result['autonomousRecordedRuns'], result['quarantinedAssistedRuns']) == (1, 1)
+    assert result['evaluation']['qualifiedRuns'] == 1 and result['evaluation']['qualifiedRate'] == 0.5
+    assert result['evaluation']['unevaluatedRuns'] == 1 and result['accuracy']['measuredReports'] == 1
+    assert result['stability']['allEndMs']['n'] == 1 and result['stability']['automaticBoundaryUnverifiedRuns'] == 1
+    assert result['costUsd'] is None and result['knownCostUsd'] == '0.5' and result['runsWithUnknownCost'] == 1
+    assert result['modelCalls'] is None and result['knownModelCalls'] == automatic['modelCalls']
+    assert result['autoCompletion']['pass'] == 0 and result['autoCompletion']['fail'] == 1
+    assert result['semanticReview']['reviewModelCalls'] is None
+    assert result['assistedDiagnostics'][0]['knownCostUsd'] == '7.25'
+    assert result['assistedDiagnostics'][0]['totalMs'] == 31000
+
+
 def bundle(run_id=None, *, verdict='SUCCESS', status='FINISHED', fixes=1, cost='0.5', complete=True,
            architecture='MULTI_AGENT', with_usage=True):
     """한 개발 실행(Run)에 대한 가짜 자료 묶음을 만든다. (실행 정보, 사건 목록, 문제 목록, 도구 시도, 사용량, 설정)
@@ -112,6 +140,54 @@ def test_unfinished_run_has_no_total_time():
     assert metrics['totalMs'] is None and metrics['verdictMs'] is None and metrics['firstBuildPassMs'] == 10000
 
 
+@pytest.mark.parametrize('override', [
+    {'BUILD_PASSED': 5},                                    # 첫 빌드만 시작보다 빠르게 기록됨
+    {'VERDICT_CREATED': 5, 'RUN_FINISHED': 6},              # 판정·끝이 시작보다 빠름
+    {'RUN_FINISHED': 9},                                    # 끝만 시작보다 빠름
+    {'BUILD_PASSED': 1, 'VERDICT_CREATED': 2, 'RUN_FINISHED': 3},  # 모두 시작보다 빠름
+])
+def test_reversed_event_times_are_unmeasured_not_zero(override):
+    """끝 사건이 시작보다 빠르게 기록되면(시계 역전·잘못된 기록) 그 시간은 0ms가 아니라 미측정(None)이고, 이유를 note로
+    남긴다. 역전되지 않은 다른 시간은 그대로 계산한다(Codex 11.8 시험지 검토: 역전된 시각을 0으로 보정하지 않는다)."""
+    run_id = uid(1)
+    times = {'RUN_STARTED': 10, 'BUILD_PASSED': 20, 'FIX_ATTEMPT_STARTED': 25, 'VERDICT_CREATED': 30, 'RUN_FINISHED': 31,
+             **override}
+    data = bundle(run_id)
+    data['events'] = [event(run_id, kind, second) for kind, second in times.items()]
+    data['eventsTotal'] = len(data['events'])
+    metrics = run_metrics(data)
+
+    def expected(kind):
+        return None if times[kind] < 10 else (times[kind] - 10) * 1000
+    assert (metrics['firstBuildPassMs'], metrics['verdictMs'], metrics['totalMs']) == (
+        expected('BUILD_PASSED'), expected('VERDICT_CREATED'), expected('RUN_FINISHED'))
+    assert 'EVENT_TIME_REVERSED' in metrics['notes']
+
+
+def test_event_at_the_same_time_as_start_is_zero_not_reversed():
+    """시작과 같은 시각의 사건은 역전이 아니다. 0ms로 계산하고 note를 남기지 않는다(None으로 바꾸는 오탐 방지)."""
+    run_id = uid(1)
+    data = bundle(run_id)
+    data['events'] = [event(run_id, 'RUN_STARTED', 10), event(run_id, 'BUILD_PASSED', 10, eventId=uid(950)),
+                      event(run_id, 'FIX_ATTEMPT_STARTED', 25), event(run_id, 'VERDICT_CREATED', 30),
+                      event(run_id, 'RUN_FINISHED', 31)]
+    data['eventsTotal'] = len(data['events'])
+    metrics = run_metrics(data)
+    assert (metrics['firstBuildPassMs'], metrics['verdictMs'], metrics['totalMs']) == (0, 20000, 21000)
+    assert 'EVENT_TIME_REVERSED' not in metrics['notes']
+
+
+def test_collaboration_wall_time_is_unmeasured_when_verdict_precedes_start():
+    """판정 사건이 시작보다 빠르게 기록되면 시작~판정 경과 시간과 에이전트 밖 시간을 음수로 만들지 않고 None으로 둔다
+    (위 시간 지표 역전 처리와 같은 원칙). 정상 순서면 그대로 계산한다."""
+    from evaluation.run_metrics import collaboration_metrics
+    run_id = uid(1)
+    reversed_order = collaboration_metrics([event(run_id, 'RUN_STARTED', 10), event(run_id, 'VERDICT_CREATED', 5)])
+    assert reversed_order['wallToVerdictMs'] is None and reversed_order['outsideAgentMs'] is None
+    normal = collaboration_metrics([event(run_id, 'RUN_STARTED', 10), event(run_id, 'VERDICT_CREATED', 30)])
+    assert normal['wallToVerdictMs'] == 20000 and normal['outsideAgentMs'] == 20000
+
+
 def test_parts_from_another_run_are_rejected():
     """묶음 안에 다른 실행(Run)의 자료가 섞여 있으면 거부한다. 지표가 엉뚱하게 계산되는 것을 막는다."""
     data = bundle()
@@ -169,7 +245,8 @@ def summary_input():
 def test_summary_denominator_includes_unstarted_runs():
     """성공률의 분모는 "시작하지 못한 Run까지 포함한 계획 전체"이다. (5개 계획 중 3개만 시작 → 성공 1/5)"""
     result = experiment_summary(summary_input(), {'MULTI_AGENT': 5})['MULTI_AGENT']
-    assert (result['plannedRuns'], result['recordedRuns'], result['notStarted']) == (5, 3, 2)
+    assert (result['plannedRuns'], result['recordedRuns'], result['notStarted']) == (5, 3, None)
+    assert result['unrecordedRuns'] == result['unknownExecutionSlots'] == 2
     assert result['successRate'] == 1 / 5 and result['verifiedRate'] == 2 / 5 and result['unverifiedRate'] == 1 / 5
     assert result['successVerdictMs'] == {'n': 1, 'median': 30000, 'min': 30000, 'max': 30000}
     # 시작하지 못한 Run이 있으므로 전체 합계는 확정하지 않고, 확인된 부분의 합만 낸다.
@@ -1048,7 +1125,8 @@ def test_experiment_summary_invariants_on_random_runs():
         summary = experiment_summary(runs, planned, group_by='loopPolicy')
         for policy, group in summary.items():
             mine = [item for item in runs if item['loopPolicy'] == policy]
-            assert group['recordedRuns'] == len(mine) and group['notStarted'] + len(mine) == planned[policy]
+            assert group['recordedRuns'] == len(mine) and group['unrecordedRuns'] + len(mine) == planned[policy]
+            assert group['notStarted'] == (None if group['unrecordedRuns'] else 0)
             assert (group['success'] + group['fail'] + group['unverified'] + group['humanReview']
                     + group['inProgress'] + group['aborted']) == len(mine), case
             assert group['successRate'] == group['success'] / planned[policy]

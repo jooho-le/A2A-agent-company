@@ -403,6 +403,31 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     # 비밀번호를 로거 필터·handler 필터로 가린 뒤 내보내는 정상 앱(필터 전 원문을 노출로 보면 오탐, Codex 10.30 3차 2).
     'masked_logger_filter': _audit(_AUDIT_MASKED.replace('FILTER_TARGET', 'logger'), 'payload.password'),
     'masked_handler_filter': _audit(_AUDIT_MASKED.replace('FILTER_TARGET', 'handler'), 'payload.password'),
+    # 점검 1(2026-11-14): 원래 get_db가 항상 실패하는 앱. 시험용 세션으로 바꿔 끼운 검사는 통과하지만 실제 서버에서는
+    # 가입이 500이므로 정상 가입(QA-SIGNUP-001)이 FAIL이어야 한다.
+    'broken_get_db': [('database.py', 'def get_db():\n    with SessionLocal() as db:\n        yield db\n',
+                       'def get_db():\n    raise RuntimeError("database connection is not configured")\n    yield\n')],
+    # 원래 get_db가 DATABASE_URL이 아닌 다른 DB에 쓰는 앱: 가입은 성공하지만 임시 DB에서 확인할 수 없어 미검증이다.
+    'get_db_other_database': [
+        ('database.py', 'import os\n', 'import os\nimport tempfile\n'),
+        ('database.py', 'def get_db():\n    with SessionLocal() as db:\n        yield db\n',
+         '_OTHER_ENGINE = create_engine("sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="other-db-"), "other.db"),\n'
+         '                              connect_args={"check_same_thread": False})\n'
+         'OtherSession = sessionmaker(bind=_OTHER_ENGINE, autocommit=False, autoflush=False)\n\n\n'
+         'def get_db():\n    Base.metadata.create_all(_OTHER_ENGINE)\n    with OtherSession() as db:\n        yield db\n')],
+    # 점검(2026-11-15): 평가용 DB에 INSERT까지 하지만 커밋하지 않고 성공 응답을 주는 앱. 다른 저장소를 쓴 것이 아니라
+    # 저장을 안 한 것이므로 정상 가입(QA-SIGNUP-001)은 미검증이 아니라 FAIL이어야 한다.
+    'no_commit': [('routers/auth.py', _HANDLED_COMMIT, '    db.flush()\n')],
+    # 실제 엔진의 SQL 매개변수 로그는 해시를 노출한다. 검사기가 다른 엔진으로 대체하면 놓친다.
+    'engine_echo_hash': [('database.py', 'engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})',
+                         'engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False}, echo=True)')],
+    'engine_echo_hidden_parameters': [('database.py', 'engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})',
+                                      'engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False}, echo=True, hide_parameters=True)')],
+    # 앱이 DB를 준비하지 않으면 평가기도 대신 만들지 않는다. 첫 요청에서 준비하는 정상 앱도 허용한다.
+    'missing_bootstrap': [],
+    'lazy_bootstrap': [('database.py', 'def get_db():\n',
+                        'import threading\n_SCHEMA_LOCK = threading.Lock()\n\n'
+                        'def get_db():\n    with _SCHEMA_LOCK:\n        Base.metadata.create_all(engine)\n')],
     'app_missing': [('main.py', 'app.include_router(auth_router)\n', 'app.include_router(auth_router)\napplication = app\n'),
                     ('main.py', '    return JSONResponse(status_code=422, content={"detail": errors})\n',
                      '    return JSONResponse(status_code=422, content={"detail": errors})\n\n\ndel app\n')],
@@ -421,4 +446,7 @@ def build(variant: str) -> dict[str, str]:
         if files[name].count(old) != 1:
             raise ValueError(f'{variant}: replacement target must appear exactly once in {name}')
         files[name] = files[name].replace(old, new)
+    # 정상 합성 앱도 실제 배포처럼 자기 초기화를 수행한다. 이미 별도 lifespan을 둔 변형은 그대로 둔다.
+    if variant not in ('missing_bootstrap', 'lazy_bootstrap'):
+        files['main.py'] = files['main.py'].replace('app = FastAPI()\n', _LIFESPAN_APP)
     return files

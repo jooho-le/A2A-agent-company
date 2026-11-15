@@ -160,6 +160,14 @@ def test_regression_from_another_run_is_refused_in_summary():
         render_summary(report(), scenario_contract=CONTRACT, regression=regression)
 
 
+@pytest.mark.parametrize('final_version', [1, 3, None, True])
+def test_stale_or_unbound_regression_is_refused_in_final_summary(final_version):
+    regression = regression_from_reports([report(version=1), report(version=2)])
+    regression['finalCodeVersion'] = final_version
+    with pytest.raises(ValueError, match='final code version'):
+        render_summary(report(version=2), scenario_contract=CONTRACT, regression=regression)
+
+
 def test_exposure_coverage_is_shown_as_partial_check():
     """노출 검사가 PASS여도 보지 못한 출력(A2A Message 본문 등)을 적어 REQ-006 전체 충족이 아님을 드러낸다."""
     exposure = {'status': 'PASS', 'reasons': [], 'findings': [],
