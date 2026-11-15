@@ -6,8 +6,12 @@ from fastapi.exceptions import RequestValidationError
 
 from orchestrator.api.errors import request_validation_error_handler
 from orchestrator.api.routes.health import router as health_router
+from orchestrator.api.routes.host import router as host_router
+from orchestrator.api.host_access import HostServiceAuthenticationMiddleware
 from orchestrator.api.routes.runs import router as runs_router
 from orchestrator.api.routes.scenarios import router as scenarios_router
+from orchestrator.api.routes.submissions import router as submissions_router
+from orchestrator.api.routes.downloads import router as downloads_router
 from orchestrator.application import PlannerRunDispatcher
 from orchestrator.core.config import Settings, get_settings
 from orchestrator.core.logging import configure_logging
@@ -36,10 +40,19 @@ def create_app(
     app.state.repository_lock = Lock()
     app.state.workspace_registry = None
     app.state.workspace_registry_lock = Lock()
+    app.state.artifact_store = None
+    app.state.artifact_store_lock = Lock()
     app.state.run_dispatcher = dispatcher
     app.state.agent_client_factory = None
     app.state.control_preflight = None
     app.state.telemetry_store = None
+    # Only create_host enables the authenticated service entrypoint. The
+    # standalone local bootstrap remains an explicitly separate development app.
+    app.state.host_api_auth_required = False
+    app.state.host_api_token = None
+    app.state.require_idempotency_key = False
+    app.state.approved_configuration_provider = None
+    app.add_middleware(HostServiceAuthenticationMiddleware)
     if submission_validator is not None and not callable(submission_validator):
         raise ValueError("OWNED_AGENT_CONFIGURATION_INVALID")
     app.state.submission_validator = submission_validator
@@ -47,6 +60,9 @@ def create_app(
     app.include_router(health_router)
     app.include_router(runs_router, prefix=settings.api_prefix)
     app.include_router(scenarios_router, prefix=settings.api_prefix)
+    app.include_router(host_router, prefix=settings.api_prefix)
+    app.include_router(submissions_router, prefix=settings.api_prefix)
+    app.include_router(downloads_router, prefix=settings.api_prefix)
     return app
 
 

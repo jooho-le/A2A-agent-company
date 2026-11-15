@@ -35,6 +35,7 @@ from orchestrator.domain import (
 )
 from orchestrator.domain.models import utc_now
 from orchestrator.domain.planning_artifacts import RequirementArtifact
+from orchestrator.domain.submissions import RunSubmissionRecord, SubmissionKeyConflict, SubmissionView
 from orchestrator.core.security import redact_data, redact_text
 
 
@@ -84,7 +85,8 @@ class SQLiteWorkflowRepository:
         *,
         run_configuration=None,
         workspace=None,
-    ) -> None:
+        submission: RunSubmissionRecord | None = None,
+    ) -> tuple[RunSubmissionRecord, bool] | None:
         _validate_bundle(run, steps, events)
         if run_configuration is None:
             from orchestrator.domain.run_configuration import RunConfigurationArtifact
@@ -98,6 +100,19 @@ class SQLiteWorkflowRepository:
                 root_path=str((self.database_path.parent / "workspaces" / str(run.workspace_id)).resolve()),
             )
         with self._transaction() as connection:
+            if submission is not None:
+                existing = connection.execute(
+                    "SELECT payload_json FROM run_submissions WHERE internal_key = ?",
+                    (str(submission.internal_key),),
+                ).fetchone()
+                if existing is not None:
+                    record = RunSubmissionRecord.model_validate_json(existing[0])
+                    if record.request_sha256 != submission.request_sha256:
+                        raise SubmissionKeyConflict()
+                    return record, False
+                if (submission.run_id != run.run_id or not steps
+                        or submission.first_step_id != steps[0].workflow_step_id):
+                    raise ValueError("Submission identity differs from the initial Run bundle")
             connection.execute(
                 "INSERT INTO workflow_runs(run_id, status, created_at, updated_at, payload_json) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -134,6 +149,73 @@ class SQLiteWorkflowRepository:
                     "INSERT INTO workspaces(workspace_id, run_id, payload_json) VALUES (?, ?, ?)",
                     (str(workspace.workspace_id), str(run.run_id), workspace.model_dump_json()),
                 )
+            if submission is not None:
+                connection.execute(
+                    "INSERT INTO run_submissions(internal_key, run_id, first_step_id, payload_json) VALUES (?, ?, ?, ?)",
+                    (str(submission.internal_key), str(run.run_id), str(submission.first_step_id),
+                     submission.model_dump_json(by_alias=True)),
+                )
+                return submission, True
+
+    def get_submission(self, internal_key: UUID) -> RunSubmissionRecord | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM run_submissions WHERE internal_key = ?", (str(internal_key),)
+            ).fetchone()
+        return RunSubmissionRecord.model_validate_json(row[0]) if row else None
+
+    def get_submission_view(self, internal_key: UUID) -> SubmissionView | None:
+        """Read a receipt and current state consistently, without dispatch or writes."""
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            row = connection.execute(
+                "SELECT payload_json FROM run_submissions WHERE internal_key=?", (str(internal_key),)
+            ).fetchone()
+            if row is None:
+                return None
+            receipt = RunSubmissionRecord.model_validate_json(row[0])
+            run_row = connection.execute(
+                "SELECT payload_json FROM workflow_runs WHERE run_id=?", (str(receipt.run_id),)
+            ).fetchone()
+            steps = [_load_model(WorkflowStep, item[0]) for item in connection.execute(
+                "SELECT payload_json FROM workflow_steps WHERE run_id=?", (str(receipt.run_id),)
+            ).fetchall()]
+            first = next((step for step in steps if step.workflow_step_id == receipt.first_step_id), None)
+            if run_row is None or first is None:
+                raise ValueError("SUBMISSION_RECORD_INTEGRITY_ERROR")
+            run = _load_model(WorkflowRun, run_row[0])
+            if (receipt.internal_key != internal_key or run.run_id != receipt.run_id
+                    or first.run_id != run.run_id or first.agent_role != AgentRole.PLANNER):
+                raise ValueError("SUBMISSION_RECORD_INTEGRITY_ERROR")
+            sent_ids = {item[0] for item in connection.execute(
+                "SELECT DISTINCT json_extract(payload_json,'$.workflowStepId') FROM trace_events "
+                "WHERE run_id=? AND event_type='A2A_MESSAGE_SENT'", (str(run.run_id),)
+            ).fetchall()}
+            uncertain = any(step.a2a_task_id is None and str(step.workflow_step_id) in sent_ids for step in steps)
+            return SubmissionView(receipt=receipt, run=run, first_step=first, uncertain_send=uncertain)
+
+    def record_source_download_rejection(self, run_id: UUID, artifact_id: UUID) -> None:
+        """Record one incident per registered Source; never change verdict/evidence."""
+        with self._transaction() as connection:
+            source_row = connection.execute(
+                "SELECT payload_json FROM project_artifacts WHERE run_id=? AND artifact_id=? AND artifact_type='SOURCE'",
+                (str(run_id), str(artifact_id)),
+            ).fetchone()
+            if source_row is None:
+                return
+            source = CodeSnapshotArtifact.model_validate_json(source_row[0])
+            run_row = connection.execute("SELECT payload_json FROM workflow_runs WHERE run_id=?", (str(run_id),)).fetchone()
+            run = _load_model(WorkflowRun, run_row[0])
+            recorded = connection.execute(
+                "SELECT 1 FROM trace_events WHERE run_id=? AND event_type='SOURCE_DOWNLOAD_REJECTED' "
+                "AND json_extract(payload_json,'$.inputArtifactIds[0]')=? LIMIT 1",
+                (str(run_id), str(artifact_id)),
+            ).fetchone()
+            if recorded is None:
+                _insert_event(connection, TraceEvent(run_id=run_id, workflow_step_id=source.workflow_step_id,
+                    event_type="SOURCE_DOWNLOAD_REJECTED", actor="Orchestrator", attempt=run.fix_attempt,
+                    input_artifact_ids=[artifact_id], code_version=source.code_version,
+                    snapshot_sha256=source.snapshot_sha256, workflow_state=run.status))
 
     def get_run_configuration(self, run_id: UUID):
         from orchestrator.domain.run_configuration import RunConfigurationArtifact
@@ -1683,6 +1765,18 @@ class SQLiteWorkflowRepository:
                 );
                 CREATE INDEX IF NOT EXISTS workflow_steps_by_run
                     ON workflow_steps(run_id, created_at, workflow_step_id);
+                CREATE TABLE IF NOT EXISTS run_submissions (
+                    internal_key TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL UNIQUE REFERENCES workflow_runs(run_id),
+                    first_step_id TEXT NOT NULL UNIQUE REFERENCES workflow_steps(workflow_step_id),
+                    payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
+                );
+                CREATE TRIGGER IF NOT EXISTS run_submissions_no_update
+                    BEFORE UPDATE ON run_submissions
+                    BEGIN SELECT RAISE(ABORT, 'run_submissions are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS run_submissions_no_delete
+                    BEFORE DELETE ON run_submissions
+                    BEGIN SELECT RAISE(ABORT, 'run_submissions are immutable'); END;
                 CREATE TABLE IF NOT EXISTS agent_contexts (
                     run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
                     agent_id TEXT NOT NULL,

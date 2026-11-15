@@ -373,6 +373,7 @@ def create_platform(
     app = create_orchestrator_app(repository=repository, dispatcher=dispatcher,
         settings=settings, submission_validator=validate_submission)
     app.state.workspace_registry = workspace_registry
+    app.state.artifact_store = artifact_store
     app.state.agent_client_factory = client_factory
     app.state.telemetry_store = telemetry_store
 

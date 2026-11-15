@@ -147,6 +147,7 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
     app = create_orchestrator_app(repository=repository, settings=settings, dispatcher=dispatcher,
                                 submission_validator=validate_submission)
     app.state.workspace_registry, app.state.agent_client_factory = workspace_registry, client_factory
+    app.state.artifact_store = artifact_store
     app.state.telemetry_store = telemetry_store
     app.state.single_continuation_ready = True
 

@@ -32,6 +32,8 @@ from orchestrator.api.schemas.runs import (
     RunSubmissionResponse,
     WorkflowStepResponse,
 )
+from orchestrator.api.submissions import get_submission_identity, replay_submission, SubmissionIdentity
+from orchestrator.domain.submissions import RunSubmissionRecord, SubmissionKeyConflict
 from orchestrator.domain import (
     AgentRole,
     TraceEvent,
@@ -69,16 +71,26 @@ Workspaces = Annotated[WorkspaceRegistry, Depends(get_workspace_registry)]
     "",
     response_model=RunSubmissionResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={200: {"model": RunSubmissionResponse, "description": "Replay of a persisted creation receipt"},
+               409: {"description": "Idempotency key already belongs to a different request"}},
 )
 def create_run(
     body: CreateRunRequest,
     request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
+    submission: Annotated[SubmissionIdentity | None, Depends(get_submission_identity)],
     repository: Repository,
     dispatcher: Dispatcher,
 ) -> RunSubmissionResponse:
     """Create a durable Run and its initial pending Planner Step."""
+    if submission is not None:
+        existing = repository.get_submission(submission.internal_key)
+        if existing is not None:
+            try:
+                return replay_submission(existing, submission, request, response)
+            except SubmissionKeyConflict:
+                raise HTTPException(status_code=409, detail="IDEMPOTENCY_KEY_CONFLICT") from None
     if get_scenario(body.scenario_id) is None:
         raise HTTPException(status_code=422, detail="scenarioId is not registered; see GET /api/v1/scenarios")
     # Only an explicitly composed runtime can admit Single; default stays Multi.
@@ -124,19 +136,33 @@ def create_run(
         workspace_id=run.workspace_id, run_id=run.run_id,
         root_path=str((Path(request.app.state.settings.workspace_root) / str(run.workspace_id)).resolve()),
     )
-    repository.create_run(run, (step,), events, run_configuration=configuration, workspace=workspace)
-    dispatch_status = "NOT_CONFIGURED"
-    if dispatcher is not None:
-        background_tasks.add_task(dispatcher.dispatch_planner, run.run_id)
-        dispatch_status = "SCHEDULED"
-    response.headers["Location"] = str(
-        request.url_for("get_run", run_id=str(run.run_id))
-    )
-    return RunSubmissionResponse(
+    dispatch_status = "SCHEDULED" if dispatcher is not None else "NOT_CONFIGURED"
+    submitted = RunSubmissionResponse(
         run=RunStatusResponse.from_run(run),
         first_step=WorkflowStepResponse.from_step(step),
         dispatch_status=dispatch_status,
     )
+    record = None if submission is None else RunSubmissionRecord(
+        internal_key=submission.internal_key, request_sha256=submission.request_sha256,
+        run_id=run.run_id, first_step_id=step.workflow_step_id, created_at=run.created_at,
+        response_json=submitted.model_dump_json(by_alias=True),
+    )
+    try:
+        result = repository.create_run(run, (step,), events, run_configuration=configuration,
+                                       workspace=workspace, **({"submission": record} if record else {}))
+        if result is not None and not result[1]:
+            return replay_submission(result[0], submission, request, response)
+    except SubmissionKeyConflict:
+        raise HTTPException(status_code=409, detail="IDEMPOTENCY_KEY_CONFLICT") from None
+    if dispatcher is not None:
+        background_tasks.add_task(dispatcher.dispatch_planner, run.run_id)
+    if submission is not None:
+        response.headers["Idempotency-Replayed"] = "false"
+        response.headers["Cache-Control"] = "no-store"
+    response.headers["Location"] = str(
+        request.url_for("get_run", run_id=str(run.run_id))
+    )
+    return submitted
 
 
 @router.get("/{run_id}", response_model=RunStatusResponse)

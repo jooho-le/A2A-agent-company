@@ -4,11 +4,13 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import sys
 
 from agents.platform.configuration import resolve_runtime_configuration
 from agents.platform.host import HostFactoryError, create_host, inspect_host_configuration
 from agents.platform.runner import PlatformRunnerError, run_platform
+from orchestrator.api.host_access import host_token_from_environment
 
 
 class _Parser(argparse.ArgumentParser):
@@ -66,7 +68,10 @@ def main(argv=None):
                 price_book_file=options.price_book, **mode)
             if options.check_secrets:
                 try:
-                    resolve_runtime_configuration(plan.runtime, base_directory=plan.runtime_directory)
+                    resolved = resolve_runtime_configuration(plan.runtime, base_directory=plan.runtime_directory)
+                    host_token_from_environment(os.environ,
+                        other_credentials=(secret for settings in resolved.agent_settings.values()
+                                           for secret in (settings.bearer_token, settings.llm_api_key)))
                 except Exception:
                     raise HostFactoryError() from None
             sys.stdout.write(json.dumps({"status": "OWNED_HOST_CONFIGURATION_VALID",
