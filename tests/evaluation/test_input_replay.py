@@ -273,7 +273,11 @@ def test_real_failure_evidence_is_redacted_before_hashing_and_still_replays(fail
                 if event['kind'] == 'password' and len(event['value']) >= 8:
                     assert event['value'] not in public
     if variant == 'case_sensitive_email':
-        assert '[PRIVATE_INPUT_' in public
+        # Canonical-email observations now record only a boolean, so no raw
+        # email enters the assertion message and no redaction marker is needed.
+        canonical = [row for check in output['checkDetails']['checks'] for row in check['items']
+                     if row['itemId'] == 'canonical' and row['status'] == 'FAIL']
+        assert canonical and all(row['actual'] is False for row in canonical)
         assert 'AssertionError' in public
         assert '[PRIVATE_INPUT_' not in json.dumps(raw['privateDiagnostics'])
     assert raw['sourceReportSha256'] == digest(output['report'])

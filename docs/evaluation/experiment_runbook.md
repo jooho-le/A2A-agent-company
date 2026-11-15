@@ -18,7 +18,7 @@ PYTHONPATH=src .venv/bin/python -m evaluation.environment status
 | 시작 커밋 | `.data/starting-source/scn001`, `e6e7158c356ff0be5ffa12ec59894d2217f61ca8` |
 | 도구 설정 | `configs/experiment/ver1·ver2/owned-tools.local.json`(Ver1만 보호 범위 2개) |
 | 하드웨어 프로필 | `MacBookPro18,1-Apple-M1-Pro-10cpu-16gib/docker-29.1.3-linux/aarch64-10cpu-7.7gib/darwin` |
-| 보호 시험 | 0.5.2, 공식 최종 SHA-256 `dff9e3b5ee543b819c5326306529ae522db05d3b2380497f0809287fa557f624` |
+| 보호 시험 | 0.7.0, 공식 최종 SHA-256 `cd7a246d2309ac7e3e281355be270a9ea8866e837da03058f8caaf10ef8f121f` |
 
 로컬 PyCharm 실행 구성에 API 키와 Multi 4개·Single 1개 내부 토큰을 등록했다. 키 값은 출력하지 않았으며 원격 API의 유효성·접근 권한은 아직 확인하지 않았다. 임시 데이터 저장소에서 Single/Multi × Ver1/Ver2의 Host 기동·정상 응답·토큰 인증·종료를 확인했고, 이때 모델의 외부 전송을 차단해 API 호출은 0회였다. dev `3147711`부터 Host API에 서버 전용 토큰 `A2A_HOST_API_TOKEN`도 필요하다(3절). 남은 것은 키·토큰을 넣은 Host 기동, 유료 시범 Run과 그 실제 생성물의 비교다. 브라우저 문제는 아래와 같이 해결했다.
 
@@ -183,3 +183,7 @@ PYTHONPATH=src .venv/bin/python -m evaluation.experiment compare --results exper
 - Run 제출부터 유료 모델 호출이 일어난다. 시범 4 Run의 비용 상한은 따로 정하지 않았다(계획의 호출·토큰 한도가 Run별 상한).
 - 같은 `--out`에서 앞 순서가 끝나지 않으면 다음 Run을 제출하지 않는다. 시간 초과는 Run을 취소하지 않으므로 같은 명령을 다시 실행해 이어 받는다.
 - 브라우저 도구는 컨테이너 안 Chromium 샌드박스(`chromium_sandbox=True`)를 쓴다. 시범에서 브라우저 시험이 매번 미검증이면 Docker의 사용자 네임스페이스 설정을 먼저 확인한다.
+
+## 세부 관찰 결과 보고서 (suite 0.7.0)
+
+동일한 최종 시험 실행에서 모든 QA·Security 세부 항목의 기대값·실제값·PASS/FAIL/NOT_RUN/UNVERIFIED를 수집한다. `check_details.json`과 `check_details.md`로 별도 저장하며, 요약에는 링크를 남긴다. 공식 검사 9개와 요구사항 7개의 판정·점수는 유지한다. 자세한 동작과 범위는 [상세 결과 기록](check_details.md)을 참고한다. 새 시험지 지문으로 실행하며 구형 기록의 세부 결과를 추정해 채우지 않는다.

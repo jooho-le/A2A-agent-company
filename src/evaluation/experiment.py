@@ -438,10 +438,14 @@ def _score_into(folder, export, run, archive, expected, *, runner, exam, contrac
             reports.append(version_output['report'])
             _write(folder / 'versions' / f'v{version}.json', reports[-1], False)
             _write(folder / 'version_outputs' / f'v{version}.json', version_output, False)
+            from .check_details import write_details
+            write_details(folder / 'version_details' / f'v{version}', version_output, _write)
         regression = regression_from_reports(reports)
         _write(folder / 'regression.json', regression, False)
     timing = first_passing_snapshot(bundle, reports)
     _write(folder / 'timing_metrics.json', timing, False)
+    from .check_details import write_details
+    write_details(folder, output, _write)
     _write(folder / 'output.json', output, False)
     _write(folder / 'meta.json', {'runId': run_id, 'exam': exam, 'pairId': pair_id, 'loopPolicy': loop_policy,
                                   'codeVersion': expected.code_version}, False)
@@ -453,6 +457,8 @@ def _score_into(folder, export, run, archive, expected, *, runner, exam, contrac
     summary += ('\n- 최초 통과 Snapshot 산출 시간(TIME-05): '
                 + (str(timing['firstPassingSnapshotMs']) + 'ms' if timing['firstPassingSnapshotMs'] is not None
                    else str(timing['reason'])) + '\n')
+    if output.get('checkDetails') is not None:
+        summary += '\n- 세부 검사 결과: [기대값·실제값·항목별 상태](check_details.md) · [JSON](check_details.json)\n'
     _write(folder / 'summary.md', summary, False)
     if agent_export is not None:
         from .agent_eval import agent_tables, render_markdown

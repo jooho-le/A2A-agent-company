@@ -81,6 +81,8 @@ class RunnerOutcome:
     coverage: Optional[dict] = None   # (줄 기록 실행기만) 파일별 실행 가능한 줄·지나간 줄·지나가지 않은 줄
     private_inputs: Optional[dict] = None  # evaluator-only; never included by to_dict()
 
+    detail_results: Optional[dict] = None  # safe observations from the same protected execution
+
     def to_dict(self):
         # 증거·결과에 남길 실행 정보(보고서 본문은 따로 담는다).
         return {'kind': self.kind, 'exitCode': self.exit_code, 'error': self.error, 'imageDigest': self.image_digest}
@@ -91,18 +93,18 @@ def _checked_outcome(outcome: RunnerOutcome) -> RunnerOutcome:
     # JSON이 있어도 실행 오류·신호 종료·건수/종료 코드 불일치는 검증 근거가 아니다.
     #   종료 코드 규칙(dev 실행기): 0 = 모두 통과, 1 = 실패가 있음, 2 = 실행기 오류. 음수는 신호로 강제 종료된 경우다.
     if outcome.error is not None:
-        return replace(outcome, report=None, coverage=None)
+        return replace(outcome, report=None, coverage=None, detail_results=None)
     if type(outcome.exit_code) is not int or outcome.exit_code not in (0, 1):
-        return replace(outcome, report=None, coverage=None, error='RUNNER_EXIT_INVALID')
+        return replace(outcome, report=None, coverage=None, detail_results=None, error='RUNNER_EXIT_INVALID')
     try:
         valid = _valid_report(outcome.report)
     except (TypeError, ValueError):
         valid = False
     if not valid:
-        return replace(outcome, report=None, coverage=None, error='UNIT_REPORT_INVALID')
+        return replace(outcome, report=None, coverage=None, detail_results=None, error='UNIT_REPORT_INVALID')
     expected_exit = 1 if outcome.report['failed'] else 0  # 보고서에 실패가 있으면 1, 없으면 0이어야 앞뒤가 맞는다
     if outcome.exit_code != expected_exit:
-        return replace(outcome, report=None, coverage=None, error='RUNNER_EXIT_REPORT_MISMATCH')
+        return replace(outcome, report=None, coverage=None, detail_results=None, error='RUNNER_EXIT_REPORT_MISMATCH')
     return outcome
 
 
@@ -129,6 +131,27 @@ def _parse_coverage(stdout: str) -> Optional[dict]:
             value = payload['coverage-v1']
             return value if isinstance(value, dict) and isinstance(value.get('files'), dict) else None
     return None
+
+
+def _parse_details(stdout):
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('DETAIL_DUPLICATE_KEY')
+            value[key] = item
+        return value
+    rows = []
+    for line in stdout.splitlines()[:-1]:
+        if len(line.encode('utf-8')) > 1024 * 1024:
+            continue
+        try:
+            value = json.loads(line, object_pairs_hook=unique)
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(value, dict) and set(value) == {'protected-details-v1'}:
+            rows.append(value['protected-details-v1'])
+    return rows[0] if len(rows) == 1 and isinstance(rows[0], dict) else None
 
 
 def _parse_private_inputs(stdout):
@@ -168,6 +191,7 @@ class LocalRunner:
                 'if hasattr(runner, "run_tests_with_inputs"):\n'
                 '    report, code, inputs = runner.run_tests_with_inputs(sys.argv[2], sys.argv[3], sys.argv[4])\n'
                 '    sys.__stdout__.write(json.dumps({"protected-inputs-v1": inputs}) + "\\n")\n'
+                '    sys.__stdout__.write(json.dumps({"protected-details-v1": runner.detail_results()}) + "\\n")\n'
                 'elif hasattr(runner, "run_tests_with_coverage"):\n'
                 '    report, code, coverage = runner.run_tests_with_coverage(sys.argv[2], sys.argv[3], sys.argv[4])\n'
                 '    sys.__stdout__.write(json.dumps({"coverage-v1": coverage}) + "\\n")\n'
@@ -184,7 +208,7 @@ class LocalRunner:
                 return RunnerOutcome(None, None, 'TIMEOUT', None, self.kind)
         report, error = _parse_runner_output(done.stdout)
         return _checked_outcome(RunnerOutcome(report, done.returncode, error, None, self.kind,
-                                              _parse_coverage(done.stdout), _parse_private_inputs(done.stdout)))
+                                              _parse_coverage(done.stdout), _parse_private_inputs(done.stdout), _parse_details(done.stdout)))
 
 
 class DockerRunner:
@@ -317,7 +341,7 @@ class DockerRunner:
             return RunnerOutcome(None, None, 'DOCKER_UNAVAILABLE', None, self.kind)
         report, error = _parse_runner_output(done.stdout)
         return _checked_outcome(RunnerOutcome(report, done.returncode, error, digest, self.kind,
-                                              _parse_coverage(done.stdout), _parse_private_inputs(done.stdout)))
+                                              _parse_coverage(done.stdout), _parse_private_inputs(done.stdout), _parse_details(done.stdout)))
 
 
 def _sha256(data: bytes) -> str:
@@ -624,6 +648,9 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
         'static': {'evidenceId': evidence_ids['static'], 'error': static_error,
                    'requirements': static_requirements if static_requirements is not None else None},
     }
+    from .check_details import build_details
+    check_details = build_details(report, outcomes[exam].detail_results, exam=exam,
+                                  runner_error=outcomes[exam].error)
     score, reference_score = exam_score(report), exam_score(reference)
     if snapshot_info.get('examExposure'):
         # 점수에 관한 값은 모두 비운다(실행하지 않았으므로 "미검증을 모두 통과로 볼 때의 위쪽 끝"도 의미가 없다).
@@ -634,7 +661,7 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
             'referenceReport': reference, 'referenceScore': reference_score,
             'supplementary': supplementary, 'evidence': evidence, 'snapshot': snapshot_info,
             'runner': {**outcomes[exam].to_dict(), 'evaluationId': evaluation_id}, 'trace': trace,
-            'inputRecord': input_record, 'inputReplay': replay_status}
+            'inputRecord': input_record, 'inputReplay': replay_status, 'checkDetails': check_details}
 
 
 def _runner_source() -> bytes:

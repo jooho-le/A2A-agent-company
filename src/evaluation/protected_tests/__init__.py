@@ -43,7 +43,7 @@ SETS = ('practice', 'pilot', 'final')  # 시험지 세 벌(최종 평가는 이 
 ROLES = ('QA', 'SECURITY')  # 검사 관점이자 순환 안에서 그 검사를 실행하는 에이전트 역할
 LOOP_SCOPES = {'QA': 'in-loop-qa', 'SECURITY': 'in-loop-security'}  # 역할별 순환 안 범위
 RESULT_FILES = frozenset({'output.json', 'meta.json', 'summary.md', 'bundle.json', 'regression.json',
-                          'comparison.json'})  # 실험 결과 폴더(experiments/)에 보관하는 파일 이름(evaluation.experiment)
+                          'comparison.json', 'check_details.json', 'check_details.md'})  # 실험 결과 폴더(experiments/)에 보관하는 파일 이름(evaluation.experiment)
 _SELECTOR = re.compile(r'[a-z][a-z0-9_-]{0,63}\Z')           # dev qa_contract.py와 같은 규칙
 _PATTERN = re.compile(r'[A-Za-z0-9_*?\[\].-]{1,128}\.py\Z')   # dev unit_runner.py와 같은 규칙
 _REQUIREMENT = re.compile(r'REQ-\d{3}\Z')  # 요구사항 이름 모양(예: REQ-001)
@@ -180,11 +180,89 @@ def without_comments(source: str) -> str:
     return ''.join(kept)
 
 
+def compact_source(source):
+    # Keep original spellings so Python 3.10 and 3.13 ship identical bytes.
+    # ast.unparse changes tuple/f-string formatting between Python versions.
+    # Generated source under test is never passed here.
+    def tokens_for(text):
+        result = []
+        pending, depth = None, 0
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == getattr(tokenize, 'FSTRING_START', -1):
+                if not depth:
+                    pending = token
+                depth += 1
+            elif token.type == getattr(tokenize, 'FSTRING_END', -1):
+                depth -= 1
+                if not depth:
+                    result.append(tokenize.TokenInfo(tokenize.STRING, '', pending.start, token.end, pending.line))
+            elif not depth:
+                result.append(token)
+        return result
+
+    tree = ast.parse(source)
+    tokens = tokens_for(source)
+    lines = source.splitlines(keepends=True)
+    string_lines = {line for token in tokens if token.type == tokenize.STRING
+                    for line in range(token.start[0] + 1, token.end[0] + 1)}
+    comments = {token.start[0]: token.start[1] for token in tokens if token.type == tokenize.COMMENT}
+    kept = []
+    for number, line in enumerate(lines, 1):
+        if number in comments:
+            line = line[:comments[number]].rstrip() + '\n'
+        if not line.strip() and number not in string_lines:
+            continue
+        if number not in string_lines:
+            indent = len(line) - len(line.lstrip(' '))
+            line = ' ' * (indent // 4) + line[indent:]
+        kept.append(line)
+    compact = ''.join(kept)
+    try:
+        if ast.dump(ast.parse(compact)) != ast.dump(tree):
+            return source
+    except (SyntaxError, ValueError):
+        return source
+    # Join implicit continuation lines, but never newlines inside strings.
+    indented = compact
+    lines = compact.splitlines(keepends=True)
+    for token in reversed(tokens_for(compact)):
+        if token.type == tokenize.NL and token.start[0] < len(lines):
+            index = token.start[0] - 1
+            lines[index] = lines[index].rstrip('\r\n') + ' '
+            lines[index + 1] = lines[index + 1].lstrip(' \t')
+    compact = ''.join(lines)
+    # Remove only token gaps outside strings. Keep name/number boundaries and
+    # indentation; require AST identity again before shipping the result.
+    tokens = tokens_for(compact)
+    lines = compact.splitlines(keepends=True)
+    gaps = {}
+    structural = {tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER}
+    for left, right in zip(tokens, tokens[1:]):
+        if (left.type in structural or right.type in structural or left.end[0] != right.start[0]
+                or left.end[1] >= right.start[1]
+                or left.type in {tokenize.NAME, tokenize.NUMBER} and right.type in {tokenize.NAME, tokenize.NUMBER}
+                or left.type == tokenize.NUMBER and right.string == '.'):
+            continue
+        number = left.end[0] - 1
+        if lines[number][left.end[1]:right.start[1]].isspace():
+            gaps.setdefault(number, []).append((left.end[1], right.start[1]))
+    for number, spans in gaps.items():
+        for start, end in reversed(spans):
+            lines[number] = lines[number][:start] + lines[number][end:]
+    packed = ''.join(lines)
+    try:
+        if ast.dump(ast.parse(packed)) == ast.dump(tree):
+            return packed
+    except (SyntaxError, ValueError):
+        pass
+    return indented
+
+
 def protected_files(scope: str, suite: Optional[dict] = None) -> dict[str, str]:
     # {"tests/signup/...py": 파일 내용} 사전. dev 보호 파일 설정(protected_files)과 D5 채점에 그대로 넣는다.
     # 주석을 뺀 사본이다(코드는 저장소 파일과 같음, 시험으로 AST를 대조).
     _suite, entry = _scope(scope, suite)
-    return {file: without_comments((ROOT / file).read_text(encoding='utf-8')) for file in sorted(entry['files'])}
+    return {file: compact_source((ROOT / file).read_text(encoding='utf-8')) for file in sorted(entry['files'])}
 
 
 def suite_sha256(scope: str, suite: Optional[dict] = None) -> str:
@@ -229,7 +307,7 @@ def exam_exposure(files: Mapping[str, bytes], suite: Optional[dict] = None) -> l
     for scope in SCOPES:
         for path in protected_files(scope, suite):
             original = (ROOT / path).read_text(encoding='utf-8')  # 저장소 파일(주석 있음)과 보내는 사본(주석 없음) 모두
-            for content in (original, without_comments(original)):
+            for content in (original, without_comments(original), compact_source(original)):
                 known[digest(content.encode('utf-8'))] = path
     found = []
     for path, data in sorted(files.items()):

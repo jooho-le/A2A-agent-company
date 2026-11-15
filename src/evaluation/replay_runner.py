@@ -11,6 +11,12 @@ import threading
 from pathlib import Path
 
 
+_DETAIL_RESULTS = None
+
+def detail_results():
+    return _DETAIL_RESULTS
+
+
 class InputTape:
     def __init__(self, replay=None, error_type=ValueError):
         self.replay = replay
@@ -81,8 +87,12 @@ def _load(name, path):
 
 
 def run_tests_with_inputs(test_root, source_root, pattern):
+    global _DETAIL_RESULTS
+    _DETAIL_RESULTS = None
     root = Path(__file__).resolve().parent
     runner = _load('trusted_unit_runner', root / '_unit_runner.py')
+    details = _load('signup_details', Path(test_root) / 'signup_details.py')
+    details.COLLECTED.clear()
     link = _load('signup_link', Path(test_root) / 'signup_link.py')
     request = json.loads((root / '_input_replay.json').read_text(encoding='utf-8'))
     tape = InputTape(request.get('tests'), link.Unverified)
@@ -91,6 +101,7 @@ def run_tests_with_inputs(test_root, source_root, pattern):
         report, code = runner.run_tests(test_root, source_root, pattern)
     finally:
         link._TAPE = None
+        _DETAIL_RESULTS = details.payload()
     return report, code, tape.payload(report)
 
 
@@ -110,6 +121,7 @@ def main(argv=None):
             report, code, tape = run_tests_with_inputs(Path('/inputs') / args.directory, Path('/snapshot'), args.pattern)
     except BaseException:
         report, code = None, 2
+    sys.stdout.write(json.dumps({'protected-details-v1': detail_results()}, separators=(',', ':'), allow_nan=False) + '\n')
     sys.stdout.write(json.dumps({'protected-inputs-v1': tape}, separators=(',', ':'), allow_nan=False) + '\n')
     sys.stdout.write(json.dumps(report if report is not None else {'error': 'TEST_RUNNER_ERROR'},
                                separators=(',', ':'), allow_nan=False) + '\n')

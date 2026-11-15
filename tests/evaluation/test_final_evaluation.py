@@ -81,7 +81,7 @@ class VerifiedImageRunner:
     def run(self, snapshot_dir, inputs_dir, directory, pattern, script='_unit_runner.py'):
         self.calls += 1
         outcome = self.local.run(snapshot_dir, inputs_dir, directory, pattern, script=script)
-        return RunnerOutcome(outcome.report, outcome.exit_code, outcome.error, self.digest, self.kind, outcome.coverage)
+        return RunnerOutcome(outcome.report, outcome.exit_code, outcome.error, self.digest, self.kind, outcome.coverage, outcome.private_inputs, outcome.detail_results)
 
 
 class RecordingRunner:
@@ -600,3 +600,5 @@ def test_real_container_run():
     output = final(archive, manifest(archive, lock=lock, image=runner.image_digest()), runner)
     assert output['runner']['error'] is None, output['runner']
     assert output['report']['evaluationVerdict'] == 'PASS', statuses(output)
+    assert output['checkDetails']['recordStatus'] == 'COMPLETE'
+    assert len(output['checkDetails']['checks']) == 9

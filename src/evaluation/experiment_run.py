@@ -566,16 +566,16 @@ def _run_one_locked(plan, row, out_root, base, *, client_factory, poll_seconds, 
         body = submission(plan, approved, row['order'])
         budget_ms = approved.limits.runtime_budget_ms
         configuration_hash = _hash(body['configuration'])
-        key = str(uuid4())
+        submission_key = str(uuid4())  # Host 중복 제출 방지 키(위 원장 키 key와 다른 값)
         # 클라이언트를 먼저 만든다: 토큰이 없으면 제출 의도를 남기기 전에 멈춘다(보낸 요청이 없다).
         client = client_factory(entry['api'])
         with client:
             _record(out_root, plan, row, 'SUBMITTING', fingerprint=fingerprint,
                     intentAt=datetime.now(timezone.utc).isoformat(), submissionSha256=_submission_hash(body),
                     configurationSha256=configuration_hash, hostRequestSha256=_host_request_hash(body),
-                    idempotencyKey=key)
+                    idempotencyKey=submission_key)
             try:
-                run_id = submit(client, body, idempotency_key=key)
+                run_id = submit(client, body, idempotency_key=submission_key)
             except Exception:
                 # Intent remains durable even if recording this diagnostic fails.
                 _record(out_root, plan, row, 'SUBMISSION_UNCERTAIN', fingerprint=fingerprint)

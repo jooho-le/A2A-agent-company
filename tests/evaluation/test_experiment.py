@@ -453,7 +453,11 @@ def test_forced_rescore_replaces_the_whole_result_set(tmp_path):
     results = tmp_path / 'results'
     folder = score_export(export, runner=VerifiedImageRunner(), exam='pilot', results=results, contract=CONTRACT,
                           bundle=bundle, all_versions=True)
-    assert {path.name for path in folder.iterdir()} >= {'regression.json', 'versions', 'bundle.json'}
+    assert {path.name for path in folder.iterdir()} >= {'regression.json', 'versions', 'bundle.json', 'version_details'}
+    assert (folder / 'version_details/v1/check_details.md').is_file()
+    detail = json.loads((folder / 'check_details.json').read_text())
+    assert detail['exam'] == 'pilot' and detail['recordStatus'] == 'COMPLETE'
+    assert '[기대값·실제값·항목별 상태](check_details.md)' in (folder / 'summary.md').read_text()
 
     class BrokenRunner(VerifiedImageRunner):
         # 채점 도중 실패하는 실행기 대역
@@ -467,7 +471,8 @@ def test_forced_rescore_replaces_the_whole_result_set(tmp_path):
     assert [path.name for path in results.iterdir() if not path.name.startswith('.')] == [bundle['run']['runId']]
     assert not list(results.glob('.*.staging-*'))  # 비공개 입력·평가 이력은 보존, 임시 폴더는 제거
     score_export(export, runner=VerifiedImageRunner(), exam='final', results=results, contract=CONTRACT, force=True)
-    assert {path.name for path in folder.iterdir()} == {'output.json', 'meta.json', 'summary.md', 'timing_metrics.json'}
+    assert {path.name for path in folder.iterdir()} == {'output.json', 'meta.json', 'summary.md', 'timing_metrics.json',
+                                                        'check_details.json', 'check_details.md'}
     assert json.loads((folder / 'timing_metrics.json').read_text())['firstPassingSnapshotMs'] is None
     assert json.loads((folder / 'meta.json').read_text())['exam'] == 'final'
     assert [path.name for path in results.iterdir() if not path.name.startswith('.')] == [bundle['run']['runId']]

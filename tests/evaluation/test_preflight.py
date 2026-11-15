@@ -130,6 +130,7 @@ def test_prepared_plan_checks_only_isolated_package_metadata(tmp_path, monkeypat
     (json.dumps({'format': 'browser-v1', 'total': 1, 'passed': 0, 'failed': 1, 'tests': []}), 1,
      'HOST_BROWSER_EXECUTION_FAILED'),
     ('not json', 2, 'HOST_BROWSER_REPORT_INVALID'),
+    ('["browser-v1"]', 0, 'HOST_BROWSER_REPORT_INVALID'),  # JSON이지만 보고서 모양(객체)이 아닌 출력
 ])
 def test_browser_that_cannot_run_under_the_sandbox_options_is_not_ready(tmp_path, monkeypatch, output, exit_code,
                                                                         reason):

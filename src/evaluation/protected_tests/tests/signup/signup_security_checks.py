@@ -22,10 +22,10 @@ MALFORMED = {"missing_email": lambda email, password: {"password": password},
              "misspelled": lambda email, password: {"email": email, "passwd": password}}
 
 
-def parse_argon2id(encoded):
-    # Argon2id encoded hash("$"로 나뉜 6조각)를 읽어 ({m, t, p}, salt)를 돌려준다. 모양이 다르면 None.
+def parse_argon2(encoded):
+    # 구조 해석과 Argon2id 정책 판정을 분리한다. 다른 Argon2 방식도 읽을 수 있으면 계속 검증한다.
     parts = encoded.split("$") if isinstance(encoded, str) else []
-    if len(parts) != 6 or parts[0] or parts[1] != "argon2id" or not parts[2].startswith("v="):
+    if len(parts) != 6 or parts[0] or parts[1] not in ('argon2id', 'argon2i', 'argon2d') or not parts[2].startswith("v="):
         return None
     try:
         params = dict(item.split("=", 1) for item in parts[3].split(","))
@@ -34,10 +34,11 @@ def parse_argon2id(encoded):
         return None
     if not parts[4] or not parts[5]:
         return None
-    return values, parts[4]
+    return values, parts[4], parts[1]
 
 
 def stored_hash(test, data):
+    test.prepare("SEC-SIGNUP-002", data)
     # SEC-SIGNUP-002: 같은 비밀번호로 계정 여러 개를 만들고 저장값의 형식·설정값·salt·검증 결과를 본다.
     def body(service):
         try:
@@ -47,58 +48,77 @@ def stored_hash(test, data):
         rejected = (exceptions.VerificationError, exceptions.InvalidHashError)
         password = link.new_password(data["length"])
         emails = [link.new_email(data["template"]) for _ in range(data["accounts"])]
-        for email in emails:
-            if service.signup(email, password) not in link.SUCCESS:
-                raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
-        stored = [service.stored_hash(email) for email in emails]
-        test.assertFalse(any(not isinstance(value, str) or password in value for value in stored),
-                         "저장값이 글자가 아니거나 비밀번호 원문을 담고 있음")
-        parsed = [parse_argon2id(value) for value in stored]
-        test.assertTrue(all(parsed), "저장값이 Argon2id encoded hash 형식이 아님")
-        for params, _salt in parsed:
-            for name, minimum in ARGON2_MINIMUM.items():
-                test.assertGreaterEqual(params[name], minimum, "Argon2 " + name + " 값이 기준 미만")
-        test.assertEqual(len({salt for _params, salt in parsed}), len(parsed), "같은 비밀번호인데 계정의 salt가 같음")
-        hasher = PasswordHasher()
-        for value in stored:
-            try:
-                hasher.verify(value, password)
-            except rejected:
-                test.fail("가입한 비밀번호로 저장 해시 검증이 실패함")
-            try:
-                hasher.verify(value, link.new_password())
-            except rejected:
-                pass
+        stored = {}
+        for index, email in enumerate(emails):
+            ready = None
+            with test.case(account=index):
+                ready = test.observe(f'account_{index + 1}_setup', 'http_status', lambda: service.signup(email, password), required=False)
+                if not ready:
+                    raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
+            if ready is None:
+                continue
+            with test.case(account=index):
+                stored[index] = service.stored_hash(email)
+        parsed = {index: parse_argon2(value) for index, value in stored.items()}
+        complete = len(stored) == len(emails)
+        block = test.detail_recorder.block
+        need = 'HASH_VALUES_REQUIRED'
+        for item, passed in [('no_plaintext', all(isinstance(v, str) and password not in v for v in stored.values())),
+                             ('argon2id', all(p and p[2] == 'argon2id' for p in parsed.values()))]:
+            if complete or not passed:
+                test.observe('storage', item, passed)
             else:
-                test.fail("다른 비밀번호로 저장 해시 검증이 성공함")
+                block('storage', [item], need)
+        hasher = PasswordHasher()
+
+        def verifies(value, candidate):
+            try:
+                return bool(hasher.verify(value, candidate))
+            except rejected:
+                return False
+
+        for index in range(len(emails)):
+            case = f'account_{index + 1}'
+            if not parsed.get(index):
+                reason = 'HASH_FORMAT_REQUIRED' if index in stored else need
+                block(case, [*ARGON2_MINIMUM, 'correct_password', 'wrong_password'], reason)
+                continue
+            for name in ARGON2_MINIMUM:
+                test.observe(case, name, parsed[index][0][name])
+            test.observe(case, 'correct_password', lambda: verifies(stored[index], password))
+            test.observe(case, 'wrong_password', lambda: verifies(stored[index], link.new_password()))
+        if complete and all(parsed.values()):
+            test.observe('storage', 'distinct_salts', len({p[1] for p in parsed.values()}))
+        else:
+            block('storage', ['distinct_salts'], 'HASH_FORMAT_REQUIRED' if complete else need)
     test.check(body)
 
 
 def unique_and_canonical(test, data):
+    test.prepare("SEC-SIGNUP-003", data)
     # SEC-SIGNUP-003: 대소문자·공백 변형으로 가입하면 정리된(canonical) 값으로 저장되고, 앱의 사전 검사를 거치지 않고
     # 같은 이메일 행을 DB에 직접 넣으면 DB가 이메일 칸 UNIQUE로 거부해야 한다. 정리는 앞뒤 공백 제거·소문자만이다
     # (정책: Gmail 점 제거·+태그 제거 안 함). 그래서 점·+태그만 다른 두 주소(aliases)는 각각 가입되고 그대로 저장돼야 한다.
     def body(service):
-        if service.signup(link.new_email(), link.new_password()) not in link.SUCCESS:
+        if not test.observe('precondition', 'http_status', lambda: service.signup(link.new_email(), link.new_password()), required=False):
             raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
         for form in data["forms"]:
+            case = "variant_" + form
             with test.case(variant=form):
                 email = link.new_email(data["template"])
                 status = service.signup(link.variant(email, form), link.new_password())
-                test.assertIn(status, link.SUCCESS, "대소문자·공백만 다른 유효한 이메일을 정리하지 않고 거부함")
-                test.assertEqual(service.stored_email(email), link.canonical(email),
-                                 "저장된 이메일이 앞뒤 공백 제거·소문자 형태가 아님")
-                test.assertTrue(service.db_rejects_duplicate(email), "DB에 이메일 UNIQUE 제약이 없음")
+                test.observe(case, 'http_status', status)
+                test.observe(case, 'canonical', lambda: service.stored_email(email) == link.canonical(email))
+                test.observe(case, 'unique', lambda: service.db_rejects_duplicate(email))
         for index, pair in enumerate(data["aliases"]):
             with test.case(alias=index):
                 addresses = link.new_emails(*pair)
-                for address in addresses:
-                    test.assertIn(service.signup(address, link.new_password()), link.SUCCESS,
-                                  "점·+태그만 다른 주소를 같은 주소로 보고 거부함(정책상 다른 주소)")
+                for position, address in enumerate(addresses):
+                    test.observe(f'alias_{index + 1}_address_{position + 1}', 'http_status',
+                                 lambda: service.signup(address, link.new_password()))
                 stored = service.emails()
-                for address in addresses:
-                    test.assertTrue(stored.count(link.canonical(address)) == 1,
-                                    "점·+태그가 있는 주소가 정책대로(앞뒤 공백 제거·소문자만) 저장되지 않음")
+                for position, address in enumerate(addresses):
+                    test.observe(f'alias_{index + 1}_address_{position + 1}', 'account_count', stored.count(link.canonical(address)))
     test.check(body)
 
 
@@ -147,43 +167,55 @@ def _forms(value):
 
 
 def not_exposed(test, data):
+    test.prepare("SEC-SIGNUP-005", data)
     # SEC-SIGNUP-005: 성공·형식 오류·짧은 비밀번호·중복·형식이 틀린 본문·DB 오류 요청의 응답(본문·헤더)과
     # 앱 시작부터 종료까지의 서버 로그·출력에서 비밀번호와 해시를 찾는다(그대로·base64·16진수). 거부된 요청이나 DB 오류 때 계산한
     # 해시도 있으므로 해시 모양 자체도 찾는다(예: 처리하지 못한 DB 오류의 traceback에 SQL 값으로 찍힌 해시). 그런 해시를
     # base64·16진수로 바꿔 남긴 경우도 후보를 풀어서 찾는다.
     def body(service):
         email, used = link.new_email(data["template"]), []
+        captured = {}
 
-        def attempt(address, password):
+        def attempt(case, address, password):
             # 가입 요청을 보내고, 쓴 비밀번호를 찾을 값 목록에 넣는다.
             used.append(password)
-            return service.signup(address, password)
+            before = len(service.responses)
+            result = service.signup(address, password)
+            captured[case] = service.responses[before:]
+            return result
 
-        if attempt(email, link.new_password()) not in link.SUCCESS:
+        if not test.observe('precondition', 'http_status', lambda: attempt('success', email, link.new_password()), required=False):
             raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
         stored = service.stored_hash(email)
-        attempt(data["invalid"], link.new_password())
-        attempt(link.new_email(), link.new_password(data["short"]))
-        attempt(link.variant(email, data["duplicate"]), link.new_password())
+        attempt("invalid_email", data["invalid"], link.new_password())
+        attempt("short_password", link.new_email(), link.new_password(data["short"]))
+        attempt("duplicate", link.variant(email, data["duplicate"]), link.new_password())
         for kind in data["malformed"]:  # 형식이 틀린 본문 세 종류(필드 누락·목록 본문·필드 이름 오타)
             password = link.new_password()
             used.append(password)
+            before = len(service.responses)
             service.send(MALFORMED[kind](link.new_email(), password))
+            captured["malformed_" + kind] = service.responses[before:]
         service.fail_next_insert()
-        attempt(link.new_email(), link.new_password())
-        service.require_insert_failure()
+        attempt("db_error", link.new_email(), link.new_password())
+        test.observe("db_error", "injected", lambda: (service.require_insert_failure(), True)[1])
         secrets = list(used)
         if isinstance(stored, str) and stored:
             secrets.append(stored)
             digest = stored.rsplit("$", 1)[-1]
             if len(digest) >= 16:
                 secrets.append(digest)
-        found = {form for value in secrets for form in _forms(value)}
         service.stop()  # 종료할 때 남기는 로그까지 모은 뒤 판정한다.
-        responses, logs = service.responses, service.log_text()
-        test.assertFalse(any(value in text for value in found for text in responses)
-                         or any(_hash_shown(text) for text in responses),
-                         "응답에 비밀번호 또는 비밀번호 해시가 들어 있음")
-        test.assertFalse(any(value in logs for value in found) or _hash_shown(logs),
-                         "서버 로그·출력에 비밀번호 또는 비밀번호 해시가 들어 있음")
+        logs = service.log_text()
+        password_forms = {form for value in used for form in _forms(value)}
+        hash_forms = {form for value in secrets[len(used):] for form in _forms(value)}
+        captured['application_logs'] = [logs]
+        for case, texts in captured.items():
+            if not texts:
+                for item in ('password_exposed', 'hash_exposed'):
+                    test.detail_recorder.index[(case, item)].update(status='UNVERIFIED', reason='RESPONSE_NOT_CAPTURED')
+                continue
+            test.observe(case, 'password_exposed', any(value in text for value in password_forms for text in texts))
+            test.observe(case, 'hash_exposed', any(value in text for value in hash_forms for text in texts)
+                         or any(_hash_shown(text) for text in texts))
     test.check(body)

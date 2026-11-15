@@ -23,6 +23,15 @@ import traceback
 import unittest
 from urllib.parse import quote, unquote
 
+# Also support trusted inspection via spec_from_file_location outside test discovery.
+try:
+    import signup_details as details
+except ModuleNotFoundError:
+    _details_spec = importlib.util.spec_from_file_location('signup_details', os.path.join(os.path.dirname(__file__), 'signup_details.py'))
+    details = importlib.util.module_from_spec(_details_spec)
+    sys.modules['signup_details'] = details
+    _details_spec.loader.exec_module(details)
+
 # 연결 규격: (모듈, 이름) 위치, User 필드 이름, 가입 경로
 APP = ("main", "app")
 DB_DEPENDENCY = ("database", "get_db")
@@ -560,16 +569,39 @@ class SignupCheck(unittest.TestCase):
             try:
                 yield
             except Unverified as error:
+                self.detail_reason = "PRECONDITION_OR_OBSERVATION_UNAVAILABLE"
                 self.skipTest("UNVERIFIED:" + error.code)
+            except AssertionError:
+                self.detail_reason = "PRIOR_ASSERTION_FAILED"
+                raise
+
+    def prepare(self, key, data):
+        self.detail_recorder = details.Recorder(key, data)
+        self.detail_reason = "NOT_REACHED"
+
+    def observe(self, case, item, actual, *, required=True):
+        passed = self.detail_recorder.observe(case, item, actual)
+        if required and not passed:
+            # Keep the parent FAIL while allowing independent observations.
+            with self.subTest(case=case, item=item):
+                self.fail(item)
+        return passed
 
     def check(self, body):
         service = Service()
-        try:
-            service.open()
-        except Unverified as error:
-            self.skipTest("UNVERIFIED:" + error.code)
+        reason = 'NOT_REACHED'
         self.addCleanup(service.close)
         try:
+            self.observe('setup', 'ready', lambda: (service.open(), True)[1])
             body(service)
         except Unverified as error:
+            reason = 'PRECONDITION_OR_OBSERVATION_UNAVAILABLE'
             self.skipTest("UNVERIFIED:" + error.code)
+        except AssertionError:
+            reason = 'PRIOR_ASSERTION_FAILED'
+            raise
+        except BaseException:
+            reason = 'CHECK_INTERRUPTED'
+            raise
+        finally:
+            self.detail_recorder.finish(reason if reason != "NOT_REACHED" else self.detail_reason)

@@ -544,7 +544,13 @@ python -m evaluation.experiment_run all --plan examples/evaluation/scn001-pilot.
 - `run --order N`은 다음 순서의 신규 실행 또는 이미 제출한 Run의 복구에 사용합니다. 신규 제출 때 앞 슬롯 전부의 수락·종료/보류 기록이 없으면 `PREVIOUS_ORDER_NOT_COMPLETED`로 중단합니다. 앞 Run이 종료됐고 인계만 실패했다면 다음 슬롯을 실행할 수 있으며, 기존 Run 인계 복구도 계속 가능합니다.
 - 인계 폴더가 이미 있으면 모든 목록 파일의 해시, Run·구조·상태·고정 설정, v1부터 최종 버전까지의 코드·Manifest를 확인합니다. 정상 폴더는 기록만 복구하고, 불완전한 폴더는 `.incomplete-…` 이름으로 보존한 뒤 같은 Run을 다시 내보냅니다. 다른 Run·설정의 폴더는 거부합니다.
 
-현재 보호 시험 묶음은 0.5.2(앱 import 단계 로그 노출까지 수집)이며 최종 지문은 [최종 시험지](../../docs/evaluation/final_exam.md)에 기록합니다. 0.5.1 이하 설정·채점 결과를 새 지문의 결과와 섞지 않으며, 새 측정 전에 보호 케이스와 실험 등록표를 현재 버전으로 준비합니다(`python -m evaluation.protected_tests export --out configs/experiment/ver1 --force`).
+현재 보호 시험 묶음은 0.7.0이며(0.5.2 앱 import 단계 로그 수집 → 0.6.0 검사별 세부 관찰 기록 → 0.7.0 FAIL 뒤에도 독립 세부 항목 계속 검사, 9개 검사·요구사항·점수 산식은 그대로) 최종 지문은 [최종 시험지](../../docs/evaluation/final_exam.md)에 기록합니다. 0.6.0 이하 설정·채점 결과를 새 지문의 결과와 섞지 않으며, 새 측정 전에 보호 케이스와 실험 등록표를 현재 버전으로 준비합니다(`python -m evaluation.protected_tests export --out configs/experiment/ver1 --force`).
+
+### 검사별 세부 결과 (`check_details`, 0.6.0~0.7.0)
+
+최종 채점은 9개 검사마다 세부 항목(응답 상태, 사용자 수 증가량, Argon2 설정값 등)의 기대값·실제값·상태를 `check_details.json`·`check_details.md`로 함께 남깁니다. 비밀번호·해시·이메일·응답 본문은 담지 않고 참/거짓·정수·응답 코드만 담습니다. 공식 판정과 점수는 기존 9개 검사 결과만 쓰며 세부 항목 수로 바뀌지 않습니다. 세부 기록이 없거나 상위 판정과 어긋나면 그 검사의 세부 기록을 미검증으로 표시합니다. 정의와 예시는 [세부 결과 설명](../../docs/evaluation/check_details.md)에 있습니다.
+
+실행기와 dev Host 사이 계약은 가짜 Host뿐 아니라 실제 dev 앱에 붙여서도 시험합니다(`tests/evaluation/test_experiment_run_host_contract.py`: 토큰·중복 방지 키·200 재생·접수 조회 지문·복구).
 
 ### 점검 수정 (2026-11-15, 0.5.1)
 

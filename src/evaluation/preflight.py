@@ -185,6 +185,8 @@ def _browser_run(docker, image, browser, files, timeout=150):
         report = json.loads(done.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
         return 'HOST_BROWSER_REPORT_INVALID'
+    if not isinstance(report, dict):
+        return 'HOST_BROWSER_REPORT_INVALID'
     if report.get('error') == 'BROWSER_START_FAILED':
         return 'HOST_BROWSER_START_FAILED'
     if (report.get('format') != 'browser-v1' or type(report.get('total')) is not int or report['total'] < 1
