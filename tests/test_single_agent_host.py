@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import unittest
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -34,7 +34,8 @@ class _SingleFixture(fixtures._HostFixture):
         super().setUp()
         self.runtime["agents"] = {"SINGLE_AGENT": {"port": 8105,
             "databasePath": "../.data/agents/single_agent.sqlite3", "bearerTokenEnv": "A2A_PLATFORM_SINGLE_AGENT_TOKEN"}}
-        self.environment = {key: value for key, value in self.environment.items() if key.endswith("API_KEY")}
+        self.environment = {key: value for key, value in self.environment.items()
+                            if key.endswith("API_KEY") or key == "A2A_HOST_API_TOKEN"}
         self.environment["A2A_PLATFORM_SINGLE_AGENT_TOKEN"] = "single-fixture-bearer-not-a-real-key"
         self.write()
 
@@ -83,6 +84,8 @@ class SingleHostConfigurationTests(_SingleFixture, unittest.TestCase):
     def test_missing_single_credentials_and_storage_aliases_fail_before_creation(self):
         plan = self.inspect()
         for key in tuple(self.environment):
+            if key == "A2A_HOST_API_TOKEN":
+                continue  # The Host credential is checked by create_host, not the Agent runtime resolver.
             environment = dict(self.environment)
             environment.pop(key)
             with self.subTest(key=key), self.assertRaises(RuntimeConfigurationError):
@@ -129,7 +132,10 @@ class SingleHostCreationTests(_SingleFixture, unittest.IsolatedAsyncioTestCase):
                     await stack.enter_async_context(app.router.lifespan_context(app))
                 client = await stack.enter_async_context(httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=platform.orchestrator_app), base_url="http://127.0.0.1:8000"))
-                response = await client.post("/api/v1/runs", json={"scenarioId": str(fixtures.SCN_001_ID),
+                response = await client.post("/api/v1/runs", headers={
+                    "Authorization": "Bearer " + self.environment["A2A_HOST_API_TOKEN"],
+                    "Idempotency-Key": str(uuid4()),
+                }, json={"scenarioId": str(fixtures.SCN_001_ID),
                     "requestText": "승인한 회원가입 기준을 구현해 주세요.",
                     "configuration": approved_run_configuration(platform).model_dump(mode="json", by_alias=True)})
                 self.assertEqual(response.status_code, 201, response.text)

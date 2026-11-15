@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import hashlib
 import inspect
 import json
+import os
 from pathlib import Path
 import stat
 from uuid import UUID
@@ -42,6 +43,8 @@ from orchestrator.artifacts.service import ArtifactStore
 from orchestrator.domain.run_configuration import ExecutionLimits, RunConfiguration
 from orchestrator.domain.states import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
+from orchestrator.api.host_access import host_token_from_environment
+from orchestrator.core.security import register_secret_values
 from orchestrator.workspaces.registry import WorkspaceRegistry
 
 
@@ -303,6 +306,10 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
     try:
         resolved = resolve_runtime_configuration(plan.runtime,
             base_directory=plan.runtime_directory, environ=environ)
+        host_token = host_token_from_environment(os.environ if environ is None else environ,
+            other_credentials=(secret for settings in resolved.agent_settings.values()
+                               for secret in (settings.bearer_token, settings.llm_api_key)))
+        register_secret_values(host_token.get_secret_value())
     except Exception:
         raise HostFactoryError() from None
     providers = {}
@@ -379,6 +386,10 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
         # Host-only assembly metadata, not a new HTTP/Artifact/Trace contract.
         platform.orchestrator_app.state.approved_host_configuration_json = plan._configuration_json
         platform.orchestrator_app.state.host_policy_sha256 = plan.policy_sha256
+        platform.orchestrator_app.state.host_api_token = host_token
+        platform.orchestrator_app.state.host_api_auth_required = True
+        platform.orchestrator_app.state.require_idempotency_key = True
+        platform.orchestrator_app.state.approved_configuration_provider = lambda: approved_run_configuration(platform)
         return platform
     except BaseException as error:
         canceled = await _close_allocated(providers.values(), platform)
@@ -393,6 +404,8 @@ def approved_run_configuration(platform):
     """Fresh public configuration template; no keys/Host paths/live Source."""
     try:
         if type(platform) is not OwnedAgentPlatform:
+            raise ValueError
+        if platform._lifecycle.closed:
             raise ValueError
         return RunConfiguration.model_validate(parse_json(platform.orchestrator_app.state.approved_host_configuration_json))
     except Exception:

@@ -2,6 +2,8 @@
 
 작성 기준: 2026-10-11. 대상: 1번 Orchestrator + 2번 Agent/MCP. 현재 코드의 사용법과 연결 계약을 정리한 문서이며, 팀원 제품·독립 평가를 새로 구현하거나 실제 연결한 단계는 아니다.
 
+2026-11-15 후속: 실제 `create_host()` 실행에는 별도의 프로세스 환경 `A2A_HOST_API_TOKEN`이 필요하다. `/api/v1/*` 호출은 서비스 Bearer로 인증하고 Run 생성에는 내부 UUIDv4 `Idempotency-Key`를 추가한다. 공개 설정은 `GET /api/v1/host/approved-configuration?scenarioId={uuid}`로 조회한다. 본문의 과거 공개 payload 예제는 유지하되 헤더 계약은 [83번](83-host-service-authentication.md)~[85번](85-idempotent-run-submission.md)을 적용한다. 제품 연결의 Host 주소는 승인 runtime의 8002로 설정하며 아래 8000 설명은 과거 기본값이다.
+
 ## 1. 지금 어디까지 된 상태인가
 
 | 구분 | 상태 |

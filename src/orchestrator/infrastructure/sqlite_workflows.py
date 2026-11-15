@@ -35,6 +35,7 @@ from orchestrator.domain import (
 )
 from orchestrator.domain.models import utc_now
 from orchestrator.domain.planning_artifacts import RequirementArtifact
+from orchestrator.domain.submissions import RunSubmissionRecord, SubmissionKeyConflict
 from orchestrator.core.security import redact_data, redact_text
 
 
@@ -84,7 +85,8 @@ class SQLiteWorkflowRepository:
         *,
         run_configuration=None,
         workspace=None,
-    ) -> None:
+        submission: RunSubmissionRecord | None = None,
+    ) -> tuple[RunSubmissionRecord, bool] | None:
         _validate_bundle(run, steps, events)
         if run_configuration is None:
             from orchestrator.domain.run_configuration import RunConfigurationArtifact
@@ -98,6 +100,19 @@ class SQLiteWorkflowRepository:
                 root_path=str((self.database_path.parent / "workspaces" / str(run.workspace_id)).resolve()),
             )
         with self._transaction() as connection:
+            if submission is not None:
+                existing = connection.execute(
+                    "SELECT payload_json FROM run_submissions WHERE internal_key = ?",
+                    (str(submission.internal_key),),
+                ).fetchone()
+                if existing is not None:
+                    record = RunSubmissionRecord.model_validate_json(existing[0])
+                    if record.request_sha256 != submission.request_sha256:
+                        raise SubmissionKeyConflict()
+                    return record, False
+                if (submission.run_id != run.run_id or not steps
+                        or submission.first_step_id != steps[0].workflow_step_id):
+                    raise ValueError("Submission identity differs from the initial Run bundle")
             connection.execute(
                 "INSERT INTO workflow_runs(run_id, status, created_at, updated_at, payload_json) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -134,6 +149,20 @@ class SQLiteWorkflowRepository:
                     "INSERT INTO workspaces(workspace_id, run_id, payload_json) VALUES (?, ?, ?)",
                     (str(workspace.workspace_id), str(run.run_id), workspace.model_dump_json()),
                 )
+            if submission is not None:
+                connection.execute(
+                    "INSERT INTO run_submissions(internal_key, run_id, first_step_id, payload_json) VALUES (?, ?, ?, ?)",
+                    (str(submission.internal_key), str(run.run_id), str(submission.first_step_id),
+                     submission.model_dump_json(by_alias=True)),
+                )
+                return submission, True
+
+    def get_submission(self, internal_key: UUID) -> RunSubmissionRecord | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM run_submissions WHERE internal_key = ?", (str(internal_key),)
+            ).fetchone()
+        return RunSubmissionRecord.model_validate_json(row[0]) if row else None
 
     def get_run_configuration(self, run_id: UUID):
         from orchestrator.domain.run_configuration import RunConfigurationArtifact
@@ -1683,6 +1712,18 @@ class SQLiteWorkflowRepository:
                 );
                 CREATE INDEX IF NOT EXISTS workflow_steps_by_run
                     ON workflow_steps(run_id, created_at, workflow_step_id);
+                CREATE TABLE IF NOT EXISTS run_submissions (
+                    internal_key TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL UNIQUE REFERENCES workflow_runs(run_id),
+                    first_step_id TEXT NOT NULL UNIQUE REFERENCES workflow_steps(workflow_step_id),
+                    payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
+                );
+                CREATE TRIGGER IF NOT EXISTS run_submissions_no_update
+                    BEFORE UPDATE ON run_submissions
+                    BEGIN SELECT RAISE(ABORT, 'run_submissions are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS run_submissions_no_delete
+                    BEFORE DELETE ON run_submissions
+                    BEGIN SELECT RAISE(ABORT, 'run_submissions are immutable'); END;
                 CREATE TABLE IF NOT EXISTS agent_contexts (
                     run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
                     agent_id TEXT NOT NULL,

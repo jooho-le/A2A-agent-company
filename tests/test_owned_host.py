@@ -101,6 +101,7 @@ class _HostFixture:
         }
         self.cases = {"schemaVersion": 1, "cases": []}
         self.environment = fake_environment()
+        self.environment["A2A_HOST_API_TOKEN"] = "dedicated-host-test-service-token-not-a-real-secret"
         self.providers = []
         self.write()
 
@@ -529,7 +530,10 @@ class OwnedHostCreationTests(_HostFixture, unittest.IsolatedAsyncioTestCase):
         approved = self.inspect().approved_configuration
         changed = approved.model_copy(update={"starting_snapshot_sha256": "f" * 64})
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=platform.orchestrator_app), base_url="http://inprocess") as client:
-            response = await client.post("/api/v1/runs", json={"scenarioId": str(SCN_001_ID), "requestText": "inert fixture request", "configuration": changed.model_dump(mode="json", by_alias=True)})
+            response = await client.post("/api/v1/runs", headers={
+                "Authorization": "Bearer " + self.environment["A2A_HOST_API_TOKEN"],
+                "Idempotency-Key": str(uuid4()),
+            }, json={"scenarioId": str(SCN_001_ID), "requestText": "inert fixture request", "configuration": changed.model_dump(mode="json", by_alias=True)})
         self.assertEqual(response.status_code, 422)
         self.assertNotIn(str(self.directory), response.text)
         repository = platform.orchestrator_app.state.workflow_repository
