@@ -453,7 +453,7 @@ export function mountAgentOffice(root, {
       }
     }
     function updateUi() { updateActualUi(); }
-    function motionAllowed() { return motionEnabled && !reducedMotion.matches; }
+    function motionAllowed() { return motionEnabled && !reducedMotion.matches && !root.closest('[inert]'); }
     function sceneReady() {
       return renderedOnce && !disposed && root.isConnected && stage.clientWidth > 0 && stage.clientHeight > 0
         && document.visibilityState === 'visible' && element('loading').hidden

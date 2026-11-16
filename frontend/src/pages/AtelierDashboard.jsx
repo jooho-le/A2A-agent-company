@@ -95,6 +95,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
   }, [])
   useEffect(() => {
     document.title = copy[0] + ' — AI 에이전트 회사'
+    rootRef.current?.querySelector('.content')?.scrollTo({ top: 0, behavior: 'instant' })
     rootRef.current?.querySelector('#page-title')?.focus({ preventScroll: true })
   }, [copy])
   function requestNew() {
@@ -124,7 +125,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
     : runMonitor.run?.status === 'FINISHED' ? ({ SUCCESS: '업무가 성공적으로 완료되었습니다.', FAIL: '검증을 통과하지 못했습니다.', UNVERIFIED: '검증이 완료되지 않았습니다.', HUMAN_REVIEW: '담당자의 검토가 필요합니다.' })[runMonitor.run.verdict] || '업무가 종료되었습니다.'
       : activeWork?.dispatchStatus === 'NOT_CONFIGURED' ? '업무는 저장되었지만 실행 서버가 연결되지 않아 대기 중입니다.' : '팀의 업무 진행 상황을 자동으로 확인하고 있습니다.' : ''
 
-  return <div ref={rootRef} className={'atelier-dashboard ' + (motion ? 'motion-ready' : 'motion-paused') + (view === 'home' ? ' office-immersive' : '') + (mobile && drawerOpen ? ' nav-open' : '')}>
+  return <div ref={rootRef} className={'atelier-dashboard workspace-shell ' + (motion ? 'motion-ready' : 'motion-paused') + (view === 'home' ? ' office-immersive' : '') + (mobile && drawerOpen ? ' nav-open' : '')}>
     <button type="button" className="sidebar-dismiss" aria-label="회사 메뉴 닫기" tabIndex={-1} onClick={() => closeDrawer(true)} />
     <AtelierIcons />
     <div className="app"><div className="layout">
