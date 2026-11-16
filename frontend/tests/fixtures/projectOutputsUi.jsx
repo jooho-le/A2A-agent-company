@@ -26,9 +26,11 @@ globalThis.fetch = async (url, options = {}) => {
   let data, status = 200
   if (path === '/api/projects') data = { projects: [] }
   else if (path === '/api/v1/scenarios') data = { scenarios: scenario === 'unregistered' ? [] : [{ scenarioId }] }
+  else if (path === '/api/v1/host/approved-configuration') data = { scenarioId, configurationId: 'c'.repeat(64), configuration: { architecture: 'MULTI_AGENT' } }
+  else if (path === '/api/projects/' + id(5)) data = { projectId: id(5), name: '테스트 프로젝트', scenarioId, createdAt: '2026-11-16T00:00:00', updatedAt: '2026-11-16T00:00:00', runs: [] }
   else if (path === '/api/v1/runs' && options.method === 'POST') {
     if (scenario === 'failure') { status = 422; data = { detail: 'mock rejection' } }
-    else { data = { run, firstStep: step, dispatchStatus: 'SCHEDULED' } }
+    else { data = { run, firstStep: step, dispatchStatus: 'SCHEDULED', projectId: id(5), submissionStatus: 'CREATED', requestId: new Headers(options.headers).get('Idempotency-Key') } }
   } else if (path === `/api/v1/runs/${runId}`) data = scenario === 'finished' ? { ...run, status: 'FINISHED', verdict: 'SUCCESS' } : run
   else if (path.endsWith('/steps')) data = { runId, steps: [step] }
   else if (path.endsWith('/configuration')) data = { runId, artifactType: 'RUN_CONFIGURATION', configuration: { architecture: 'MULTI_AGENT' } }
@@ -46,6 +48,7 @@ globalThis.fetch = async (url, options = {}) => {
 async function mount(approved) {
   if (root) { await act(async () => root.unmount()); host.remove() }
   calls = []
+  sessionStorage.removeItem('ai-company.selected-project-id'); sessionStorage.removeItem('ai-company.pending-office-submission')
   host = document.createElement('div'); document.body.append(host)
   root = createRoot(host)
   await act(async () => root.render(<StrictMode><Dashboard approvedRunSubmission={approved} /></StrictMode>))
@@ -82,7 +85,7 @@ async function verify() {
   check(!document.querySelector('#projects-view .project-card'), 'no demo projects')
   await navigate('outputs')
   check(document.querySelector('#outputs-view').textContent.includes('접수한 실제 업무가 없습니다'), 'outputs empty')
-  check(!document.querySelector('#outputs-view .output-card') && calls.every(call => call.url === 'http://127.0.0.1:8000/api/projects'), 'no demo files or Run API calls without run')
+  check(!document.querySelector('#outputs-view .output-card') && calls.every(call => !call.url.startsWith('/api/v1/runs')), 'no demo files or Run API calls without run')
   checks.push('empty projects and outputs contain no demo data')
 
   scenario = 'ready'; await mount(approval); await navigate('home'); fill(); await submit()
@@ -92,7 +95,7 @@ async function verify() {
   check(card.textContent.includes('계획에이전트 · 작업') && !card.textContent.includes('%'), 'step state and no invented percent')
   check(!card.querySelector('.progress-track'), 'no numeric progress graphic')
   await act(async () => card.click())
-  check(globalThis.__officeProps.runDisplayState.runId === runId && globalThis.__officeProps.displayMode === 'actual', 'project selects same actual office run')
+  check(globalThis.__officeProps.runDisplayState.runId === runId && !globalThis.__officeProps.onDisplayModeChange, 'project selects same actual office run')
   check(postCount() === 1, 'project navigation does not create runs')
   checks.push('project card connects current Run and Step without progress percentage')
 

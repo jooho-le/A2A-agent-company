@@ -24,7 +24,7 @@ test('통합 업무 입력창: 단일 UI·승인 차단·자동 Run/Trace 연결
         if (source.endsWith('/AgentOffice3D')) return '\0office'
         if (source.endsWith('/useAtelierMotion')) return '\0motion'
       }, load(id) {
-        if (id === '\0office') return `import { createElement } from 'react'; export default function Office(props) { globalThis.__officeProps = props; return createElement('section', { 'data-testid': 'office' }); }`
+        if (id === '\0office') return `import { createElement } from 'react'; export default function Office(props) { globalThis.__officeProps = props; return createElement('section', { 'data-testid': 'office' }, props.requestPanel); }`
         if (id === '\0motion') return 'export default function useAtelierMotion() {} export function useMediaQuery() { return false }'
         if (id === '\0style') return ''
       } }],

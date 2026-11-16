@@ -31,7 +31,7 @@ test('선택 후 새로고침: ID만 저장하고 JWT 상세 재조회 결과로
   let response = project
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     requests.push(url)
-    assert.equal(url, `http://127.0.0.1:8000/api/projects/${project.projectId}`)
+    assert.equal(url, `/api/projects/${project.projectId}`)
     assert.equal(options.method, 'GET')
     assert.equal(options.headers.Authorization, 'Bearer mock-user-a-token')
     return Response.json(response)

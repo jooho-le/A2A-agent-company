@@ -1,3 +1,4 @@
+Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => 'test-product-jwt' } })
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { access, mkdtemp, writeFile, rm } from 'node:fs/promises'
@@ -24,7 +25,7 @@ test('프로젝트·보관함: 현재 Run 연결, 실제 목록, 빈 상태와 �
         if (source.endsWith('/AgentOffice3D')) return '\0office'
         if (source.endsWith('/useAtelierMotion')) return '\0motion'
       }, load(id) {
-        if (id === '\0office') return `import { createElement } from 'react'; export default function Office(props) { globalThis.__officeProps = props; return createElement('section', { 'data-testid': 'office' }); }`
+        if (id === '\0office') return `import { createElement } from 'react'; export default function Office(props) { globalThis.__officeProps = props; return createElement('section', { 'data-testid': 'office' }, props.requestPanel); }`
         if (id === '\0motion') return 'export default function useAtelierMotion() {} export function useMediaQuery() { return false }'
         if (id === '\0style') return ''
       } }],

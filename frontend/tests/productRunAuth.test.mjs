@@ -7,7 +7,7 @@ const runId = '70000000-0000-4000-8000-000000000001'
 const token = 'mock-product-jwt-only'
 const run = { runId, status: 'RECEIVED' }
 
-test('JWT: 기존 sessionStorage 토큰으로 보호 요청 헤더 구성, 현재 8001에는 미전송', async t => {
+test('JWT: 기존 sessionStorage 토큰으로 보호 요청 헤더 구성, 제품 API에만 전송', async t => {
   const reads = [], requests = []
   const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true,
@@ -23,8 +23,8 @@ test('JWT: 기존 sessionStorage 토큰으로 보호 요청 헤더 구성, 현�
   })
   // 현재 제품 전환이 꺼진 앱 경로는 토큰을 읽거나 추가하지 않습니다.
   await getAgentRun(runId)
-  assert.equal(new Headers(requests[0].options.headers).has('Authorization'), false)
-  assert.deepEqual(reads, [])
+  assert.equal(new Headers(requests[0].options.headers).get('Authorization'), `Bearer ${token}`)
+  assert.deepEqual(reads, ['access_token'])
   // 보호 전송기도 기본값으로는 실제 프록시에 보내지 못합니다.
   await assert.rejects(createProductRunFetch()(`/api/v1/runs/${runId}`), { code: 'PRODUCT_API_NOT_READY' })
   assert.equal(requests.length, 1)

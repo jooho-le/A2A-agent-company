@@ -2,7 +2,7 @@ import { loginRequired } from './productRunRequest.js'
 import { runUuid } from './agentRunSubmission.js'
 
 // 기존 제품 로그인과 같은 주소입니다. /api/v1 Orchestrator 프록시는 사용하지 않습니다.
-const projectsUrl = 'http://127.0.0.1:8000/api/projects'
+const projectsUrl = '/api/projects'
 
 function projectError(message, code, status = null) {
   return Object.assign(new Error(message), { name: 'ProjectApiError', code, status })

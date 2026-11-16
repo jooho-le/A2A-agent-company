@@ -1,4 +1,4 @@
-"""허용된 Host GET만 준비합니다. 서비스 인증 합의 전 실제 전송은 차단합니다."""
+"""제품 서버 전용 Host 전송. 브라우저 JWT와 Host 자격증명은 분리합니다."""
 
 import http.client
 import json
@@ -10,12 +10,11 @@ from uuid import UUID
 
 
 HOST_KEY = "local-multi"
-# 현재 Host에는 inbound 서비스 토큰 검증이 없습니다. 환경변수로 해제하지 않습니다.
-# 팀장과 인증 계약 및 Host의 거부 동작을 검증한 뒤에만 이 경계를 변경합니다.
-HOST_SERVICE_AUTH_VERIFIED = False
+# 실제 Host의 HostServiceAuthenticationMiddleware 계약(83번)이 구현되었습니다.
+HOST_SERVICE_AUTH_VERIFIED = True
 TIMEOUT_SECONDS = 5
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
-RESOURCES = frozenset(("", "steps", "events", "issues", "artifacts"))
+RESOURCES = frozenset(("", "steps", "events", "issues", "artifacts", "configuration"))
 
 
 class HostUnavailable(Exception):
@@ -25,6 +24,11 @@ class HostUnavailable(Exception):
 
 class HostRunNotFound(Exception):
     pass
+
+
+class HostRejected(Exception):
+    def __init__(self, status):
+        self.status = status
 
 
 class HostReadClient:
@@ -44,6 +48,27 @@ class HostReadClient:
         run_id = str(UUID(str(run_id)))
         if resource not in RESOURCES or not 1 <= limit <= 500 or offset < 0:
             raise HostUnavailable()
+        path = f"/api/v1/runs/{run_id}" + (f"/{resource}" if resource else "")
+        if resource == "events":
+            path += "?" + urlencode({"limit": limit, "offset": offset})
+        payload = self.exchange("GET", path)
+        if payload.get("runId") != run_id:
+            raise HostUnavailable()
+        if resource and resource != "configuration" and not isinstance(payload.get(resource), list):
+            raise HostUnavailable()
+        return payload
+
+    def exchange(self, method, path, *, body=None, key=None):
+        if not HOST_SERVICE_AUTH_VERIFIED:
+            raise HostUnavailable()
+        try:
+            return self._exchange(method, path, body=body, key=key)
+        except (HostRunNotFound, HostRejected):
+            raise
+        except Exception:
+            raise HostUnavailable() from None
+
+    def _exchange(self, method, path, *, body, key):
         token = os.environ.get("A2A_HOST_API_TOKEN", "")
         if not token or not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", token):
             raise HostUnavailable()
@@ -57,17 +82,23 @@ class HostReadClient:
         # 평문 서비스 토큰은 로컬 연결에만 허용합니다.
         if url.scheme == "http" and url.hostname not in ("127.0.0.1", "localhost", "::1"):
             raise HostUnavailable()
-        path = f"/api/v1/runs/{run_id}" + (f"/{resource}" if resource else "")
-        if resource == "events":
-            path += "?" + urlencode({"limit": limit, "offset": offset})
         connection_type = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
         # http.client는 환경 프록시·리다이렉트를 따라가지 않습니다.
         with closing(connection_type(url.hostname, url.port, timeout=TIMEOUT_SECONDS)) as connection:
-            connection.request("GET", path, headers={"Accept": "application/json", "Authorization": f"Bearer {token}"})
+            headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+            options = {}
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+                options["body"] = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            if key is not None:
+                headers["Idempotency-Key"] = str(UUID(str(key)))
+            connection.request(method, path, headers=headers, **options)
             with closing(connection.getresponse()) as response:
                 if response.status == 404:
                     raise HostRunNotFound()
-                if response.status != 200:
+                if 400 <= response.status < 500 and response.status not in (401, 403):
+                    raise HostRejected(response.status)
+                if response.status not in (200, 201):
                     raise HostUnavailable()
                 if response.getheader("Content-Type", "").split(";")[0].strip().lower() != "application/json":
                     raise HostUnavailable()
@@ -75,9 +106,7 @@ class HostReadClient:
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise HostUnavailable()
                 payload = json.loads(body)
-        if not isinstance(payload, dict) or payload.get("runId") != run_id:
-            raise HostUnavailable()
-        if resource and not isinstance(payload.get(resource), list):
+        if not isinstance(payload, dict):
             raise HostUnavailable()
         # Host가 서비스 토큰을 잘못 반사하더라도 브라우저로 전달하지 않습니다.
         if token in json.dumps(payload, ensure_ascii=False):

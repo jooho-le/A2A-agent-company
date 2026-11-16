@@ -3,7 +3,6 @@ import { addPlannerLeadership } from './office3dLeader'
 import { createAgentCloseupCamera } from './office3dPlannerCamera'
 import { humanAgents } from './humanAgents'
 import { createOfficePerformance, finaleOptions } from './office3dPerformance'
-import { completeCelebration, getNextCelebration, resetCelebrationOrder } from './officeCelebrationSequence'
 import { createOfficeRunController } from './office3dRunController'
 import { createRunSuccessCeremony } from './runSuccessCeremony'
 import { addOfficeOrchestrator, managementDisplay, updateOfficeBadges, orchestratorIndex } from './office3dOrchestrator'
@@ -13,9 +12,7 @@ import { buildOfficeRunPopups, popupResultNotice, renderOfficeRunPopups } from '
 
 // 제공된 HTML의 시연·카메라 로직을 영역 내부로 한정한 수명 주기 어댑터입니다.
 export function mountAgentOffice(root, {
-  requestText,
   motionEnabled,
-  displayMode = 'mock',
   runDisplayState = null,
   successCeremony = createRunSuccessCeremony()
 }, engine) {
@@ -47,6 +44,7 @@ export function mountAgentOffice(root, {
     getOfficeAgentPose,
     applyOfficeAgentPose
   } = engine;
+  const displayMode = 'actual';
   const events = new AbortController();
   let frame = 0;
   let disposed = false;
@@ -248,8 +246,6 @@ export function mountAgentOffice(root, {
       cameraButton = element("home"),
       celebration = element("celebration"),
       reducedMotion = matchMedia("(prefers-reduced-motion: reduce)"),
-      timeline = element("timeline"),
-      playButton = element("play"),
       stepButtons = [...root.querySelectorAll(".office3d-step")].sort((a, b) => Number(a.dataset.agentIndex) - Number(b.dataset.agentIndex)),
       agentLabels = office.agents.map((i, e) => {
         let t = document.createElement("button");
@@ -261,53 +257,13 @@ export function mountAgentOffice(root, {
           updateUi();
         }), stage.append(t), t;
       }),
-      stateLabels = {
-        waiting: "대기 중",
-        working: "작업 중",
-        handoff: "결과 전달",
-        resting: "정리 중",
-        completed: "휴식 중"
-      },
-      roleColors = ["#9bafc2", "#b1a0c5", "#93ae98", "#8fa7c8", "#c7aa68"],
-      time = 0,
-      playing = !1,
-      speed = tr,
       autoCamera = !0,
       selectedAgent = -1,
       statusOpen = !1,
       lastFrame = performance.now(),
       lastUiFrame = -1,
       cameraTarget = homeTarget.clone(),
-      request = requestText || "업무 흐름 시연",
-      requestKind = al(request),
-      errorMode = element("error-mode").value,
-      finale = getNextCelebration().value,
-      completionRecorded = false,
-      previewingFinale = false,
-      bubbleKey = "";
-    function beginPresentation() {
-      finale = getNextCelebration().value;
-      completionRecorded = false;
-      previewingFinale = false;
-      time = 0;
-    }
-    function recordCompletion() {
-      if (displayMode === 'actual') return;
-      if (time < En || completionRecorded || previewingFinale) return;
-      const selected = completeCelebration();
-      finale = selected.value;
-      completionRecorded = true;
-      if (!selected.persisted) element("notice").textContent = '브라우저 저장소를 사용할 수 없어 새로고침 후에는 세리머니 순서가 초기화됩니다.';
-    }
-    function updatePlayButton() {
-      playButton.textContent = playing ? "Ⅱ 일시정지" : time >= bn ? "↻ 다시 재생" : "▶ 재생", playButton.setAttribute("aria-pressed", String(playing));
-    }
-    function togglePlayback() {
-      if (displayMode === 'actual') return;
-      if (time >= bn) beginPresentation();
-      playing = motionEnabled && !playing;
-      updatePlayButton();
-    }
+      finale = 'team';
     function setAutoCamera(i) {
       if (!i) {
         agentCamera.hide();
@@ -321,72 +277,8 @@ export function mountAgentOffice(root, {
     }
     setAutoCamera(!0);
     listen(cameraButton, "click", () => setAutoCamera(!autoCamera));
-    listen(playButton, "click", togglePlayback);
-    listen(timeline, "input", () => {
-      if (displayMode === 'actual') return;
-      time = Number(timeline.value), recordCompletion(), updatePlayButton(), updateUi();
-    });
-    listen(element("speed"), "change", i => speed = Number(i.target.value));
-    // 상단 atelier 요청 폼과 별개인 시각적 시연만 다시 시작합니다.
-    listen(element("restart"), "click", () => {
-      if (displayMode === 'actual') return;
-      errorMode = element("error-mode").value;
-      beginPresentation();
-      playing = motionEnabled;
-      selectedAgent = -1;
-      setAutoCamera(true);
-      updatePlayButton();
-      updateUi();
-    });
-    listen(element("error-mode"), "change", event => {
-      if (displayMode === 'actual') return;
-      errorMode = event.target.value;
-      updateUi();
-    });
-    listen(element("preview-finale"), "click", () => {
-      if (displayMode === 'actual') return;
-      // 완료한 발표는 같은 포즈를 다시 보여주고, 미완료 발표는 다음 포즈만 미리 봅니다.
-      if (!completionRecorded) {
-        finale = getNextCelebration().value;
-        previewingFinale = true;
-      }
-      time = En;
-      playing = motionEnabled;
-      setAutoCamera(true);
-      updatePlayButton();
-      updateUi();
-    });
-    listen(element("reset-finale"), "click", () => {
-      if (displayMode === 'actual') return;
-      const persisted = resetCelebrationOrder();
-      beginPresentation();
-      playing = false;
-      setAutoCamera(true);
-      element("notice").textContent = persisted
-        ? '리허설 순서를 초기화했습니다. 다음 발표 완료 시 1번 포즈를 표시합니다.'
-        : '현재 페이지의 순서를 1번으로 초기화했습니다. 브라우저 저장소는 사용할 수 없습니다.';
-      updatePlayButton();
-      updateUi();
-    });
-    listen(element('success-play'), 'click', () => {
-      if (displayMode !== 'actual' || handoffs.busy() || !handoffs.info().ready) return;
-      if (successCeremony.start({ ready: sceneReady(), motionEnabled: motionAllowed(), manual: true })) {
-        selectedAgent = -1; setAutoCamera(true);
-      }
-      updateUi();
-    });
-    listen(element('success-reset'), 'click', () => {
-      if (displayMode !== 'actual' || successCeremony.info().playback && !successCeremony.info().playback.completed) return;
-      if (!window.confirm('실제 성공 세리머니 순서와 처리한 Run 기록을 초기화할까요? 목업 기록은 유지됩니다.')) return;
-      if (successCeremony.reset()) { actualPlayback = null; restoreActualPose(); }
-      updateUi();
-    });
-    stepButtons.forEach((i, e) => listen(i, "click", () => {
-      if (displayMode === 'actual') {
-        selectedAgent = e; setAutoCamera(true); updateUi(); return;
-      }
-      if (e === orchestratorIndex) { selectedAgent = e; setAutoCamera(true); updateUi(); return; }
-      time = At[e].start + .4, selectedAgent = e, playing = motionEnabled, setAutoCamera(!0), updatePlayButton(), updateUi();
+    stepButtons.forEach((button, index) => listen(button, "click", () => {
+      selectedAgent = index; setAutoCamera(true); updateUi();
     }));
     listen(element("fullscreen"), "click", () => {
       const action = document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen?.();
@@ -394,9 +286,6 @@ export function mountAgentOffice(root, {
     });
     listen(element("vectors"), "click", i => {
       statusOpen = !statusOpen, element("vector-panel").hidden = !statusOpen, i.currentTarget.setAttribute("aria-pressed", String(statusOpen)), updateUi();
-    });
-    listen(root, "keydown", i => {
-      i.code === "Space" && !["INPUT", "SELECT", "BUTTON", "TEXTAREA"].includes(document.activeElement.tagName) && (i.preventDefault(), togglePlayback());
     });
     function resize() {
       renderer.setSize(Math.max(1, stage.clientWidth), Math.max(1, stage.clientHeight), !1), camera.aspect = Math.max(1, stage.clientWidth) / Math.max(1, stage.clientHeight), camera.zoom = Math.min(1, camera.aspect / 1.45) * (camera.aspect > 1.6 ? 1.05 : 1), camera.updateProjectionMatrix();
@@ -419,9 +308,8 @@ export function mountAgentOffice(root, {
         return active;
       }
       if (displayMode === 'actual' && finaleTime === null) active = selectedAgent >= 0 ? selectedAgent : bubbleInfo?.agent ?? -1;
-      else if (displayMode === 'mock' && selectedAgent === orchestratorIndex && time < En) active = orchestratorIndex;
-      else if (bubbleInfo && time < At[bubbleInfo.agent].end + .5 * pt) active = bubbleInfo.agent;
-      if (active >= 0 && (displayMode === 'actual' || time < En)) {
+
+      if (active >= 0 && true) {
         cameraTarget.copy(agentCamera.update(camera, stage.clientWidth, stage.clientHeight, active));
         return active;
       }
@@ -434,7 +322,7 @@ export function mountAgentOffice(root, {
       referenceCamera.lookAt(homeTarget);
       referenceCamera.updateMatrixWorld();
       referenceCamera.updateProjectionMatrix();
-      const finaleCamera = finaleTime !== null || displayMode === 'mock' && time >= En;
+      const finaleCamera = finaleTime !== null;
       const agents = finaleCamera ? office.agents : active >= 0 ? [office.agents[active]] : [];
       // 넓은 화면의 전체 보기만 소폭 확대합니다. 높이·인물 비율과 세리머니 구도는 유지합니다.
       let zoom = baseZoom * (camera.aspect > 1.6 ? 1.05 : 1), offsetX = 0, offsetY = 0;
@@ -470,7 +358,7 @@ export function mountAgentOffice(root, {
       const maxY = (-1 - photoBottom * ratio) * stage.clientHeight / 2;
       offsetX = minX <= maxX ? Qt.clamp(offsetX, minX, maxX) : (minX + maxX) / 2;
       offsetY = minY <= maxY ? Qt.clamp(offsetY, minY, maxY) : (minY + maxY) / 2;
-      const moving = displayMode === 'actual' ? motionEnabled && !reducedMotion.matches : playing && motionEnabled;
+      const moving = motionEnabled && !reducedMotion.matches;
       const blend = !moving ? 1 : 1 - Math.exp(-delta * 2.8);
       digitalView.zoom = Qt.lerp(digitalView.zoom, zoom, blend);
       digitalView.x = Qt.lerp(digitalView.x, offsetX, blend);
@@ -511,30 +399,11 @@ export function mountAgentOffice(root, {
       }
       return s;
     }
-    function positionBubble(i) {
-      let e = faceBounds(office.agents[i], !0),
-        t = stage.clientWidth,
-        n = stage.clientHeight,
-        s = (e.left + e.right) / 2;
-      if (!Number.isFinite(s) || e.right < 0 || e.left > t || e.bottom < 0 || e.top > n) {
-        bubble.hidden = !0;
-        return;
-      }
-      bubble.hidden = !1;
-      let r = 12,
-        o = bubble.offsetWidth,
-        c = o / 2,
-        l = Qt.clamp(s, c + 14, t - c - 14);
-      bubble.style.left = l + "px"; bubble.style.top = r + "px";
-      let d = Qt.clamp(50 + 100 * (s - l) / o, 8, 92);
-      bubble.style.setProperty("--popup-tail", d + "%");
-    }
     function positionOverlays(i, e, finaleTime = null) {
-      bubble.hidden = displayMode === 'actual' || !i;
-      if (displayMode === 'mock' && i) positionBubble(i.agent);
+      bubble.hidden = true;
       for (let t = 0; t < office.agents.length; t++) {
         let n = office.agents[t],
-          s = finaleTime !== null || displayMode === 'mock' && time >= En || e >= 0 && e !== t || i?.agent === t;
+          s = finaleTime !== null || e >= 0 && e !== t || i?.agent === t;
         if (agentLabels[t].hidden = s, agentLabels[t].style.display = s ? "none" : "flex", s) continue;
         let r = n.g.localToWorld(new P(0, 3.65, -.4)),
           o = projectPoint(...r.toArray());
@@ -543,13 +412,12 @@ export function mountAgentOffice(root, {
         agentLabels[t].style.transform = `translate(${labelX}px,${o.y}px) translate(-50%,-100%)`;
       }
       const pose = actualPlayback?.pose ?? finale;
-      const shownTime = finaleTime ?? time;
+      const shownTime = finaleTime ?? 0;
       celebration.hidden = displayMode === 'actual' && finaleTime === null || shownTime < (pose === 'team' ? vs + .5 : En + 1.4);
       if (!celebration.hidden) {
-        celebration.style.top = '12px';
+        celebration.style.top = 'max(var(--office-popup-top-min, 0px), 12px)';
         celebration.style.setProperty('--celebration-scale', '1');
       }
-      if (i && displayMode === 'mock') element("bubble-progress").style.transform = `scaleX(${i.progress})`;
     }
     function actualBubble() {
       const running = actualAgents.map((agent, index) => index < orchestratorIndex && agent.displayState === 'working' ? index : -1).filter(index => index >= 0);
@@ -574,24 +442,14 @@ export function mountAgentOffice(root, {
       const refreshing = actualAgents.some(agent => agent.refreshing);
       const unknown = actualAgents.some(agent => agent.displayState === 'unknown');
       const queryFailed = runDisplayState?.errors?.run || runDisplayState?.errors?.steps;
-      element('live-notice').textContent = `Run ${runDisplayState?.runId ?? '-'} · ` + (refreshing
+      element('live-notice').textContent = !runDisplayState?.runId ? '요청을 기다리고 있어요.' : (refreshing
         ? '갱신 중 · 확인된 상태가 있으면 그대로 표시합니다.' : queryFailed
           ? '조회 오류 · Agent 작업 실패가 아닙니다. 수동 새로고침으로 다시 확인해주세요.'
           : unknown ? '상태 확인 불가 · 불명확한 Step을 임의로 실행하거나 실패 처리하지 않습니다.'
             : `Run 상태 ${runDisplayState?.run.status ?? '-'} · 최종 판정 ${runDisplayState?.run.verdict ?? '아직 최종 판정 없음'}`);
       if (runDisplayState?.errors?.events) element('live-notice').textContent += ' · Event 조회 실패(Step 표시는 유지).';
       const success = successCeremony.info();
-      const playable = sceneReady() && motionAllowed();
-      element('success-play').disabled = !success.eligible || Boolean(success.processed) || !playable || handoffs.busy() || !handoffs.info().ready;
-      element('success-reset').disabled = Boolean(success.playback && !success.playback.completed);
-      element('success-notice').textContent = success.storageError
-        ? '실제 성공 기록을 읽거나 저장할 수 없어 재생하지 않습니다. 저장소 설정을 확인한 뒤 버튼으로 다시 시도해주세요.'
-        : success.playback ? `${success.playback.pose} · ${success.playback.completed ? '세리머니 재생 완료' : '성공 세리머니 재생 중'}`
-          : success.processed ? `${success.processed.pose} · 이미 재생을 시작한 Run입니다. 중복 재생하지 않습니다.${success.interrupted ? ' 조회 오류 등으로 재생이 중단되었습니다.' : ''}`
-            : success.eligible ? `${success.nextPose} · ${success.autoPending ? '3D·모션 준비 후 자동 재생 대기' : '버튼을 눌러 성공 세리머니를 재생해주세요.'}${!playable ? ' 3D 준비 및 모션 켜기가 필요합니다.' : ''}`
-              : runDisplayState?.errors?.architecture ? '실행 방식 조회 실패 · 성공 세리머니를 실행하지 않습니다.'
-                : runDisplayState?.architecture && runDisplayState.architecture !== 'MULTI_AGENT' ? 'MULTI_AGENT Run이 아니므로 성공 세리머니를 실행하지 않습니다.'
-                  : '모든 조회와 MULTI_AGENT·FINISHED·SUCCESS 확인 후 성공 세리머니를 사용할 수 있습니다.';
+      element('success-notice').textContent = success.playback ? '업무가 성공적으로 완료됐어요.' : '';
       actualAgents.forEach((agent, index) => {
         const suffix = agent.refreshing ? agent.hasConfirmedState ? ' · 갱신 중(마지막 확인 상태)' : ' · 갱신 중' : '';
         const label = agentLabels[index];
@@ -618,48 +476,10 @@ export function mountAgentOffice(root, {
         const index = selectedAgent >= 0 ? selectedAgent : info?.agent ?? 0;
         const agent = actualAgents[index], model = office.agents[index];
         element('selected').textContent = displayRole(index) + ' · 실제 Run';
-        element('vector-data').textContent = `상태 ${agent.label}\nStep ${agent.step?.workflowStepId ?? '-'}\n작업 모션 시간 ${agent.motionTime.toFixed(2)}초 (서버 진행률 아님)\n오른팔 회전 [${model.arms[1].shoulder.rotation.toArray().slice(0, 3).map(value => value.toFixed(3)).join(', ')}]\n조회 중 ${agent.refreshing ? '예' : '아니오'}`;
+        element('vector-data').textContent = `상태 ${agent.label}\n시도 ${agent.step?.attempt ?? '-'}\n코드 버전 ${agent.step?.codeVersion ?? '-'}`;
       }
     }
-    function updateUi() {
-      if (displayMode === 'actual') { updateActualUi(); return; }
-      element('actual-popups').hidden = true;
-      actualPopupKey = '';
-      previousPopups = null;
-      bubble.dataset.mode = 'mock';
-      element('finale-source').textContent = '목업 시연 · 리더 + 4개 역할';
-      element('finale-title').textContent = '협업 완료 시연';
-      element('finale-note').textContent = '실제 코드 생성·검증 결과는 아닙니다.';
-      let i = Zo(time, requestKind, errorMode),
-        e = office.agents.slice(0, orchestratorIndex).filter(n => ci(n.i, time) === "completed").length,
-        t = e > 0 ? "다음 에이전트가 작업을 준비하고 있어요." : "요청을 받아 업무를 준비하고 있어요.";
-      element("finale-caption").textContent = finaleOptions.find((item) => item.value === finale).label;
-      const next = getNextCelebration();
-      element("finale-order").textContent = completionRecorded
-        ? `이번 발표 · ${finaleOptions.find((item) => item.value === finale).label} / 다음 ${next.number}번`
-        : `${previewingFinale ? '미리보기' : '다음 세리머니'} · ${finaleOptions.find((item) => item.value === finale).label}`;
-      element("caption").textContent = e === 4 ? "업무 완료 시연 · " + finaleOptions.find((item) => item.value === finale).label : i ? `${request} \xB7 ${i.title}` : t, element("stepcount").textContent = `작업 완료 ${e} / 4 · 리더 1`;
-      for (let n = 0; n < office.agents.length; n++) {
-        let s = stateAt(n, time);
-        agentLabels[n].dataset.state = s, agentLabels[n].querySelector("small").textContent = stateLabels[s], agentLabels[n].style.setProperty("--role-color", roleColors[n]), agentLabels[n].classList.toggle("selected", selectedAgent === n), stepButtons[n].classList.toggle("current", i?.agent === n), stepButtons[n].classList.toggle("done", s === "completed");
-      }
-      if (i) {
-        let n = `${requestKind}|${i.agent}|${i.tone}|${i.title}|${i.detail}`;
-        if (n !== bubbleKey) {
-          bubbleKey = n;
-          let s = i.tone === "error" && (bubble.dataset.tone !== "error" || bubble.dataset.agent !== String(i.agent));
-          bubble.dataset.tone = i.tone, bubble.dataset.agent = String(i.agent), bubble.classList.remove("fresh", "warning-enter"), element("bubble-role").textContent = displayRole(i.agent) + (i.tone === "error" ? " \xB7 오류 경고" : " \xB7 " + stateLabels[i.state]), element("bubble-title").textContent = i.title, element("bubble-detail").textContent = i.detail, bubble.offsetWidth, bubble.classList.add("fresh"), s && bubble.classList.add("warning-enter");
-        }
-      } else bubbleKey = "", bubble.dataset.tone = "normal", bubble.classList.remove("fresh", "warning-enter");
-      if (timeline.value = String(time), timeline.style.setProperty("--played", time / bn * 100 + "%"), element("clock").textContent = `${String(Math.floor(time)).padStart(2, "0")} / ${bn}초`, statusOpen) {
-        let n = selectedAgent < 0 ? i?.agent ?? 0 : selectedAgent,
-          s = office.agents[n];
-        element("selected").textContent = displayRole(n), element("vector-data").textContent = `position  [${s.g.position.toArray().map(r => r.toFixed(2)).join(", ")}]
-rotation  [${s.upper.rotation.toArray().slice(0, 3).map(r => r.toFixed(2)).join(", ")}]
-state     ${stateAt(n, time)}
-좌표 단위 m \xB7 회전 단위 rad`;
-      }
-    }
+    function updateUi() { updateActualUi(); }
     function motionAllowed() { return motionEnabled && !reducedMotion.matches; }
     function sceneReady() {
       return renderedOnce && !disposed && root.isConnected && stage.clientWidth > 0 && stage.clientHeight > 0
@@ -709,22 +529,10 @@ state     ${stateAt(n, time)}
         frame = requestAnimationFrame(renderFrame);
         return;
       }
-      playing && (time = Math.min(bn, time + e * speed), time === bn && (playing = !1, updatePlayButton()));
-      stage.dataset.actualCeremony = 'none';
-      recordCompletion();
-      updateOfficePose(time);
-      let t = Zo(time, requestKind, errorMode);
-      const expression = acting.update(time, finale, t, motionEnabled && !reducedMotion.matches);
-      bubble.dataset.expression = expression;
-      stage.dataset.expression = expression;
-      element("bubble-emotion").textContent = ({worried:'난감',angry:'화남',sweat:'진땀'})[expression] || '';
-      stage.dataset.finale = finale;
-      const n = updateCamera(t, e * speed);
-      camera.updateProjectionMatrix(), i - lastUiFrame > 75 && (updateUi(), lastUiFrame = i), positionOverlays(t, n), renderer.render(scene, camera), renderedOnce = true, frame = requestAnimationFrame(renderFrame);
     }
     function setRunDisplay(mode, snapshot) {
       const changed = displayMode !== mode || runDisplayState?.runId !== snapshot?.runId;
-      displayMode = mode;
+      mode = 'actual';
       runDisplayState = snapshot;
       successCeremony.observe(snapshot, mode);
       actualPlayback = successCeremony.info().playback;
@@ -739,32 +547,17 @@ state     ${stateAt(n, time)}
         previousPopups = null;
         element('trace-recent').replaceChildren();
         element('trace-notice').textContent = '새 Run의 Trace 기준점을 확인하고 있습니다.';
-        playing = false;
         selectedAgent = -1;
-        bubbleKey = '';
         if (mode === 'actual') restoreActualPose();
       }
-      updatePlayButton();
       updateUi();
     }
     if (displayMode === 'actual') { updateOfficePose(0); acting.update(0, finale, null, false); }
-    updatePlayButton();
     updateUi();
     frame = requestAnimationFrame(renderFrame);
     element("loading").hidden = true;
     return {
-      setRequest(text) {
-        request = text || '업무 흐름 시연';
-        requestKind = al(request);
-        updateUi();
-      },
-      setMotion(enabled) {
-        motionEnabled = enabled;
-        if (!enabled) {
-          playing = false;
-          updatePlayButton();
-        }
-      },
+      setMotion(enabled) { motionEnabled = enabled; },
       setRunDisplay,
       dispose
     };

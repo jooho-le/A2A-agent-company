@@ -9,7 +9,8 @@ window.history.replaceState(null, '', '#/home')
 let failLogin = true, loginCalls = 0, unexpectedCalls = 0, probe
 // Mock 로그인 이외의 모든 요청은 실패시킵니다. 실제 fetch fallback은 없습니다.
 globalThis.fetch = async (url) => {
-  if (url !== 'http://127.0.0.1:8000/api/auth/login') {
+  if (url === '/api/v1/scenarios') return Response.json({ detail: 'Host unavailable' }, { status: 503 })
+  if (url !== '/api/auth/login') {
     unexpectedCalls++
     throw new Error('Unexpected request')
   }

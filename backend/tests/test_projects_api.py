@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 import project_scenarios
 from database import Base, get_db
-from models import Document, Project, ProjectRun, User
+from models import Document, Project, ProjectRun, RunSubmission, User
 from project_schema import create_project_tables
 from security import create_access_token
 
@@ -70,9 +70,10 @@ class ProjectAPITests(unittest.TestCase):
                 db.exec_driver_sql("SELECT * FROM documents ORDER BY id").all(),
             )
 
-    def request(self, method, path, payload=None, user=1, token=None):
+    def request(self, method, path, payload=None, user=1, token=None, extra_headers=()):
         body = json.dumps(payload).encode() if payload is not None else b""
         headers = [(b"content-type", b"application/json")]
+        headers.extend(extra_headers)
         access_token = token if token is not None else self.tokens.get(user)
         if access_token:
             headers.append((b"authorization", f"Bearer {access_token}".encode()))
@@ -214,6 +215,7 @@ class ProjectAPITests(unittest.TestCase):
 
     def test_unapplied_schema_returns_safe_error_without_creating_tables(self):
         # 이 테스트의 임시 DB에만 legacy-only 상태를 재현합니다.
+        RunSubmission.__table__.drop(self.engine)
         ProjectRun.__table__.drop(self.engine)
         Project.__table__.drop(self.engine)
         status, body = self.request("GET", "/api/projects")

@@ -1,3 +1,4 @@
+Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => 'test-product-jwt' } })
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { claimSuccessCeremony, createRunSuccessCeremony, isSuccessCeremonyEligible,
@@ -178,7 +179,7 @@ test('실제 configuration API는 계약을 검증하고 architecture 이외의 
     }
     for(const status of [404,422,503]) {
       globalThis.fetch=async()=>new Response(JSON.stringify({detail:'CONFIG_NOT_AVAILABLE'}),{status})
-      await assert.rejects(getAgentRunArchitecture(ids[0]),error=>error.status===status&&error.code==='CONFIG_NOT_AVAILABLE')
+      await assert.rejects(getAgentRunArchitecture(ids[0]),error=>error.status===status&&error.code==='HTTP_ERROR')
     }
     const abort=new AbortController();abort.abort()
     await assert.rejects(getAgentRunArchitecture(ids[0],{signal:abort.signal}),error=>error.name==='AbortError')

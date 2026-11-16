@@ -44,7 +44,7 @@ test('로그인 사용자: 제품 8000 GET과 JWT, 실제 프로젝트 공개 �
   let calls = 0
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     calls++
-    assert.equal(url, 'http://127.0.0.1:8000/api/projects')
+    assert.equal(url, '/api/projects')
     assert.equal(options.method, 'GET')
     assert.equal(options.headers.Authorization, `Bearer ${token}`)
     assert.equal(options.redirect, 'error')

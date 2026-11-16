@@ -36,7 +36,7 @@ async function fetchDocumentList(view, signal) {
   }
 
   try {
-    const response = await fetch(`http://127.0.0.1:8000/api/documents?view=${view}`, {
+    const response = await fetch(`/api/documents?view=${view}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
       signal,
@@ -137,7 +137,7 @@ function DocumentPage({ onBack }) {
     let fileReceived = false
 
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/documents/${documentId}/download`, {
+      const response = await fetch(`/api/documents/${documentId}/download`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal,
@@ -229,7 +229,7 @@ function DocumentPage({ onBack }) {
     setIsSubmitting(true)
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/documents', {
+      const response = await fetch('/api/documents', {
         method: 'POST',
         // multipart boundary는 브라우저가 생성하므로 Content-Type을 지정하지 않습니다.
         headers: { Authorization: `Bearer ${token}` },

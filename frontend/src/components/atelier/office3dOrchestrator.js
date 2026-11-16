@@ -23,6 +23,8 @@ export function addOfficeOrchestrator(office, engine) {
 }
 
 export function managementDisplay(snapshot) {
+  if (!snapshot?.runId) return { agentRole: 'ORCHESTRATOR', displayState: 'idle', label: '기본 대기',
+    expression: 'normal', refreshing: false, poseState: 'waiting', hasConfirmedState: false, managementServer: true }
   const refreshing = snapshot?.queryStatus?.run === 'loading'
   const valid = snapshot?.runId && snapshot?.queryStatus?.run === 'success' && snapshot.run?.status
   const status = snapshot?.run?.status

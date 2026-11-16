@@ -1,13 +1,13 @@
+import { cloneElement } from 'react'
 import AgentLeadership from './AgentLeadership'
 import { Icon, OfficeDesk } from './AtelierArtwork'
 import { ActivityList, AgentCards, ProjectCard, ProjectOptions, RequestForm } from './AtelierCards'
 import { agentStates, employees, progress, projectStatus } from './atelierMock'
 
 export function HomeView({ mode, onMode, projects, project, activities, onSelect, onCreate, onNew, onEmployee, onPlan, onWorklog, officeScene, submission = null, presentation = {} }) {
-  if (mode === 'multi') return <>
-    <RequestForm mode={mode} onCreate={onCreate} submission={submission} />
-    {officeScene}
-  </>
+  if (mode === 'multi') return officeScene ? cloneElement(officeScene, {
+    requestPanel: <RequestForm mode={mode} onCreate={onCreate} submission={submission} />,
+  }) : null
   const status = presentation.status || projectStatus(project)
   const amount = presentation.amount ?? progress(project)
   const prefix = mode === 'single' ? 'single-' : ''
@@ -43,7 +43,7 @@ export function ProjectsView({ projects, search, onSearch, onSelect, actual = fa
   const needsLogin = saved?.error?.code === 'AUTH_REQUIRED'
   return <>
     <div className="view-toolbar"><p className="toolbar-note">우리 회사가 함께 만드는 일 <strong>{String(projects.length).padStart(2, '0')}</strong></p><div className="search"><Icon name="search" /><label className="sr-only" htmlFor={presentation.searchId || 'atelier-search'}>프로젝트 검색</label><input id={presentation.searchId || 'atelier-search'} type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="프로젝트 이름 검색" autoComplete="off" /></div></div>
-    {actual && <p className="view-footnote">{saved ? '내 계정에 저장된 프로젝트와 현재 화면에서 접수한 업무입니다. 저장된 프로젝트의 업무 실행 상태는 아직 조회하지 않습니다.' : '현재 화면에서 접수한 실제 업무만 표시합니다. 프로젝트 이름과 Run 연결은 새로고침 후 복원되지 않습니다.'}</p>}
+    {actual && <p className="view-footnote">{saved ? '내 계정에 저장된 프로젝트와 현재 화면에서 접수한 업무입니다. 저장된 프로젝트의 업무 실행 상태는 아직 조회하지 않습니다.' : '내 계정에 저장된 실제 업무를 표시합니다.'}</p>}
     {pending && <p role="status">저장된 프로젝트 목록을 불러오는 중입니다.</p>}
     {failed && <p role="alert">{saved.error.message} {needsLogin ? <button className="button" type="button" onClick={onLogin}>로그인</button> : <button className="button" type="button" onClick={saved.retry}>다시 불러오기</button>}</p>}
     {actual && projects.some(item => item.status.text === '상태 조회 오류') && <p role="alert">업무 상태 조회에 실패했습니다. <button className="button" type="button" onClick={onRetry}>다시 불러오기</button></p>}
@@ -52,8 +52,12 @@ export function ProjectsView({ projects, search, onSearch, onSelect, actual = fa
   </>
 }
 
-export function TeamView({ project, onEmployee, presentation = {} }) {
-  return <><div className="team-banner"><div><span className="eyebrow">SMALL TEAM. CLEAR ROLES.</span><h2>{presentation.teamTitle || '오케스트레이터와 네 작업 에이전트.'}</h2><p>{presentation.teamDescription || '리더가 진행을 조율하고, 계획·개발·QA·보안 에이전트가 각 업무를 맡습니다.'}</p></div><span className="headcount"><strong>{String(presentation.staff?.length || 5).padStart(2, '0')}</strong>TEAM MEMBERS</span></div><AgentLeadership /><div className="employee-grid"><AgentCards project={project} agents={presentation.agents} profile onEmployee={onEmployee} /></div><p className="view-footnote">직원 이름·성격·진행 상태는 디자인 시연용 목업입니다.</p></>
+export function TeamView({ project, onEmployee, actualStates, presentation = {} }) {
+  const agents = actualStates ? employees.map(employee => {
+    const current = actualStates.find(agent => agent.agentRole === employee.role.toUpperCase())
+    return { employee, state: { state: current?.displayState === 'working' ? 'active' : current?.displayState === 'succeeded' ? 'done' : 'idle', label: current?.label || '업무 조율', task: employee.purpose } }
+  }) : presentation.agents
+  return <><div className="team-banner"><div><span className="eyebrow">SMALL TEAM. CLEAR ROLES.</span><h2>{presentation.teamTitle || '오케스트레이터와 네 작업 에이전트.'}</h2><p>{presentation.teamDescription || '리더가 진행을 조율하고, 계획·개발·QA·보안 에이전트가 각 업무를 맡습니다.'}</p></div><span className="headcount"><strong>{String(presentation.staff?.length || 5).padStart(2, '0')}</strong>TEAM MEMBERS</span></div><AgentLeadership /><div className="employee-grid"><AgentCards project={project} agents={agents} profile onEmployee={onEmployee} /></div><p className="view-footnote">직원 프로필은 역할 소개이며, 실제 업무 상태는 오피스에서 확인할 수 있습니다.</p></>
 }
 
 export function OutputsView({ projects, project, onSelect, onFile, onDownload, actual = false, catalog, onRetry, presentation = {} }) {
@@ -89,7 +93,7 @@ function RunOutputs({ projects, project, onSelect, catalog, onRetry }) {
       </details>
     </article>)}</div>
     {!failed && !loading && !current.items.length && <div className="empty-state"><Icon name="file" /><h2>아직 등록된 산출물이 없습니다.</h2><p>API에서 확인된 결과물만 표시합니다.</p></div>}
-    <p className="view-footnote">소스 파일 원문 조회·다운로드 API는 제공되지 않습니다. Artifact 등록 URI를 다운로드 주소로 사용하지 않습니다. 현재 화면의 Run 연결은 새로고침 후 복원되지 않습니다.</p>
+    <p className="view-footnote">소스 파일 원문 조회·다운로드 API는 제공되지 않습니다. Artifact 등록 URI를 다운로드 주소로 사용하지 않습니다. 프로젝트의 업무 이력에서 다시 열 수 있습니다.</p>
   </>
 }
 

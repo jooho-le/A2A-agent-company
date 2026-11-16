@@ -73,3 +73,8 @@ def get_issues(request: Request, run_id: UUID = Depends(owned_run), client: Host
 @router.get("/{runId}/artifacts")
 def get_artifacts(request: Request, run_id: UUID = Depends(owned_run), client: HostReadClient = Depends(get_host_read_client)):
     return read_host(request, client, run_id, "artifacts")
+
+
+@router.get("/{runId}/configuration")
+def get_configuration(request: Request, run_id: UUID = Depends(owned_run), client: HostReadClient = Depends(get_host_read_client)):
+    return read_host(request, client, run_id, "configuration")

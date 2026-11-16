@@ -1,49 +1,94 @@
 import { useEffect, useRef, useState } from 'react'
-import { createAgentRun, getAgentRunScenarios } from '../api/agentRuns'
-import { approvedRunSubmission, createRunSubmission, dispatchMessage } from '../api/agentRunSubmission'
 import { hasStoredAccessToken, loginRequired } from '../api/productRunRequest'
+import { loadOfficeApproval, lookupOfficeWork, submitOfficeWork } from '../api/officeService'
 
-// 파란색 요청창의 제출 상태만 관리합니다. Run 관측은 Dashboard의 기존 Hook이 담당합니다.
-export default function useOfficeRunSubmission(approval, onCreated) {
-  const submission = useRef(null)
+const pendingKey = 'ai-company.pending-office-submission'
+const empty = { busy: false, locked: false, error: '', result: null, name: '', requestText: '', uncertain: false }
+
+export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
+  const [state, setState] = useState(empty)
+  const [configuration, setConfiguration] = useState({ value: null, loading: false, error: '' })
+  const [revision, refreshApproval] = useState(0)
   const pending = useRef(false)
-  const [state, setState] = useState({ busy: false, locked: false, error: '', result: null, name: '', requestText: '' })
-  let ready = false
-  try { approvedRunSubmission(approval); ready = true } catch { /* 원본 설정은 화면에 노출하지 않습니다. */ }
+  const current = useRef(0)
+  const requestId = useRef(null)
+  const mounted = useRef(true)
+  const hasToken = hasStoredAccessToken()
 
   useEffect(() => {
-    const runner = createRunSubmission({ listScenarios: getAgentRunScenarios, postRun: createAgentRun, onCreated })
-    submission.current = runner
-    return () => { runner.dispose(); submission.current = null }
-  }, [onCreated])
-
-  async function submit(name, requestText) {
-    // UI의 disabled 여부와 별개로, 제출 직전에 확인하여 익명 Run 접수를 막습니다.
-    if (!hasStoredAccessToken()) {
-      setState(current => ({ ...current, error: loginRequired().message }))
-      return false
-    }
-    const runner = submission.current
-    if (!runner || pending.current || runner.blocked() || !name.trim() || !requestText.trim()) return false
-    pending.current = true
-    setState(current => ({ ...current, busy: true, error: '' }))
+    mounted.current = true
+    return () => { mounted.current = false; current.current++ }
+  }, [])
+  useEffect(() => {
+    if (!hasToken) return
+    const controller = new AbortController()
+    setConfiguration({ value: null, loading: true, error: '' })
+    loadOfficeApproval(controller.signal).then(value => {
+      if (!controller.signal.aborted) setConfiguration({ value, loading: false, error: '' })
+    }).catch(error => {
+      if (!controller.signal.aborted) setConfiguration({ value: null, loading: false, error: error.message })
+    })
     try {
-      // API에는 projectName 필드가 없으므로 사용자 입력을 requestText에 함께 전달합니다.
-      // 명시적인 업무 시작 클릭이 실행 요청이며 별도 자동 제출은 없습니다.
-      const result = await runner.submit({ approval, confirmed: true,
-        requestText: `프로젝트: ${name.trim()}\n\n요구사항:\n${requestText.trim()}` })
-      if (submission.current === runner) setState({ busy: false, locked: true, error: '', result, name: name.trim(), requestText: requestText.trim() })
+      const key = sessionStorage.getItem(pendingKey)
+      if (key) { requestId.current = key; setState(value => ({ ...value, locked: true, uncertain: true })) }
+    } catch { /* 저장소를 사용할 수 없으면 현재 화면에서만 중복을 차단합니다. */ }
+    return () => controller.abort()
+  }, [hasToken, revision])
+
+  function remember(key) {
+    requestId.current = key
+    try { key ? sessionStorage.setItem(pendingKey, key) : sessionStorage.removeItem(pendingKey) } catch { /* 메모리 중복 차단은 유지 */ }
+  }
+  function accept(result, name, requestText) {
+    const uncertain = ['UNKNOWN', 'PENDING'].includes(result.submissionStatus)
+    setState({ busy: false, locked: result.submissionStatus !== 'REJECTED', error: result.submissionStatus === 'REJECTED'
+      ? '실행 서버가 요청을 거절했습니다. 설정과 요청 내용을 확인해 주세요.' : '', result, name, requestText, uncertain })
+    if (!uncertain) remember(null)
+    if (result.submissionStatus === 'CREATED') onCreated({ ...result, projectName: name, requestText })
+  }
+  async function submit(name, requestText) {
+    if (!hasStoredAccessToken()) { setState(value => ({ ...value, error: loginRequired().message })); return false }
+    if (pending.current || state.locked || !configuration.value || !name.trim() || !requestText.trim()) return false
+    pending.current = true
+    const sequence = ++current.current
+    const key = crypto.randomUUID()
+    remember(key)
+    setState(value => ({ ...value, busy: true, error: '', name: name.trim(), requestText: requestText.trim() }))
+    try {
+      const result = await submitOfficeWork({ ...configuration.value, projectName: name.trim(), requestText: requestText.trim() }, key)
+      if (mounted.current && sequence === current.current) accept(result, name.trim(), requestText.trim())
     } catch (error) {
-      if (submission.current === runner) setState(current => ({ ...current, busy: false, locked: runner.blocked(), error: error.message }))
+      if (mounted.current && sequence === current.current) {
+        const uncertain = ![400, 401, 403, 404, 409, 413, 415, 422, 429].includes(error.status)
+        if (!uncertain) remember(null)
+        setState(value => ({ ...value, busy: false, locked: uncertain, uncertain, error: uncertain
+          ? '접수 결과를 확인하지 못했습니다. 다시 생성하지 말고 접수 상태를 확인해 주세요.' : error.message }))
+      }
     } finally { pending.current = false }
-    // 실패·성공 모두 입력을 보존하고 목업 프로젝트를 만들지 않습니다.
     return false
   }
-
-  const hasToken = hasStoredAccessToken()
-  return { ...state, submit, disabled: !hasToken || !ready || state.busy || state.locked,
-    notice: !hasToken ? '업무를 시작하려면 대표님 계정 메뉴에서 로그인해 주세요.'
-      : !ready ? '등록된 시나리오와 승인된 공개 실행 설정이 준비되지 않아 업무를 시작할 수 없습니다.'
-      : state.result ? dispatchMessage(state.result.dispatchStatus)
-        : '업무 시작을 누르면 승인된 설정으로 실제 에이전트가 실행됩니다. API 비용이 발생할 수 있습니다.' }
+  async function recover() {
+    if (pending.current || !requestId.current) return
+    pending.current = true
+    const sequence = ++current.current
+    setState(value => ({ ...value, busy: true, error: '' }))
+    try {
+      const result = await lookupOfficeWork(requestId.current)
+      if (mounted.current && sequence === current.current) accept(result, state.name, state.requestText)
+    } catch (error) {
+      if (mounted.current && sequence === current.current) setState(value => ({ ...value, busy: false, error: error.message }))
+    } finally { pending.current = false }
+  }
+  function reset() {
+    if (pending.current || state.uncertain) return false
+    remember(null); current.current++; setState(empty)
+    return true
+  }
+  return { ...state, submit, recover, reset, refreshApproval: () => refreshApproval(value => value + 1),
+    configurationLoading: configuration.loading, configurationError: configuration.error,
+    disabled: !hasToken || !configuration.value || state.busy || state.locked,
+    notice: !hasToken ? '업무를 맡기려면 로그인해 주세요.'
+      : state.uncertain ? '접수 결과를 확인 중입니다. 중복 생성은 차단되어 있습니다.'
+        : configuration.loading ? '실행 서버의 준비 상태를 확인하고 있어요.'
+          : configuration.error || '현재 회원가입 기능 개발을 지원합니다. 업무 시작을 누르면 실제 에이전트가 실행됩니다.' }
 }

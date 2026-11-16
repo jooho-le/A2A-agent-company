@@ -21,6 +21,7 @@ function App() {
   function handleLoginSuccess() {
     // 같은 계정의 재로그인을 포함해 새 로그인 세션은 이전 선택을 이어받지 않습니다.
     clearProjectSelection()
+    sessionStorage.removeItem('ai-company.pending-office-submission')
     setHasAccessToken(hasStoredAccessToken())
     setShowLogin(false)
     setShowSignup(false)
@@ -43,6 +44,7 @@ function App() {
 
   function handleLogout() {
     clearProjectSelection()
+    sessionStorage.removeItem('ai-company.pending-office-submission')
     sessionStorage.removeItem('access_token')
     setHasAccessToken(false)
     setShowLogin(false)

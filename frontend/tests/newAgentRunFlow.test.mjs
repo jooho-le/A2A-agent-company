@@ -1,3 +1,4 @@
+Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => 'test-product-jwt' } })
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createAgentRun, getAgentRunScenarios } from '../src/api/agentRuns.js'

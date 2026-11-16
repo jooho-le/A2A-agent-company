@@ -3,7 +3,7 @@
 from sqlalchemy import inspect
 
 from database import Base
-from models import Project, ProjectRun
+from models import Project, ProjectRun, RunSubmission
 
 
 def create_project_tables(bind):
@@ -19,6 +19,14 @@ def create_project_tables(bind):
             raise ValueError("기존 User·Document 테이블을 먼저 준비해야 합니다.")
         Base.metadata.create_all(
             bind=connection,
-            tables=[Project.__table__, ProjectRun.__table__],
+            tables=[Project.__table__, ProjectRun.__table__, RunSubmission.__table__],
             checkfirst=True,
         )
+
+
+if __name__ == "__main__":
+    from database import engine
+    from models import User, Document
+    Base.metadata.create_all(bind=engine, tables=[User.__table__, Document.__table__])
+    create_project_tables(engine)
+    print("Project, ProjectRun, RunSubmission schema ready.")

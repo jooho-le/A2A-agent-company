@@ -1,6 +1,4 @@
-// Vite의 /api/v1 대상이 제품 8000으로 전환되고 계약이 준비된 뒤 별도 변경합니다.
-// 브라우저 저장소·요청 옵션·환경변수로 활성화하지 않습니다.
-const PRODUCT_RUN_API_READY = false
+// 브라우저는 제품 API만 호출하며 Host 서비스 토큰을 보유하지 않습니다.
 
 // 존재 확인만 합니다. JWT 유효성·소유권은 실제 제품 API가 검증합니다.
 export function hasStoredAccessToken() {
@@ -56,18 +54,11 @@ export function createProductRunFetch({
     // 인증 실패 본문을 읽거나 재출력하지 않고, 자동 갱신·재전송하지 않습니다.
     if (response.status === 401) throw loginRequired()
     if (!response.ok) {
-      throw new ProductRunRequestError('제품 API 요청을 처리할 수 없습니다.', 'HTTP_ERROR', response.status)
+      throw new ProductRunRequestError(response.status === 503 ? '실행 서버가 준비되지 않았습니다. 서버 연결과 승인 설정을 확인해 주세요.' : '제품 API 요청을 처리할 수 없습니다.', 'HTTP_ERROR', response.status)
     }
     return response
   }
 }
 
-const protectedFetch = createProductRunFetch({ productApiReady: PRODUCT_RUN_API_READY })
-
-export const runApiTransport = {
-  fetch(path, options) {
-    // 기존 8001 경로에는 sessionStorage를 읽거나 제품 JWT를 추가하지 않습니다.
-    // 제품 전환 시에만 보호 전송기를 사용하며 익명 요청으로 fallback하지 않습니다.
-    return PRODUCT_RUN_API_READY ? protectedFetch(path, options) : globalThis.fetch(path, options)
-  },
-}
+const protectedFetch = createProductRunFetch({ productApiReady: true })
+export const runApiTransport = { fetch: protectedFetch }

@@ -89,7 +89,7 @@ class HostReadAPITests(unittest.TestCase):
             self.assertEqual(self.request("GET", base), (503, {"detail": "Host 조회를 사용할 수 없습니다."}))
         self.assertEqual(self.request("GET", f"/api/runs/{self.run_id}")[0], 404)
         # 생성 경로를 구현하거나 catch-all 프록시로 선점하지 않습니다.
-        self.assertEqual(self.request("POST", "/api/v1/runs")[0], 404)
+        self.assertEqual(self.request("POST", "/api/v1/runs")[0], 422)
         self.constructor.assert_not_called()
 
     def test_owner_reads_all_five_contracts_with_service_auth_and_event_order(self):
@@ -128,9 +128,11 @@ class HostReadAPITests(unittest.TestCase):
                 self.assertEqual(self.request("GET", self.path(suffix), user=None, token=token)[0], 401)
         for suffix in ("?url=http://example.test", "?hostKey=other-host", "/events?limit=501", "/events?offset=-1", "/events?offset=0&offset=1"):
             self.assertEqual(self.request("GET", self.path(suffix))[0], 422)
-        self.assertEqual(self.request("GET", self.path("/configuration"))[0], 404)
-        self.assertEqual(self.request("POST", self.path())[0], 405)
         self.constructor.assert_not_called()
+        self.mock_json({"runId": self.run_id, "artifactType": "RUN_CONFIGURATION", "configuration": {"architecture": "MULTI_AGENT"}})
+        self.assertEqual(self.request("GET", self.path("/configuration"))[0], 200)
+        self.assertEqual(self.request("POST", self.path())[0], 405)
+        self.constructor.assert_called_once()
 
     def test_unverified_auth_missing_token_and_host_errors_fail_safely(self):
         unavailable = (503, {"detail": "Host 조회를 사용할 수 없습니다."})

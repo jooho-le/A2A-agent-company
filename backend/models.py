@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 
 from database import Base
 
@@ -55,3 +55,21 @@ class ProjectRun(Base):
     # 설정 참조의 형식은 Host 계약에 따르며 설정 본문이나 비밀정보는 저장하지 않습니다.
     configuration_id = Column(String, nullable=False)
     linked_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class RunSubmission(Base):
+    __tablename__ = "run_submissions"
+    __table_args__ = (UniqueConstraint("owner_user_id", "client_key", name="uq_submission_owner_key"),)
+
+    internal_key = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    client_key = Column(String(36), nullable=False)
+    project_id = Column(String(36), ForeignKey("projects.project_id", ondelete="RESTRICT"), nullable=False)
+    request_sha256 = Column(String(64), nullable=False)
+    host_request_sha256 = Column(String(64), nullable=False)
+    # 승인된 공개 설정과 원문을 동결합니다. 토큰·서버 파일 경로를 저장하지 않습니다.
+    host_request_json = Column(Text, nullable=False)
+    configuration_id = Column(String(64), nullable=False)
+    state = Column(String(16), nullable=False, default="PENDING")
+    response_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())

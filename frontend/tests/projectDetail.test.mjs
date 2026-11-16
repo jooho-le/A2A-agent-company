@@ -55,7 +55,7 @@ test('카드 상세 선택: 제품 JWT GET, 여러 Run 공개 이력과 서버 �
   let calls = 0, selected
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     calls++
-    assert.equal(url, `http://127.0.0.1:8000/api/projects/${project.projectId}`)
+    assert.equal(url, `/api/projects/${project.projectId}`)
     assert.equal(options.method, 'GET')
     assert.equal(options.headers.Authorization, `Bearer ${token}`)
     assert.equal(options.redirect, 'error')

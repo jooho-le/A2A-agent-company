@@ -84,7 +84,7 @@ class ProjectModelTests(unittest.TestCase):
             self.assertEqual(db.exec_driver_sql("PRAGMA foreign_keys").scalar(), 0)
         create_project_tables(engine)
         create_project_tables(engine)
-        self.assertEqual(set(inspect(engine).get_table_names()), {"users", "documents", "projects", "project_runs"})
+        self.assertEqual(set(inspect(engine).get_table_names()), {"users", "documents", "projects", "project_runs", "run_submissions"})
         with engine.connect() as db:
             after = db.exec_driver_sql("SELECT type, name, sql FROM sqlite_master ORDER BY name").all()
             self.assertTrue(all(row in after for row in schema))

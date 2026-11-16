@@ -6,7 +6,7 @@ function Timestamp({ value }) {
   return <time dateTime={value}>{value.replace('T', ' ')}</time>
 }
 
-export function SavedProjectDetailContent({ status, project, error, onRetry, onLogin }) {
+export function SavedProjectDetailContent({ status, project, error, onRetry, onLogin, onOpenRun }) {
   if (status === 'loading') return <p role="status">프로젝트 상세와 Run 연결 이력을 불러오는 중입니다.</p>
   if (status === 'error') return <div role="alert">
     <p>{error.message}</p>
@@ -31,13 +31,14 @@ export function SavedProjectDetailContent({ status, project, error, onRetry, onL
           <dt>Configuration ID</dt><dd>{run.configurationId}</dd>
           <dt>연결 시각</dt><dd><Timestamp value={run.linkedAt} /></dd>
         </dl>
+        {run.hostKey === 'local-multi' && onOpenRun && <button type="button" className="button start" onClick={() => onOpenRun(project, run)}>오피스에서 업무 보기</button>}
       </li>)}
     </ol> : <p className="dialog-description">아직 연결된 Run이 없습니다.</p>}
-    <p className="dialog-note">저장된 Run 연결 이력입니다. 실제 실행 상태는 아직 조회하지 않습니다.</p>
+    <p className="dialog-note">저장된 Run 연결 이력입니다. 업무를 선택하면 실제 실행 상태를 이어서 확인할 수 있습니다.</p>
   </>
 }
 
-export default function SavedProjectDetail({ projectId, onLogin }) {
+export default function SavedProjectDetail({ projectId, onLogin, onOpenRun }) {
   const [state, update] = useReducer((_state, next) => next, { status: 'loading', project: null, error: null })
   const [attempt, retry] = useReducer(value => value + 1, 0)
   useEffect(() => {
@@ -52,6 +53,6 @@ export default function SavedProjectDetail({ projectId, onLogin }) {
     return () => { current = false; controller.abort() }
   }, [projectId, attempt])
   return <div className="dialog-body saved-project-detail">
-    <SavedProjectDetailContent {...state} onRetry={retry} onLogin={onLogin} />
+    <SavedProjectDetailContent {...state} onRetry={retry} onLogin={onLogin} onOpenRun={onOpenRun} />
   </div>
 }
