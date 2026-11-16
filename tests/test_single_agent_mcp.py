@@ -116,7 +116,9 @@ class SingleMCPFileTests(unittest.IsolatedAsyncioTestCase):
         self.fixture = file_fixtures.FileToolTests("runTest")
         self.fixture.architecture = "SINGLE_AGENT"
         self.fixture.setUp()
-        self.addCleanup(self.fixture.doCleanups)
+        for function, arguments, keywords in self.fixture._cleanups:
+            self.addCleanup(function, *arguments, **keywords)
+        self.fixture._cleanups.clear()
         self.selection = self.fixture.source_selection()
         self.run = self.fixture.run
 
@@ -215,7 +217,9 @@ class SingleMCPFileTests(unittest.IsolatedAsyncioTestCase):
     async def test_single_binding_cannot_attach_to_a_multi_run(self):
         other = file_fixtures.FileToolTests("runTest")
         other.setUp()
-        self.addCleanup(other.doCleanups)
+        for function, arguments, keywords in other._cleanups:
+            self.addCleanup(function, *arguments, **keywords)
+        other._cleanups.clear()
         handler = AsyncMock()
         principal = binding(run_id=other.run.run_id, workspace_id=other.run.workspace_id)
         dispatcher = MCPDispatcher(principal, other.registry, handlers={"write_source_file": handler})

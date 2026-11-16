@@ -43,7 +43,8 @@ SETS = ('practice', 'pilot', 'final')  # 시험지 세 벌(최종 평가는 이 
 ROLES = ('QA', 'SECURITY')  # 검사 관점이자 순환 안에서 그 검사를 실행하는 에이전트 역할
 LOOP_SCOPES = {'QA': 'in-loop-qa', 'SECURITY': 'in-loop-security'}  # 역할별 순환 안 범위
 RESULT_FILES = frozenset({'output.json', 'meta.json', 'summary.md', 'bundle.json', 'regression.json',
-                          'comparison.json'})  # 실험 결과 폴더(experiments/)에 보관하는 파일 이름(evaluation.experiment)
+                          'comparison.json', 'check_details.json', 'check_details.md',
+                          'axis_scorecard.json', 'axis_scorecard.md'})  # 실험 결과 폴더(experiments/)에 보관하는 파일 이름(evaluation.experiment)
 _SELECTOR = re.compile(r'[a-z][a-z0-9_-]{0,63}\Z')           # dev qa_contract.py와 같은 규칙
 _PATTERN = re.compile(r'[A-Za-z0-9_*?\[\].-]{1,128}\.py\Z')   # dev unit_runner.py와 같은 규칙
 _REQUIREMENT = re.compile(r'REQ-\d{3}\Z')  # 요구사항 이름 모양(예: REQ-001)
@@ -73,6 +74,20 @@ def load_suite(path: Path = SUITE_FILE) -> dict:
     for exam, classes in suite['sets'].items():
         if not isinstance(classes, dict) or set(classes) != set(ROLES):
             raise ValueError('Each set names a test class for every role')
+    # 이 시험지가 전제로 하는 요구사항 기준(설명·완료 조건·검증 담당). 동결 계약과 글자 그대로 대조한다(check_requirements).
+    requirements = suite.get('requirements')
+    if not isinstance(requirements, dict) or not requirements:
+        raise ValueError('Suite must pin the requirement baseline it implements')
+    for key, item in requirements.items():
+        if (not _REQUIREMENT.fullmatch(key) or not isinstance(item, dict)
+                or set(item) != {'description', 'acceptanceCriteria', 'validators'}):
+            raise ValueError('Invalid pinned requirement')
+        _text(item['description'], 'description')
+        for name in ('acceptanceCriteria', 'validators'):
+            if not isinstance(item[name], list) or not item[name]:
+                raise ValueError('Invalid pinned requirement')
+            for value in item[name]:
+                _text(value, name)
     # 2) 범위마다 시험지·역할·선택자·패턴과 파일 목록을 확인한다. 파일은 sourceDirectory 바로 아래의 .py여야 한다
     #    (dev가 보호 파일을 그 폴더에 넣어 실행하므로 하위 폴더·다른 위치는 받지 않는다).
     directory = suite['sourceDirectory']
@@ -106,6 +121,8 @@ def load_suite(path: Path = SUITE_FILE) -> dict:
             _text(check.get(name), name)
         if not _REQUIREMENT.fullmatch(check.get('requirementKey', '')):
             raise ValueError('Invalid requirement key')
+        if check['requirementKey'] not in requirements:
+            raise ValueError('Check requirement is not in the pinned baseline')
         if check.get('perspective') not in ROLES:
             raise ValueError('Unsupported perspective')
         if not _METHOD.fullmatch(check.get('method') or ''):
@@ -164,11 +181,89 @@ def without_comments(source: str) -> str:
     return ''.join(kept)
 
 
+def compact_source(source):
+    # Keep original spellings so Python 3.10 and 3.13 ship identical bytes.
+    # ast.unparse changes tuple/f-string formatting between Python versions.
+    # Generated source under test is never passed here.
+    def tokens_for(text):
+        result = []
+        pending, depth = None, 0
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == getattr(tokenize, 'FSTRING_START', -1):
+                if not depth:
+                    pending = token
+                depth += 1
+            elif token.type == getattr(tokenize, 'FSTRING_END', -1):
+                depth -= 1
+                if not depth:
+                    result.append(tokenize.TokenInfo(tokenize.STRING, '', pending.start, token.end, pending.line))
+            elif not depth:
+                result.append(token)
+        return result
+
+    tree = ast.parse(source)
+    tokens = tokens_for(source)
+    lines = source.splitlines(keepends=True)
+    string_lines = {line for token in tokens if token.type == tokenize.STRING
+                    for line in range(token.start[0] + 1, token.end[0] + 1)}
+    comments = {token.start[0]: token.start[1] for token in tokens if token.type == tokenize.COMMENT}
+    kept = []
+    for number, line in enumerate(lines, 1):
+        if number in comments:
+            line = line[:comments[number]].rstrip() + '\n'
+        if not line.strip() and number not in string_lines:
+            continue
+        if number not in string_lines:
+            indent = len(line) - len(line.lstrip(' '))
+            line = ' ' * (indent // 4) + line[indent:]
+        kept.append(line)
+    compact = ''.join(kept)
+    try:
+        if ast.dump(ast.parse(compact)) != ast.dump(tree):
+            return source
+    except (SyntaxError, ValueError):
+        return source
+    # Join implicit continuation lines, but never newlines inside strings.
+    indented = compact
+    lines = compact.splitlines(keepends=True)
+    for token in reversed(tokens_for(compact)):
+        if token.type == tokenize.NL and token.start[0] < len(lines):
+            index = token.start[0] - 1
+            lines[index] = lines[index].rstrip('\r\n') + ' '
+            lines[index + 1] = lines[index + 1].lstrip(' \t')
+    compact = ''.join(lines)
+    # Remove only token gaps outside strings. Keep name/number boundaries and
+    # indentation; require AST identity again before shipping the result.
+    tokens = tokens_for(compact)
+    lines = compact.splitlines(keepends=True)
+    gaps = {}
+    structural = {tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER}
+    for left, right in zip(tokens, tokens[1:]):
+        if (left.type in structural or right.type in structural or left.end[0] != right.start[0]
+                or left.end[1] >= right.start[1]
+                or left.type in {tokenize.NAME, tokenize.NUMBER} and right.type in {tokenize.NAME, tokenize.NUMBER}
+                or left.type == tokenize.NUMBER and right.string == '.'):
+            continue
+        number = left.end[0] - 1
+        if lines[number][left.end[1]:right.start[1]].isspace():
+            gaps.setdefault(number, []).append((left.end[1], right.start[1]))
+    for number, spans in gaps.items():
+        for start, end in reversed(spans):
+            lines[number] = lines[number][:start] + lines[number][end:]
+    packed = ''.join(lines)
+    try:
+        if ast.dump(ast.parse(packed)) == ast.dump(tree):
+            return packed
+    except (SyntaxError, ValueError):
+        pass
+    return indented
+
+
 def protected_files(scope: str, suite: Optional[dict] = None) -> dict[str, str]:
     # {"tests/signup/...py": 파일 내용} 사전. dev 보호 파일 설정(protected_files)과 D5 채점에 그대로 넣는다.
     # 주석을 뺀 사본이다(코드는 저장소 파일과 같음, 시험으로 AST를 대조).
     _suite, entry = _scope(scope, suite)
-    return {file: without_comments((ROOT / file).read_text(encoding='utf-8')) for file in sorted(entry['files'])}
+    return {file: compact_source((ROOT / file).read_text(encoding='utf-8')) for file in sorted(entry['files'])}
 
 
 def suite_sha256(scope: str, suite: Optional[dict] = None) -> str:
@@ -185,7 +280,7 @@ def suite_sha256(scope: str, suite: Optional[dict] = None) -> str:
               if role in (None, check['perspective'])]
     canonical = json.dumps({'files': files, 'checks': checks, 'scope': scope, 'set': entry['set'],
                             'suiteId': suite['suiteId'], 'suiteVersion': suite['suiteVersion'],
-                            'scenarioKey': suite['scenarioKey']},
+                            'scenarioKey': suite['scenarioKey'], 'requirements': suite['requirements']},
                            ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
@@ -213,7 +308,7 @@ def exam_exposure(files: Mapping[str, bytes], suite: Optional[dict] = None) -> l
     for scope in SCOPES:
         for path in protected_files(scope, suite):
             original = (ROOT / path).read_text(encoding='utf-8')  # 저장소 파일(주석 있음)과 보내는 사본(주석 없음) 모두
-            for content in (original, without_comments(original)):
+            for content in (original, without_comments(original), compact_source(original)):
                 known[digest(content.encode('utf-8'))] = path
     found = []
     for path, data in sorted(files.items()):
@@ -222,8 +317,17 @@ def exam_exposure(files: Mapping[str, bytes], suite: Optional[dict] = None) -> l
             found.append({'path': path, 'reason': 'SAME_AS_PROTECTED_FILE', 'protectedFile': known[digest(bytes(data))]})
         elif 'protected_tests' in parts or any(parts[i:i + 2] == ['src', 'evaluation'] for i in range(len(parts))):
             found.append({'path': path, 'reason': 'EVALUATION_PATH'})
+        elif '.private-inputs' in parts or '.evaluation-history' in parts or parts[-1] == '_input_replay.json':
+            found.append({'path': path, 'reason': 'PRIVATE_INPUT_PATH'})
         elif parts[0] == 'experiments' and parts[-1] in RESULT_FILES:
             found.append({'path': path, 'reason': 'RESULTS_PATH'})
+        elif b'PROTECTED_INPUT_RECORD' in bytes(data):
+            try:
+                record = json.loads(data)
+            except (ValueError, UnicodeError):
+                record = None
+            if isinstance(record, dict) and record.get('kind') == 'PROTECTED_INPUT_RECORD':
+                found.append({'path': path, 'reason': 'PROTECTED_INPUT_RECORD'})
     return found
 
 
@@ -250,26 +354,83 @@ SUPPORTED_POLICY = {
 }
 
 
-def check_policy(scenario_contract: Mapping):
+def check_policy(scenario_contract: Mapping, suite: Optional[dict] = None):
     # 받은 시나리오 정책의 비밀번호 해시·이메일 정책이 SUPPORTED_POLICY와 같은지 본다. 다르면 ValueError.
+    # 연결 규격(externalContract)이 있으면 시험지 연결부와 같은지도 본다(check_external_contract).
+    # 요구사항(설명·완료 조건·검증 담당)이 시험지 기준과 글자 그대로 같은지도 본다(check_requirements).
     actual = {'passwordHashPolicy': ((scenario_contract.get('securityPolicy') or {}).get('passwordHashPolicy') or {}),
               'emailPolicy': scenario_contract.get('emailPolicy') or {}}
     for section, expected in SUPPORTED_POLICY.items():
         if any(actual[section].get(key) != value for key, value in expected.items()):
             raise ValueError('Scenario contract policy is not supported by the protected suite')
+    check_external_contract(scenario_contract)
+    check_requirements(scenario_contract, suite)
+
+
+def check_requirements(scenario_contract: Mapping, suite: Optional[dict] = None):
+    # 동결 계약의 요구사항이 시험지가 전제로 하는 기준(suite.json의 requirements)과 같은지 본다. 완료 조건 하나가 바뀌거나
+    # (예: 최소 길이 8→12자) 요구사항이 늘거나 줄면, 이 시험지로는 맞게 판정할 수 없으므로 ValueError로 거부한다.
+    suite = suite or load_suite()
+    pinned = suite['requirements']
+    try:
+        actual = {item['key']: {'description': item['description'], 'acceptanceCriteria': list(item['acceptanceCriteria']),
+                                'validators': list(item['validators'])}
+                  for item in scenario_contract.get('requirements', [])}
+        keys = [item['key'] for item in scenario_contract.get('requirements', [])]
+    except (KeyError, TypeError, AttributeError):
+        raise ValueError('Scenario contract requirements are malformed') from None
+    if len(keys) != len(set(keys)):
+        raise ValueError('Duplicate requirement key in scenario contract')
+    if actual != pinned:
+        raise ValueError('Scenario contract requirements differ from the protected suite baseline')
+
+
+# 숨긴 시험지 연결부(tests/signup/signup_link.py)가 생성물에 붙는 위치. dev 시나리오 계약의 연결 규격(externalContract)이
+# 이와 다르면 에이전트가 다른 이름·경로로 만들어 시험 9개가 연결 단계에서 전부 미검증이 되므로 설정·채점을 만들지 않는다.
+# 연결부 상수를 바꾸면 이 값과 dev 계약을 함께 고친다(시험: tests/evaluation/test_external_contract_link.py).
+CONNECTOR = {
+    'app': ('main', 'app'), 'database': ('database', 'get_db'), 'userModel': ('models', 'User'),
+    'columns': ('email', 'password_hash'), 'urlEnv': 'DATABASE_URL',
+    'signup': ('POST', '/api/auth/signup'), 'bodyFields': ('email', 'password'),
+}
+
+
+def check_external_contract(scenario_contract: Mapping):
+    # 동결 계약의 연결 규격이 CONNECTOR와 같은지 본다. 다르거나 모양이 틀리면 ValueError.
+    # 칸이 없으면(연결 규격이 생기기 전에 동결된 계약) 넘어간다. 그런 Run은 에이전트가 규격을 받지 못했으므로
+    # 연결 실패가 미검증으로 나오는 것까지 결과로 남긴다.
+    external = scenario_contract.get('externalContract')
+    if external is None:
+        return
+    try:
+        actual = {
+            'app': (external['app']['module'], external['app']['attribute']),
+            'database': (external['database']['module'], external['database']['dependency']),
+            'userModel': (external['userModel']['module'], external['userModel']['class']),
+            'columns': tuple(external['userModel']['columns']), 'urlEnv': external['database']['urlEnv'],
+            'signup': (external['signupApi']['method'], external['signupApi']['path']),
+            'bodyFields': tuple(external['signupApi']['bodyFields']),
+        }
+    except (KeyError, TypeError):
+        raise ValueError('Scenario external contract is malformed') from None
+    if actual != CONNECTOR:
+        raise ValueError('Scenario external contract does not match the protected suite connector')
 
 
 def _requirement_ids(scenario_contract: Mapping, suite: dict) -> dict[str, str]:
     # 동결 시나리오 정책에서 {REQ-001: 요구사항 UUID} 표를 만든다. 검사 내용이 전제로 하는 정책과 다르면 거부한다.
     if not isinstance(scenario_contract, Mapping) or scenario_contract.get('scenarioKey') != suite['scenarioKey']:
         raise ValueError('Scenario contract does not match the protected suite')
-    check_policy(scenario_contract)
-    ids = {}
+    check_policy(scenario_contract, suite)
+    ids, seen_ids = {}, set()
     for item in scenario_contract.get('requirements', []):
         key, requirement_id = item.get('key'), str(item.get('requirementId'))
         _uuid4(requirement_id)
         if key in ids:
             raise ValueError('Duplicate requirement key in scenario contract')
+        if requirement_id in seen_ids:
+            raise ValueError('Duplicate requirement ID in scenario contract')
+        seen_ids.add(requirement_id)
         ids[key] = requirement_id
     missing = {check['requirementKey'] for check in suite['checks']} - set(ids)
     if missing:
@@ -279,7 +440,7 @@ def _requirement_ids(scenario_contract: Mapping, suite: dict) -> dict[str, str]:
 
 def owned_cases(scenario_contract: Mapping, role: str, suite: Optional[dict] = None) -> dict:
     # 그 역할(QA·SECURITY)의 순환 안 PROTECTED 케이스. 두 역할의 케이스는 dev 보호 케이스 파일 하나
-    # (owned-protected-cases.local.json)에 함께 넣고, Host가 범위의 역할대로 QA·Security에 나눈다.
+    # (owned-protected-cases.local.json, protected_case_file)에 케이스마다 역할을 적어 함께 넣는다.
     # 보고서의 모든 테스트가 여기 묶여야 한다. 순환용(practice) 시험지만 넣는다.
     if role not in ROLES:
         raise ValueError('Unknown role')
@@ -295,6 +456,13 @@ def owned_cases(scenario_contract: Mapping, role: str, suite: Optional[dict] = N
 def owned_qa_cases(scenario_contract: Mapping, suite: Optional[dict] = None) -> dict:
     # QA의 순환 안 PROTECTED 케이스(dev configs/owned-qa-cases.local.json 내용)
     return owned_cases(scenario_contract, 'QA', suite)
+
+
+def protected_case_file(scenario_contract: Mapping, roles=ROLES, suite: Optional[dict] = None) -> dict:
+    # Ver1 Host에 넘기는 보호 케이스 파일(schemaVersion 2). 케이스마다 실행할 역할(role)을 적는다.
+    # dev Host는 Security 보호 범위를 이 명시 역할이 범위 역할과 모두 같을 때만 받는다(역할이 없는 1판은 QA만).
+    return {'schemaVersion': 2, 'cases': [dict(case, role=role) for role in roles
+                                          for case in owned_cases(scenario_contract, role, suite)['cases']]}
 
 
 def evaluation_inputs(scenario_contract: Mapping, exam: str, suite: Optional[dict] = None) -> dict:

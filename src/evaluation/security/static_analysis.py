@@ -497,9 +497,11 @@ def check_password_storage(modules, criteria, policy):
                                       enclosing[module.path].get(id(call)))
         # db.execute("UPDATE users SET password_hash = ?", (값,)) 처럼 SQL 글자로 저장 칸을 채우는 호출.
         # SQL에 저장 칸 이름이 있으면, 함께 넘긴 값 중 해시가 아닌 비밀번호가 있는지 본다.
-        if terminal_name(call.func) in ('execute', 'executemany', 'exec_driver_sql') and call.args \
-                and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str) \
-                and any(re.search(r'\b%s\b' % re.escape(column), call.args[0].value.lower()) for column in rules['storageFieldNames']
+        scope = enclosing[module.path].get(id(call))
+        sql = (_storage_literal(call.args[0], module, scope, sql=True)
+               if terminal_name(call.func) in ('execute', 'executemany', 'exec_driver_sql') and call.args else None)
+        sql_write = sql is not None and re.search(r'\b(?:insert|update|replace)\b', _sql_clean(sql))
+        if sql_write and any(re.search(r'\b%s\b' % re.escape(column), sql.lower()) for column in rules['storageFieldNames']
                         if column != 'password'):
             leaves = []
             for argument in [*call.args[1:], *(keyword.value for keyword in call.keywords)]:
@@ -509,18 +511,40 @@ def check_password_storage(modules, criteria, policy):
                     leaves.extend(argument.values)
                 else:
                     leaves.append(argument)
-            scope = enclosing[module.path].get(id(call))
             for leaf in leaves:
                 if isinstance(leaf, ast.Call) and _is_hash_call(leaf, ctx, scope=scope, password_matcher=matcher):
                     stored.append(_obs(module, leaf, 'STORED_VIA_HASH', field='sql'))
                 elif isinstance(leaf, (ast.Name, ast.Attribute, ast.Subscript)) and matcher.search(terminal_name(leaf) or '') \
                         and not _hash_like_name(terminal_name(leaf) or ''):
                     fails.append(_obs(module, leaf, 'PLAINTEXT_STORAGE', field='sql'))
+                else:
+                    # A previous safe ORM write is not evidence for this SQL
+                    # value. Unresolved aliases/parameters must remain unknown.
+                    unresolved.append(_obs(module, leaf, 'SQL_STORAGE_VALUE_UNKNOWN'))
+            if not leaves:
+                unresolved.append(_obs(module, call, 'SQL_STORAGE_VALUES_UNRESOLVED'))
         # setattr(user, "password_hash", 값) 으로 칸 값을 정하는 호출
-        if isinstance(call.func, ast.Name) and call.func.id == 'setattr' and len(call.args) >= 3 \
-                and isinstance(call.args[1], ast.Constant) and call.args[1].value in rules['storageFieldNames']:
-            _classify_storage(module, call.args[2], call.args[1].value, ctx, rules, matcher, fails, stored, unresolved,
-                              enclosing[module.path].get(id(call)))
+        elif terminal_name(call.func) in ('execute', 'executemany', 'exec_driver_sql') and call.args and sql is None:
+            statement = call.args[0]
+            # A direct ORM values(...) write is classified above, including
+            # unknown values. Extra execution parameters can override it.
+            known_values = (len(call.args) == 1 and not call.keywords
+                and isinstance(statement, ast.Call) and isinstance(statement.func, ast.Attribute)
+                and statement.func.attr == 'values' and not statement.args and statement.keywords
+                and all(keyword.arg is not None for keyword in statement.keywords)
+                and any(keyword.arg in rules['storageFieldNames'] for keyword in statement.keywords)
+                and isinstance(statement.func.value, ast.Call)
+                and terminal_name(statement.func.value.func) in ('insert', 'update')
+                and len(statement.func.value.args) == 1
+                and terminal_name(statement.func.value.args[0]) in orm_classes)
+            if not known_values:
+                unresolved.append(_obs(module, call, 'SQL_STORAGE_TARGET_UNKNOWN'))
+        if isinstance(call.func, ast.Name) and call.func.id == 'setattr' and len(call.args) >= 3:
+            field = _storage_literal(call.args[1], module, scope)
+            if field in rules['storageFieldNames']:
+                _classify_storage(module, call.args[2], field, ctx, rules, matcher, fails, stored, unresolved, scope)
+            elif field is None:
+                unresolved.append(_obs(module, call, 'STORAGE_FIELD_UNKNOWN'))
         # DB 테이블 객체를 만드는 호출이면, 비밀번호 칸(password_hash 등)에 무엇을 넣는지 살펴본다. 예) User(password_hash=...)
         if isinstance(call.func, (ast.Name, ast.Attribute)) and terminal_name(call.func) in orm_classes:
             for keyword in call.keywords:
@@ -648,6 +672,27 @@ def _bind_parameters(call, order, defaults, constants, module, rules):
             return None, failed  # 숫자를 알 수 없으면 설정을 확정할 수 없다.
         params[key] = value
     return params, failed
+
+
+def _storage_literal(value, module, scope, *, sql=False, seen=frozenset()):
+    """Resolve one immutable literal, including SQLAlchemy text(...), without executing it."""
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return value.value
+    if (sql and isinstance(value, ast.Call) and qualname(value.func, module.aliases) == 'sqlalchemy.text'
+            and len(value.args) == 1 and not value.keywords):
+        return _storage_literal(value.args[0], module, scope, seen=seen)
+    if not isinstance(value, ast.Name) or value.id in seen or len(seen) >= 16:
+        return None
+    owner = scope if scope is not None and _name_bindings(scope).get(value.id, 0) else module.tree
+    if _name_bindings(owner).get(value.id, 0) != 1:
+        return None
+    candidates = [statement.value for statement in getattr(owner, 'body', [])
+                  if isinstance(statement, (ast.Assign, ast.AnnAssign))
+                  and any(isinstance(target, ast.Name) and target.id == value.id for target, _ in _assignment_pairs(statement))]
+    if len(candidates) != 1:
+        return None
+    return _storage_literal(candidates[0], module, owner if owner is not module.tree else None,
+                            sql=sql, seen=seen | {value.id})
 
 
 def _classify_storage(module, value, field_name, ctx, rules, matcher, fails, stored, unresolved, scope=None):
@@ -1957,7 +2002,6 @@ def check_duplicate_email(modules, criteria):
     email = _email_names(criteria)
     normalized = set()  # 확인한 정리 방법("strip", "lower")
     normalization_unknown = False
-    validator_found = False
     # 이메일 UNIQUE는 "사용자 표"(비밀번호를 저장하는 표)에 대한 것일 때만 근거가 된다. 다른 표의 이메일 칸은 가입 중복을 막지 못한다.
     # 사용자 표인지는 같은 클래스·표 안에 비밀번호 칸(password_hash 등)이 있는지로 판단한다. 표 밖에서 선언한 것은 가리지 못해 모든 후보에 적용한다.
     matcher = _sensitive(criteria)
@@ -1984,8 +2028,6 @@ def check_duplicate_email(modules, criteria):
         loads = {}  # 이메일 검증기마다 정리 결과를 한 번만 계산해 두는 기록(_used_normalization이 쓴다).
         executed_sql = _executed_sql_strings(module.tree)  # 설명 글(docstring)이나 쓰이지 않는 글자는 SQL 근거로 인정하지 않는다.
         for node in ast.walk(module.tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _email_validator(node, email):
-                validator_found = True
             if isinstance(node, ast.ClassDef) and node.name in orm_classes and _stores_password(node, is_password):
                 evidence.user_owners.add(('class', node.name))
                 for item in node.body:  # __tablename__ = "users" 로 이 클래스가 가리키는 표의 이름을 알아 둔다.
@@ -2081,28 +2123,27 @@ def check_duplicate_email(modules, criteria):
     unique = observations
     required = set(rules['requireNormalization'])
     missing = [step for step in rules['requireNormalization'] if step not in normalized]  # 빠진 정리 방법
-    if not missing:
-        return CheckOutcome(PASS, 'STATIC_DECLARATION', unique)
-    # 검증기·pydantic 설정만으로 모자라면, 가입으로 사용자를 저장하는 곳(User(email=...), user.email = ...)마다
+    # 검증기·pydantic 설정은 해당 입력 모델에서 온 값에만 적용한다. 프로젝트 다른 곳의 정상 검증기는
+    # 미검증 모델이나 검증 뒤 덮어쓴 값을 보호하지 않으므로, 모든 저장 지점의 실제 값 연결을 확인한다.
     # 그 이메일 값이 실제로 거친 정리 단계를 따라간다. 모든 저장 곳에서 필요한 정리가 확인되면 PASS이다.
     # 예) email = payload.email.strip().lower(); User(email=email) / User(email=normalize_email(payload.email))
     sites = _email_storage_sites(class_names, calls, email_stores, email)
-    flow = _email_flow(modules, _hash_context(modules, criteria['hashPolicy']), criteria['exposure']['routeMethods'])
+    flow = _email_flow(modules, _hash_context(modules, criteria['hashPolicy']), criteria['exposure']['routeMethods'], email)
     if sites:
         site_steps = [(module, node, flow.steps(module, node, value)) for module, node, value in sites]
-        if all(required <= normalized | steps for _module, _node, steps in site_steps):
+        if all(required <= steps for _module, _node, steps in site_steps):
             return CheckOutcome(PASS, 'STATIC_DECLARATION', unique + [
                 _obs(module, node, 'NORMALIZED_BEFORE_STORAGE') for module, node, _steps in site_steps][:MAX_OBSERVATIONS])
     if normalization_unknown:
         return CheckOutcome(UNVERIFIED, 'EMAIL_NORMALIZATION_UNDETERMINED', unique)
-    # FAIL로 단정하는 경우는 세 가지뿐이다.
-    #   · 이메일 필드에 등록된 검증기가 정리하지 않은 값을 돌려준다(검증기의 모든 반환 경로를 확인했다).
+    # FAIL로 단정하는 경우는 두 가지뿐이다.
     #   · 빠진 정리 방법(strip 또는 lower)이 프로젝트 어디에서도 이메일 값에 쓰이지 않는다. (아무 데서도 하지 않으니 저장 값도 정리되지 않았다.)
     #   · 가입 경로 함수가 받은 입력을 그대로 저장한다(User(email=payload.email)이고 그 함수 안에서 그 필드를 바꾸는 곳이 없다).
     #     정리한 값을 계산만 하고 원래 값을 저장하는 코드가 여기에 해당한다.
     # 그 밖에는 정리 코드가 있지만 저장되는 값과 연결되는지 증명하지 못한 경우라서 UNVERIFIED로 둔다.
-    raw_sites = [_obs(module, node, 'RAW_EMAIL_STORED') for module, node, value in sites if flow.raw(module, node, value)]
-    if validator_found or any(step not in touched for step in missing) or raw_sites:
+    raw_sites = [_obs(module, node, 'RAW_EMAIL_STORED') for module, node, value in sites
+                 if not required <= flow.steps(module, node, value) and flow.raw(module, node, value)]
+    if any(step not in touched for step in missing) or raw_sites:
         return CheckOutcome(FAIL, 'EMAIL_NORMALIZATION_MISSING',
                             unique + [Observation(unique[0].path, unique[0].line, 'NORMALIZATION_MISSING',
                                                   {'missing': missing})] + raw_sites[:MAX_OBSERVATIONS])
@@ -2129,7 +2170,74 @@ def _email_storage_sites(class_names, calls, email_stores, email):
     return sites
 
 
-def _email_flow(modules, ctx, route_methods=()):
+def _email_model_fields(modules, email):
+    """Normalization guaranteed by the declared input model, keyed by model and field."""
+    found, repeated = {}, set()
+    definitions = {}
+    for module in modules.values():
+        for model in (node for node in ast.walk(module.tree) if isinstance(node, ast.ClassDef)):
+            definitions[model.name] = definitions.get(model.name, 0) + 1
+    for module in modules.values():
+        aliases = {target.id: value for statement in module.tree.body
+                   for target, value in _assignment_pairs(statement) if isinstance(target, ast.Name)
+                   and module.bindings.get(target.id) == 1}
+        for model in (node for node in ast.walk(module.tree) if isinstance(node, ast.ClassDef)):
+            if definitions[model.name] != 1:
+                repeated.add(model.name)
+            if (model.decorator_list or not model.bases or any(
+                    qualname(base, module.aliases) not in ('pydantic.BaseModel', 'pydantic.main.BaseModel')
+                    for base in model.bases)):
+                continue
+            if any(isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                    item.name in ('__init__', 'model_post_init') or any(
+                        terminal_name(node.func if isinstance(node, ast.Call) else node) in ('model_validator', 'root_validator')
+                        for node in item.decorator_list)) for item in model.body):
+                continue  # Whole-model hooks can overwrite a field after its own validator.
+            config = set()
+            for item in model.body:
+                if isinstance(item, ast.ClassDef) and item.name == 'Config':
+                    for option in item.body:
+                        config |= _normalization_options(option)
+                for target, value in _assignment_pairs(item):
+                    if isinstance(target, ast.Name) and target.id == 'model_config':
+                        config |= _normalization_options(value)
+            fields = {}
+            for item in model.body:
+                if not (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+                        and email.search(item.target.id)):
+                    continue
+                steps = set(config)
+                annotation = aliases.get(item.annotation.id, item.annotation) if isinstance(item.annotation, ast.Name) else item.annotation
+                for option in ast.walk(annotation):
+                    steps |= _normalization_options(option)
+                validators = [validator for validator in model.body
+                              if isinstance(validator, (ast.FunctionDef, ast.AsyncFunctionDef))
+                              and any(isinstance(node, ast.Call) and terminal_name(node.func) in ('validator', 'field_validator')
+                                      and any(isinstance(arg, ast.Constant) and arg.value == item.target.id for arg in node.args)
+                                      for node in validator.decorator_list)]
+                for validator in validators:
+                    if not isinstance(validator, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        continue
+                    decorators = [node for node in validator.decorator_list if isinstance(node, ast.Call)
+                                  and terminal_name(node.func) in ('validator', 'field_validator')
+                                  and any(isinstance(arg, ast.Constant) and arg.value == item.target.id for arg in node.args)]
+                    if not decorators:
+                        continue
+                    options = {keyword.arg: keyword.value for node in decorators for keyword in node.keywords}
+                    before = (isinstance(options.get('mode'), ast.Constant) and options['mode'].value == 'before'
+                              or isinstance(options.get('pre'), ast.Constant) and options['pre'].value is True)
+                    if options and (not before or len(validators) != 1 or set(options) - {'mode', 'pre'}):
+                        steps = set()  # Unknown validator ordering is not proof of the stored value.
+                        break
+                    result = _returned_normalization(validator, {name: frozenset() if before else frozenset(steps)
+                                                                 for name in _parameter_names(validator)})
+                    steps = set(result or ()) | (config if before else set())
+                fields[item.target.id] = frozenset(steps)
+            found[model.name] = fields
+    return {name: fields for name, fields in found.items() if name not in repeated}
+
+
+def _email_flow(modules, ctx, route_methods=(), email=None):
     # 저장하는 이메일 값이 "확실히" 거친 정리 단계({"strip", "lower"})를 따라가는 함수를 돌려준다. PASS 근거로만 쓴다.
     # 모르면 빈 집합(정리를 증명하지 못함)이다. 그래서 틀리더라도 정리를 덜 인정하는 쪽(UNVERIFIED·FAIL 쪽)으로만 틀린다.
     #   · value.strip().lower()            → 앞의 값 + strip, lower
@@ -2140,11 +2248,14 @@ def _email_flow(modules, ctx, route_methods=()):
     #   · payload.email                    → 이 함수 본문 바로 아래에서 먼저 payload.email = 값 으로 한 번만 바꿨고 다른 쓰기가 없으면 그 값
     #   · 조건식·and·or                     → 모든 갈래의 공통 단계
     #   · 프로젝트가 strip·lower·casefold라는 이름의 메서드를 직접 정의했으면 그 호출은 정리로 인정하지 않는다.
-    enclosing, call_sites, references = {}, {}, {}
+    enclosing, call_sites, references, owners = {}, {}, {}, {}
+    model_fields = _email_model_fields(modules, email) if email is not None else {}
     for module in modules.values():
         table = _enclosing_functions(module.tree)
         enclosing[module.path] = table
         for node in ast.walk(module.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                owners[id(node)] = module
             if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute)):
                 call_sites.setdefault(terminal_name(node.func), []).append((node, table.get(id(node))))
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
@@ -2152,6 +2263,24 @@ def _email_flow(modules, ctx, route_methods=()):
             elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
                 references[node.attr] = references.get(node.attr, 0) + 1
     memo, keep_alive, parents_of, work = {}, [], {}, [0]
+    bindings_cache, stores_cache = {}, {}
+
+    def bindings(scope):
+        if id(scope) not in bindings_cache:
+            bindings_cache[id(scope)] = _name_bindings(scope)
+        return bindings_cache[id(scope)]
+
+    def field_stores(scope, parameter, path):
+        if id(scope) not in stores_cache:
+            values = {}
+            for statement in scope.body:
+                if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                    continue
+                base, chain = _chain(statement.targets[0])
+                if isinstance(base, ast.Name) and all(kind == 'attr' for kind, _ in chain):
+                    values.setdefault((base.id, tuple(name for _, name in chain)), []).append(statement)
+            stores_cache[id(scope)] = values
+        return stores_cache[id(scope)].get((parameter, path), ())
 
     def tick():
         work[0] += 1
@@ -2205,7 +2334,7 @@ def _email_flow(modules, ctx, route_methods=()):
                  if isinstance(target, ast.Name) and target.id == name]
         simple = [(value, statement) for _target, value, statement in pairs if isinstance(statement, (ast.Assign, ast.AnnAssign))]
         own = 1 if name in _parameter_names(scope) else 0
-        if len(simple) != len(pairs) or _name_bindings(scope).get(name, 0) != len(simple) + own or not (simple or own):
+        if len(simple) != len(pairs) or bindings(scope).get(name, 0) != len(simple) + own or not (simple or own):
             return frozenset()  # for·with·+= 같은 다른 묶임이 있으면 어떤 값이 들어오는지 모두 알 수 없다.
         body = getattr(scope, 'body', [])
         position = top_index(node, scope)
@@ -2248,19 +2377,21 @@ def _email_flow(modules, ctx, route_methods=()):
         # payload.email처럼 매개변수의 필드를 읽는 경우. 이 함수가 그 필드를 먼저 한 번만 바꿔 두었다면 그 값을 따른다.
         base, chain = _chain(expr)
         if scope is None or not isinstance(base, ast.Name) or base.id not in _parameter_names(scope) \
-                or any(kind != 'attr' for kind, _name in chain) or _name_bindings(scope).get(base.id, 0) != 1:
+                or any(kind != 'attr' for kind, _name in chain) or bindings(scope).get(base.id, 0) != 1:
             return frozenset()
         path = tuple(name for _kind, name in chain)
-        stores = [statement for statement in scope.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1
-                  and _chain(statement.targets[0])[0].__class__ is ast.Name
-                  and _chain(statement.targets[0])[0].id == base.id
-                  and tuple(name for _kind, name in _chain(statement.targets[0])[1]) == path]
+        initial = input_field_steps(base.id, path, scope)
+        stores = field_stores(scope, base.id, path)
+        if not stores:
+            changed = _mutated_fields(scope, ctx).get(base.id, ())
+            return (frozenset() if any(path[:len(item)] == item or item[:len(path)] == path for item in changed)
+                    else initial)
         if len(stores) != 1:
             return frozenset()
         store = stores[0]
         position = top_index(expr, scope)
-        if position is None or scope.body.index(store) >= position:
-            return frozenset()  # 정리한 대입이 읽기보다 먼저 실행된다는 보장이 없다.
+        if position is None:
+            return frozenset()
         # 그 대입을 뺀 함수 사본에서 같은 필드를 바꾸는 곳(도우미 함수·별칭·setattr 등)이 있으면 어느 값이 남는지 알 수 없다.
         rest = copy.copy(scope)
         rest.body = [statement for statement in scope.body if statement is not store] or [ast.Pass()]
@@ -2268,7 +2399,24 @@ def _email_flow(modules, ctx, route_methods=()):
         changed = _mutated_fields(rest, ctx).get(base.id, ())
         if any(path[:len(item)] == item or item[:len(path)] == path for item in changed):
             return frozenset()
+        if scope.body.index(store) >= position:
+            return initial  # The read precedes the sole write, including its right-hand side.
         return steps(store.value, scope, depth, visiting)
+
+    def input_field_steps(parameter, path, scope):
+        if len(path) != 1 or not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in route_methods for node in getattr(scope, 'decorator_list', ())):
+            return frozenset()
+        positional = [*scope.args.posonlyargs, *scope.args.args]
+        arguments = positional + list(scope.args.kwonlyargs)
+        defaults = dict(zip([arg.arg for arg in reversed(positional)], reversed(scope.args.defaults)))
+        defaults.update({arg.arg: value for arg, value in zip(scope.args.kwonlyargs, scope.args.kw_defaults) if value})
+        if parameter in defaults:  # Dependencies and constructed defaults need their own value-flow proof.
+            return frozenset()
+        argument = next((arg for arg in arguments if arg.arg == parameter), None)
+        owner = owners.get(id(scope))
+        name = qualname(argument.annotation, owner.aliases) if argument is not None and owner is not None else None
+        return model_fields.get((name or '').rsplit('.', 1)[-1], {}).get(path[0], frozenset())
 
     def flow(module, node, value):
         if value is None:

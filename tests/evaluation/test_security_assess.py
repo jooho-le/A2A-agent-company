@@ -335,7 +335,7 @@ REVIEW_CASES = [
         {'REQ-003': 'FAIL', 'REQ-005': 'UNVERIFIED'}),
     ('SQL UNIQUE on the email column alone is enough', lambda f: dict(f, **{'models.py': _run_sql(
         'SCHEMA = """CREATE TABLE users (\n id INTEGER,\n email TEXT,\n password_hash TEXT,\n UNIQUE (email)\n)"""\n')}),
-        {'REQ-005': 'UNVERIFIED'}),
+        {'REQ-003': 'UNVERIFIED', 'REQ-005': 'UNVERIFIED'}),
     # --- REQ-006: 검증 오류 응답에 입력값이 실리는 경우 ---
     ('input copied under another key', _replace('main.py', ERROR_ITEM, '{"detail": error["input"]}'), {'REQ-006': 'FAIL'}),
     ('whole error item turned into text', _replace('main.py', ERROR_ITEM, '{"detail": str(error)}'), {'REQ-006': 'FAIL'}),
@@ -697,18 +697,18 @@ THIRD_REVIEW_CASES = [
         'SCHEMA = """CREATE TABLE audit (id INTEGER, email TEXT UNIQUE)"""\n')), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('unique email in the SQL users table', _models_file(
         'SCHEMA = """CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT)"""\n'),
-        UNVERIFIED_STORAGE),
+        {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('table constraint and quoted names in SQL', _models_file(
         'SCHEMA = """CREATE TABLE IF NOT EXISTS "main"."users" (id INTEGER, "email" TEXT, "password_hash" TEXT, '
-        'CONSTRAINT uq_email UNIQUE (email))"""\n'), UNVERIFIED_STORAGE),
+        'CONSTRAINT uq_email UNIQUE (email))"""\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('primary key on the email column in SQL', _models_file(
-        'SCHEMA = """CREATE TABLE users (email TEXT, password_hash TEXT, PRIMARY KEY (email))"""\n'), UNVERIFIED_STORAGE),
+        'SCHEMA = """CREATE TABLE users (email TEXT, password_hash TEXT, PRIMARY KEY (email))"""\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('unique index on another table is undetermined', _models_file(
         'SCHEMA = """CREATE TABLE users (id INTEGER, email TEXT, password_hash TEXT)"""\n'
         'INDEX = "CREATE UNIQUE INDEX ux ON audit(email)"\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('unique index on the users table', _models_file(
         'SCHEMA = """CREATE TABLE users (id INTEGER, email TEXT, password_hash TEXT)"""\n'
-        'INDEX = "CREATE UNIQUE INDEX ux ON users(email)"\n'), UNVERIFIED_STORAGE),
+        'INDEX = "CREATE UNIQUE INDEX ux ON users(email)"\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('unique email in an ORM class without a password column', _without_email_unique(_append('models.py',
         '\n\nclass Audit(Base):\n    __tablename__ = "audit"\n    id = Column(Integer, primary_key=True)\n'
         '    email = Column(String, unique=True)\n')), {'REQ-003': 'FAIL'}),
@@ -718,7 +718,7 @@ THIRD_REVIEW_CASES = [
     ('unique email in a Core Table with a password column', _models_file(
         'from sqlalchemy import Table, Column, String, MetaData\n'
         'users = Table("users", MetaData(), Column("email", String, unique=True), Column("password_hash", String))\n'),
-        UNVERIFIED_STORAGE),
+        {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('unique email in a Core Table without a password column', _models_file(
         'from sqlalchemy import Table, Column, String, MetaData\n'
         'logs = Table("logs", MetaData(), Column("email", String, unique=True))\n'),
@@ -891,10 +891,10 @@ FOURTH_REVIEW_CASES = [
         'SCHEMA = "CREATE TABLE users (email TEXT CHECK (email <> \'unique\'), password_hash TEXT)"\n'),
         {**UNVERIFIED_STORAGE, 'REQ-003': 'FAIL'}),
     ('commas and parentheses inside a string do not break the columns', _models_file(
-        'SCHEMA = "CREATE TABLE users (email TEXT UNIQUE DEFAULT \'a,(b\', password_hash TEXT)"\n'), UNVERIFIED_STORAGE),
+        'SCHEMA = "CREATE TABLE users (email TEXT UNIQUE DEFAULT \'a,(b\', password_hash TEXT)"\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('MySQL UNIQUE KEY with a name', _models_file(
         'SCHEMA = "CREATE TABLE users (email VARCHAR(255), password_hash VARCHAR(255), UNIQUE KEY ux_email (email))"\n'),
-        UNVERIFIED_STORAGE),
+        {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('SQL with unbalanced parentheses is not guessed', _models_file(
         'SCHEMA = "CREATE TABLE users (email TEXT, password_hash TEXT"\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('constraint added later with ALTER TABLE is not analyzed', _models_file(
@@ -906,10 +906,10 @@ FOURTH_REVIEW_CASES = [
         '\nSCHEMA = "CREATE TABLE users (email TEXT UNIQUE, password_hash TEXT)"\n')), {'REQ-003': 'FAIL'}),
     ('SQL passed directly to execute counts', _models_file(
         'import sqlite3\nsqlite3.connect(":memory:").execute("CREATE TABLE users (email TEXT UNIQUE, password_hash TEXT)")\n'),
-        UNVERIFIED_STORAGE),
+        {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('SQL wrapped in text() counts', _models_file(
         'from sqlalchemy import text\nSTATEMENT = text("CREATE TABLE users (email TEXT UNIQUE, password_hash TEXT)")\n'),
-        UNVERIFIED_STORAGE),
+        {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('partial unique index in SQL covers only some rows', _models_file(
         'SCHEMA = "CREATE TABLE users (id INTEGER, email TEXT, password_hash TEXT)"\n'
         'IDX = "CREATE UNIQUE INDEX ux ON users(email) WHERE active = 1"\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
@@ -921,7 +921,7 @@ FOURTH_REVIEW_CASES = [
         {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('SQL unique index with a USING clause', _models_file(
         'SCHEMA = "CREATE TABLE users (id INTEGER, email TEXT, password_hash TEXT)"\n'
-        'IDX = "CREATE UNIQUE INDEX ux ON users USING btree (email)"\n'), UNVERIFIED_STORAGE),
+        'IDX = "CREATE UNIQUE INDEX ux ON users USING btree (email)"\n'), {**UNVERIFIED_STORAGE, 'REQ-003': 'UNVERIFIED'}),
     ('partial unique index declared in the ORM', _without_email_unique(_append('models.py',
         '    __table_args__ = (Index("ix_email", "email", unique=True, postgresql_where=text("active")),)\n')),
         {'REQ-003': 'UNVERIFIED'}),
@@ -1001,9 +1001,10 @@ def _both(*changes):
 
 def _form_route(body, item=False):
     # routers.py에 폼 객체(form)를 받는 경로 함수를 하나 더 덧붙인다. 이 함수는 body를 실행한 뒤 form.passwd를 해시해 저장한다.
-    # item=True이면 form을 사전처럼 꺼내 쓴다(form["passwd"]).
+    # item=True이면 form을 사전처럼 꺼내 쓴다(form["passwd"]). 이 별도 함수는 요청 모델 검증을
+    # 거치지 않으므로 이메일은 직접 정규화하여 비밀번호 출처 검사와 다른 요구를 분리한다.
     value = 'form["passwd"]' if item else 'form.passwd'
-    email = 'form["email"]' if item else 'form.email'
+    email = ('form["email"]' if item else 'form.email') + '.strip().lower()'
     return _router_helper(
         f'def signup_form(form, db=Depends(get_db)):\n{body}    user = User(email={email}, password_hash=hash_password({value}))\n    return {{}}\n')
 
@@ -1251,7 +1252,7 @@ SIXTH_REVIEW_CASES = [
     ('dict holding the form is changed, not the form', _form_route('    ctx = {"form": form}\n    ctx["user"] = 1\n'), {}),
     ('sub-dict of a dict form written with get', _form_route('    profile = form.get("profile", {})\n    profile["name"] = "x"\n'), {}),
     ('new user object written', _form_route(
-        '    made = User(email=form.email, password_hash=hash_password(form.passwd))\n    made.is_active = True\n'), {}),
+        '    made = User(email=form.email.strip().lower(), password_hash=hash_password(form.passwd))\n    made.is_active = True\n'), {}),
     ('response header written', _form_route('    response.headers["X-Foo"] = "bar"\n'), {}),
     ('helper that returns a new object, then written', _both(
         _router_helper('def build(item):\n    return {"email": item.email}\n'), _form_route('    made = build(form)\n    made.passwd = "x"\n')), {}),
@@ -1370,7 +1371,7 @@ def signup(payload: SignupRequest, db=Depends(get_db)):
     db.add(user)
     db.commit()
     return {"success": True}
-'''), {}),
+'''), {'REQ-003': 'UNVERIFIED', 'REQ-005': 'UNVERIFIED'}),
     ('user fields assigned one by one', _router_file('''@router.post("/api/signup", status_code=201)
 def signup(payload: SignupRequest, db=Depends(get_db)):
     user = User()
@@ -1417,7 +1418,7 @@ def signup(payload: SignupRequest, db=Depends(get_db)):
     db.add(user)
     db.commit()
     return {"success": True}
-'''), {}),
+'''), {'REQ-003': 'UNVERIFIED'}),
     ('hashing wrapped in try and except', _router_file('''@router.post("/api/signup", status_code=201)
 def signup(payload: SignupRequest, db=Depends(get_db)):
     try:
@@ -1454,7 +1455,7 @@ def signup(payload: SignupRequest, db=Depends(get_db)):
 
 
 @pytest.mark.parametrize('label,change,changed', NATURAL_STYLE_CASES, ids=[item[0] for item in NATURAL_STYLE_CASES])
-def test_natural_signup_styles_still_pass(label, change, changed):
+def test_natural_signup_styles_preserve_proven_or_unknown_paths(label, change, changed):
     # 위 구현을 하나씩 판정해서 세 요구사항 모두 통과하는지 확인한다.
     result, _assessment = outcomes(change(dict(GOOD)))
     assert result == {**GOOD_EXPECTED, **changed}
@@ -1505,10 +1506,10 @@ FULL_REVIEW_CASES = [
         '    @classmethod\n    def clean(cls, v: str) -> str:\n        return v.strip().lower()\n'), {'REQ-003': 'FAIL'}),
     ('helper stores a parameter named password_digest', _router_helper(
         'def save(db, email, password_digest):\n    user = User(email=email, password_hash=password_digest)\n    db.add(user)\n'),
-        {'REQ-005': 'UNVERIFIED'}),
+        {'REQ-003': 'UNVERIFIED', 'REQ-005': 'UNVERIFIED'}),
     ('helper stores a parameter named password', _router_helper(
         'def save(db, email, password):\n    user = User(email=email, password_hash=password)\n    db.add(user)\n'),
-        {'REQ-005': 'FAIL'}),
+        {'REQ-003': 'UNVERIFIED', 'REQ-005': 'FAIL'}),
 ]
 
 

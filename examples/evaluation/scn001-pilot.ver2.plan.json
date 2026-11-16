@@ -1,0 +1,53 @@
+{
+  "experimentId": "c322e08b-567d-41df-889e-2a8e306230f9",
+  "scenarioKey": "SCN-001",
+  "source": {
+    "repositoryPath": "../../.data/starting-source/scn001",
+    "commitHash": "e6e7158c356ff0be5ffa12ec59894d2217f61ca8",
+    "lockPath": "requirements.lock"
+  },
+  "image": "sha256:c712fdf445fe01217001440459070bf1e2b0a8d94ad3b9103bacfedddf7dae5a",
+  "model": {
+    "provider": "openai",
+    "modelId": "gpt-4.1-mini-2025-04-14",
+    "modelRevision": null,
+    "temperature": 0,
+    "seed": null
+  },
+  "limits": {
+    "modelCalls": 200,
+    "toolCalls": 200,
+    "outputTokens": 8192,
+    "totalTokens": null,
+    "modelTimeoutSeconds": 120,
+    "toolTimeoutSeconds": 120,
+    "runtimeBudgetMs": 3600000,
+    "maxFixAttempts": 3,
+    "maxToolRetries": 2
+  },
+  "plannedRuns": {
+    "SINGLE_AGENT": 1,
+    "MULTI_AGENT": 1
+  },
+  "loopPolicy": "FINAL_ONLY",
+  "executionOrder": "ALTERNATING",
+  "warmupState": "FRESH_WORKSPACE_COLD_START",
+  "hardwareProfile": "MacBookPro18,1-Apple-M1-Pro-10cpu-16gib/docker-29.1.3-linux/aarch64-10cpu-7.7gib/darwin",
+  "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "hostConfigurations": {
+    "SINGLE_AGENT": {
+      "api": "http://127.0.0.1:8010",
+      "runtime": "../../configs/single-runtime.local.json",
+      "tools": "../../configs/experiment/ver2/owned-tools.local.json",
+      "source": "../../configs/owned-source.local.json",
+      "priceBook": "../../configs/owned-price-book.scn001.json"
+    },
+    "MULTI_AGENT": {
+      "api": "http://127.0.0.1:8000",
+      "runtime": "../../configs/owned-runtime.local.json",
+      "tools": "../../configs/experiment/ver2/owned-tools.local.json",
+      "source": "../../configs/owned-source.local.json",
+      "priceBook": "../../configs/owned-price-book.scn001.json"
+    }
+  }
+}

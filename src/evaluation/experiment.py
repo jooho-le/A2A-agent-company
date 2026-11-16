@@ -16,6 +16,7 @@
 #            받아 bundle.json·trace.json으로 저장한다. A2A Message 본문은 API로 받을 수 없어 dev a2a_export로 따로 꺼낸다.
 # score    : dev snapshot_export가 꺼낸 Snapshot(source.tar·manifest.json)을 D5로 채점하고 결과·요약을 Run별 폴더에 보관한다.
 #            --all-versions면 중간 코드 버전도 같은 시험지로 채점해 Regression(수정으로 새로 생긴 실패)을 계산한다.
+#            수정 없이 첫 버전에서 끝난 Run은 비교할 버전 쌍이 0개로 남는다.
 #            버전별 결과는 개발 순환에 전달하지 않는다. 실제 생성 코드는 DockerRunner(해시로 고정한 이미지)로만 실행한다.
 # record   : 채점하지 못한 Run(빌드 실패·중단 등)의 Run 기록만 결과 폴더에 남긴다. compare가 실패·비용 집계에 넣는다.
 # compare  : 보관한 Run들(채점 여부와 상관없이)로 Ver1·Ver2 비교 가능 여부, 정책별 요약(상태·시간·토큰·비용·점수,
@@ -31,6 +32,7 @@
 import argparse
 import copy
 import json
+import os
 import shutil
 import sys
 import uuid
@@ -40,10 +42,11 @@ from typing import Mapping, Optional
 from . import protected_tests
 from .final_evaluation import DockerRunner, evaluate_final_snapshot, read_snapshot
 from .manifest import ExecutionManifest
-from .run_metrics import (GROUPINGS, LOOP_POLICIES, comparison_validity, experiment_summary, fetch_run_bundle, loop_policy_effect,
-                          regression_from_reports, run_metrics)
+from .run_metrics import (GROUPINGS, LOOP_POLICIES, architecture_pairs, comparison_validity, experiment_summary,
+                          fetch_run_bundle, is_assisted_run, loop_policy_effect, regression_from_reports, run_metrics)
 from .summary import render_summary
 from .trace_checks import A2A_DOCUMENT, fetch_trace_documents
+from .evidence_metrics import first_passing_snapshot, process_metrics
 
 SECURITY_TESTS = {'name': 'security-tests', 'kind': 'QA_TESTS', 'source_directory': 'tests', 'pattern': 'test_*.py',
                   'role': 'SECURITY'}  # Security 에이전트가 쓰는 자체 테스트 범위(outputs/security/tests)
@@ -142,8 +145,7 @@ def configure(tools: Mapping, *, contract: Mapping, suite_ref: Optional[str] = N
         except Exception:
             raise ExperimentError('TOOLS_UNIT_SCOPES_INVALID') from None
         return document
-    cases = {'schemaVersion': 1, 'cases': [case for role in ('QA', 'SECURITY')
-                                           for case in protected_tests.owned_cases(contract, role, suite)['cases']]}
+    cases = protected_tests.protected_case_file(contract, suite=suite)
     return {
         'ver1/owned-tools.local.json': variant(base_scopes + [SECURITY_TESTS] + protected),
         'ver1/owned-protected-cases.local.json': cases,
@@ -177,7 +179,8 @@ def read_export(export: Path, version: Optional[int] = None):
 def score_export(export: Path, *, runner, exam: str, results: Path, contract: Mapping,
                  bundle: Optional[Mapping] = None, trace: Optional[Mapping] = None, a2a: Optional[Mapping] = None,
                  pair_id: Optional[str] = None, loop_policy: Optional[str] = None, architecture: Optional[str] = None,
-                 all_versions: bool = False, force: bool = False) -> Path:
+                 all_versions: bool = False, force: bool = False, known_values=(), additional_outputs=None,
+                 agent_export=None, _complete=None) -> Path:
     # 최종 코드 버전을 채점해 <results>/<Run 번호>/에 보관하고 그 폴더를 돌려준다. all_versions면 중간 버전도 채점해
     # Regression을 계산한다(내보내기 폴더에 그 버전들이 있어야 한다: snapshot_export --all-versions).
     # loop_policy: 실험 계획상 이 Run의 버전(IN_LOOP_AND_FINAL=Ver1, FINAL_ONLY=Ver2). compare가 동결 설정과 대조한다.
@@ -193,8 +196,14 @@ def score_export(export: Path, *, runner, exam: str, results: Path, contract: Ma
         raise ExperimentError('OUTPUT_EXISTS')  # 컨테이너 채점을 다 돌리기 전에 멈춘다
     scored = (target / 'output.json').exists()
     recorded = {} if scored else _read_meta(target)
+    boundary = _closed_automatic_boundary(target)
+    if boundary is not None:
+        recorded = _read_meta(target)
+    if boundary is not None and bundle is None and (target / 'bundle.json').is_file():
+        bundle = json.loads((target / 'bundle.json').read_text(encoding='utf-8'))
     if not scored and bundle is None and (target / 'bundle.json').is_file():  # record·fetch로 먼저 받아 둔 Run 기록
         bundle = json.loads((target / 'bundle.json').read_text(encoding='utf-8'))
+    _check_automatic_boundary(target, bundle, run=run, expected=expected)
     pair_id = pair_id if pair_id is not None else recorded.get('pairId')
     loop_policy = loop_policy if loop_policy is not None else recorded.get('loopPolicy')
     if loop_policy not in (None, *LOOP_POLICIES):
@@ -208,15 +217,31 @@ def score_export(export: Path, *, runner, exam: str, results: Path, contract: Ma
     if trace is not None and trace.get('runId') != run_id or a2a is not None and (trace is None or a2a.get('runId') != run_id):
         raise ExperimentError('TRACE_RUN_MISMATCH')  # A2A 본문은 같은 Run의 노출 검사 기록과 함께만 쓴다
     trace_documents = None if trace is None else {**trace, **({A2A_DOCUMENT: a2a} if a2a is not None else {})}
+    if additional_outputs is not None:
+        if trace_documents is None or additional_outputs.get('runId') != run_id:
+            raise ExperimentError('TRACE_RUN_MISMATCH')
+        trace_documents['additionalOutputs'] = additional_outputs
+    known_values = tuple(known_values)
+    if any(not isinstance(value, str) or not value for value in known_values):
+        raise ExperimentError('KNOWN_VALUES_INVALID')
     # 결과 한 세트를 임시 폴더에 다 만든 뒤 한꺼번에 바꿔 넣는다. 다시 채점(force)할 때 예전 회귀·버전·Run 기록 파일이
     # 남아 새 결과와 섞이지 않고, 채점 중 실패하면 예전 결과가 그대로 남는다.
     folder = Path(results) / f'.{run_id}.staging-{uuid.uuid4().hex}'
     try:
         _score_into(folder, export, run, archive, expected, runner=runner, exam=exam, contract=contract,
                     bundle=bundle, trace_documents=trace_documents, pair_id=pair_id, loop_policy=loop_policy,
-                    architecture=architecture, all_versions=all_versions)
+                    architecture=architecture, all_versions=all_versions, known_values=known_values,
+                    agent_export=agent_export)
+        if _complete is not None:
+            _complete(folder)  # workflow 부가 결과도 공개 전에 같은 임시 폴더 안에서 완성한다.
+        boundary = boundary or _automatic_boundary(bundle, run=run)
+        if boundary is not None:
+            # A regrade may replace derived scores, but never erase the fact
+            # that these source records close the autonomous segment.
+            _write(folder / 'automatic_boundary.json', boundary, False)
         if (target / 'output.json').exists() and not force:
             raise ExperimentError('OUTPUT_EXISTS')
+        _check_automatic_boundary(target, bundle, run=run, expected=expected)
         _replace(folder, target)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
@@ -227,6 +252,64 @@ def _read_meta(folder: Path) -> dict:
     # 보관 폴더의 meta.json(없으면 빈 사전)
     path = Path(folder) / 'meta.json'
     return json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+
+
+def _automatic_boundary(bundle=None, *, run=None):
+    """Paused source evidence closes the automatic segment through every entry point."""
+    original = (bundle or {}).get('run')
+    if original is None and run is not None:
+        original = {'runId': run.get('runId'), 'status': run.get('status'), 'verdict': run.get('verdict'),
+                    'codeVersion': run.get('finalCodeVersion')}
+    if not isinstance(original, Mapping) or original.get('status') not in ('HUMAN_REVIEW', 'WAITING_INPUT'):
+        return None
+    boundary = {'schemaVersion': 1, 'runId': original['runId'], 'runStatus': original['status'],
+                'automaticSegmentClosed': True}
+    if bundle is None:
+        # Direct score may have only snapshot_export/run.json. Keep that small
+        # identity here so later regrading cannot substitute a resumed snapshot.
+        boundary['run'] = original
+    return boundary
+
+
+def _closed_automatic_boundary(folder: Path):
+    """Read the immutable segment marker, including older workflow results."""
+    for name in ('automatic_boundary.json', 'evaluation_status.json'):
+        path = folder / name
+        if not path.is_file():
+            continue
+        record = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(record, dict):
+            raise ExperimentError('AUTOMATIC_BOUNDARY_INVALID')
+        if record.get('automaticSegmentClosed') is True:
+            return {'schemaVersion': 1, 'runId': record['runId'],
+                    'runStatus': record['runStatus'], 'automaticSegmentClosed': True,
+                    **({'run': record['run']} if 'run' in record else {})}
+    # Earlier direct score/record results have no marker. The preserved paused
+    # bundle is still evidence of a closed boundary and must not be overwritten.
+    path = folder / 'bundle.json'
+    if path.is_file():
+        return _automatic_boundary(json.loads(path.read_text(encoding='utf-8')))
+    return None
+
+
+def _check_automatic_boundary(folder: Path, bundle, *, run=None, expected=None):
+    boundary = _closed_automatic_boundary(folder)
+    if boundary is None:
+        return None
+    path = folder / 'bundle.json'
+    previous = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else None
+    if previous != bundle:
+        raise ExperimentError('AUTOMATIC_SEGMENT_ALREADY_CLOSED')
+    original = previous['run'] if previous is not None else boundary['run']
+    if run is not None and any(run.get(key) != original.get(field) for key, field in
+                              (('runId', 'runId'), ('status', 'status'), ('verdict', 'verdict'),
+                               ('finalCodeVersion', 'codeVersion'))):
+        raise ExperimentError('AUTOMATIC_SEGMENT_ALREADY_CLOSED')
+    if expected is not None and (folder / 'output.json').is_file():
+        old = json.loads((folder / 'output.json').read_text(encoding='utf-8'))['report']['expectedManifest']
+        if old != expected.to_payload():
+            raise ExperimentError('AUTOMATIC_SEGMENT_ALREADY_CLOSED')
+    return boundary
 
 
 def _replace(folder: Path, target: Path):
@@ -261,7 +344,7 @@ def _checked_metrics(bundle) -> dict:
 
 
 def record_run(results: Path, bundle: Mapping, *, pair_id: Optional[str] = None, loop_policy: Optional[str] = None,
-               force: bool = False) -> Path:
+               force: bool = False, _complete=None) -> Path:
     # 채점하지 못한 Run(빌드 실패·중단·Snapshot 없음 등)의 Run 기록을 <results>/<Run 번호>/에 남긴다(bundle.json·meta.json).
     # compare가 이 Run도 실패·중단·비용·토큰 집계에 넣는다(채점 결과는 없음). 이미 채점한 Run은 덮어쓰지 않는다.
     run_id = _checked_metrics(bundle)['runId']  # 묶음 모양·Run 일치 확인
@@ -272,37 +355,97 @@ def record_run(results: Path, bundle: Mapping, *, pair_id: Optional[str] = None,
         raise ExperimentError('ALREADY_SCORED')
     if target.exists() and not force:
         raise ExperimentError('OUTPUT_EXISTS')
+    boundary = _check_automatic_boundary(target, bundle)
+    if boundary is not None:
+        old = _read_meta(target)
+        if ((pair_id is not None and pair_id != old.get('pairId'))
+                or (loop_policy is not None and loop_policy != old.get('loopPolicy'))):
+            raise ExperimentError('AUTOMATIC_SEGMENT_ALREADY_CLOSED')
+        return target  # Re-recording identical evidence must retain its closure and diagnostics.
     folder = Path(results) / f'.{run_id}.staging-{uuid.uuid4().hex}'
     try:
         _write(folder / 'bundle.json', bundle, False)
         _write(folder / 'meta.json', {'runId': run_id, 'exam': None, 'pairId': pair_id, 'loopPolicy': loop_policy}, False)
+        if _complete is not None:
+            _complete(folder)
+        boundary = _automatic_boundary(bundle)
+        if boundary is not None:
+            _write(folder / 'automatic_boundary.json', boundary, False)
+        _check_automatic_boundary(target, bundle)
+        if target.exists() and not force:
+            raise ExperimentError('OUTPUT_EXISTS')
         _replace(folder, target)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     return target
 
 
+def _archive_replay_baseline(results, run_id, output, contract=None):
+    """Keep each completed evaluation's replay baseline outside replaceable results."""
+    if not (output.get('inputRecord') or {}).get('fileName'):
+        return
+    evaluation_id = str(uuid.UUID(output['report']['evaluationId']))
+    directory = Path(results) / '.evaluation-history' / run_id / evaluation_id
+    for path in (directory.parent.parent, directory.parent, directory):
+        if path.is_symlink():
+            raise ExperimentError('EVALUATION_HISTORY_SYMLINK')
+        path.mkdir(exist_ok=True, mode=0o700)
+    documents = {'output.json': output}
+    if contract is not None:
+        documents['contract.json'] = dict(contract)
+    for name, document in documents.items():
+        path = directory / name
+        data = (json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + '\n').encode()
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        except FileExistsError:
+            if path.is_symlink() or not path.is_file() or path.read_bytes() != data:
+                raise ExperimentError('EVALUATION_HISTORY_CHANGED') from None
+            continue
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+
 def _score_into(folder, export, run, archive, expected, *, runner, exam, contract, bundle, trace_documents, pair_id,
-                loop_policy, architecture, all_versions):
+                loop_policy, architecture, all_versions, known_values=(), agent_export=None):
     # score_export의 채점 본체. 새 폴더(folder)에 결과 한 세트를 쓴다.
     run_id = run['runId']
+    # Keep evaluator-only input tapes outside replaceable Run results. A force
+    # regrade must not erase the inputs needed to reproduce earlier evaluations.
+    private_inputs = folder.parent / '.private-inputs' / run_id
     output = evaluate_final_snapshot(archive=archive, expected=expected, scenario_contract=contract,
                                      source_run_id=run_id, runner=runner, exam=exam, architecture=architecture,
-                                     run_bundle=bundle, trace_documents=trace_documents)
+                                     run_bundle=bundle, trace_documents=trace_documents, known_values=known_values,
+                                     private_input_dir=private_inputs)
+    _archive_replay_baseline(folder.parent, run_id, output, contract)
     regression = None
+    reports = [output['report']]
     if all_versions:
         earlier = [version for version in run.get('exportedCodeVersions', []) if version != expected.code_version]
-        if not earlier:
+        # 수정 없이 첫 버전(v1)에서 끝난 Run은 비교할 앞 버전이 없는 것이 정상이다. 멈추지 않고 비교 쌍 0개로 남긴다.
+        # 최종 버전이 2 이상인데 앞 버전이 하나도 없으면 내보내기가 빠진 것이므로 거부한다.
+        if not earlier and expected.code_version != 1:
             raise ExperimentError('EXPORT_HAS_NO_EARLIER_VERSIONS')
-        reports = [output['report']]
         for version in sorted(earlier):
             _run, version_archive, version_expected = read_export(Path(export), version)
-            reports.append(evaluate_final_snapshot(archive=version_archive, expected=version_expected,
-                                                   scenario_contract=contract, source_run_id=run_id, runner=runner,
-                                                   exam=exam, architecture=architecture)['report'])
+            version_output = evaluate_final_snapshot(archive=version_archive, expected=version_expected,
+                                                     scenario_contract=contract, source_run_id=run_id, runner=runner,
+                                                     exam=exam, architecture=architecture,
+                                                     private_input_dir=private_inputs)
+            _archive_replay_baseline(folder.parent, run_id, version_output, contract)
+            reports.append(version_output['report'])
             _write(folder / 'versions' / f'v{version}.json', reports[-1], False)
+            _write(folder / 'version_outputs' / f'v{version}.json', version_output, False)
+            from .check_details import write_details
+            write_details(folder / 'version_details' / f'v{version}', version_output, _write)
         regression = regression_from_reports(reports)
         _write(folder / 'regression.json', regression, False)
+    timing = first_passing_snapshot(bundle, reports)
+    _write(folder / 'timing_metrics.json', timing, False)
+    from .check_details import write_details
+    write_details(folder, output, _write)
     _write(folder / 'output.json', output, False)
     _write(folder / 'meta.json', {'runId': run_id, 'exam': exam, 'pairId': pair_id, 'loopPolicy': loop_policy,
                                   'codeVersion': expected.code_version}, False)
@@ -311,13 +454,25 @@ def _score_into(folder, export, run, archive, expected, *, runner, exam, contrac
     summary = render_summary(output['report'], scenario_contract=contract, run_bundle=bundle, trace=output['trace'],
                              runner=output['runner'], regression=regression, reference_report=output['referenceReport'],
                              supplementary=output['supplementary'])
+    summary += ('\n- 최초 통과 Snapshot 산출 시간(TIME-05): '
+                + (str(timing['firstPassingSnapshotMs']) + 'ms' if timing['firstPassingSnapshotMs'] is not None
+                   else str(timing['reason'])) + '\n')
+    if output.get('checkDetails') is not None:
+        summary += '\n- 세부 검사 결과: [기대값·실제값·항목별 상태](check_details.md) · [JSON](check_details.json)\n'
     _write(folder / 'summary.md', summary, False)
+    if agent_export is not None:
+        from .agent_eval import agent_tables, render_markdown
+        tables = agent_tables(agent_export, contract, output['report'])
+        _write(folder / 'agent_tables.json', tables, False)
+        _write(folder / 'agent_tables.md', render_markdown(tables), False)
 
 
 # ---------------------------------------------------------------- compare
 
 
-def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by: str = 'loopPolicy') -> dict:
+def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by: str = 'loopPolicy', *, run_journals=(),
+            architecture: Optional[str] = None, loop_policy: Optional[str] = None,
+            parity_file: Optional[Path] = None) -> dict:
     # <results>/ 아래 Run 폴더들로 Ver1·Ver2(group_by='loopPolicy')를 비교한다. group_by='architecture'면 같은 방안(보호
     # 테스트 조건이 같은 Run들)에서 Single과 Multi를 비교한다(10.29 회의록 방안 1·2의 본래 비교, Single 실행기는 1번 담당).
     # 구조별 비교에서는 차이의 차이(practiceEffect)를 계산하지 않는다. Run 기록(bundle.json)이 있는 폴더는 모두 Run으로 센다:
@@ -333,11 +488,27 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
     #     (지문 대조. 두 보고서를 바꿔 넣거나 다른 날의 다른 시험지로 채점한 결과가 섞이면 거부).
     #   - regression.json은 같은 Run·같은 시험지·같은 최종 코드 버전의 것이다.
     #   - Ver1 Run이 개발 중에 받은 순환용 시험지(Run 설정의 보호 테스트 참조)가 참고 채점의 순환용 시험지와 같다.
+    # 2×2 결과는 원본 폴더를 옮기지 않고 반대 축 하나를 고정해 읽는다. planned는 선택한 조건의 계획 수다.
+    if group_by not in GROUPINGS:
+        raise ExperimentError('GROUP_BY_INVALID')
+    if (architecture not in (None, *GROUPINGS['architecture']) or loop_policy not in (None, *LOOP_POLICIES)
+            or group_by == 'architecture' and architecture is not None
+            or group_by == 'loopPolicy' and loop_policy is not None):
+        raise ExperimentError('COMPARISON_SELECTION_INVALID')
     from .reporting import validate_contract
     suite = protected_tests.load_suite()
+    from .execution_journal import read_execution_journals, validate_bindings
+    journal_paths = list(run_journals)
+    if (Path(results) / 'runs.jsonl').is_file():
+        journal_paths.append(Path(results) / 'runs.jsonl')
+    try:
+        slots, journal_sources = read_execution_journals(journal_paths)
+    except Exception as error:
+        raise ExperimentError('EXECUTION_JOURNAL_INVALID') from error
     runs, evaluations, references, entries, exams, regressions, pairs = [], [], [], [], set(), {}, {}
+    exam_for_run = {}
     loop_ref = protected_tests.loop_suite_ref(suite)
-    unlinked, unlabeled, unscored, rows = [], [], [], []
+    unlinked, unlabeled, unscored, rows, quarantined = [], [], [], [], []
     for path in Path(results).iterdir():
         # 결과를 바꾸다 되돌리지 못한 백업(.<Run>.old-…)만 있고 원래 폴더가 없으면, 그 Run이 비교에서 조용히 빠지지 않게 멈춘다.
         if path.name.startswith('.') and '.old-' in path.name and \
@@ -358,12 +529,21 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
         frozen = metrics['loopPolicy']
         if intended is None:
             unlabeled.append(metrics['runId'])
-        metrics = {**metrics, 'loopPolicy': intended or frozen}
+        # workflow가 남긴 끝 상태 원인·의미 검토 사용량·자동 완료(outcome.json). 예전 결과 폴더에는 없을 수 있다.
+        outcome_record = None
+        if (folder / 'outcome.json').is_file():
+            outcome_record = json.loads((folder / 'outcome.json').read_text(encoding='utf-8'))
+            if not isinstance(outcome_record, dict) or outcome_record.get('runId') != metrics['runId']:
+                raise ExperimentError('OUTCOME_RUN_MISMATCH')
+        metrics = {**metrics, 'loopPolicy': intended or frozen, 'frozenLoopPolicy': frozen, 'outcomeRecord': outcome_record}
+        assisted = is_assisted_run(metrics)
+        if assisted:
+            quarantined.append(metrics['runId'])
         if frozen == 'IN_LOOP_AND_FINAL' and \
                 (bundle['configuration'].get('configuration') or {}).get('protectedTestSuiteRef') != loop_ref:
             unlinked.append(metrics['runId'])
         report = None
-        if (folder / 'output.json').is_file():
+        if (folder / 'output.json').is_file() and not assisted:
             output = json.loads((folder / 'output.json').read_text(encoding='utf-8'))
             report, reference = output.get('report'), output.get('referenceReport')
             try:
@@ -381,6 +561,7 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
             evaluations.append(report)
             references.append(reference)
             exams.add(meta['exam'])
+            exam_for_run[metrics['runId']] = meta['exam']
             if (folder / 'regression.json').is_file():
                 regression = json.loads((folder / 'regression.json').read_text(encoding='utf-8'))
                 if (regression.get('runId') != metrics['runId'] or regression.get('suiteSha256') != report['suite']['sha256']
@@ -389,6 +570,18 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
                 regressions[metrics['runId']] = (metrics[group_by], regression)
         else:
             unscored.append(metrics['runId'])
+        version_reports = [report] if report is not None else []
+        if report is not None:
+            for path in sorted((folder / 'versions').glob('v*.json')):
+                version_reports.append(json.loads(path.read_text(encoding='utf-8')))
+        # 파생 파일만 믿지 않고 원본 보고서·사건으로 다시 계산한다.
+        timing = (first_passing_snapshot(bundle, version_reports) if not assisted else
+                  {'status': 'UNVERIFIED', 'reason': 'AUTOMATIC_BOUNDARY_NOT_CAPTURED',
+                   'firstPassingSnapshotMs': None})
+        process_path = folder / 'process_evidence.json'
+        process = process_metrics(metrics['runId'], json.loads(process_path.read_text(encoding='utf-8'))
+                                  if process_path.is_file() and not assisted else None)
+        metrics = {**metrics, 'firstPassTiming': timing, 'processMetrics': process}
         runs.append(metrics)
         if meta.get('pairId') is not None:
             pairs[metrics['runId']] = str(meta['pairId'])
@@ -398,14 +591,48 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
         # Run마다 한 줄: 실행 결과(verdict·상태)와 채점 여부를 따로 적어 "시작 후 실패·실행 완료 미채점·채점 미검증"을 구분한다.
         rows.append({'runId': metrics['runId'], 'loopPolicy': metrics['loopPolicy'], 'frozenLoopPolicy': frozen,
                      'pairId': meta.get('pairId'), 'workflowStatus': metrics['workflowStatus'],
-                     'verdict': metrics['verdict'], 'scoring': 'SCORED' if report is not None else 'NOT_SCORED',
-                     'evaluationVerdict': report['evaluationVerdict'] if report is not None else None})
-    if not runs:
+                     'verdict': metrics['verdict'], 'scoring': 'QUARANTINED_ASSISTED' if assisted else
+                     'SCORED' if report is not None else 'NOT_SCORED',
+                     'evaluationVerdict': report['evaluationVerdict'] if report is not None else None,
+                     'cause': 'ASSISTED_CONTINUATION' if assisted else
+                     ((outcome_record or {}).get('outcome') or {}).get('cause'),
+                     'autoCompletion': 'FAIL' if assisted else
+                     ((outcome_record or {}).get('autoCompletion') or {}).get('status')})
+    # Validate the complete join before selecting a cohort: a mismatched Run ID,
+    # foreign experiment or contradictory slot must not disappear behind a filter.
+    try:
+        validate_bindings(slots, entries)
+    except Exception as error:
+        raise ExperimentError('EXECUTION_JOURNAL_MISMATCH') from error
+    selection = {'architecture': architecture, 'loopPolicy': loop_policy,
+                 'excludedRunIds': [], 'excludedExecutionSlots': 0}
+    if architecture is not None or loop_policy is not None:
+        def selected(item):
+            # Include contradictory labels on either side of the fixed condition;
+            # comparison_validity must reject them instead of silently hiding them.
+            return ((architecture is None or item['architecture'] == architecture)
+                    and (loop_policy is None or loop_policy in
+                         (item['loopPolicy'], item.get('frozenLoopPolicy'))))
+        selection['excludedRunIds'] = sorted(item['runId'] for item in runs if not selected(item))
+        runs = [item for item in runs if selected(item)]
+        ids = {item['runId'] for item in runs}
+        evaluations = [report for report in evaluations if report['sourceRunId'] in ids]
+        references = [report for report in references if report['sourceRunId'] in ids]
+        entries = [entry for entry in entries if entry['configuration']['runId'] in ids]
+        rows = [row for row in rows if row['runId'] in ids]
+        regressions = {run_id: value for run_id, value in regressions.items() if run_id in ids}
+        pairs = {run_id: value for run_id, value in pairs.items() if run_id in ids}
+        unlinked, unlabeled, unscored, quarantined = (
+            [run_id for run_id in values if run_id in ids]
+            for values in (unlinked, unlabeled, unscored, quarantined))
+        exams = {exam_for_run[run_id] for run_id in ids if run_id in exam_for_run}
+        retained_slots = [slot for slot in slots if selected(slot)]
+        selection['excludedExecutionSlots'] = len(slots) - len(retained_slots)
+        slots = retained_slots
+    if not runs and not planned:
         raise ExperimentError('NO_RESULTS')
     if len(exams) > 1:
         raise ExperimentError('MIXED_EXAMS')  # 시범(pilot)과 공식(final) 채점을 한 비교에 섞지 않는다
-    if group_by not in GROUPINGS:
-        raise ExperimentError('GROUP_BY_INVALID')
     observed = {}
     for item in runs:
         observed[item[group_by]] = observed.get(item[group_by], 0) + 1
@@ -415,6 +642,19 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
                                                  for policy, n in planned.items())
             or set(observed) - set(planned)):
         raise ExperimentError('PLANNED_RUNS_INVALID')  # 계획보다 결과가 많거나 계획에 없는 정책의 결과가 있음
+    try:
+        validate_bindings(slots, entries)
+        if any(slot[group_by] not in planned for slot in slots):
+            raise ValueError('UNPLANNED_EXECUTION_SLOT')
+    except Exception as error:
+        raise ExperimentError('EXECUTION_JOURNAL_MISMATCH') from error
+    recorded_ids = {item['runId'] for item in runs}
+    missing_slots = [slot for slot in slots if slot['runId'] not in recorded_ids]
+    rows.extend({**{k: slot[k] for k in ('runId', 'architecture', 'loopPolicy', 'workflowStatus')},
+                 'executionOrder': slot['order'], 'experimentId': slot['experimentId'],
+                 'scoring': 'RESULT_NOT_COLLECTED' if slot['runId'] else 'SUBMISSION_UNCONFIRMED',
+                 'cause': slot['reason'] or slot['state'], 'verdict': None,
+                 'evaluationVerdict': None, 'autoCompletion': None} for slot in missing_slots)
     regression = {}
     for policy in planned:
         mine = [item for owner, item in regressions.values() if owner == policy]
@@ -423,12 +663,27 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
                               'incompleteRuns': sum(1 for item in mine if not item.get('complete'))}
     try:
         validity = comparison_validity(entries, group_by=group_by) if len(observed) == 2 else None
-        summary = experiment_summary(runs, planned, evaluations, group_by=group_by)
+        summary = experiment_summary(runs, planned, evaluations, group_by=group_by, execution_slots=slots)
         effect = (loop_policy_effect(runs, evaluations, references, pairs=pairs, unscored=unscored)
                   if group_by == 'loopPolicy' else None)
+        # STAB-05: 구조 비교에서는 같은 쌍(pairId)으로 함께 실행한 Single·Multi의 차이를 따로 낸다.
+        pair_comparison = architecture_pairs(runs, evaluations, pairs) if group_by == 'architecture' else None
     except ValueError:
         # 보관한 결과끼리 맞지 않음(예: Run의 최종 코드 버전이 아닌 버전을 채점한 보고서). 명령줄에 짧은 코드로 알린다.
         raise ExperimentError('RESULTS_INCONSISTENT') from None
+    parity = _tool_parity(Path(results), [item['runId'] for item in runs], parity_file=parity_file)
+    if validity is not None:
+        _outcome_warnings(validity, runs)
+        if quarantined:
+            validity['warnings'].append({'field': 'automaticSegment', 'detail': 'ASSISTED_RESULTS_QUARANTINED',
+                                         'runs': sorted(quarantined)})
+        if parity['status'] == 'FAIL':
+            # 개발정의서 11-A "Single만 Tool 적게 → 비교 무효"
+            validity['violations'].append({'field': 'toolParity', 'severity': 'INVALID_COMPARISON',
+                                           'values': {'failedChecks': parity.get('failedChecks', [])}})
+            validity['valid'] = False
+        elif parity['status'] != 'PASS':
+            validity['warnings'].append({'field': 'toolParity', 'detail': parity['status'], 'runs': []})
     if validity is not None and unlinked:
         # 개발 중에 준 순환용 시험지를 Run 기록으로 확인할 수 없으면 차이의 차이(보조 지표)의 전제가 깨진다.
         validity['violations'].append({'field': 'protectedTestSuiteRef.practice', 'severity': 'INVALID_COMPARISON',
@@ -437,11 +692,75 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
     if validity is not None and unlabeled and group_by == 'loopPolicy':
         validity['warnings'].append({'field': 'loopPolicy', 'detail': 'INTENDED_LOOP_POLICY_NOT_RECORDED',
                                      'runs': sorted(unlabeled)})
-    return {'exam': exams.pop() if exams else None, 'groupBy': group_by, 'plannedRuns': planned,
+    blockers = []
+    if not planned_known:
+        blockers.append('PLANNED_RUNS_UNKNOWN')
+    if validity is None or not validity.get('valid') or validity.get('violations'):
+        blockers.append('COMPARISON_CONDITIONS_NOT_VERIFIED')
+    # 구조 비교(Single·Multi)와 버전 비교(Ver1·Ver2) 모두 실제 Host 한도·도구 설정 동일 확인과 Run별 고정 정책 확인이
+    # 있어야 공식 비교로 본다(점검 5). parity.json은 이 비교 기준으로 만든 것이어야 한다.
+    if parity['status'] != 'PASS':
+        blockers.append('TOOL_AND_LIMIT_PARITY_NOT_VERIFIED')
+    if not parity.get('pinnedRunsVerified'):
+        blockers.append('RUN_POLICY_BINDINGS_NOT_VERIFIED')
+    if parity['status'] != 'NOT_CHECKED' and parity.get('groupBy') != group_by:
+        blockers.append('PARITY_REPORT_FOR_OTHER_COMPARISON')
+    if quarantined:
+        blockers.append('ASSISTED_CONTINUATION_REQUIRES_SEPARATE_EXPERIMENT')
+    if any(group['unrecordedRuns'] for group in summary.values()):
+        blockers.append('PLANNED_SLOT_RESULTS_NOT_COLLECTED')
+    return {'exam': exams.pop() if exams else None, 'groupBy': group_by, 'plannedRuns': planned, 'selection': selection,
+            'readiness': {'status': 'PASS' if not blockers else 'UNVERIFIED', 'blockers': blockers},
             'plannedRunsKnown': planned_known,
             'validity': validity, 'runs': rows, 'unscoredRuns': sorted(unscored),
-            'summary': summary, 'practiceEffect': effect,
-            'regression': regression}
+            'quarantinedAssistedRuns': sorted(quarantined),
+            'executionSlots': slots, 'executionJournalSources': journal_sources,
+            'summary': summary, 'practiceEffect': effect, 'pairComparison': pair_comparison,
+            'toolParity': parity, 'regression': regression}
+
+
+def _outcome_warnings(validity, runs):
+    # 끝 상태 원인으로 비교 해석에 주의할 Run을 알린다(판정을 바꾸지 않는다).
+    def runs_where(test):
+        return sorted(item['runId'] for item in runs if test(item.get('outcomeRecord')))
+    validity_of = lambda record: ((record or {}).get('outcome') or {}).get('comparisonValidity')
+    for detail, found in (('ENVIRONMENT_FAILURE_RUNS', runs_where(lambda record: validity_of(record) == 'UNVERIFIED')),
+                          ('OUTCOME_REVIEW_REQUIRED', runs_where(lambda record: validity_of(record) == 'REVIEW_REQUIRED')),
+                          ('OUTCOME_NOT_RECORDED', runs_where(lambda record: record is None))):
+        if found:
+            validity['warnings'].append({'field': 'outcome', 'detail': detail, 'runs': found})
+
+
+def _tool_parity(results: Path, run_ids=(), *, parity_file: Optional[Path] = None) -> dict:
+    # <results>/parity.json(evaluation.parity가 쓴 도구·LLM 한도 동일 확인)을 읽는다. 없으면 NOT_CHECKED.
+    path = Path(parity_file) if parity_file is not None else results / 'parity.json'
+    if not path.is_file():
+        return {'status': 'NOT_CHECKED', 'source': None}
+    try:
+        report = json.loads(path.read_text(encoding='utf-8'))
+        status = report['status']
+        if status not in ('PASS', 'FAIL', 'UNVERIFIED'):
+            raise ValueError
+        checks = report['checks']
+        if (not isinstance(checks, list) or not checks or any(not isinstance(item, dict)
+                or item.get('status') not in ('PASS', 'FAIL', 'UNVERIFIED') for item in checks)):
+            raise ValueError
+        states = [item['status'] for item in checks]
+        if status != ('FAIL' if 'FAIL' in states else 'UNVERIFIED' if 'UNVERIFIED' in states else 'PASS'):
+            raise ValueError
+        if any(item.get('check') == 'pinnedPolicy' and not isinstance(item.get('runId'), str) for item in checks):
+            raise ValueError
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ExperimentError('PARITY_REPORT_INVALID') from None
+    failed = [item.get('check') for item in report.get('checks', []) if item.get('status') == 'FAIL']
+    pinned = [item for item in checks if item.get('check') == 'pinnedPolicy']
+    matched = [item.get('runId') for item in pinned if item['status'] == 'PASS']
+    verified = (report.get('pinnedPolicyChecked') is True and bool(run_ids)
+                and len(matched) == len(pinned) == len(set(matched)) == len(set(run_ids))
+                and set(matched) == set(run_ids))
+    group_by = report.get('groupBy', 'architecture')  # groupBy가 없는 예전 보고서는 구조 비교용이다
+    return {'status': status, 'source': path.name, 'failedChecks': failed, 'pinnedRunsVerified': verified,
+            'groupBy': group_by}
 
 
 # ---------------------------------------------------------------- 명령줄
@@ -475,6 +794,9 @@ def main(argv=None):
     item.add_argument('--architecture', choices=GROUPINGS['architecture'],
                       help='보고서에 적을 구조(기본: Run 기록에 동결된 구조, 없으면 MULTI_AGENT)')
     item.add_argument('--all-versions', action='store_true', help='중간 코드 버전도 채점해 Regression 계산')
+    item.add_argument('--secrets-file', type=Path, help='평가용 비밀값 JSON 배열 파일(결과에 복사하지 않음)')
+    item.add_argument('--output-manifest', type=Path, help='추가로 검사할 출력 파일 목록 JSON')
+    item.add_argument('--output-root', type=Path, help='출력 목록의 상대 경로 기준 폴더')
     item.add_argument('--contract')
     item.add_argument('--force', action='store_true')
     item = commands.add_parser('record', help='채점하지 못한 Run의 기록만 보관(실패·중단·비용 집계용)')
@@ -489,7 +811,14 @@ def main(argv=None):
                       help='조건별 계획 Run 수(IN_LOOP_AND_FINAL=5 FINAL_ONLY=5, 구조별이면 MULTI_AGENT=5 SINGLE_AGENT=5). 성공률 분모')
     item.add_argument('--group-by', choices=tuple(GROUPINGS), default='loopPolicy',
                       help='loopPolicy(Ver1·Ver2, 기본) 또는 architecture(같은 방안의 Single·Multi)')
+    item.add_argument('--architecture', choices=GROUPINGS['architecture'],
+                      help='group-by loopPolicy에서 비교할 구조 하나를 고정한다')
+    item.add_argument('--loop-policy', choices=LOOP_POLICIES,
+                      help='group-by architecture에서 비교할 버전 하나를 고정한다')
+    item.add_argument('--parity', type=Path, help='선택한 비교 조건·Run들의 evaluation.parity 보고서')
     item.add_argument('--out', type=Path)
+    item.add_argument('--run-journal', action='append', default=[], type=Path,
+                      help='측정 실행 runs.jsonl 또는 그 폴더. 반복 지정 가능. 미시작과 결과 미수집을 구분')
     options = parser.parse_args(argv)
     try:
         if options.command == 'configure':
@@ -505,7 +834,10 @@ def main(argv=None):
                 print(f'{name}: {options.out / name}')
         elif options.command == 'fetch':
             import httpx
-            with httpx.Client(base_url=options.api, timeout=30) as client:
+            # 실제 Host(dev 83번)는 API마다 서버 전용 Bearer 토큰을 요구한다. 토큰은 환경 변수에서만 읽는다.
+            token = os.environ.get('A2A_HOST_API_TOKEN')
+            headers = {'Authorization': f'Bearer {token}'} if token else {}
+            with httpx.Client(base_url=options.api, timeout=30, headers=headers) as client:
                 def get(path, params=None):
                     # dev Run 조회 API 한 번 부르기(오류 응답이면 예외)
                     response = client.get(path, params=params)
@@ -517,13 +849,24 @@ def main(argv=None):
             _write(options.out / 'trace.json', trace, True)
             print(f'bundle: {options.out / "bundle.json"}\ntrace: {options.out / "trace.json"}')
         elif options.command == 'score':
+            from .output_evidence import read_known_values, collect_output_evidence
             read = lambda path: json.loads(path.read_text(encoding='utf-8')) if path else None
             bundle, trace, a2a = read(options.bundle), read(options.trace), read(options.a2a)
+            try:
+                known = read_known_values(options.secrets_file) if options.secrets_file else ()
+                if bool(options.output_manifest) != bool(options.output_root):
+                    raise ValueError('OUTPUT_ROOT_AND_MANIFEST_REQUIRED')
+                extra = (collect_output_evidence(options.output_root, read(options.output_manifest),
+                                                 read(options.export / 'run.json')['runId'])
+                         if options.output_manifest else None)
+            except (OSError, ValueError, KeyError):
+                raise ExperimentError('OUTPUT_EVIDENCE_INPUT_INVALID') from None
             folder = score_export(options.export, runner=DockerRunner(options.image), exam=options.exam,
                                   results=options.results, contract=_contract(options.contract), bundle=bundle,
                                   trace=trace, a2a=a2a,
                                   pair_id=options.pair_id, loop_policy=options.loop_policy, architecture=options.architecture,
-                                  all_versions=options.all_versions, force=options.force)
+                                  all_versions=options.all_versions, force=options.force,
+                                  known_values=known, additional_outputs=extra)
             print(f'results: {folder}')
         elif options.command == 'record':
             folder = record_run(options.results, json.loads(options.bundle.read_text(encoding='utf-8')),
@@ -536,9 +879,12 @@ def main(argv=None):
                 if not count.isdigit() or policy in planned:
                     raise ExperimentError('PLANNED_ARGUMENT_INVALID')
                 planned[policy] = int(count)
-            result = compare(options.results, planned or None, group_by=options.group_by)
+            result = compare(options.results, planned or None, group_by=options.group_by, run_journals=options.run_journal,
+                             architecture=options.architecture, loop_policy=options.loop_policy, parity_file=options.parity)
             out = options.out or options.results
             _write(out / 'comparison.json', result, True)
+            from .comparison_report import render_comparison
+            _write(out / 'comparison.md', render_comparison(result), True)
             print(f'comparison: {out / "comparison.json"}')
     except ExperimentError as error:
         sys.stderr.write(error.code + '\n')

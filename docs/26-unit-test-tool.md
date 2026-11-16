@@ -56,7 +56,7 @@ live `source/`를 테스트하지 않는다. `snapshotId`는 저장된 Source Ar
 | `reportRef` | `artifact://<실행 기록 UUID>/unit-test-report.json` |
 | `executionManifestId` | 실제 저장된 Unit 실행 기록 UUIDv4 |
 
-`read_test_report`는 기존 `workspaceId`, `reportRef`를 받아 `{ "testResult": <검증된 unittest-v1 보고서> }`를 반환한다. 보고서는 format/counts와 `tests[{testId,outcome,details?}]`만 포함한다.
+`read_test_report`는 기존 `workspaceId`, `reportRef`를 받아 `{ "testResult": <검증된 unittest-v1 보고서> }`를 반환한다. 보고서는 format/counts와 `tests[{testId,outcome,details?}]`를 포함한다. 보호 검사에는 기대조건을 제외한 세부 관찰의 선택 필드 `observations` 또는 손상 표시 `observationError`도 포함할 수 있다. 필드와 개발 에이전트 전달 경로는 [순환 중 세부 피드백](evaluation/loop_validation_feedback.md)을 참고한다.
 
 `reportRef`는 기존 MCP Artifact-reference 문법을 따르는 **전용 Unit Store의 사설 실행 참조**다. Project Artifact Registry/A2A QA Artifact를 발급한 것이 아니다. Source ID, Sandbox execution ID, receipt ID는 별개이며 임의 URL fetch·Workspace 경로 읽기로 해석하지 않는다. 실제 QA/Build Artifact와의 연결은31/32번이다.
 

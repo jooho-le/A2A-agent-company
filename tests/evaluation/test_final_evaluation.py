@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -81,7 +81,7 @@ class VerifiedImageRunner:
     def run(self, snapshot_dir, inputs_dir, directory, pattern, script='_unit_runner.py'):
         self.calls += 1
         outcome = self.local.run(snapshot_dir, inputs_dir, directory, pattern, script=script)
-        return RunnerOutcome(outcome.report, outcome.exit_code, outcome.error, self.digest, self.kind, outcome.coverage)
+        return RunnerOutcome(outcome.report, outcome.exit_code, outcome.error, self.digest, self.kind, outcome.coverage, outcome.private_inputs, outcome.detail_results)
 
 
 class RecordingRunner:
@@ -132,6 +132,61 @@ def test_canonical_snapshot_is_read():
     """dev와 같은 모양의 Snapshot은 파일 내용 그대로 읽힌다."""
     files = read_snapshot(snapshot())
     assert 'main.py' in files and files['requirements.lock'] == LOCK
+
+
+@pytest.mark.parametrize('damage,error', [
+    ('missing_fields', 'COVERAGE_INVALID'), ('bad_count', 'COVERAGE_INVALID'),
+    ('bool_count', 'COVERAGE_INVALID'), ('duplicate_lines', 'COVERAGE_INVALID'),
+    ('unknown_source', 'COVERAGE_INVALID'), ('missing', 'COVERAGE_UNAVAILABLE'),
+    ('wrong_image', 'COVERAGE_ENVIRONMENT_UNVERIFIED'),
+    ('omitted_source', 'COVERAGE_INCOMPLETE'),
+    ('runner_error', 'TEST_RUNNER_ERROR'), ('invalid_report', 'UNIT_REPORT_INVALID'),
+])
+def test_unusable_coverage_does_not_destroy_the_independent_result(damage, error):
+    from evaluation import protected_tests
+    suite = protected_tests.load_suite()
+
+    class CoverageRunner:
+        kind = 'docker'
+
+        def run(self, source, inputs, directory, pattern, script='_unit_runner.py'):
+            exam = 'practice' if pattern == suite['scopes']['practice']['pattern'] else 'final'
+            cases = protected_tests.evaluation_inputs(CONTRACT, exam, suite)['unit_cases']
+            report = {'format': 'unittest-v1', 'total': len(cases), 'passed': len(cases), 'failed': 0, 'skipped': 0,
+                      'tests': [{'testId': name, 'outcome': 'PASS'} for name in cases]}
+            coverage = {'files': {'main.py': {'lines': 3, 'executed': 2, 'missing': [3]}}}
+            image, failure = IMAGE, None
+            if script == '_coverage_runner.py':
+                if damage == 'missing_fields': coverage['files']['main.py'] = {}
+                elif damage == 'bad_count': coverage['files']['main.py']['executed'] = 4
+                elif damage == 'bool_count': coverage['files']['main.py']['lines'] = True
+                elif damage == 'duplicate_lines': coverage['files']['main.py']['missing'] = [3, 3]
+                elif damage == 'unknown_source': coverage['files']['not-in-snapshot.py'] = coverage['files'].pop('main.py')
+                elif damage == 'missing': coverage = None
+                elif damage == 'wrong_image': image = 'sha256:' + 'e' * 64
+                elif damage == 'runner_error': failure = 'TEST_RUNNER_ERROR'
+                elif damage == 'omitted_source': pass
+                else: report = None
+            return RunnerOutcome(report, 0, failure, image, self.kind, coverage)
+
+    archive = snapshot()
+    result = final(archive, manifest(archive), CoverageRunner())
+    assert result['report']['evaluationVerdict'] == 'PASS'
+    assert result['referenceReport']['evaluationVerdict'] == 'PASS'
+    supplement = result['supplementary']['coverage']
+    assert supplement['error'] == error and 'all' not in supplement
+    assert result['evidence'][supplement['evidenceId']]['coverage'] is None
+
+
+def test_runner_error_with_malformed_coverage_remains_an_unverified_evaluation():
+    class BrokenRunner(RecordingRunner):
+        def run(self, *args, **kwargs):
+            return RunnerOutcome(None, 2, 'TEST_RUNNER_ERROR', IMAGE, self.kind, {'files': {'main.py': {}}})
+
+    archive = snapshot()
+    result = final(archive, manifest(archive), BrokenRunner())
+    assert result['report']['evaluationVerdict'] == 'UNVERIFIED'
+    assert result['supplementary']['coverage']['error'] == 'TEST_RUNNER_ERROR'
 
 
 def add_special(name, kind, link=''):
@@ -201,6 +256,17 @@ def test_missing_lock_means_results_are_not_used():
     output = final(archive, manifest(archive), RecordingRunner())
     assert output['snapshot']['lockFound'] is False
     assert output['report']['manifestCheck']['errorCode'] == 'MANIFEST_MISSING'
+
+
+def test_other_file_cannot_substitute_for_the_declared_dependency_lock():
+    files = read_snapshot(snapshot(lock=b'changed requirements\n'))
+    files['notes/old-lock.txt'] = LOCK
+    archive, runner = canonical_tar(files), RecordingRunner()
+    output = final(archive, manifest(archive), runner)
+    assert runner.calls == 0
+    assert output['snapshot']['lockFound'] is False
+    assert output['snapshot']['error'] == 'DEPENDENCY_LOCK_MISSING_OR_MISMATCH'
+    assert output['report']['evaluationVerdict'] == 'UNVERIFIED'
 
 
 @pytest.mark.parametrize('exam', ['practice', 'in-loop-qa', None])
@@ -278,9 +344,29 @@ def test_written_tree_is_readable_by_container_user(tmp_path):
     assert modes == {'tree': 0o755, 'tree/main.py': 0o644, 'tree/routers': 0o755, 'tree/routers/auth.py': 0o644}
 
 
+def test_replay_mount_input_is_readable_under_restrictive_host_umask():
+    """New per-scope replay data needs the same mount permissions as the suite."""
+    class PermissionRunner(RecordingRunner):
+        def run(self, snapshot_dir, inputs_dir, *args, **kwargs):
+            assert stat.S_IMODE((inputs_dir / '_input_replay.json').stat().st_mode) == 0o644
+            assert stat.S_IMODE(inputs_dir.stat().st_mode) == 0o755
+            assert stat.S_IMODE(inputs_dir.parent.stat().st_mode) == 0o700
+            return super().run(snapshot_dir, inputs_dir, *args, **kwargs)
+
+    archive, runner = snapshot(), PermissionRunner()
+    previous = os.umask(0o077)
+    try:
+        final(archive, manifest(archive), runner)
+    finally:
+        os.umask(previous)
+    assert runner.calls == 3
+
+
 def fake_docker(tmp_path, image_id, report):
     """docker 대신 쓰는 시험용 프로그램: image inspect에는 이미지 정보를, run에는 실행기 출력을 돌려준다."""
-    script = tmp_path / 'docker'
+    # Keep the inert fixture distinguishable from a real Docker executable,
+    # including when the test process explicitly prohibits Docker access.
+    script = tmp_path / 'fixture_container_output.py'
     script.write_text('#!' + sys.executable + '\nimport json, sys\n'
                       f'IMAGE = {json.dumps({"Id": image_id, "Os": "linux", "RepoDigests": []})}\n'
                       f'REPORT = {json.dumps(report)}\n'
@@ -303,6 +389,94 @@ def test_docker_runner_checks_image_before_running(tmp_path):
     assert bad.report is None and bad.error == 'IMAGE_UNAVAILABLE_OR_MISMATCH'
     missing = DockerRunner(IMAGE, docker=str(tmp_path / 'no-docker')).run(tmp_path, tmp_path, 't', 'p.py')
     assert missing.error == 'IMAGE_UNAVAILABLE_OR_MISMATCH'
+
+
+@pytest.mark.parametrize('lock_case', ['matching', 'mismatch', 'missing', 'conflicting_paths', 'invalid'])
+def test_standard_docker_path_verifies_actual_image_lock_before_testing(monkeypatch, lock_case):
+    from evaluation import protected_tests
+    from evaluation.final_evaluation import IMAGE_LOCK_PATHS
+    suite = protected_tests.load_suite()
+    actual_lock = 'sha256:' + hashlib.sha256(LOCK).hexdigest()
+    locks = {IMAGE_LOCK_PATHS[0]: actual_lock}
+    if lock_case == 'mismatch': locks[IMAGE_LOCK_PATHS[0]] = 'sha256:' + 'e' * 64
+    elif lock_case == 'missing': locks = {}
+    elif lock_case == 'conflicting_paths': locks[IMAGE_LOCK_PATHS[1]] = 'sha256:' + 'e' * 64
+    probe = {'format': 'evaluation-image-lock-v1', 'locks': locks} if lock_case != 'invalid' else []
+    calls = []
+
+    def fake_call(args, timeout):
+        calls.append(args)
+        if args[:2] == ('image', 'inspect'):
+            payload = [{'Id': IMAGE, 'Os': 'linux'}]
+        elif '-c' in args:
+            assert '--mount' not in args  # never mount generated source for the probe
+            assert args[args.index('--network') + 1] == 'none'
+            assert args[args.index('--user') + 1] == '10001:10001'
+            payload = probe
+        else:
+            scope = 'practice' if args[-1] == suite['scopes']['practice']['pattern'] else 'final'
+            cases = protected_tests.evaluation_inputs(CONTRACT, scope, suite)['unit_cases']
+            payload = {'format': 'unittest-v1', 'total': len(cases), 'passed': len(cases), 'failed': 0, 'skipped': 0,
+                       'tests': [{'testId': name, 'outcome': 'PASS'} for name in cases]}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), '')
+
+    runner = DockerRunner(IMAGE)
+    monkeypatch.setattr(runner, '_call', fake_call)
+    archive = snapshot()
+    output = final(archive, manifest(archive), runner)
+    observation = output['snapshot']['imageDependencyLock']
+    product_calls = [args for args in calls if args[0] == 'run' and '-c' not in args]
+    if lock_case == 'matching':
+        assert len(product_calls) == 3 and output['report']['evaluationVerdict'] == 'PASS'
+        assert observation['status'] == 'OBSERVED' and observation['sha256'] == actual_lock
+    else:
+        assert product_calls == [] and output['report']['evaluationVerdict'] == 'UNVERIFIED'
+        assert observation['status'] == 'UNVERIFIED'
+        assert observation['error'] == ('IMAGE_DEPENDENCY_LOCK_MISMATCH' if lock_case == 'mismatch'
+                                         else 'IMAGE_DEPENDENCY_LOCK_UNAVAILABLE')
+
+
+@pytest.mark.parametrize('cleanup,expected_error,executions', [
+    ('removed', 'TIMEOUT', 3), ('failed', 'TIMEOUT_CLEANUP_FAILED', 1),
+    ('timeout', 'TIMEOUT_CLEANUP_TIMEOUT', 1), ('unavailable', 'TIMEOUT_CLEANUP_UNAVAILABLE', 1),
+])
+def test_unconfirmed_timeout_cleanup_stops_following_evaluations(monkeypatch, cleanup, expected_error, executions):
+    runner, calls = DockerRunner(IMAGE), []
+    monkeypatch.setattr(runner, 'image_digest', lambda: IMAGE)
+    monkeypatch.setattr(runner, 'image_dependency_lock', lambda: {
+        'status': 'OBSERVED', 'sha256': 'sha256:' + hashlib.sha256(LOCK).hexdigest(),
+        'imageDigest': IMAGE, 'paths': ['/opt/evaluation/requirements.lock'], 'error': None})
+
+    def fake_call(args, timeout):
+        calls.append(args)
+        if args[0] == 'run' or cleanup == 'timeout':
+            raise subprocess.TimeoutExpired(args[0], timeout)
+        if cleanup == 'unavailable':
+            raise OSError('fixture unavailable')
+        return subprocess.CompletedProcess(args, 0 if cleanup == 'removed' else 1, '', '')
+
+    monkeypatch.setattr(runner, '_call', fake_call)
+    archive = snapshot()
+    output = final(archive, manifest(archive), runner)
+    assert output['runner']['error'] == expected_error
+    assert sum(args[0] == 'run' for args in calls) == executions
+    assert sum(args[0] == 'rm' for args in calls) == executions
+    assert output['report']['evaluationVerdict'] == 'UNVERIFIED'
+    if cleanup != 'removed':
+        assert output['supplementary']['coverage']['error'] == 'NOT_RUN_AFTER_UNVERIFIED_CLEANUP'
+
+
+def test_image_lock_probe_preserves_timeout_cleanup_failure(monkeypatch):
+    runner = DockerRunner(IMAGE)
+    monkeypatch.setattr(runner, 'image_digest', lambda: IMAGE)
+    def fake_call(args, timeout):
+        if args[0] == 'run':
+            raise subprocess.TimeoutExpired(args[0], timeout)
+        return subprocess.CompletedProcess(args, 1, '', '')
+    monkeypatch.setattr(runner, '_call', fake_call)
+    result = runner.image_dependency_lock()
+    assert result['status'] == 'UNVERIFIED'
+    assert result['error'] == 'IMAGE_DEPENDENCY_LOCK_TIMEOUT_CLEANUP_FAILED'
 
 
 # ---------------------------------------------------------------- 실행(합성 서비스)
@@ -389,6 +563,7 @@ def test_local_runner_results_are_never_used_as_final_evidence():
     output = final(archive, manifest(archive), LocalRunner(trusted=True))
     assert output['runner']['kind'] == 'local' and output['runner']['imageDigest'] is None
     assert output['report']['manifestCheck']['errorCode'] == 'MANIFEST_MISSING'
+    assert output['snapshot']['imageDependencyLock']['status'] == 'NOT_OBSERVED'
     unit = next(item for item in output['evidence'].values() if item['kind'] == 'UNIT_TEST_REPORT' and item['exam'] == 'final')
     assert unit['report']['passed'] == 9  # 실행 자체는 되었지만 보고서 판정에는 쓰지 않는다.
 
@@ -409,7 +584,21 @@ def test_real_container_run():
     """실제 Docker로 정상 서비스를 채점하면 실행기 오류 없이 PASS다."""
     image = os.environ['EVAL_DOCKER_IMAGE']
     runner = DockerRunner(image)
-    archive = snapshot()
-    output = final(archive, manifest(archive, image=runner.image_digest()), runner)
+    observed_lock = runner.image_dependency_lock()
+    assert observed_lock['status'] == 'OBSERVED', observed_lock
+    # Use the immutable image's exact build lock rather than an invented fixture
+    # string that happens to name some packages. No generated source is mounted.
+    command = runner._base_command('eval-fixture-lock-' + uuid4().hex[:12]) + [
+        '--entrypoint', runner.python, image, '-I', '-B', '-c',
+        'from pathlib import Path; import sys; sys.stdout.write(Path(sys.argv[1]).read_text())',
+        observed_lock['paths'][0]]
+    done = runner._call(command, 60)
+    assert done.returncode == 0
+    lock = done.stdout.encode('utf-8')
+    assert 'sha256:' + hashlib.sha256(lock).hexdigest() == observed_lock['sha256']
+    archive = snapshot(lock=lock)
+    output = final(archive, manifest(archive, lock=lock, image=runner.image_digest()), runner)
     assert output['runner']['error'] is None, output['runner']
     assert output['report']['evaluationVerdict'] == 'PASS', statuses(output)
+    assert output['checkDetails']['recordStatus'] == 'COMPLETE'
+    assert len(output['checkDetails']['checks']) == 9

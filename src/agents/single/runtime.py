@@ -131,7 +131,9 @@ class SingleAgentExecutor(AgentExecutor):
         result = await engine.run(prompt=prompt, model=execution.model, output=contract.output,
             budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
             usage_sink=telemetry.usage if telemetry is not None else self._usage_sink,
-            call_started_sink=telemetry.model_started if telemetry is not None else None)
+            call_started_sink=telemetry.model_started if telemetry is not None else None,
+            output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                    input_observed_sink=telemetry.model_input if telemetry is not None else None)
         return contract.validate(result.data), result, prompt
 
     async def _review(self, context, role, execution, phase, decision, result, telemetry, prompt):

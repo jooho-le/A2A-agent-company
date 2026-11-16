@@ -1,5 +1,6 @@
 .env
 configs/*.local.json
+configs/experiment/
 
 # Operator-prepared sandbox packages/browser binaries, not source code.
 docker/sandbox/prepared/
@@ -17,3 +18,7 @@ dist/
 
 # Evaluation experiments: keep scored results, never the exported Snapshot tar files.
 experiments/**/export/
+
+# Evaluator-only concrete inputs and immutable replay baselines.
+.private-inputs/
+.evaluation-history/

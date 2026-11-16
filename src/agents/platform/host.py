@@ -28,6 +28,7 @@ from agents.platform.configuration import (
 from agents.core.identity import SingleAgentIdentity
 from agents.single.platform import create_single_platform
 from agents.platform.host_policy_store import HostPolicyStore
+from agents.platform.package_service import install_package_service
 from agents.platform.host_services import HostRuntimeServices, _model_json
 from agents.platform.pricing import load_price_book
 from agents.platform.security_approval import ApprovedSecurityAssessor
@@ -45,6 +46,7 @@ from orchestrator.domain.states import AgentRole
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.api.host_access import host_token_from_environment, install_host_api_documentation
 from orchestrator.core.security import register_secret_values
+from orchestrator.observability import ObservationStore
 from orchestrator.workspaces.registry import WorkspaceRegistry
 
 
@@ -72,31 +74,52 @@ def _case_data(case):
     }
 
 
-def _load_protected_cases(path):
+def _load_protected_case_file(path):
+    """Return (cases, roles). Schema 1 has no roles; schema 2 names each case's role."""
     if path is None:
-        return ()
+        return (), None
     raw = _read_regular(Path(path).absolute(), 1_048_576)
     data = parse_json(raw.decode("utf-8"), max_bytes=1_048_576)
     if (type(data) is not dict or set(data) != {"schemaVersion", "cases"}
-            or type(data["schemaVersion"]) is not int or data["schemaVersion"] != 1
+            or type(data["schemaVersion"]) is not int or data["schemaVersion"] not in (1, 2)
             or type(data["cases"]) is not list or len(data["cases"]) > 256):
         raise HostFactoryError()
-    result = []
+    explicit = data["schemaVersion"] == 2
+    fields = _CASE_FIELDS | {"role"} if explicit else _CASE_FIELDS
+    result, roles = [], []
     for case in data["cases"]:
-        if (type(case) is not dict or set(case) != _CASE_FIELDS
-                or any(type(value) is not str for value in case.values())):
+        if (type(case) is not dict or set(case) != fields
+                or any(type(value) is not str for value in case.values())
+                or explicit and case["role"] not in ("QA", "SECURITY")):
             raise HostFactoryError()
         result.append(QACaseBinding(tool_name=case["toolName"], selector=case["selector"], test_id=case["testId"],
             requirement_id=UUID(case["requirementId"]), title=case["title"], expected_result=case["expectedResult"]))
-    return tuple(result)
+        if explicit:
+            roles.append(case["role"])
+    return tuple(result), tuple(roles) if explicit else None
 
 
-def _policy_references(tools, cases):
+def _load_protected_cases(path):
+    return _load_protected_case_file(path)[0]
+
+
+def _policy_references(tools, cases, roles=None):
     # This Host's case file is QA's in-loop suite. Security self-tests can be
     # enabled explicitly; a separate protected Security case contract is not
     # implemented here and must never be silently inferred from QA cases.
     security_unit = tools.unit_configuration_for(AgentRole.SECURITY)
-    if security_unit is not None and any(scope.kind == "PROTECTED" for scope in security_unit.scopes):
+    security_protected = set() if security_unit is None else {
+        scope.name for scope in security_unit.scopes if scope.kind == "PROTECTED"}
+    # Protected case file schema 2 is the explicit Security case contract: every
+    # case states its role, and the role must equal the role of the protected
+    # scope it targets. Schema 1 (no roles) keeps Security protected scopes closed.
+    if roles is None:
+        if security_protected:
+            raise HostFactoryError()
+    elif len(roles) != len(cases) or any(
+            role != ("SECURITY" if case.tool_name == "run_unit_tests" and case.selector in security_protected
+                     else "QA")
+            for case, role in zip(cases, roles)):
         raise HostFactoryError()
     profiles = {profile.profile_ref for profile in tools.security_configuration.profiles}
     if len(profiles) != 1:
@@ -223,8 +246,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             raise HostFactoryError()
         source = verify_starting_source(load_source_configuration(source_path),
             base_directory=source_path.parent, environment=tools.baseline)
-        cases = _load_protected_cases(protected_cases_file)
-        scanner_ref, protected_ref = _policy_references(tools, cases)
+        cases, roles = _load_protected_case_file(protected_cases_file)
+        scanner_ref, protected_ref = _policy_references(tools, cases, roles)
         lock = Path(tools.dependency_lock_file)
         lock = lock if lock.is_absolute() else tools_path.parent / lock
         inputs = (runtime_path, tools_path, source_path)
@@ -336,6 +359,8 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
             client_factory=mcp_client_factory, protected_cases=plan.protected_cases, proof_verifier=verifier)
 
         async def prepare_workspace(run_id):
+            await _host_call(ObservationStore(repository).pin_policy, run_id)
+            await _host_call(platform.orchestrator_app.state.package_service.enroll, run_id)
             frozen = await _host_call(repository.get_run_configuration, run_id)
             plan.validate_configuration(frozen.configuration)
             if verifier is not None:
@@ -383,6 +408,7 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
 
         platform.orchestrator_app.state.submission_validator = validate_submission
         platform.orchestrator_app.state.control_preflight = control_preflight
+        install_package_service(platform, repository)
         # Host-only assembly metadata, not a new HTTP/Artifact/Trace contract.
         platform.orchestrator_app.state.approved_host_configuration_json = plan._configuration_json
         platform.orchestrator_app.state.host_policy_sha256 = plan.policy_sha256

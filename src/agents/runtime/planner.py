@@ -284,6 +284,8 @@ class PlannerAgentExecutor(AgentExecutor):
                 prompt=prepare_role_prompt(AgentRole.PLANNER, task_input=task_input, metadata=execution.metadata),
                 model=execution.model, output=build_planner_output_contract(scenario),
                 budget=execution.budget, usage_sink=usage_sink, call_started_sink=call_started_sink,
+                output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                    input_observed_sink=telemetry.model_input if telemetry is not None else None,
                 workspace_id=str(execution.configuration.workspace_id),
             )
             decision = validate_planner_decision(result.data, scenario)

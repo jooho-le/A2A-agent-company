@@ -378,6 +378,9 @@ class UnitTestOutputStore:
                                     "--directory", scope.source_directory, "--pattern", scope.pattern):
                 raise UnitTestStoreError("UNIT_TEST_RESULT_INVALID")
             parsed = parse_unit_report(result.stdout, result.exit_code)
+            if scope.kind != 'PROTECTED' and any(
+                    case.observations_json is not None or case.observation_error is not None for case in parsed.tests):
+                raise UnitTestStoreError('UNIT_TEST_RESULT_INVALID')
             if report != parsed:
                 raise UnitTestStoreError("UNIT_TEST_RESULT_INVALID")
             report_bytes = _json(parsed.to_dict()).encode("utf-8")

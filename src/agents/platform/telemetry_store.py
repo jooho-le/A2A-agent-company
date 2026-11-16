@@ -414,6 +414,30 @@ class AgentTelemetryStore:
         except Exception:
             raise TelemetryStoreError() from None
 
+    def append_model_input(self, event: TraceEvent, record: dict, model) -> dict:
+        """Persist only validated hashes bound to an already reserved model call."""
+        try:
+            from agents.llm.input_evidence import ModelInputEvidence
+            if type(event) is not TraceEvent or event.event_type != 'MODEL_INPUT_OBSERVED':
+                raise ValueError()
+            detail = ModelInputEvidence.model_validate(record).model_dump()
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT payload_json FROM agent_runtime_events WHERE run_id=? AND kind='LLM' AND idempotency_key=?",
+                    (str(event.run_id), f'model-start:{detail["sequence"]}')).fetchone()
+            if row is None:
+                raise ValueError()
+            started = json.loads(row[0])['binding']
+            binding = event.to_trace_json()
+            if any(started.get(key) != binding.get(key) for key in (
+                    'runId', 'workflowStepId', 'a2aTaskId', 'agentContextId', 'actor', 'attempt',
+                    'codeVersion', 'requirementIds', 'inputArtifactIds')):
+                raise ValueError()
+            detail['requestedModel'] = _safe_model(model)
+            return self._append(event, binding, detail, 'LLM', f'model-input:{detail["sequence"]}', 'EVENT')
+        except Exception:
+            raise TelemetryStoreError() from None
+
     def append_semantic_review(self, event: TraceEvent, record: dict, model) -> dict:
         """A review reference is neither a model-call event nor a usage receipt.
 

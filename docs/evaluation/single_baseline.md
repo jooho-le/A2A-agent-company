@@ -1,6 +1,8 @@
 # Single-Agent 비교 기준선 (D6, 팀 공유·논의용)
 
-작성: 2026-10-14 · 갱신: 2026-10-31 · 4번(강석민) · 상태: **설계 초안. Single 실행기는 주호가 개발(10.29 회의록), 4번은 평가 기준·비교 집계 담당. Single 실행 경로가 없어 실제 비교는 아직 불가(평가 쪽 비교 도구는 준비됨)**
+> 현재 실행 상태(2026-11-15): 비교 대상은 **Single 하나·Multi Ver1·Multi Ver2**이며 Single에 Ver1·Ver2는 없다. 시범용 공통 시작 커밋·모델·호출/시간 한도·가격표·Host/D5 이미지가 로컬 설정에 있다. 기존 네 조합의 환경·인증 점검은 이력이며, 실제 세 조건 실행에는 Single 정책·계획·제출·분모·비교 조건 정리가 남아 있다. 실제 유료 모델 비교 Run은 미실행이다. [실행 절차의 적용 범위](experiment_runbook.md), [최신 구현·검증 상태](development_progress.md), [최종 시험지](final_exam.md)를 우선한다. 아래 회의 근거·옛 미정 항목은 당시 설계 이력이다.
+
+작성: 2026-10-14 · 갱신: 2026-11-05 · 4번(강석민) · 상태: **설계 초안. Single 실행기는 주호가 구현해 dev에 병합(2026-11, `src/agents/single`, `architecture` SINGLE_AGENT 허용), 4번은 평가 기준·비교 집계 담당. 평가 쪽은 Single 기록(A2A 저장소 하나)을 받도록 맞췄고, 실제 비교 Run은 아직**
 근거: 개발정의서 11-A, 기업질의응답(Q75~80), 2차 기업미팅 11~12절, dev `run_configuration.py`·`telemetry_store.py`, [evaluation_spec.md](evaluation_spec.md) 13절.
 
 ## 1. 우선순위와 범위
@@ -99,7 +101,7 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 
 | 막힌 것 | 필요한 결정·작업 | 담당 논의 |
 |---|---|---|
-| Single 실행기가 없음. `architecture`가 `MULTI_AGENT`만 허용 | 10.29 회의록에서 Single 에이전트 개발은 주호 담당으로 정함(dev 45번 §7의 "Single-Agent 기준선은 역할 4 범위"보다 나중 결정). 4번은 평가 기준과 비교 집계(`experiment compare --group-by architecture`)를 맡음. 실행 경로(`architecture` 확장 또는 기존 Multi 구현 일부를 단일 구조로 바꾸는 방법)는 주호의 dev 작업 | 주호(팀장) |
+| (해소, 2026-11) Single 실행기 | 주호가 구현해 dev에 병합(`architecture` SINGLE_AGENT 허용, `evaluation_export`로 Run 기록·A2A 저장소·Snapshot을 한 번에 꺼냄). 4번은 Single A2A 문서(스키마 2, 저장소 하나)를 노출 검사가 받도록 고치고, Agent별 평가표를 단계 역할로 만들게 함(2026-11-05). 남은 것은 실제 Run | — |
 | 시작 코드 미정(owned-source 미설정) | 시작 코드 규격 에이전트 여부 논의(11/2) 뒤 위치·형태와 승인 커밋을 정함. Single·Multi는 같은 시작 Commit에서 출발해야 한다(정의서 11-A) | 주호(팀장) |
 | 보호 테스트 위치 | 10.29 회의록의 방안 1(순환 + 최종)·방안 2(최종 중심)는 방식 검토 중. 회의 뒤 4번 방침으로 멀티에이전트를 Ver1(방안 1 조건)·Ver2(방안 2 조건) 두 버전으로 모두 실행. Single vs Multi는 같은 방안 안에서 비교(보호 테스트 조건이 같아야 유효). 검사 9개 × 시험지 세 벌(순환용·시범·공식)로 구현(2026-10-30). Single을 다시 비교할 때도 같은 채점용 시험지를 쓴다 | — |
 | 실험 예산·모델·가격표 | 모델 lock, 단가, 한도, 반복 횟수 | 전원 |
@@ -107,5 +109,5 @@ dev 제약: QA 보호 케이스는 Python unittest만, `/inputs/tests` 읽기 �
 
 ## 9. 4번이 먼저 해 둘 수 있는 것
 
-- 완료(구현): 통제 조건 비교, 지표 변환, 구조별 요약, 협업 시간(시도·재개 구간별), Regression 계산과 버전별 보고서 연결(`run_metrics.py`), 최종 독립 채점기(`final_evaluation.py`). 남음: Single 실행 경로(주호 개발, 10.29 회의록), 실제 Run으로 검증.
+- 완료(구현): 통제 조건 비교, 지표 변환, 구조별 요약, 협업 시간(시도·재개 구간별), Regression 계산과 버전별 보고서 연결(`run_metrics.py`), 최종 독립 채점기(`final_evaluation.py`). 남음: 실제 Run으로 검증(Single 실행기는 주호가 구현).
 - 실제 Run이 없으므로 합성 데이터 결과는 실험 결과로 쓰지 않는다.

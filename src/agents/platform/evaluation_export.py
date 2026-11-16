@@ -56,7 +56,7 @@ def _coverage(repository, run, a2a):
             "a2aComplete": not (a2a["missingRoles"] or missing or mismatched or unbound)}
 
 
-def collect_evaluation_export(repository, run_id, *, stores, all_versions=True):
+def collect_evaluation_export(repository, run_id, *, stores, all_versions=True, package_records=None):
     """Collect exact bytes under a pinned Host read transaction; returns files.
 
     Agent stores have their own read transactions. Cross-store lag/missing
@@ -85,12 +85,43 @@ def collect_evaluation_export(repository, run_id, *, stores, all_versions=True):
             for item in snapshots:
                 files[f"v{item.code_version}/source.tar"] = item.archive
                 files[f"v{item.code_version}/manifest.json"] = _json(item.manifest)
+            # Immutable generated QA test inputs are also output files. Export
+            # exact existing bytes, not an evaluator-supplied file manifest.
+            with view._connection() as connection:
+                available = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='qa_test_input_files'").fetchone()
+                if available:
+                    total = 0
+                    for capture_id, path, content, digest in connection.execute(
+                        'SELECT f.capture_id,f.path,f.content,f.content_sha256 FROM qa_test_input_files f '
+                        'JOIN qa_test_input_captures c ON c.capture_id=f.capture_id WHERE c.run_id=? ORDER BY f.capture_id,f.path',
+                        (str(parsed),)):
+                        if sha256(content).hexdigest() != digest:
+                            raise EvaluationExportError('OUTPUT_FILE_EVIDENCE_CHANGED')
+                        if path.startswith('_'):
+                            continue  # Host runner implementation is not Agent output.
+                        total += len(content)
+                        if total > 32 * 1024 * 1024 or len(files) >= 4000:
+                            raise EvaluationExportError('OUTPUT_FILE_EVIDENCE_TOO_LARGE')
+                        files[f'observed-files/qa-{capture_id}/{sha256(path.encode()).hexdigest()}.txt'] = content
+            if package_records is not None:
+                from agents.platform.package_records import collect_package_records
+                try:
+                    files.update(collect_package_records(package_records, files, bundle))
+                except Exception:
+                    raise EvaluationExportError('PACKAGE_RECORDS_INVALID_OR_INCOMPLETE') from None
+            else:
+                from agents.platform.package_records import collect_stored_package_records
+                try:
+                    files.update(collect_stored_package_records(view, files, bundle))
+                except Exception:
+                    raise EvaluationExportError('PACKAGE_RECORDS_INVALID_OR_INCOMPLETE') from None
             steps = view.list_steps(parsed)
             phase = {"PLANNER": "PLANNING", "DEVELOPER": "IMPLEMENTING", "QA": "QA", "SECURITY": "SECURITY"}
             with view._connection() as connection:
                 workspace_roots = tuple(Path(WorkspaceRecord.model_validate_json(row[0]).root_path).resolve()
                     for row in connection.execute("SELECT payload_json FROM workspaces"))
             coverage = _coverage(view, run, a2a)
+            from agents.platform.package_records import package_production_status
             final_available = any(item.code_version == run.code_version for item in snapshots)
             handoff = {"schemaVersion": 1, "runId": str(parsed), "architecture": mode,
                 "runStatus": run.status.value, "orchestratorVerdict": snapshot_run["verdict"],
@@ -101,6 +132,7 @@ def collect_evaluation_export(repository, run_id, *, stores, all_versions=True):
                 "consistency": {"host": "PINNED_SQLITE_TRANSACTION", "agentStores": "PER_STORE_READ_TRANSACTION",
                     "crossDatabaseAtomic": False},
                 "coverage": coverage,
+                "packageProduction": package_production_status(view, parsed),
                 "steps": [{"workflowStepId": str(step.workflow_step_id), "agentIdentity": "SINGLE_AGENT" if mode == "SINGLE_AGENT" else step.agent_role.value,
                     "phase": "FIXING" if step.agent_role.value == "DEVELOPER" and (step.code_version or 0) > 1 else phase[step.agent_role.value],
                     "a2aTaskId": step.a2a_task_id, "agentContextId": step.agent_context_id,
@@ -117,8 +149,9 @@ def collect_evaluation_export(repository, run_id, *, stores, all_versions=True):
         raise EvaluationExportError() from None
 
 
-def write_evaluation_export(repository, run_id, out, *, stores, all_versions=True):
-    files, workspace_roots = collect_evaluation_export(repository, run_id, stores=stores, all_versions=all_versions)
+def write_evaluation_export(repository, run_id, out, *, stores, all_versions=True, package_records=None):
+    files, workspace_roots = collect_evaluation_export(repository, run_id, stores=stores, all_versions=all_versions,
+                                                      package_records=package_records)
     out = Path(out).resolve()
     if any(out == root or root in out.parents for root in workspace_roots):
         raise EvaluationExportError("EXPORT_INSIDE_AGENT_WORKSPACE")
@@ -151,6 +184,7 @@ def main(argv=None):
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--store", action="append", default=[], metavar="IDENTITY=PATH")
     parser.add_argument("--final-only", action="store_true")
+    parser.add_argument("--package-records", type=Path, help="Existing Host completion record and final-report directory")
     args = parser.parse_args(argv)
     try:
         stores = {}
@@ -160,7 +194,7 @@ def main(argv=None):
                 raise EvaluationExportError("STORE_ARGUMENT_INVALID")
             stores[identity] = path
         write_evaluation_export(ReadOnlyWorkflowRepository(args.database), args.run_id, args.out,
-            stores=stores, all_versions=not args.final_only)
+            stores=stores, all_versions=not args.final_only, package_records=args.package_records)
     except EvaluationExportError as error:
         sys.stderr.write(error.code + "\n")
         return 1

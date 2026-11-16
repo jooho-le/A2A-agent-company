@@ -33,6 +33,9 @@ class ScenarioDefinition:
     excluded_features: tuple[str, ...]
     security_policy_json: str | None = None
     email_policy_json: str | None = None
+    # Generated-code connection contract (app, DB dependency, model, API) used by
+    # the hidden evaluation suite. Absent in contracts frozen before it existed.
+    external_contract_json: str | None = None
 
     @classmethod
     def from_contract(cls, contract: Mapping[str, object]) -> "ScenarioDefinition":
@@ -58,6 +61,8 @@ class ScenarioDefinition:
             excluded_features=tuple(contract["excludedFeatures"]),
             security_policy_json=json.dumps(contract["securityPolicy"], ensure_ascii=False),
             email_policy_json=json.dumps(contract["emailPolicy"], ensure_ascii=False),
+            external_contract_json=(json.dumps(contract["externalContract"], ensure_ascii=False)
+                                    if "externalContract" in contract else None),
         )
 
     @property
@@ -107,6 +112,8 @@ class ScenarioDefinition:
             contract["securityPolicy"] = json.loads(self.security_policy_json)
         if self.email_policy_json is not None:
             contract["emailPolicy"] = json.loads(self.email_policy_json)
+        if self.external_contract_json is not None:
+            contract["externalContract"] = json.loads(self.external_contract_json)
         return contract
 
     def validate_planner_requirements(self, requirements: Sequence[object]) -> None:
@@ -130,6 +137,32 @@ class ScenarioDefinition:
 
 
 SCN_001_ID = UUID("f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76")
+# Values are strings or string lists so semantic review can quote them as policy.
+# Field names are written as values: secret-looking keys such as "password" are
+# redacted by redact_data and would invalidate the frozen contract.
+_SCN_001_EXTERNAL_CONTRACT = {
+    "app": {
+        "module": "main", "attribute": "app", "framework": "FastAPI",
+        "serve": "uvicorn main:app", "readyCheck": "GET / 요청에 2xx 응답",
+    },
+    "database": {
+        "module": "database", "dependency": "get_db", "kind": "동기 함수(async 아님)",
+        "access": "요청 처리의 DB 접근은 모두 Depends(get_db)로 한다",
+        "urlEnv": "DATABASE_URL", "engine": "SQLite에서 동작해야 한다",
+    },
+    "userModel": {
+        "module": "models", "class": "User", "orm": "SQLAlchemy",
+        "columns": ["email", "password_hash"], "uniqueInModel": ["email"],
+    },
+    "signupApi": {
+        "method": "POST", "path": "/api/auth/signup", "bodyFormat": "JSON",
+        "bodyFields": ["email", "password"], "success": "2xx",
+        "rejected": "4xx (입력 검증 실패, 중복)",
+    },
+    "responseRule": "응답 본문에 password와 password_hash 값을 넣지 않는다",
+    "startingFiles": ["main.py", "database.py", "models.py", "tests/test_health.py", "requirements.lock"],
+    "packages": "실행 이미지에 설치된 패키지만 사용한다",
+}
 _SCN_001 = ScenarioDefinition(
     scenario_id=SCN_001_ID,
     key="SCN-001",
@@ -206,6 +239,7 @@ _SCN_001 = ScenarioDefinition(
     excluded_features=(
         "로그인", "OAuth", "이메일 인증", "비밀번호 찾기", "프로필 관리",
     ),
+    external_contract_json=json.dumps(_SCN_001_EXTERNAL_CONTRACT, ensure_ascii=False),
 )
 
 SCENARIO_REGISTRY: Mapping[UUID, ScenarioDefinition] = MappingProxyType(

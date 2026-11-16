@@ -49,6 +49,9 @@ def test_configure_builds_a_ver1_ver2_pair_that_differs_only_in_protected_tests(
                  if scope.kind == 'PROTECTED'}
     cases = documents['ver1/owned-protected-cases.local.json']['cases']
     assert {case['selector'] for case in cases} == set(protected) and len(cases) == 9
+    # 케이스 파일 2판: 케이스마다 적은 역할이 그 케이스가 가리키는 보호 범위의 역할과 같아야 dev Host가 받는다.
+    assert documents['ver1/owned-protected-cases.local.json']['schemaVersion'] == 2
+    assert all(case['role'] == protected[case['selector']].value for case in cases)
     assert {key: value for key, value in ver1.items() if key != 'unit'} == {key: value for key, value in ver2.items() if key != 'unit'}
     assert documents['experiment.json']['suiteSha256'] == {scope: pt.suite_sha256(scope) for scope in pt.SCOPES}
     with pytest.raises(ExperimentError):
@@ -406,6 +409,32 @@ def test_all_versions_scoring_counts_regressions(tmp_path):
 
 
 @pytest.mark.skipif(not RUNTIME, reason='fastapi·httpx·sqlalchemy·argon2-cffi가 있어야 실행 시험을 돈다')
+@pytest.mark.parametrize('listed', [[1], []])
+def test_all_versions_scoring_accepts_a_run_that_ended_at_the_first_version(tmp_path, listed):
+    """수정 없이 첫 버전(v1)에서 끝난 Run도 --all-versions로 채점된다. 비교할 버전 쌍이 없으므로 regression.json에
+    비교 쌍 0개·Regression 0건으로 남고 중간 버전 폴더는 만들지 않는다(Codex 11.8 시험지 검토). 내보내기 목록에
+    v1이 적혀 있든 비어 있든 같다. 앞 버전이 빠진 v2만 있는 내보내기는 여전히 거부한다(위 시험)."""
+    bundle = FIXTURE_RUNS['qa_failure_actual_fix_and_revalidation_preserve_all_lineages_and_shared_budget']
+    export = tmp_path / 'export'
+    files = {path: text.encode('utf-8') for path, text in signup_service.build('good').items()}
+    archive = canonical_tar({**files, 'requirements.lock': LOCK})
+    payload = manifest(archive).to_payload()
+    payload['codeVersion'] = 1
+    (export / 'v1').mkdir(parents=True)
+    (export / 'v1/source.tar').write_bytes(archive)
+    (export / 'v1/manifest.json').write_text(json.dumps(ExecutionManifest.from_payload(payload).to_payload()))
+    (export / 'run.json').write_text(json.dumps({'runId': bundle['run']['runId'], 'finalCodeVersion': 1,
+                                                 'exportedCodeVersions': listed}))
+    # Run 기록(bundle)은 넘기지 않는다: 이 fixture 기록은 코드 버전 2라 v1 채점과 섞이면 채점기가 먼저 거부한다.
+    folder = score_export(export, runner=VerifiedImageRunner(), exam='pilot', results=tmp_path / 'results',
+                          contract=CONTRACT, all_versions=True)
+    regression = json.loads((folder / 'regression.json').read_text())
+    assert (regression['comparedVersionPairs'], regression['regressionCount'], regression['complete']) == (0, 0, True)
+    assert regression['finalCodeVersion'] == 1 and not (folder / 'versions').exists()
+    assert (folder / 'output.json').is_file() and (folder / 'summary.md').is_file()
+
+
+@pytest.mark.skipif(not RUNTIME, reason='fastapi·httpx·sqlalchemy·argon2-cffi가 있어야 실행 시험을 돈다')
 def test_forced_rescore_replaces_the_whole_result_set(tmp_path):
     """pilot으로 버전별 채점(regression.json·versions/·bundle.json)을 남긴 뒤 final로 다시 채점(force)하면 예전 파일이
     하나도 남지 않는다(Codex 10.30 R4). 다시 채점하다 실패하면 예전 결과 한 세트가 그대로 남고 임시 폴더도 없다."""
@@ -424,7 +453,11 @@ def test_forced_rescore_replaces_the_whole_result_set(tmp_path):
     results = tmp_path / 'results'
     folder = score_export(export, runner=VerifiedImageRunner(), exam='pilot', results=results, contract=CONTRACT,
                           bundle=bundle, all_versions=True)
-    assert {path.name for path in folder.iterdir()} >= {'regression.json', 'versions', 'bundle.json'}
+    assert {path.name for path in folder.iterdir()} >= {'regression.json', 'versions', 'bundle.json', 'version_details'}
+    assert (folder / 'version_details/v1/check_details.md').is_file()
+    detail = json.loads((folder / 'check_details.json').read_text())
+    assert detail['exam'] == 'pilot' and detail['recordStatus'] == 'COMPLETE'
+    assert '[기대값·실제값·항목별 상태](check_details.md)' in (folder / 'summary.md').read_text()
 
     class BrokenRunner(VerifiedImageRunner):
         # 채점 도중 실패하는 실행기 대역
@@ -435,11 +468,15 @@ def test_forced_rescore_replaces_the_whole_result_set(tmp_path):
     with pytest.raises(Exception):
         score_export(export, runner=BrokenRunner(), exam='final', results=results, contract=CONTRACT, force=True)
     assert (folder / 'output.json').read_text() == before and (folder / 'regression.json').is_file()
-    assert [path.name for path in results.iterdir()] == [bundle['run']['runId']]  # 임시 폴더가 남지 않음
+    assert [path.name for path in results.iterdir() if not path.name.startswith('.')] == [bundle['run']['runId']]
+    assert not list(results.glob('.*.staging-*'))  # 비공개 입력·평가 이력은 보존, 임시 폴더는 제거
     score_export(export, runner=VerifiedImageRunner(), exam='final', results=results, contract=CONTRACT, force=True)
-    assert {path.name for path in folder.iterdir()} == {'output.json', 'meta.json', 'summary.md'}
+    assert {path.name for path in folder.iterdir()} == {'output.json', 'meta.json', 'summary.md', 'timing_metrics.json',
+                                                        'check_details.json', 'check_details.md'}
+    assert json.loads((folder / 'timing_metrics.json').read_text())['firstPassingSnapshotMs'] is None
     assert json.loads((folder / 'meta.json').read_text())['exam'] == 'final'
-    assert [path.name for path in results.iterdir()] == [bundle['run']['runId']]
+    assert [path.name for path in results.iterdir() if not path.name.startswith('.')] == [bundle['run']['runId']]
+    assert not list(results.glob('.*.staging-*'))
 
 
 @pytest.mark.skipif(not RUNTIME, reason='fastapi·httpx·sqlalchemy·argon2-cffi가 있어야 실행 시험을 돈다')
@@ -538,3 +575,201 @@ def test_score_passes_trace_and_a2a_bodies_to_the_exposure_check(tmp_path):
     with pytest.raises(ExperimentError):
         score_export(export, runner=VerifiedImageRunner(), exam='pilot', results=tmp_path / 'r2', contract=CONTRACT,
                      bundle=bundle, trace=trace, a2a=a2a_document('00000000-0000-4000-8000-000000000099'))
+
+
+# ---------------------------------------------------------------- 끝 상태 원인·도구 동일 확인·짝 비교 연결(2026-11-13)
+
+def outcome_record(run_id, *, cause='COMPLETED_SUCCESS', validity='VALID', auto='PASS'):
+    return {'schemaVersion': 1, 'runId': run_id,
+            'outcome': {'cause': cause, 'comparisonValidity': validity, 'resume': 'TERMINAL'},
+            'semanticReview': {'reviews': 4, 'held': 0, 'knownReviewModelCalls': 4, 'reviewModelCalls': 4,
+                               'reviewInputTokens': 40, 'reviewOutputTokens': 20, 'reviewCostUsd': None, 'complete': True},
+            'autoCompletion': {'status': auto}}
+
+
+def architecture_results(tmp_path, *, multi_outcome=None, single_outcome=None):
+    multi = keep(tmp_path, uid(1), None, real_report(uid(1), 'final'), real_report(uid(1), 'practice'))
+    single = keep(tmp_path, uid(2), None, real_report(uid(2), 'final', architecture='SINGLE_AGENT'),
+                  real_report(uid(2), 'practice', architecture='SINGLE_AGENT'), architecture='SINGLE_AGENT')
+    for folder, record in ((multi, multi_outcome), (single, single_outcome)):
+        if record is not None:
+            (folder / 'outcome.json').write_text(json.dumps(record))
+    return multi, single
+
+
+@pytest.mark.parametrize('legacy', ['stale_auto_pass', 'no_outcome', 'damaged_assisted_report'])
+def test_compare_quarantines_legacy_assisted_results_and_keeps_unaffected_partial_results(tmp_path, legacy):
+    from tests.evaluation.test_run_metrics import mark_resumed
+    multi, _ = architecture_results(tmp_path, multi_outcome=(None if legacy == 'no_outcome' else outcome_record(uid(1))),
+                                   single_outcome=outcome_record(uid(2)))
+    keep(tmp_path, uid(3), None, real_report(uid(3), 'final'), real_report(uid(3), 'practice'), pair='p2')
+    raw = mark_resumed(json.loads((multi / 'bundle.json').read_text()))
+    raw['usage']['summary'].update(costUsd='7.25', knownCostUsd='7.25')
+    (multi / 'bundle.json').write_text(json.dumps(raw))
+    if legacy == 'damaged_assisted_report':
+        (multi / 'output.json').write_text('obsolete assisted report, not an automatic result')
+    (tmp_path / 'parity.json').write_text(json.dumps({'schemaVersion': 1, 'status': 'PASS',
+        'groupBy': 'architecture', 'pinnedPolicyChecked': True,
+        'checks': [{'check': 'runtimeLimits', 'status': 'PASS'}] + [
+            {'check': 'pinnedPolicy', 'runId': uid(number), 'status': 'PASS'} for number in (1, 2, 3)]}))
+    result = compare(tmp_path, {'MULTI_AGENT': 2, 'SINGLE_AGENT': 1}, group_by='architecture')
+    assert result['readiness'] == {'status': 'UNVERIFIED', 'blockers': ['ASSISTED_CONTINUATION_REQUIRES_SEPARATE_EXPERIMENT']}
+    assert result['quarantinedAssistedRuns'] == [uid(1)] and result['unscoredRuns'] == [uid(1)]
+    row = next(row for row in result['runs'] if row['runId'] == uid(1))
+    assert (row['scoring'], row['cause'], row['autoCompletion']) == ('QUARANTINED_ASSISTED', 'ASSISTED_CONTINUATION', 'FAIL')
+    group = result['summary']['MULTI_AGENT']
+    assert (group['plannedRuns'], group['recordedRuns'], group['notStarted'], group['quarantinedAssistedRuns']) == (2, 2, 0, 1)
+    assert group['evaluation']['qualifiedRuns'] == 1 and group['evaluation']['qualifiedRate'] == 0.5
+    assert group['evaluation']['unevaluatedRuns'] == 1 and group['accuracy']['measuredReports'] == 1
+    assert group['accuracy']['meanFullSatisfactionLower'] == 1
+    assert group['stability']['allVerdictMs']['n'] == 1 and group['stability']['allEndMs']['n'] == 1
+    assert group['costUsd'] is None and group['knownCostUsd'] == '0.5' and group['runsWithUnknownCost'] == 1
+    assert group['assistedDiagnostics'][0]['knownCostUsd'] == '7.25'
+    assert group['semanticReview']['reviewModelCalls'] is None and group['autoCompletion']['pass'] == 0
+    assert result['summary']['SINGLE_AGENT']['evaluation']['qualifiedRate'] == 1
+    assert next(pair for pair in result['pairComparison']['excludedPairs'] if pair['pairId'] == 'p1')['reason'] == 'ASSISTED_CONTINUATION'
+    assert {'field': 'automaticSegment', 'detail': 'ASSISTED_RESULTS_QUARANTINED', 'runs': [uid(1)]} in result['validity']['warnings']
+
+
+def test_loop_policy_effect_also_excludes_assisted_run_and_its_paired_partner(tmp_path):
+    from tests.evaluation.test_run_metrics import mark_resumed
+    assisted = keep(tmp_path, uid(1), pt.loop_suite_ref(), real_report(uid(1), 'final'), real_report(uid(1), 'practice'))
+    keep(tmp_path, uid(2), None, real_report(uid(2), 'final'), real_report(uid(2), 'practice'))
+    (assisted / 'bundle.json').write_text(json.dumps(mark_resumed(json.loads((assisted / 'bundle.json').read_text()))))
+    result = compare(tmp_path, {'IN_LOOP_AND_FINAL': 1, 'FINAL_ONLY': 1}, group_by='loopPolicy')
+    effect = result['practiceEffect']
+    assert effect['practiceEffect'] is None
+    assert effect['policies']['IN_LOOP_AND_FINAL']['runs'] == 0
+    assert effect['policies']['FINAL_ONLY']['runs'] == 0
+    assert result['summary']['IN_LOOP_AND_FINAL']['evaluation']['qualifiedRate'] == 0
+    assert result['summary']['IN_LOOP_AND_FINAL']['notStarted'] == 0
+
+
+def test_compare_by_architecture_reports_pairs_outcomes_and_unchecked_tools(tmp_path):
+    architecture_results(tmp_path, multi_outcome=outcome_record(uid(1)),
+                         single_outcome=outcome_record(uid(2), auto='FAIL', cause='COMPLETED_FAIL'))
+    result = compare(tmp_path, {'MULTI_AGENT': 1, 'SINGLE_AGENT': 1}, group_by='architecture')
+    assert result['validity']['valid'] is True
+    assert result['toolParity'] == {'status': 'NOT_CHECKED', 'source': None}
+    assert result['readiness']['status'] == 'UNVERIFIED'
+    assert 'TOOL_AND_LIMIT_PARITY_NOT_VERIFIED' in result['readiness']['blockers']
+    assert {'field': 'toolParity', 'detail': 'NOT_CHECKED', 'runs': []} in result['validity']['warnings']
+    assert {row['runId']: (row['cause'], row['autoCompletion']) for row in result['runs']} == {
+        uid(1): ('COMPLETED_SUCCESS', 'PASS'), uid(2): ('COMPLETED_FAIL', 'FAIL')}
+    assert result['summary']['MULTI_AGENT']['autoCompletion']['rate'] == 1.0
+    assert result['summary']['SINGLE_AGENT']['autoCompletion']['rate'] == 0.0
+    pair = result['pairComparison']
+    assert [item['pairId'] for item in pair['pairs']] == ['p1'] and pair['excludedPairs'] == []
+    assert pair['pairs'][0]['metrics']['fullSatisfactionLower']['difference'] == 0
+    assert result['summary']['MULTI_AGENT']['accuracy']['measuredReports'] == 1
+
+
+def test_compare_excludes_only_the_pair_with_different_model_conditions(tmp_path):
+    multi, _ = architecture_results(tmp_path)
+    changed = json.loads((multi / 'bundle.json').read_text())
+    changed['configuration']['configuration']['model']['modelId'] = 'other-model'
+    (multi / 'bundle.json').write_text(json.dumps(changed))
+    for architecture, number in (('SINGLE_AGENT', 3), ('MULTI_AGENT', 4)):
+        keep(tmp_path, uid(number), None, real_report(uid(number), 'final', architecture=architecture),
+             real_report(uid(number), 'practice', architecture=architecture), architecture=architecture, pair='p2')
+    result = compare(tmp_path, {'MULTI_AGENT': 2, 'SINGLE_AGENT': 2}, group_by='architecture')
+    assert result['readiness']['status'] == 'UNVERIFIED'
+    paired = result['pairComparison']
+    assert [row['pairId'] for row in paired['pairs']] == ['p2']
+    assert paired['differences']['verdictMs']['n'] == 1
+    assert paired['excludedPairs'][0]['pairId'] == 'p1'
+    assert paired['excludedPairs'][0]['reason'] == 'CONDITION_MISMATCH'
+    assert any(row['field'] == 'model.modelId' for row in paired['excludedPairs'][0]['violations'])
+
+
+def test_loop_policy_comparison_has_no_architecture_pairs(tmp_path):
+    keep(tmp_path, uid(1), pt.loop_suite_ref(), real_report(uid(1), 'final'), real_report(uid(1), 'practice'))
+    keep(tmp_path, uid(2), None, real_report(uid(2), 'final'), real_report(uid(2), 'practice'))
+    result = compare(tmp_path)
+    assert result['pairComparison'] is None and result['toolParity']['status'] == 'NOT_CHECKED'
+    # 점검 5(2026-11-14): Ver1·Ver2 비교도 한도·도구 동일 확인을 하지 않았으면 알리고 공식 준비로 보지 않는다.
+    assert [entry['detail'] for entry in result['validity']['warnings'] if entry['field'] == 'toolParity'] == ['NOT_CHECKED']
+    assert 'TOOL_AND_LIMIT_PARITY_NOT_VERIFIED' in result['readiness']['blockers']
+
+
+@pytest.mark.parametrize('status,valid,field_in', [('FAIL', False, 'violations'), ('UNVERIFIED', True, 'warnings'),
+                                                   ('PASS', True, None)])
+def test_tool_parity_report_changes_the_comparison_conditions(tmp_path, status, valid, field_in):
+    architecture_results(tmp_path)
+    checks = [{'check': 'runtimeLimits', 'status': status}]
+    (tmp_path / 'parity.json').write_text(json.dumps({'schemaVersion': 1, 'status': status, 'checks': checks}))
+    result = compare(tmp_path, group_by='architecture')
+    assert result['toolParity']['status'] == status and result['validity']['valid'] is valid
+    found = {name: [entry for entry in result['validity'][name] if entry['field'] == 'toolParity']
+             for name in ('violations', 'warnings')}
+    if field_in is None:
+        assert found == {'violations': [], 'warnings': []}
+    else:
+        assert found[field_in]
+    if status == 'FAIL':
+        assert found['violations'][0]['values'] == {'failedChecks': ['runtimeLimits']}
+
+
+@pytest.mark.parametrize('content', ['not json', json.dumps({'status': 'MAYBE'}), json.dumps(['PASS'])])
+def test_damaged_tool_parity_report_stops_the_comparison(tmp_path, content):
+    architecture_results(tmp_path)
+    (tmp_path / 'parity.json').write_text(content)
+    with pytest.raises(ExperimentError, match='PARITY_REPORT_INVALID'):
+        compare(tmp_path, group_by='architecture')
+
+
+def test_official_readiness_requires_policy_binding_for_every_compared_run(tmp_path):
+    architecture_results(tmp_path)
+    base = {'schemaVersion': 1, 'status': 'PASS', 'pinnedPolicyChecked': True,
+            'checks': [{'check': 'runtimeLimits', 'status': 'PASS'}]}
+    path = tmp_path / 'parity.json'
+    base['checks'].append({'check': 'pinnedPolicy', 'runId': uid(1), 'status': 'PASS'})
+    path.write_text(json.dumps(base))
+    result = compare(tmp_path, group_by='architecture', planned={'MULTI_AGENT': 1, 'SINGLE_AGENT': 1})
+    assert 'RUN_POLICY_BINDINGS_NOT_VERIFIED' in result['readiness']['blockers']
+    base['checks'].append({'check': 'pinnedPolicy', 'runId': uid(2), 'status': 'PASS'})
+    path.write_text(json.dumps(base))
+    result = compare(tmp_path, group_by='architecture', planned={'MULTI_AGENT': 1, 'SINGLE_AGENT': 1})
+    assert result['toolParity']['pinnedRunsVerified'] is True and result['readiness']['status'] == 'PASS'
+    base['checks'][0]['status'] = 'FAIL'
+    path.write_text(json.dumps(base))
+    with pytest.raises(ExperimentError, match='PARITY_REPORT_INVALID'):
+        compare(tmp_path, group_by='architecture')
+
+
+def test_outcome_of_another_run_is_refused(tmp_path):
+    architecture_results(tmp_path, multi_outcome=outcome_record(uid(9)))
+    with pytest.raises(ExperimentError, match='OUTCOME_RUN_MISMATCH'):
+        compare(tmp_path, group_by='architecture')
+
+
+def test_environment_failures_and_missing_outcomes_are_flagged_not_hidden(tmp_path):
+    architecture_results(tmp_path, multi_outcome=outcome_record(uid(1), cause='MODEL_API_FAILURE', validity='UNVERIFIED',
+                                                                auto='FAIL'))
+    result = compare(tmp_path, group_by='architecture')
+    warnings = {entry['detail']: entry['runs'] for entry in result['validity']['warnings'] if entry['field'] == 'outcome'}
+    assert warnings == {'ENVIRONMENT_FAILURE_RUNS': [uid(1)], 'OUTCOME_NOT_RECORDED': [uid(2)]}
+    assert result['summary']['MULTI_AGENT']['outcomes']['environmentFailureRuns'] == [uid(1)]
+
+
+def test_version_comparison_readiness_requires_its_own_parity_and_bindings(tmp_path):
+    # 점검 5: Ver1·Ver2 비교도 한도·도구 동일 확인(parity.json, groupBy=loopPolicy)과 Run별 고정 정책이 있어야 준비 PASS다.
+    keep(tmp_path, uid(1), pt.loop_suite_ref(), real_report(uid(1), 'final'), real_report(uid(1), 'practice'))
+    keep(tmp_path, uid(2), None, real_report(uid(2), 'final'), real_report(uid(2), 'practice'))
+    planned = {'IN_LOOP_AND_FINAL': 1, 'FINAL_ONLY': 1}
+    result = compare(tmp_path, planned)
+    assert result['validity']['valid'] is True and result['toolParity']['status'] == 'NOT_CHECKED'
+    assert result['readiness']['status'] == 'UNVERIFIED'
+    assert {'TOOL_AND_LIMIT_PARITY_NOT_VERIFIED', 'RUN_POLICY_BINDINGS_NOT_VERIFIED'} <= set(result['readiness']['blockers'])
+    report = {'schemaVersion': 1, 'groupBy': 'loopPolicy', 'status': 'PASS', 'pinnedPolicyChecked': True,
+              'checks': [{'check': 'runtimeLimits', 'status': 'PASS'},
+                         {'check': 'pinnedPolicy', 'runId': uid(1), 'status': 'PASS'},
+                         {'check': 'pinnedPolicy', 'runId': uid(2), 'status': 'PASS'}]}
+    (tmp_path / 'parity.json').write_text(json.dumps(report))
+    assert compare(tmp_path, planned)['readiness'] == {'status': 'PASS', 'blockers': []}
+    # 구조 비교용으로 만든 parity.json은 버전 비교를 보증하지 않는다.
+    (tmp_path / 'parity.json').write_text(json.dumps({**report, 'groupBy': 'architecture'}))
+    assert 'PARITY_REPORT_FOR_OTHER_COMPARISON' in compare(tmp_path, planned)['readiness']['blockers']
+    unlimited = dict(report, status='UNVERIFIED', checks=[{'check': 'runtimeLimits', 'status': 'UNVERIFIED'}] + report['checks'][1:])
+    (tmp_path / 'parity.json').write_text(json.dumps(unlimited))
+    assert 'TOOL_AND_LIMIT_PARITY_NOT_VERIFIED' in compare(tmp_path, planned)['readiness']['blockers']

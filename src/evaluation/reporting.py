@@ -73,7 +73,7 @@ def _tool_evidence(evidence, manifest, role, outcome):
     # 확인하는 규칙:
     #  - PASS·FAIL 결과에는 도구 실행 증거가 반드시 있어야 한다.
     #  - 증거의 신분증(Manifest)이 보고서의 신분증과 같아야 한다.
-    #  - 역할에 맞는 도구여야 한다. (QA는 테스트 도구, SECURITY는 보안 스캔 도구)
+    #  - 역할에 맞는 도구여야 한다. (QA는 테스트 도구, SECURITY는 보안 스캔 또는 보호 단위 테스트 도구)
     #  - 시도 번호는 0부터 빠짐없이 이어져야 한다.
     #  - 다시 시도(재시도)는 "안전한 인프라 오류" 뒤에만 허용한다.
     #    (RESOURCE_BUSY 등. 시간 초과 같은 오류는 retrySafe=True라고 표시된 경우에만)
@@ -88,7 +88,7 @@ def _tool_evidence(evidence, manifest, role, outcome):
     validate_contract(evidence, 'tool_execution_evidence')
     if ExecutionManifest.from_payload(evidence['executionManifest']) != manifest:
         raise ValueError('Tool evidence belongs to another Manifest')
-    allowed = {'run_unit_tests', 'run_browser_tests'} if role == 'QA' else {'run_security_scan'}
+    allowed = {'run_unit_tests', 'run_browser_tests'} if role == 'QA' else {'run_security_scan', 'run_unit_tests'}
     if evidence['toolName'] not in allowed:
         raise ValueError('Tool evidence does not match the report role')
     _artifact_uri(evidence['evidenceRef'])

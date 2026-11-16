@@ -1,0 +1,1433 @@
+{
+  "scope": "SCN001 implementation review and offline/local Docker validation",
+  "modelApiCalls": 0,
+  "actualExperimentRuns": 0,
+  "fullSuite": {
+    "tests": 5635,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "passed": 5634,
+    "seconds": 2452.661,
+    "junit": "/var/folders/2k/zy092jm52_j_y_szt1llpws00000gn/T/capstone-final-audit-20261115-wv5fhjvj/all-tests.xml",
+    "failedCases": [
+      {
+        "class": "tests.evaluation.test_docker_evaluation_integration",
+        "name": "test_real_docker_confirms_regression_with_two_replays_per_version",
+        "message": "ValueError: REPLAY_CONDITIONS_DIFFER_OR_INPUTS_INCOMPLETE"
+      }
+    ]
+  },
+  "followupTests": {
+    "protectedImportRegression": {
+      "tests": 34,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 34,
+      "seconds": 12.585,
+      "junit": "/tmp/capstone-import-exposure-review-20261115.xml",
+      "failedCases": []
+    },
+    "protectedScoring": {
+      "tests": 126,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 126,
+      "seconds": 30.328,
+      "junit": "/tmp/capstone-final-scoring-review-20261115.xml",
+      "failedCases": []
+    },
+    "comparisonSelection": {
+      "tests": 175,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 175,
+      "seconds": 74.947,
+      "junit": "/private/tmp/part4-metrics-selection-final-20261115.xml",
+      "failedCases": []
+    },
+    "preflightCleanup": {
+      "tests": 61,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 61,
+      "seconds": 30.28,
+      "junit": "/private/tmp/capstone-preflight-cleanup-review.xml",
+      "failedCases": []
+    },
+    "reportIntegration": {
+      "tests": 136,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 136,
+      "seconds": 20.129,
+      "junit": "/var/folders/2k/zy092jm52_j_y_szt1llpws00000gn/T/capstone-final-audit-20261115-wv5fhjvj/integration-followup.xml",
+      "failedCases": []
+    },
+    "dockerFinal": {
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 10,
+      "seconds": 90.738,
+      "junit": "/var/folders/2k/zy092jm52_j_y_szt1llpws00000gn/T/capstone-final-audit-20261115-wv5fhjvj/docker-final-tests.xml",
+      "failedCases": []
+    },
+    "startingImage": {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 3,
+      "seconds": 24.318,
+      "junit": "/var/folders/2k/zy092jm52_j_y_szt1llpws00000gn/T/capstone-final-audit-20261115-wv5fhjvj/starting-image-tests.xml",
+      "failedCases": []
+    }
+  },
+  "browserReview": {
+    "testsPassed": 294,
+    "junit": null,
+    "source": "delegated tool execution record",
+    "actualSmoke": [
+      "correct form PASS",
+      "incorrect assertion ASSERTION_FAILED",
+      "external navigation ORIGIN_DENIED"
+    ],
+    "temporaryContainerRemoved": true
+  },
+  "preflight": {
+    "ver1": {
+      "schemaVersion": 1,
+      "ready": true,
+      "checks": [
+        {
+          "check": "experimentId",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "scenario",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "model",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "plannedRuns",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "limits",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "loopPolicy",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "executionOrder",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "warmupState",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hardwareProfile",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "modelCallFloor",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "dependencyLock",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "examIsolation",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostConfiguration",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostModel.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLimits.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostToolTimeout.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostImage.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostHardware.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostSource.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLockHash.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostProtectedCases.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostModel.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLimits.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostToolTimeout.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostImage.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostHardware.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostSource.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLockHash.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostProtectedCases.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "architectureParity",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "pinnedImage",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "docker",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "imageAvailable",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "evaluationPackages",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostBrowser.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostBrowser.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        }
+      ],
+      "warnings": [],
+      "scope": "PREPARATION_ONLY",
+      "dockerChecksEnabled": true,
+      "limitations": [
+        "공식 실험 승인·가격표·Provider 인증·실제 생성물 연결 검증은 별도다.",
+        "Host 설정은 파일로 대조한다. 실제 Run이 그 파일로 돌았는지는 evaluation.parity의 Run별 고정 해시로 확인한다.",
+        "최신 dev는 에이전트 결과마다 의미 검토 호출을 같은 Run 한도에서 쓰므로 호출 한도는 검토 호출을 포함해 정한다.",
+        "호출 하한(10·20회)은 시험 하네스 기준이며 실제 Run은 도구 호출만큼 더 쓴다."
+      ]
+    },
+    "ver2": {
+      "schemaVersion": 1,
+      "ready": true,
+      "checks": [
+        {
+          "check": "experimentId",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "scenario",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "model",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "plannedRuns",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "limits",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "loopPolicy",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "executionOrder",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "warmupState",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hardwareProfile",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "modelCallFloor",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "dependencyLock",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "examIsolation",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostConfiguration",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostModel.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLimits.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostToolTimeout.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostImage.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostHardware.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostSource.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLockHash.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostProtectedCases.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostModel.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLimits.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostToolTimeout.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostImage.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostHardware.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostSource.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostLockHash.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostProtectedCases.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "architectureParity",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "pinnedImage",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "docker",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "imageAvailable",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "evaluationPackages",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostBrowser.SINGLE_AGENT",
+          "status": "PASS",
+          "reason": null
+        },
+        {
+          "check": "hostBrowser.MULTI_AGENT",
+          "status": "PASS",
+          "reason": null
+        }
+      ],
+      "warnings": [],
+      "scope": "PREPARATION_ONLY",
+      "dockerChecksEnabled": true,
+      "limitations": [
+        "공식 실험 승인·가격표·Provider 인증·실제 생성물 연결 검증은 별도다.",
+        "Host 설정은 파일로 대조한다. 실제 Run이 그 파일로 돌았는지는 evaluation.parity의 Run별 고정 해시로 확인한다.",
+        "최신 dev는 에이전트 결과마다 의미 검토 호출을 같은 Run 한도에서 쓰므로 호출 한도는 검토 호출을 포함해 정한다.",
+        "호출 하한(10·20회)은 시험 하네스 기준이며 실제 Run은 도구 호출만큼 더 쓴다."
+      ]
+    }
+  },
+  "hostStartup": {
+    "checks": [
+      {
+        "case": "MULTI_AGENT.ver1",
+        "status": "PASS",
+        "agentHealth": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "authentication": [
+          {
+            "role": "PLANNER",
+            "withoutToken": 401,
+            "withToken": 400
+          },
+          {
+            "role": "DEVELOPER",
+            "withoutToken": 401,
+            "withToken": 400
+          },
+          {
+            "role": "QA",
+            "withoutToken": 401,
+            "withToken": 400
+          },
+          {
+            "role": "SECURITY",
+            "withoutToken": 401,
+            "withToken": 400
+          }
+        ],
+        "listenersReleased": true
+      },
+      {
+        "case": "SINGLE_AGENT.ver1",
+        "status": "PASS",
+        "agentHealth": [
+          true
+        ],
+        "authentication": [
+          {
+            "role": "SINGLE_AGENT",
+            "withoutToken": 401,
+            "withToken": 400
+          }
+        ],
+        "listenersReleased": true
+      },
+      {
+        "case": "MULTI_AGENT.ver2",
+        "status": "PASS",
+        "agentHealth": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "authentication": [
+          {
+            "role": "PLANNER",
+            "withoutToken": 401,
+            "withToken": 400
+          },
+          {
+            "role": "DEVELOPER",
+            "withoutToken": 401,
+            "withToken": 400
+          },
+          {
+            "role": "QA",
+            "withoutToken": 401,
+            "withToken": 400
+          },
+          {
+            "role": "SECURITY",
+            "withoutToken": 401,
+            "withToken": 400
+          }
+        ],
+        "listenersReleased": true
+      },
+      {
+        "case": "SINGLE_AGENT.ver2",
+        "status": "PASS",
+        "agentHealth": [
+          true
+        ],
+        "authentication": [
+          {
+            "role": "SINGLE_AGENT",
+            "withoutToken": 401,
+            "withToken": 400
+          }
+        ],
+        "listenersReleased": true
+      }
+    ],
+    "modelNetworkAttempts": 0,
+    "paidModelCalls": 0,
+    "experimentRunsSubmitted": 0,
+    "databaseScope": "temporary audit storage"
+  },
+  "localCredentials": {
+    "localCredentials": {
+      "Multi Host": {
+        "apiKeyPresent": true,
+        "internalTokensPresent": 4,
+        "offlineCredentialCheck": "PRESENT"
+      },
+      "Single Host": {
+        "apiKeyPresent": true,
+        "internalTokensPresent": 1,
+        "offlineCredentialCheck": "PRESENT"
+      }
+    },
+    "secretsIncluded": false,
+    "providerAuthenticationChecked": false,
+    "apiCalls": 0,
+    "pycharmRunMode": "CONFIGURATION_CHECK_ONLY",
+    "gitIgnored": true,
+    "verification": "Both run_host --check-secrets processes exited 0 with OWNED_HOST_CONFIGURATION_VALID"
+  },
+  "suite": {
+    "schemaVersion": 2,
+    "suiteId": "urn:suite:scn-001:signup-protected",
+    "suiteVersion": "0.5.2",
+    "scenarioKey": "SCN-001",
+    "toolName": "run_unit_tests",
+    "sourceDirectory": "tests/signup",
+    "requirements": {
+      "REQ-001": {
+        "description": "유효한 이메일과 비밀번호로 계정을 생성할 수 있어야 함",
+        "acceptanceCriteria": [
+          "정상 입력 시 사용자 1건 생성 및 성공 응답"
+        ],
+        "validators": [
+          "QA"
+        ]
+      },
+      "REQ-002": {
+        "description": "잘못된 이메일 형식을 거부해야 함",
+        "acceptanceCriteria": [
+          "합의한 이메일 파서에서 invalid인 값이 DB에 저장되지 않고 오류 응답"
+        ],
+        "validators": [
+          "QA"
+        ]
+      },
+      "REQ-003": {
+        "description": "동일한 canonical email로 중복 계정을 만들 수 없어야 함",
+        "acceptanceCriteria": [
+          "애플리케이션 사전검사와 별개로 DB UNIQUE 제약이 존재하며 동시 요청에서도 중복 생성 불가"
+        ],
+        "validators": [
+          "QA",
+          "SECURITY"
+        ]
+      },
+      "REQ-004": {
+        "description": "비밀번호는 최소 8자 이상이어야 함",
+        "acceptanceCriteria": [
+          "7자 이하는 거부, 8자 이상 정상 처리"
+        ],
+        "validators": [
+          "QA"
+        ]
+      },
+      "REQ-005": {
+        "description": "비밀번호는 승인된 Password Hash 정책으로 저장해야 함",
+        "acceptanceCriteria": [
+          "승인한 알고리즘·파라미터 충족, 평문/일반 SHA 계열 저장 없음"
+        ],
+        "validators": [
+          "SECURITY"
+        ]
+      },
+      "REQ-006": {
+        "description": "평문 비밀번호와 Password Hash가 API 응답, A2A Message/Artifact, 일반 로그, Trace에 노출되지 않아야 함",
+        "acceptanceCriteria": [
+          "지정 출력 전체에서 비밀번호 및 저장 Hash 미노출"
+        ],
+        "validators": [
+          "SECURITY"
+        ]
+      },
+      "REQ-007": {
+        "description": "실제 가입 처리 결과와 사용자 응답이 일치해야 함",
+        "acceptanceCriteria": [
+          "성공은 성공으로, 검증/중복 실패는 실패로 응답"
+        ],
+        "validators": [
+          "QA"
+        ]
+      },
+      "REQ-008": {
+        "description": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함",
+        "acceptanceCriteria": [
+          "Trace를 통해 전체 연결 관계 복원 가능"
+        ],
+        "validators": [
+          "ORCHESTRATOR"
+        ]
+      }
+    },
+    "sets": {
+      "practice": {
+        "QA": "practice_qa.PracticeQAChecks",
+        "SECURITY": "practice_security.PracticeSecurityChecks"
+      },
+      "pilot": {
+        "QA": "exam_pilot.PilotExam",
+        "SECURITY": "exam_pilot.PilotExam"
+      },
+      "final": {
+        "QA": "exam_final.FinalExam",
+        "SECURITY": "exam_final.FinalExam"
+      }
+    },
+    "scopes": {
+      "in-loop-qa": {
+        "set": "practice",
+        "role": "QA",
+        "selector": "protected-signup-qa",
+        "pattern": "practice_qa.py",
+        "files": [
+          "tests/signup/signup_link.py",
+          "tests/signup/signup_qa_checks.py",
+          "tests/signup/practice_qa.py"
+        ]
+      },
+      "in-loop-security": {
+        "set": "practice",
+        "role": "SECURITY",
+        "selector": "protected-signup-security",
+        "pattern": "practice_security.py",
+        "files": [
+          "tests/signup/signup_link.py",
+          "tests/signup/signup_security_checks.py",
+          "tests/signup/practice_security.py"
+        ]
+      },
+      "practice": {
+        "set": "practice",
+        "selector": "practice-signup",
+        "pattern": "practice_*.py",
+        "files": [
+          "tests/signup/signup_link.py",
+          "tests/signup/signup_qa_checks.py",
+          "tests/signup/signup_security_checks.py",
+          "tests/signup/practice_qa.py",
+          "tests/signup/practice_security.py"
+        ]
+      },
+      "pilot": {
+        "set": "pilot",
+        "selector": "pilot-signup",
+        "pattern": "exam_pilot.py",
+        "files": [
+          "tests/signup/signup_link.py",
+          "tests/signup/signup_qa_checks.py",
+          "tests/signup/signup_security_checks.py",
+          "tests/signup/exam_pilot.py"
+        ]
+      },
+      "final": {
+        "set": "final",
+        "selector": "final-signup",
+        "pattern": "exam_final.py",
+        "files": [
+          "tests/signup/signup_link.py",
+          "tests/signup/signup_qa_checks.py",
+          "tests/signup/signup_security_checks.py",
+          "tests/signup/exam_final.py"
+        ]
+      }
+    },
+    "checks": [
+      {
+        "key": "QA-SIGNUP-001",
+        "checkId": "28f5b695-2d40-4c9d-acb2-7ef682cfacf8",
+        "requirementKey": "REQ-001",
+        "perspective": "QA",
+        "method": "test_qa_signup_001_valid_signup_creates_user",
+        "title": "유효한 이메일·비밀번호로 가입",
+        "expectedResult": "유효한 가입마다 성공 응답(2xx)과 사용자 1명 생성"
+      },
+      {
+        "key": "QA-SIGNUP-002",
+        "checkId": "dbc502d9-5e40-4a03-9ea1-a38924a3a2ce",
+        "requirementKey": "REQ-002",
+        "perspective": "QA",
+        "method": "test_qa_signup_002_invalid_email_is_rejected",
+        "title": "형식 오류 이메일 거부",
+        "expectedResult": "빈 값·@ 없음·로컬 없음·도메인 없음·@ 두 개·공백 포함 이메일이 모두 4xx 응답, 사용자 수 변화 없음"
+      },
+      {
+        "key": "QA-SIGNUP-003",
+        "checkId": "d15c2dfa-81ec-4d71-873f-a87ec68c77fb",
+        "requirementKey": "REQ-003",
+        "perspective": "QA",
+        "method": "test_qa_signup_003_same_canonical_email_is_rejected",
+        "title": "같은 canonical 이메일 중복 가입 방지",
+        "expectedResult": "가입한 이메일을 같게·대소문자·앞뒤 공백으로 바꾼 재가입이 모두 4xx 응답이고 사용자 1명 유지"
+      },
+      {
+        "key": "QA-SIGNUP-004",
+        "checkId": "720c082c-a1f5-4147-ad53-14a27a60deaf",
+        "requirementKey": "REQ-004",
+        "perspective": "QA",
+        "method": "test_qa_signup_004_password_minimum_length_is_eight",
+        "title": "비밀번호 최소 8자",
+        "expectedResult": "7자 이하는 4xx 응답·미생성, 8자 이상은 성공 응답·1명 생성"
+      },
+      {
+        "key": "QA-SIGNUP-005",
+        "checkId": "cc579a2d-11d4-4d79-b4a5-169a99ef90b3",
+        "requirementKey": "REQ-003",
+        "perspective": "QA",
+        "method": "test_qa_signup_005_concurrent_same_email_creates_one_user",
+        "title": "동시 가입 요청의 중복 생성 방지",
+        "expectedResult": "같은 이메일 동시 요청 5건(3회)마다 성공 응답 1건·나머지 4xx, 사용자 1명"
+      },
+      {
+        "key": "QA-SIGNUP-006",
+        "checkId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+        "requirementKey": "REQ-007",
+        "perspective": "QA",
+        "method": "test_qa_signup_006_response_matches_actual_result",
+        "title": "응답과 실제 가입 결과 일치",
+        "expectedResult": "정해진 순서의 정상·형식 오류·짧은 비밀번호·중복 요청마다 응답과 DB 변화가 일치하고, 거부된 이메일로 바로 정상 가입 가능"
+      },
+      {
+        "key": "SEC-SIGNUP-002",
+        "checkId": "f89deb22-b22f-4482-8892-768d25b62d84",
+        "requirementKey": "REQ-005",
+        "perspective": "SECURITY",
+        "method": "test_sec_signup_002_password_stored_as_argon2id_hash",
+        "title": "비밀번호 저장값",
+        "expectedResult": "$argon2id$ 형식, m·t·p 기준 이상, 계정마다 다른 salt, 가입 비밀번호로 검증 성공·다른 비밀번호로 실패"
+      },
+      {
+        "key": "SEC-SIGNUP-003",
+        "checkId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+        "requirementKey": "REQ-003",
+        "perspective": "SECURITY",
+        "method": "test_sec_signup_003_email_unique_and_canonical",
+        "title": "이메일 정규화 저장과 DB UNIQUE",
+        "expectedResult": "대소문자·공백 변형 이메일이 앞뒤 공백 제거·소문자로 저장되고, 같은 이메일 행을 DB에 직접 넣으면 이메일 칸 UNIQUE로 거부"
+      },
+      {
+        "key": "SEC-SIGNUP-005",
+        "checkId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+        "requirementKey": "REQ-006",
+        "perspective": "SECURITY",
+        "method": "test_sec_signup_005_password_and_hash_not_exposed",
+        "title": "비밀번호·해시 노출",
+        "expectedResult": "성공·형식 오류·짧은 비밀번호·중복·형식이 틀린 본문·DB 오류 요청의 응답과 서버 로그·출력에 비밀번호·해시 없음(그대로·base64·16진수)"
+      }
+    ]
+  },
+  "sourceChangedDuringFullSuite": [
+    "src/evaluation/run_metrics.py",
+    "src/evaluation/experiment.py",
+    "src/evaluation/comparison_report.py",
+    "src/evaluation/preflight.py",
+    "src/evaluation/protected_tests/tests/signup/signup_link.py",
+    "tests/evaluation/test_experiment_image_skeleton.py",
+    "tests/evaluation/test_docker_evaluation_integration.py",
+    "tests/evaluation/test_import_stage_exposure.py",
+    "tests/evaluation/test_preflight_browser_cleanup.py",
+    "tests/evaluation/test_experiment_selection.py"
+  ],
+  "finalSourceSha256": {
+    "src/agents/semantic_review.py": "b9668826fddee09f7ef8fb86ec2016d1c52d829b342b5e49932f9bbc2a6cd5d5",
+    "src/agents/__init__.py": "43d50b9e66c71df7b03a05d3e2c15223604c3e1b46212ea24e0e934b8046d083",
+    "src/agents/main.py": "d0762300ed6adbba366969566abdd70b247fcfa76266670e5997855d51e62a9e",
+    "src/agents/semantic_store.py": "0b4a088b8194ed284ea121ed3f187eae094c7533aef2bde4f7c6cb19688ff2a8",
+    "src/agents/__main__.py": "af9b81d2ac24d18ee3c216f1043f9851be055140dd8dda9b3fb74a136c087fca",
+    "src/diagnostics/__init__.py": "82bf443420d65e183f82049359e7f950586ac757a8e3bb9fdd6b495401bcde8f",
+    "src/evaluation/execution_journal.py": "e6456361bdfb6302f95b5078419662d72c2f1d08357f9ea4de52adb5f042df1e",
+    "src/evaluation/replay_runner.py": "89e638f6bf128a1d2fa0455defa5f50419d06060efc47245e7acadf253462919",
+    "src/evaluation/coverage_runner.py": "d4a39fb0ea5457066e1c8a33df00b91eb19d4be9e4fc75b08a72532fd389d3ca",
+    "src/evaluation/check_adapters.py": "543c7adf5d6431731059c104594f5b65ff3d53dca5b1715fd32c826106d7057c",
+    "src/evaluation/run_metrics.py": "53d8358bbf22ae419b760120e87dc38494ed1d3170a756c1030fb13445ed182f",
+    "src/evaluation/experiment_run.py": "1e08118c822684ae9bb10a0125bb1f1aae972684cc15aeb136e75d1062292e49",
+    "src/evaluation/aggregation.py": "3d2f2585836b2fb4529281db110852d92d4ccd25ceaa14d82fc714210a584f08",
+    "src/evaluation/host_evidence.py": "7ced7b04ad3e64b0448a8bb2616e3b7a3eceda515a763cbf779f890745a4b2cc",
+    "src/evaluation/agent_eval.py": "d90cd129eb6d495f5db996c000f6a8188873bebe3ebdeb6baccdba7e0a9af84b",
+    "src/evaluation/planner_review.py": "800bb1e3630c78ffb8868f6605d8d0041d717da55b32e428086f14a761c0a7cd",
+    "src/evaluation/demo_index.py": "b5784652f771728ddb4789948768a598ff7806b291ff49be55a62fcbcdf1b250",
+    "src/evaluation/model_input.py": "4bdc19f0ab306d8dff28dde16b7d14613ac20121fc058b9df85206e8d6b58bb5",
+    "src/evaluation/output_evidence.py": "fdfda6d74c63153146883b0ab3b1b281f44f763f56633b6cbbaf6bb21da4da86",
+    "src/evaluation/manifest.py": "a13caa586b82e1d6369fafe94080dd71a32308d689b7222732aa300b22c83f87",
+    "src/evaluation/parity.py": "5b657ee0c67c94da79fb06e321c7e2592f95212e014fad12b810de05dbbaf1fe",
+    "src/evaluation/starting_source.py": "b106aee2d69fab582c41cfb3f020a2ff4221018f08df25e7dec3b07e2950c66e",
+    "src/evaluation/trace_checks.py": "242e7dc68c1beb6134a7ce83623d80734777131f6d6a4eba24489b60293f82c2",
+    "src/evaluation/scoring.py": "b6cf08739344545e2b236c0f5aea8cb959edf787109717998a7321c94ccc2cd3",
+    "src/evaluation/__init__.py": "3428f6dbcc7aad6b6539331698017343da45e5eeb3415843b3b8f66b52491a5f",
+    "src/evaluation/independent.py": "1b8bb8853f6f14c013020f5cf44a24819e3bcd6e2d04ad1c4c45d811bfcb741b",
+    "src/evaluation/report_demo.py": "5231bf7c2b636537c81f92e2f269bf42cad6bad3aa82975f9d2e0c37c2245a63",
+    "src/evaluation/experiment.py": "e0055f75c17103a54a051f1fd1da360ccd46f85c7079ad078ca6fd6a78bf34b1",
+    "src/evaluation/summary.py": "4981d2b17fc6a24153b1cdeb82f7bd5f763b8d278b08698b1a6ad3edb977d77f",
+    "src/evaluation/replay.py": "080a4105982fa6516f6d14c45fd15a8c38f9f0cdcf915bedc619bf00b9d7fab7",
+    "src/evaluation/common.py": "504d774f3aafe66e6d918ff87470b68758e6b1fc91ebf82d65b2afbbb2a73607",
+    "src/evaluation/outcomes.py": "ed293754c1420a0bf951c4fa6b91ab72e8d32fd172765f709f6662edb76b80d3",
+    "src/evaluation/comparison_report.py": "04f47d0cf04543a521c7cfaf54fe6db29bf8c5302de470bce30d89a70635e1f9",
+    "src/evaluation/final_evaluation.py": "dfa4bd11d8cade462599712c92194eabe095221809683a72f812dd34ec902d87",
+    "src/evaluation/host_process.py": "f77929adafb5f0f681997f22ab3d68a74d2ca4bb030ca6b6130f3ec52ca8072f",
+    "src/evaluation/package_evidence.py": "392e5573c829effb6bca86afa89a57721493b5e8dfff39ca18622d5dbf3a798f",
+    "src/evaluation/environment.py": "be1f36f22dea47527d75d81a867c6ef72d89ec81f112d022a8ff93fdc8f1ea40",
+    "src/evaluation/workflow.py": "fde06920c9c8abc4743a8aa653d88519ea685e9e1e234e5f62cf3a21aa73a4b8",
+    "src/evaluation/repeatability.py": "662932634b5e73975f2ef1a2ce33bb150d692513b8a74de6143fafe47eb6ed57",
+    "src/evaluation/__main__.py": "c7c92a7251495c77c31842e9be1d16db764ad97f940f78bf295421ed73b0f0b5",
+    "src/evaluation/preflight.py": "c39cb576f33d3c5941b87b57d8c010d813a52c546b443528dd6790addf74c735",
+    "src/evaluation/reporting.py": "dc474da1aecbc0c89cc97e12b6b30000cdd15c027711aa186ee12a00c90a5eb2",
+    "src/evaluation/evidence_metrics.py": "9dc7b929ba8e69391563e1172da9b8699b1b0feac1743ed3a0852ca07bf622db",
+    "src/mcp_tools/server.py": "8c92bf05a6fa711b1004ead1e0a2d6bb6aa0114c52f00590dc51993e870e0897",
+    "src/mcp_tools/client.py": "a41f57ac3322ca027f713d2947eb4c6f21104f76a00c292fcd9051308e3d2fbd",
+    "src/mcp_tools/execution_runtime.py": "e9336fd7e4d7e8d2f365f4f4b4ee97aa33d90884d7a1a07db8ab96a0a7c17b3c",
+    "src/mcp_tools/__init__.py": "c00f23a56c4613675e3e494ffcdbb9829176534fa1e59180fb086506f5d73bb0",
+    "src/mcp_tools/execution_store.py": "73db515ae2945657f8bee604a38b8842186b6911653d451d7af4d084d41d0fa1",
+    "src/mcp_tools/runtime.py": "f729dbcebcfafd30c236fc71a9cfdca2cacf9a5cb328614e01f67126d741b7cc",
+    "src/mcp_tools/stdio.py": "e024c463933561e308191e4018a596b9a19ba1452f65388fca60b9dcff44774f",
+    "src/mcp_tools/execution_policy.py": "a19768d48f5831afd07159ee82f77d9d9f34799251f720db2cc59aeb20cac4b2",
+    "src/mcp_tools/__main__.py": "dbab0d8bd068f4527ef9131673e1e96f183fe3c910ba1047fab97d3da5cfa359",
+    "src/orchestrator/__init__.py": "6ca80d85eb684df3f95d6e1d810dea3df9807b730fc3d12b7af78fb45b545162",
+    "src/orchestrator/observability.py": "4300b164a3ac8eeadc0c5d3df2c275c7b78872460d60bd6cf809e0a9cbe70909",
+    "src/orchestrator/main.py": "7694bc504c522866313115a4f179328da1a2be264a924711768115d7081c57c9",
+    "src/orchestrator/artifacts/service.py": "4cc4eea3240b741d92e53b1fb8751838e91786282c4509d20b9aea4aad95da8f",
+    "src/orchestrator/artifacts/git_snapshot.py": "c72565c5fe289182a0ec462041521ce2aa3e45be9ca347a45c4880f7984103dd",
+    "src/orchestrator/artifacts/__init__.py": "636294b4c241fb7c274fe916712bd13eda61042ac26b44549729f740ec467efe",
+    "src/orchestrator/artifacts/sqlite_store.py": "4b377d9c086de1e38e93d21d8437ad29cb72a8572f2a0862acaaf4980fd05a32",
+    "src/orchestrator/artifacts/contracts.py": "18438b0db58a8dd2ec8d50592c8501ca999b905cbea0cc2dbe85deb9cf72e338",
+    "src/orchestrator/core/logging.py": "158835d47dbabd268d99d4fb66218523c0dfd2726e3415574fb139768028e3b2",
+    "src/orchestrator/core/config.py": "5fe3ca016888f529a5400d529f0dceb10f72abc09ac1eae4015512f9b9890592",
+    "src/orchestrator/core/source_credentials.py": "589ff3c38605e99abce4d77caf69a41e0f1f6a68232a0f2351e5dc6bfe5b6a75",
+    "src/orchestrator/core/security.py": "95a41fa411a958e0f6a52560c274608e0f9ba99a6aeabc1994b85c96ee7a1d36",
+    "src/orchestrator/core/__init__.py": "4e4bc30db7f457fb12234f4477640e9c4b5c5b15f398c3ceb53b098a383199f9",
+    "src/orchestrator/core/async_control.py": "2fbb1ae04bd4a8db5c3bd0e883ab75d131e7778849942c46b78054f49d29dd5f",
+    "src/orchestrator/a2a/delivery.py": "36d37343c8846b194a9711c97ce88975db1a0977af1cb14c321b6ec811ee17de",
+    "src/orchestrator/a2a/registry.py": "7c8183ba3848a08b32e82238b1ab9cd29ddbfe021299aa7cf7f149e6be9ee83d",
+    "src/orchestrator/a2a/client.py": "2d5d48964c324000cd419d2043c70fe65378d354749a151a0823985b58780f06",
+    "src/orchestrator/a2a/__init__.py": "379c483061182ba87a6668858f374dad672aac844f7f820386db40e42d01d94a",
+    "src/orchestrator/a2a/requests.py": "3d666eeebd965c1e31a74308160a39d45ade94f250763fc520e750b4d45bc9ef",
+    "src/orchestrator/workspaces/registry.py": "9d6959510620e1558ae1b66c05ec54ed10a8175cf44d8a3f19e164791ccba5d7",
+    "src/orchestrator/workspaces/filesystem.py": "a35189b82e633b357c10e8938c16c202b8bcca5628fe439ed553c6c54065a6ed",
+    "src/orchestrator/workspaces/policy.py": "ecc4e19c35fed1d92a70ea017895b1f96df09f08a2d75408896030f9814ad258",
+    "src/orchestrator/workspaces/__init__.py": "d2f00e305cebac200d18887e82e37dfe219a6b674d58f82686c2b7b005dfa522",
+    "src/orchestrator/sandbox/__init__.py": "7f4663e23fe64fb43423e7405064a68f114f619538f3dbc30348af4db9a0661d",
+    "src/orchestrator/sandbox/docker_cli.py": "d0a7753d62ab2bf5c097fe516d3cf6953992355282c94d154c1a52881e721e87",
+    "src/orchestrator/sandbox/runtime.py": "4121f087a7fc015ee09ff5c4c58b12d0db447d2906ad7df50e8f420cd525002c",
+    "src/orchestrator/sandbox/materialization.py": "47d5b316efc8df1ca832e38ad6e1bb6e9ffd3413a03aae5aef6d3464a15fbbb2",
+    "src/orchestrator/sandbox/contracts.py": "2f2b27245689a0b96c43880d717fdbbf2f8ab130c9b0bf49262500166da9cafe",
+    "src/orchestrator/api/__init__.py": "c5e79b75137811726e30acef2fa5cfc649514fce1c86da771535b368f43238c0",
+    "src/orchestrator/api/errors.py": "cdf8f4ed348f01f9f90aabb1c4fb4275e3a0acd78f70f356d618a21626dab4cf",
+    "src/orchestrator/api/dependencies.py": "f7f51c099109ef8005953f0fc345798b783b0dc33da4a1fa0b7d1d2bc0f94a94",
+    "src/orchestrator/application/workflow_controls.py": "79267bc4de63099ec1a44f15ce01ced9fe71a896077624cf2886277ee8fefc64",
+    "src/orchestrator/application/output_envelope.py": "3d3653910299874150a8988bc32c2ba03f7ed9cccd000efc849f55472badab94",
+    "src/orchestrator/application/control_input.py": "a38a985784e23fc6b1fd6dbc3556d03f216e36d1d698b0a8d2330a6eec226fd1",
+    "src/orchestrator/application/dispatch.py": "ce40b318d6f85829807eeeacfb1e98484eb224e9d2f4c94940dc4b5cc6e85285",
+    "src/orchestrator/application/validation_output.py": "fa7e727095d96a97a75ac59fa68adf3dcd52a74f5a7379f2a91156d275330c12",
+    "src/orchestrator/application/__init__.py": "040863c1a5a0f6ea9f6c43f197a5b0c2aab85ec91112cccd5905d0dc16c4b3c9",
+    "src/orchestrator/application/developer_output.py": "811745050e7b202ad4541a201251495ceca106d387e26d3963d024583b10f17a",
+    "src/orchestrator/application/validation_request.py": "be7b90abc31cb48a35d0380609c7b1062d25adb1f13f79122253a7fe74f65394",
+    "src/orchestrator/application/planner_output.py": "a5fa355afe0123133d3ae2e34bce2cb94be1e8ebee46af0f457d1a1e86a542d5",
+    "src/orchestrator/application/a2a_tasks.py": "8a1208f58431587185d72af7c7b7af216987ce6e61ebfaee5a42f82d63d496d7",
+    "src/orchestrator/infrastructure/__init__.py": "662713b37414c1613f35428826e72084c2f951f3bf504fb1eaa7e8feb55c62cb",
+    "src/orchestrator/infrastructure/sqlite_workflows.py": "0a6d808989d2bb44781ec6424387de59ff6a533273a6966446b5a3d3e4825969",
+    "src/orchestrator/domain/issues.py": "f2813787c23f7255f0e271d808844328d528cd9be848390cdfc9521ea5e892b5",
+    "src/orchestrator/domain/json_fingerprint.py": "16bce464ee447981c7041e0bd653f2831cbc217d699091c21f3360e0a9e7524b",
+    "src/orchestrator/domain/trace.py": "77ed65e900af4b8113151c3fc388b9fbe7df473c88153a9999fd5ad37946cfb6",
+    "src/orchestrator/domain/role_outputs.py": "f6d984645c00e5eb74bb28cf9faf7e7918841277f1c2e29af0fe75dacb09829a",
+    "src/orchestrator/domain/snapshot_handoff.py": "706d2a335f6a0211520dc07bc3b0de75c43bbc793001eee0a698da884fa84725",
+    "src/orchestrator/domain/models.py": "02accbaa007387933dfcc97ed26c83c6deb988ea7886156a7788809a6399e31e",
+    "src/orchestrator/domain/planning_artifacts.py": "c855015630109c47b1cf939a633bed05e83b98c723007b10906f1fcae4faab66",
+    "src/orchestrator/domain/constants.py": "fb24594fae3b0b32a057b0fbbfbd26fee2d2a04a6215c10f7ee630fc38a2ed13",
+    "src/orchestrator/domain/contract_validation.py": "d8740ac9b8774da66057293b08db3589f026a697ad1d6dd1716b913103c6b6fc",
+    "src/orchestrator/domain/__init__.py": "e7eaf42b39b507e41951448cd079ba8c211709a33dc33766e9dbba31c18271bc",
+    "src/orchestrator/domain/scenario_registry.py": "8575f70ef13bd0fea7027be5376e44af1047cd0f58e062cc60e47a67eaa2fa68",
+    "src/orchestrator/domain/state_machine.py": "87633376c151013a46623b4caa19620b4ab5f9bfb3970eddc70337e4d2ab61ac",
+    "src/orchestrator/domain/developer_artifacts.py": "a1a4a036852692d2e9deb7790fe31203c6e36f86da72002ffd84af00dc7881bd",
+    "src/orchestrator/domain/retry_policy.py": "0c2978ec2c59e14ea5f65da64a3173f5360b36747854cdc874e1b17a955ac680",
+    "src/orchestrator/domain/requirement_authority.py": "f712bb355b592d77cfa291974ca5949f64cc693b3378e9c713a46abf704e8e59",
+    "src/orchestrator/domain/states.py": "7ddd0deba4d96ea361a2427ee315583d050f2563417e5e6727618edd0ac9bc69",
+    "src/orchestrator/domain/tool_evidence.py": "51222b7be8b0abe44a3701fbe6d0a8d504f9f65f65fc6057686e7f874bb53856",
+    "src/orchestrator/domain/validation_artifacts.py": "bc1e3d81b9b480a85ef35c6469de357e8c06e87d22dcfff6e0b84964c40fe241",
+    "src/orchestrator/domain/run_configuration.py": "545beb60999e62fdfc4c7f67c77e656d146265d45ec9aea827d1c6422b8beb1c",
+    "src/orchestrator/domain/workspaces.py": "c46fc7df4df52476da79a4195516600199d7280443254e86f7a88a5c78551d5a",
+    "src/orchestrator/api/schemas/__init__.py": "6a9987e5442d765b489503b9b01e796cb6407a732d8f1374822e030625779e1e",
+    "src/orchestrator/api/schemas/runs.py": "6060df9e84d64b523e54e16c8691e7b0f12548fbbf1a533adf16fd58d723754a",
+    "src/orchestrator/api/routes/scenarios.py": "a3706bf15de16717e630c749c9f662b0137a2854cfd49ec724f939a13cacaf55",
+    "src/orchestrator/api/routes/health.py": "6647b815004cbc84171279bcf023e56f8cc52549ffa3e4c5194b35352d6ed501",
+    "src/orchestrator/api/routes/__init__.py": "da56ec82b56790eb5a82afc6cc1e3db599f36e2314b01bbdd6992d3de2bedf2c",
+    "src/orchestrator/api/routes/runs.py": "0485f43b69ae82efdfcdac77e461a9c03048b9b39fdea49d2b00a61d02b9fb95",
+    "src/mcp_tools/tools/build.py": "6e7e075ee53e866c3ebffcbf2d935ca48767805c31185e476e892e0037aee7b4",
+    "src/mcp_tools/tools/unit_report.py": "3e6630fe43e11c14c8b1d671954857248ebcc20959873576e1d9bdf4a975d5bb",
+    "src/mcp_tools/tools/files.py": "14c2c89cb55274681a7ed6562eee73e6aeec6c2fc1755482792f3118381c7a79",
+    "src/mcp_tools/tools/snapshots.py": "1903726ac937ab5e448fed675d7f2e2996152079e66e1dd3c8410aab4fdaa285",
+    "src/mcp_tools/tools/security_report.py": "8266b9e94f06b44898680cbd03b5cbdbe0436b73257d9fa981c4a9a103610d54",
+    "src/mcp_tools/tools/security_contract.py": "3a81788f09a1a7fa4cd64fe221ef183294e43b6f9c3896dbc067619e82f2ee24",
+    "src/mcp_tools/tools/build_store.py": "bc1b84dd8448da3f50b54cf5545aa3d4adc4fbbcee1c13660b57e2e9d77dcdd1",
+    "src/mcp_tools/tools/browser_config.py": "37f2773161655bdd77ed8b013f2b612af9eef1cb649636fa5e81ede5125b290a",
+    "src/mcp_tools/tools/security.py": "2c86ff7e26d3e1a2271eeca71c525534f9f5c2471dbe77983a5c3b5775800730",
+    "src/mcp_tools/tools/unit_store.py": "dd06a5d4c0c734424adf2657485bbb207050e33f41877a40a07448d67e9b35d9",
+    "src/mcp_tools/tools/__init__.py": "e8da6ed7e4d37efa99b4b1970397d6f30a989cf1d367610416f5972eb4e05194",
+    "src/mcp_tools/tools/security_store.py": "8bbb479376e5064250251faf9b3458361992cb42d8fb8e0f6604a45750d380c0",
+    "src/mcp_tools/tools/security_inputs.py": "1ef7524527f2da2caa047570dec3f460e3872a8ae9c686c3d4d410de72657d4b",
+    "src/mcp_tools/tools/browser_runner.py": "f362565b5a695c305549778a2c685601957abd72fc6c2aa66a0dc97eee525e14",
+    "src/mcp_tools/tools/unit_inputs.py": "fe3a3e7a9c5c55e3de504ec542657f96482d559f513c432b02dfb6ac874fb0e9",
+    "src/mcp_tools/tools/patching.py": "f7dee7b5f332ed0277e8e5fc7a182a7d55d5eb64c1ea008001b5d6274202cf47",
+    "src/mcp_tools/tools/browser_report.py": "1597c676e7cd0f04daaebde14443f27cfefab72424f04567222fd77fa4c44367",
+    "src/mcp_tools/tools/browser.py": "284cf8968e7df5d82859b894165cbb81283aaf0f9325afc27517120f889054da",
+    "src/mcp_tools/tools/test_reports.py": "a086bd84f8bb0e1cab6a21a0a110764df80a83cfa1a1c2a6046700bf8c5b954b",
+    "src/mcp_tools/tools/browser_contract.py": "6ea34ae419562bdf353727106bc97bd06bcce7d7525ce21445ca90643a50d30b",
+    "src/mcp_tools/tools/unit.py": "2023cc86dd8ad6171df0da8db887e2de4b1951dce212e48f35367ce9a6ab8233",
+    "src/mcp_tools/tools/build_config.py": "2e77dbfb923aac1ccd431cc82985c6073f3c9476eedacb1f3b6a797e701a39f9",
+    "src/mcp_tools/tools/browser_store.py": "556c7bd6ccafd648a95b57361c329204f54daf0342945d2fd2c3466ffb1dd17a",
+    "src/mcp_tools/tools/file_io.py": "24c357cce709d732eeb1da25f268f53fcad5bee761656782f4db600e5d4957b3",
+    "src/mcp_tools/tools/unit_config.py": "fea7cc1efa7673636c979e88323935913837b5067ac4839a18f33353b98aff2b",
+    "src/mcp_tools/tools/security_config.py": "4170ce2e74f2163c9e9e80ed1cb723042f14581f724cf6970a0621b1b8899202",
+    "src/mcp_tools/tools/security_runner.py": "cc798bb0a0f7331b9e9f3d1d565f88442cbea952aac9a64c24b835f907071d40",
+    "src/mcp_tools/tools/browser_inputs.py": "3a39825c5b895c5bb5c03ca84b457c59060d782094c7cfb2488314be652c459d",
+    "src/mcp_tools/tools/unit_runner.py": "e2ab1d9da4c4c49a7add8fbafa464b5c7d21acbced88aab35eeff604f3c14d11",
+    "src/mcp_tools/core/catalog.py": "412b322e8ef9ae37b0c84150b4dd6a61b5191c48829f7c37314b1994c2876b0a",
+    "src/mcp_tools/core/config.py": "c471da3bb7ee0e4e5db3bee04350b75584a58c2184817617e4d893b5fcdfc000",
+    "src/mcp_tools/core/policy.py": "426612a454bfe5c53b18a95f3e1640c78ebca695e191d6cdae50752409ba2ff0",
+    "src/mcp_tools/core/__init__.py": "f88525adb57deed41f8d56f540fc0f46a54e4d282f4d486d685c3eb3c1ebcaf2",
+    "src/evaluation/protected_tests/__init__.py": "358f727cff06c63e7ac40b0b6364410f916970449e2e1fe4882150896283870b",
+    "src/evaluation/protected_tests/__main__.py": "54818cee44962491c9b2a28c9df0e3557e54220fccf9d4b8c65f667675704805",
+    "src/evaluation/security/__init__.py": "9e0a0ded8fb3794988c457ce1e5fc4a58558913d2cb25727049050ad1f7a3ca4",
+    "src/evaluation/security/assess.py": "861a2c1e49be0740912c0c89217181ab0ab7790641ab0cc48e8a50f87d02b22f",
+    "src/evaluation/security/static_analysis.py": "83d9818adc7adef3b3254582876d272d794afae242ed36e5836acec2381b4b4e",
+    "src/evaluation/contracts/__init__.py": "c9269813356aca1c6fce294151f2f2b796b799f6f6af35108ef8a883ed97fca6",
+    "src/evaluation/protected_tests/tests/signup/signup_qa_checks.py": "45eabd1e14f59641599b30070d836df730f1f4e2bdf69d180b6cb6ee2541f15a",
+    "src/evaluation/protected_tests/tests/signup/signup_security_checks.py": "20c70d283473282d5c081a0da245a538866eb7c4fd9566d593dfd533595d7da4",
+    "src/evaluation/protected_tests/tests/signup/practice_security.py": "1d405d981e8058eaf6f35cd7b7346396c8d7ba717f861ad34f9c70ddf816fcf4",
+    "src/evaluation/protected_tests/tests/signup/exam_final.py": "1fc0fd5f5a0eb295c73dfd4aa14d7e9f41694a4efcc792b6fc90d0a9fe2bf974",
+    "src/evaluation/protected_tests/tests/signup/exam_pilot.py": "e22210e5b30110e0781b247288f9ec7d80f401c62932297a0a77014b6d3e5edf",
+    "src/evaluation/protected_tests/tests/signup/practice_qa.py": "fab2aa5180b2575f8804639c221527ea306b67eca9ffccc496e759c6c09164a1",
+    "src/evaluation/protected_tests/tests/signup/signup_link.py": "365c7c3c5ee24539c67216e81e4269952867b135c2b5cd5bb9df7b760aaf6ff6",
+    "src/diagnostics/communication/guarded_contracts.py": "d7867ce34d4e52adca00cf0340914b9c9bf52a0950b3cf3dc3a69c05390ef14f",
+    "src/diagnostics/communication/guarded.py": "1380c205f3185e4fec779bc4e6268b718d9907414b442ac7e8d23a09081d8cd0",
+    "src/diagnostics/communication/natural.py": "4ec061b415624fe7fadf8f6f01f1d8e4e45589766fb8d838781ecb232b64abc8",
+    "src/diagnostics/communication/semantic_review.py": "aaf3feef34320e35ebcd416e920383ada1d7ced321a95767ba252636231a6970",
+    "src/diagnostics/communication/guarded_reporting.py": "acadadeff9e163c90fc541dd437f8704e4a68abae82d074ccd3e1c62f4fac274",
+    "src/diagnostics/communication/workloads.py": "8ffb67ab063fac1f0d6e8abacf11d0f0354e049dd497e7f165e748ba9ab789e8",
+    "src/diagnostics/communication/__init__.py": "edd3bf87642424f931d7127f5571c72e57b74a5b57b53e9666ac29ef67dd26e2",
+    "src/diagnostics/communication/timing.py": "55a23e081103794c8b78ff43d2f79933629e1f1f16256236152358d598f4ce04",
+    "src/diagnostics/communication/probe.py": "f712a664dbe9cccaa7fcbce6f4d11af11e631cf3f7504db4ccbd60d411d4ec8d",
+    "src/diagnostics/communication/contracts.py": "753ef0b37b5b3c635545cc031c8c7d524ad6622a8caa732827b5634360cc2cf4",
+    "src/diagnostics/communication/live.py": "4e900db94dd53bb7f967c686c3015591d4e27d43424f5570ed15921723062db7",
+    "src/diagnostics/communication/calibrate.py": "e381d2f1c2bd4436bad18d42073ebac9e82b720b2f077a3fecbbd619147ae5b4",
+    "src/diagnostics/communication/provenance.py": "e101071b945a7a4e8e420538e014db532bf9b5e6ab283b83173a02d8542faa39",
+    "src/diagnostics/communication/performance.py": "4351181a31941fbdb3f5191194428e52c41354e60964f5fe9f8d9ea40f1b6eed",
+    "src/diagnostics/communication/__main__.py": "bf861bb289af2c2ce6e7ea5799337343afc8e5fe874a1dd1e7102243dc5b9659",
+    "src/diagnostics/communication/peer_sessions.py": "e9377d05603fe490cd9929f336df5d118dedaed1a5ae87c7edf27418a06e767d",
+    "src/diagnostics/communication/lab.py": "3e42dcb0839feceaf05567a31e5c44e1d1d16f68f8fac9a341cb3922dfb2a28a",
+    "src/diagnostics/communication/reporting.py": "678e5178080e5e3a7ff9cdc0fe4c299f2ac75bd090091c40ea66894e86fdccb9",
+    "src/agents/llm/configuration.py": "24cde21308d53a74056d3961dcfa3b5442bb37a84df312acfe927bd33112f092",
+    "src/agents/llm/openai_responses.py": "00739590fc574a7ab5ecfc578c08fa9a04ebf4df17d74c34aad986a49d9c161d",
+    "src/agents/llm/budget.py": "86a06dd994d4ea0b8c7a7d3f44060b3ef3e10736b6df2214ad7466548cc83153",
+    "src/agents/llm/__init__.py": "682562c9304fb87ab79cc51a1a6be4ea9d423f8a2e0c3f8935c76fb7496f49a6",
+    "src/agents/llm/input_evidence.py": "a8288ff06dbd728697e29d5b863e7f60100dc6820079b5ea77f68a1b19fdfbbc",
+    "src/agents/llm/engine.py": "5396321f1245141ed0bb86f00323ba8b0283e1fb943ba73200ed5a86ce884fdb",
+    "src/agents/llm/content.py": "9b34c823a006d14ca7e45f7853a0cb3b6d4d58ce85b92c8bd47ee03304e67f62",
+    "src/agents/llm/contracts.py": "ad1fba01ee046139696749d915b6dd87db2e7180a28c062970f4bbd9d7a3989b",
+    "src/agents/core/logging.py": "8dc714f730018c76f1583f1526f584dc93922cb85fd45f4b7ab7753354ccbac1",
+    "src/agents/core/deadlines.py": "9bff29a9f3c0400dab203ad4c531483913aa7c3d61f884778727f7f27753e28e",
+    "src/agents/core/config.py": "454ab19797c97e637ae1f09576a64f48a6f53c5c8be6a824caf087231842ec90",
+    "src/agents/core/__init__.py": "510d96c153aaf4ce1413c313e6b23e2d3425921a1cdcb081ce09540c00f0f0a2",
+    "src/agents/core/contracts.py": "0b73b9a936c1bc29a785b1f97df0e1cc7fc1005bf6ceff3228313d434a4e50e6",
+    "src/agents/core/identity.py": "04cdf5fec3eb05f6ce4182b5106f9dc226bacf4ee0b2d34852a7482db2519cbf",
+    "src/agents/platform/security_verifier.py": "7215739028939ccce9ef669cc183cbb0deb82e139967e389daa1c9201be2b818",
+    "src/agents/platform/configuration.py": "e0cfae06c293276842b189d79ee74e70e98964bcb0b2bc468e4a911a7760c7de",
+    "src/agents/platform/tool_configuration.py": "79a374a11513b730854e53e00d7418aa1ed3c96dcbc7cc75454ba407efc7f2c9",
+    "src/agents/platform/runner.py": "5e4e1aa3a022ffa827f4f2735662cb78511292bbdb8599eee604cafb0231c812",
+    "src/agents/platform/pricing_store.py": "041904d85c429b727dca3731f7ce0bfd99a696455db6e60928dda935149257e0",
+    "src/agents/platform/snapshot_export.py": "b5dd7e948faa484a71cbf31a07a825ae80c428c823d4b74c1711aa267ebe6c83",
+    "src/agents/platform/security_proof_store.py": "ac6b6c4bbbd0a78fee760132c676573ec291707bb8b95ed4d3264c08c06235ef",
+    "src/agents/platform/starting_source.py": "6d0eed6d43a98dc02e6eee479a89b89dfb38bc75982fef136da42a1eaaeb524b",
+    "src/agents/platform/host.py": "40c39a4df0110d05ca214c0bba45b627ff52d32aec25d1915301895dff03b530",
+    "src/agents/platform/export_readonly.py": "3b46340d7aa1df0ee05ac0a37b3be74a93a7e6e3c6eb658cec3842d79d531891",
+    "src/agents/platform/a2a_export.py": "9c1ade3df3ebd7ad474a7b2dbe3e7fd5b98e502915a53324cc765db0b573414f",
+    "src/agents/platform/security_approval.py": "e4cc30ae1268729492737b6b66d2d7f0f958261803a6814545e15d89a06d157c",
+    "src/agents/platform/run_records.py": "547cc54b12d7ff78a5bcfadb0cf3751c3959551eb09687e6086f761edbccea49",
+    "src/agents/platform/host_policy_store.py": "f203e52d07501425d27aba5d53fc443a33c7b3d40b303c4189ecee87be5d406a",
+    "src/agents/platform/evaluation_export.py": "8be2ecec616c33436fe15147af5b1afbb2ad773b4f90f771e445b8d9b0ba601a",
+    "src/agents/platform/check_tools.py": "a593215a877a68c5966804d9598a19dd23920b10f3b53dd62b7f75dc30e319cc",
+    "src/agents/platform/__init__.py": "97f64a84ea4a0affce0c6fbab0818703beba9cdc7c351e662135f8893f2ccb7a",
+    "src/agents/platform/telemetry.py": "80f626b2dd532698d73f65c1560a2aa990f9d8739f186be9e3387ecfa31e482b",
+    "src/agents/platform/check_configuration.py": "09e51f04fd9a9a82aca72fe2ec371440ad51b66490985b74bfea94ebffa0efa6",
+    "src/agents/platform/check_source.py": "b436e0930e6ef3d14b1fd1bc3659f88148acc70d04cdd54f8a3bcba15c46cdfe",
+    "src/agents/platform/run_host.py": "83fee0faee306d1a65c7f8783bee4cae642264ccf293192c566a361e652fcdc1",
+    "src/agents/platform/package_records.py": "3aedf0973b92753f9cfd265104433d9ae27b1299b17dbb70b7be07fd94363889",
+    "src/agents/platform/pricing.py": "ab227bdd0478600929bc9bc62c16baccc041c0796a784ebc992e954096e7eeb9",
+    "src/agents/platform/telemetry_store.py": "d2195a2031bdb29b1cfc09ed2cdd612cb3f195a5cae8abe2dff9fd1dd0aa6de2",
+    "src/agents/platform/budgets.py": "585c0f1549f175724e381d667f4e5c1294af799fbd3ab484462fa5037bde106d",
+    "src/agents/platform/composition.py": "013e38a0f8658cfa8726bbb4a078b0de88b847649ca4ef1c8181fa25ccf87470",
+    "src/agents/platform/package_service.py": "b4cf585d48c458a2e3a3257e531effb6d93e665b71b248543c476cfa455f5935",
+    "src/agents/platform/host_services.py": "ef400e5fb4fa435d1de5823cf72ac56e6176416f1c988222c261c4296d015984",
+    "src/agents/platform/__main__.py": "868cfbd654b6b1cdb5110e16cd36f551dbe2a0314c47dbbe278676eafa876d9d",
+    "src/agents/runtime/bootstrap.py": "f181f832fdf6669a0806715e6a9370419f5eb4ecc221944df4414f9bb50f9086",
+    "src/agents/runtime/developer_services.py": "0ddd8106f2ac1ac575ee4d12ec4eb6a9c0d4fd40b4c74b47f65ff8c9ca8aee49",
+    "src/agents/runtime/planner.py": "624ac49e6d4b7a48a1b445ed0f92f2bae3b93bb65192927be95ac41b99454dde",
+    "src/agents/runtime/qa_services.py": "f331350dd2a81684bccaf69500768f7989068d8fc9381e6f9332b7afe85ef08b",
+    "src/agents/runtime/security_context.py": "07881060df9c2ce6fb2648f25bd4179dbd2221d496fd7b822aafb1f26bef5857",
+    "src/agents/runtime/qa_test_store.py": "053cb9fe6aaca4c58737b54e4e86baa5a0aed843838960365d2db08ede9ff0ab",
+    "src/agents/runtime/security.py": "ffe8e2a5bea75842bad79ba383bec7f1ef986b3dc8071ffecf5940357e1e25e4",
+    "src/agents/runtime/__init__.py": "0ef101c13c989924545939d2bcd7311b06560db67d2b2c464b70af7c680fb01b",
+    "src/agents/runtime/developer_context.py": "d46d7b425844534b0957050292c43e99a7eaac7a7f6403dab61c6a6998081057",
+    "src/agents/runtime/developer_workspace.py": "20ba873103948e85acee80df45575167ab2b2f675839118bb0f817d1dded9eab",
+    "src/agents/runtime/evaluation_policy_store.py": "675e4176edd22ad2c1e3ae8916b2da98888e123c14cc1c8b7ac970468cf700d0",
+    "src/agents/runtime/lifecycle.py": "066c87eca474132f3be6601c7524b997a7396b56f9280b33ea7db2bbfdef3060",
+    "src/agents/runtime/requirement_scope.py": "64d82d0580cc1e030fde84d8a69867477307a8ec076a85e9478aae1b76b366a1",
+    "src/agents/runtime/planner_context.py": "c3e789fe7c55014598cd43a2caee37f01b3931fba59c41b55983e786da6e0c4a",
+    "src/agents/runtime/developer.py": "ce945a705f76c3719a85af18786d73babc0fe3bd192a4a21a2848a5ab5e3d2b8",
+    "src/agents/runtime/security_services.py": "c21ce2eb8a67ef99be34c7a8518605ad2579fd6543a516420cd5f8df0ac5a156",
+    "src/agents/runtime/qa.py": "ad4a4516ac073c5481ec898bfc68bee45e58627b899f230501d98ffefd871520",
+    "src/agents/runtime/qa_context.py": "b6ade194df874bff2797da8d46e37dde9fbe3423af5e72b41b19a67c0da7127b",
+    "src/agents/roles/security_contract.py": "5244aa87de19f261073ed0b4888eb9612e424fb4c9880487fec9a7243a36b8ad",
+    "src/agents/roles/planner_contract.py": "9199a67e72ace8a9ac168542e3d238b9ed4c9422192cb806754fb82157aaa076",
+    "src/agents/roles/__init__.py": "fbe4d6804522302ff2e9bf37519230a68e91c846e576af85ebbcb689e130849e",
+    "src/agents/roles/prompts.py": "61f0ec5d5af05388ee6446c65aa0f3d63c2f04430587411397fe1b7fb7711786",
+    "src/agents/roles/contracts.py": "b9320a16d84cf432cd83886b58ae5710b132e7c44c79918bab8694c0e9771c26",
+    "src/agents/roles/developer_contract.py": "9f95aa6c30bfc7bd00225cb4af8a3d699c4ed3e2183a56db4f3a74d412020582",
+    "src/agents/roles/qa_contract.py": "0e39b5818b226fa660a3bb1a4958040416a3fea8319f4f42d4edac12fd8cb01f",
+    "src/agents/roles/outputs.py": "9f2ff4a47050a36c02904d12cf703a4e57a3641b10513995e93420f492182fe3",
+    "src/agents/single/__init__.py": "dc87f7c401f047e54a2851b83b1ffb84ef8e3ce7b999a8dfb3f80ffe5699eb82",
+    "src/agents/single/runtime.py": "4fbac0ffdf89e762cce84f339c921c66da0fa1f5ed0307a162aa217b8498a3bf",
+    "src/agents/single/prompts.py": "14a479243fd10897e1db4de432768284542c178f372afca742f710818b91fc06",
+    "src/agents/single/platform.py": "1b4b49cf1b44be8045fe2b402805a808794dcedca4940349456f1806fcf97195",
+    "src/agents/single/mcp.py": "8785789f8624dc0e39ff4497390550e541fb14375d70505b902720017c665382",
+    "src/agents/single/contracts.py": "fb650c8b030aa2dfbe4d680107a8320cfc24c4e84d41d5c8029bc5920ab433f6",
+    "src/agents/single/app.py": "a4b4c20e431ff62aa96ccb9299a526339c872ccc8d6bcf5cca2a4e56ea46ed4e",
+    "src/agents/single/__main__.py": "077a8b27e77b02b046acdc3cc242028c5d44f116f34d4827cfd68d6722aa1da7",
+    "src/agents/api/handler.py": "f70d24552ad43dd160926873b640d2e446f8437d4bef4fd33026629b380f231e",
+    "src/agents/api/task_store.py": "7d35dcc35d492891b1422b06a2929926dea0aad35869d6014e4e928d8eeaba41",
+    "src/agents/api/__init__.py": "9088a1ed58a8b4b4fba6ec65c03ad54a760f0f9db7daa5b06b0f54e3e8320226",
+    "src/agents/api/card.py": "210029b1a5bf8e42061cd0da2e33be4f09fa16febc38ca5223c665a7f8f30682",
+    "src/agents/api/sqlite_task_store.py": "280e911523f47f2d3882adfc9b956b4f59115254470970dd0edea42b0221a062",
+    "src/agents/api/routes.py": "e445ab099112b837034473bcb8e7c6c21d022408ff3591b1b6a087740dbd4147",
+    "src/agents/api/validation.py": "8550db10d02f5d040d0b446f68ebbafd8e1b21563c5ce6da350828532550caba",
+    "tests/test_mcp_build.py": "e7d3b93bb18034bfb1a3e20f1ad3d1c5b7a69877420a3b816655365c0cf865a7",
+    "tests/test_dispatch.py": "1c6c2f7577a1960e4079392e316893e844edcc79e235fcb7e584f6047ead2a00",
+    "tests/test_mcp_unit_store.py": "3b4de22b36a339c66bae73e57934215ce3daf3c2978f59dc402c34e25dc489d8",
+    "tests/test_validation_revalidation_services.py": "07d51607039d3c9d4a5e84ecd543025d15c6eaf46c84f0e2a70def55e8283d0d",
+    "tests/test_single_agent_mcp.py": "fc651bfb1b959f9d725b7bda6f351d0cdcceb3bbb0cef558f7913d0d674acf42",
+    "tests/test_mcp_browser_store.py": "8c337776c500ad9fe8e9339f4606433c3a87d4ed63c164460d2653ff5234ef46",
+    "tests/test_mcp_execution_store.py": "24f9dfa896a6b829441341efa5bd53c9cd99893b31c84c67f5108c1626442fa7",
+    "tests/test_requirement_authority.py": "682c8e832d1a79f2a4098ce3ea8acf65d7cf2c014034a25b2b6023474a0b07f5",
+    "tests/test_communication_performance.py": "f1a6dfa993350123e957d885db3508aec1cd1d7221631238d43fc89a396aa2b4",
+    "tests/test_qa_agent.py": "06ad1c1dd2a0b65d1d5a3a8535e10c05ab41db03156823b1c853472cf5738822",
+    "tests/test_developer_contract.py": "84f657e3af722aeac0cd475cef72bec770f00fa9549eb6455cb44a029acb39ed",
+    "tests/test_runtime_configuration.py": "45f8485481abefa53a65a7e617986b05a0cad2e8da94c12eefb6cb94a74a0575",
+    "tests/test_mcp_files.py": "00dbe07d817e5e7d4fb87cda1e92da5d71f2565d5102290ec3edf9e611bcdfa9",
+    "tests/test_security.py": "c81b52487b5dfb65f67ccc96604ecd41f8fb481cd26cc6c798c8f2cbfb203878",
+    "tests/test_developer_agent.py": "4ec176f705a532cce0050ec1e0d2ba671674fb06821a3640144aa553030bdde3",
+    "tests/test_mcp_execution_trace.py": "1e41d6f9629dd973982ce3b065570f7979edc9512ff41a53fae4704739589c77",
+    "tests/test_single_agent_priced_telemetry.py": "097fe6f8363b3998213f04d00305fcaa68911ef9efdf7fb3e880e440194d9768",
+    "tests/test_developer_fix_agent.py": "c29961ee2fc80fd386d50a2e3cb7b69977123d120394d693304f9f4f1d93a263",
+    "tests/test_security_agent.py": "c3e55fcbd8d989152197e76e8cd39016442536751c79ba8ec8349d02d8963991",
+    "tests/test_host_package_service.py": "c7920a52fbc49fbe396e0273c317e3712e0b4ecf8b95ce01e90740c63130cee3",
+    "tests/test_mcp_security_inputs.py": "910b51590af199c8aceeecbd083e420d08b3a2a9ae15dd34856e1a730a8d6140",
+    "tests/test_single_agent_controls.py": "a27e5eb1504427194a366cd02c3b020e3140477f36d630ff69381d09e213e600",
+    "tests/semantic_helpers.py": "67b595d90bb9bb4ab2326fe1dba55013b3aaa6c7fd3bd8bfa7661fabda7f88d2",
+    "tests/test_mcp_tracked_llm.py": "cf5271f0e84fdcb858d43ea9605d4e0bdf77975a0f9850068f32128d4de8205f",
+    "tests/test_mcp_unit_config.py": "207ef80c1d397b71afc3ef72ea83e1fb4afc3b46c5b258e462272e1107e7c7e8",
+    "tests/test_workflow_control_guards.py": "7317767cb2bfbbe39ca10b7439fb666388835fe77695be72b55eff247127488a",
+    "tests/test_security_host.py": "4153967639449907f08aa7cda9bab9bc355585e3b8df63cb6bda9df22b72842e",
+    "tests/test_agent_durable_budgets.py": "5622ad144f526e1526bae86c8782ee847d6d4a8d6234ee7a016ccd88de32a721",
+    "tests/test_pricing_store.py": "00e0fa285f9fb51f6f2bf62cbba9d624323019ab3916922b9dc7ae49fff85b75",
+    "tests/test_priced_pipeline.py": "41e680ec461e77fb3d8eebb899c7007e7b334da4bfd442932956b340d3f0e4e4",
+    "tests/test_agent_mcp_settings.py": "822c638f03226b47b80d41752dc3753f2e654b1bfeef72178928b356e4d1bcc0",
+    "tests/test_mcp_server.py": "abc61a8898a083b836106d1a7a1e52d3dc3c7f3e44608074c8729193ea3867c8",
+    "tests/test_process_gate_event.py": "498e44b23ef6b1a11e240931e64dff23132454d256ccf8038a07930b79f01cc5",
+    "tests/test_qa_context.py": "3a48fc66f23aee9a47f50bb01998eb326a312e927ad3d686b63392f55e18904d",
+    "tests/test_mcp_unit_runner.py": "3ad71828cb02c952565440b3e948d35ae8ceb771c5ffc7aef3b8055e4d315fc9",
+    "tests/test_validation_interrupted_controls.py": "ddb440c99e5d9f167d97c3c9b6fa5d1b184af41754548111f84b90af201d64f5",
+    "tests/test_communication_calibration.py": "d7fddc1967d1d3b115afcfc7eefa57488d2841340d8fd2c738319b477dbe19e0",
+    "tests/test_issue_revalidation_evidence.py": "647097502e505b505523823af4e14b70b06dc2a784490b4fbac27d278849f244",
+    "tests/test_mcp_browser_report.py": "5b562cf887bba6f148a092a20b087397f1a10f47da47c321391fa2fe40def38d",
+    "tests/test_owned_observation_pipeline.py": "e36d659249052fb7d0adc1cf20d04681adf4ade71af158536ee3c6d81c167db9",
+    "tests/test_model_input_evidence.py": "4a1bf69887eb9a8df5e841721744ad39dec27b35fbdcd01c2e22496d7ba9fde6",
+    "tests/test_workspace_api.py": "ce727b3eca4cc115edb7049050ae9e43e31a260897872ff97026557236c72e56",
+    "tests/test_task_deadlines.py": "382bdd8c6194d42f88554850bdb9f49e7fe37ee3570e37862e7b3dbf09e245d0",
+    "tests/test_workflow_models.py": "414cf9f1f66d8ffcdaeec88ef8ecf05e5adc5c1edf2057eaa85735f0d100e6ef",
+    "tests/test_api_validation_errors.py": "46c26608e658f98101c684ea5531008821204e6ba5e2b49df77bd98ba4ac18b5",
+    "tests/test_owned_agent_composition.py": "e26653184b5c34cb64ff0c3eadb4f2f08d6fd3c65d24c4b2bbf40be98024cf23",
+    "tests/test_mcp_runtime.py": "db7fee9ef2aa2c9dbd3301482f9a014698c4919ad2ef9a6cc9f0496d96d933fb",
+    "tests/test_mcp_browser_inputs.py": "3a93b57a746748922c10f4275b2d39bfd3b15efc1d391eb2aa05efcc6f69683d",
+    "tests/test_mcp_catalog.py": "f995559f6c388a43f4f00d7bce4f87f0bdde556d0fb19f606466aedb462a5860",
+    "tests/test_agent_continuation_response.py": "4d1d0395714a211dbdcaf1dac8e52cd1eaec500cee4796ab7779f37d0db9ce40",
+    "tests/test_requirement_scope.py": "a7ad9f20a8e438b94eb2cbad44699012aaa33cd838c068522f0d510d1b0c2e50",
+    "tests/test_owned_controls_tcp.py": "9828bc154d30a56b4fe99b488929b863e5b2406f1379b7e222c7f1265ff85a0c",
+    "tests/test_state_machine.py": "673db7a44e559f0e1e6c06c7af77bc61aba4f478bc52734b17278a9ab44592a9",
+    "tests/test_agent_role_contracts.py": "9de18c9a338bad16c7525f5419fb6e15e89814e1643b893406651891986c234c",
+    "tests/test_qa_services.py": "54fe7c319d914639325c00a823de8a60fec70699fec65ff23345fdddc2a54325",
+    "tests/test_communication_live.py": "74978432bfb8122948cc78e34e562a3cd23eb68e8824b80e3f7db219173d87e8",
+    "tests/test_selected_validation_resume.py": "1fdfafa5d32bc7ee3858e6cdd79f7d178ce71a6679c97236f01e4fcd280c3112",
+    "tests/test_single_agent_server.py": "c0df65a4a61e3fabc7437da3b6d4c6e061a011b94fcf2c2b0b1c0dc584522ef7",
+    "tests/test_credential_references.py": "668e334268d689038baddee116d2f386dacc2059f08975a99a07e9e423287c0d",
+    "tests/test_communication_overhead.py": "07eaad9c71cd842a7d14e88b733c5a605354464da515864a3cffa49580389734",
+    "tests/test_security_agent_context.py": "a8a9a4d8f0b87f94d9ba3ae9555eb7d62eca256271c6b7f3d6fba03a0d4f55a1",
+    "tests/test_single_agent_durable_budgets.py": "07eaeb1a847bbec8891cde1b0be5c47df353d437f518c9e61a9b4a1588660cda",
+    "tests/test_llm_configuration.py": "d777ea5372863dedff213150a5f690704305d877bd0630aea39a0043cbc46137",
+    "tests/test_agent_bootstrap.py": "af54b4d12a699e31cd55de73892a9897e6d1c282d896b2d4a0249a56c57ef660",
+    "tests/test_llm_runtime_telemetry.py": "1c9a002fafc71e21eef58fd1cd2f1bbcf92f77574d8d3063280e29689ea8bb5e",
+    "tests/test_validation_artifacts.py": "7478f7729302938102e95aa9c8d442e4a405c557c75b3e3e27bd62c9f0ff5d39",
+    "tests/test_single_agent_fix_pipeline.py": "be3bd7be10b9447a8ead2cd04c2892d70c2d50323843deae90b0f612fce13bde",
+    "tests/test_owned_agent_controls.py": "17da229bbc26921b96244a82fa9a8c286374fb2fa8efb11b5a7c66ff254a984b",
+    "tests/test_mcp_client.py": "56cc5fe438a28208ca900369ee98ebf09dd3375ab5f667268b1839430cbbc49e",
+    "tests/test_mcp_build_config.py": "2377aba89590abb80b947c65706bdf4b4becd9a571830971cadd18c0129273e4",
+    "tests/test_planner_context.py": "7d2c14facfe190322d4bf0be7c7d0a7ea505e36bf96d5de8904bb50efba07e92",
+    "tests/test_mcp_security_report.py": "f75e624c56aae185974da3bfa120f1bad8ed6ed6488afac9d754846186499a47",
+    "tests/test_planner_agent.py": "82591149d44def135abcd37f430ae554a09a0bea8b2cd1de0fe9ca0f58ebea6d",
+    "tests/test_retry_policy.py": "1ed541bbeef8d28c59655699e0ff2cc3465d019eb6d30a28822d40a7babb7582",
+    "tests/test_sandbox_materialization.py": "26cf5a7a3e8fd622efdf2eec5b15e4211b7dfa5d9cc8810f132ee4659c26f8e5",
+    "tests/test_mcp_client_failures.py": "662f9a68b0b99cc6a21693d22c4fcb9b3b4469c4988ca79b9ba491e266116604",
+    "tests/test_owned_platform_tcp.py": "85d1224f519f109d580665477d955fb4473061d76373dcb3ab1c35a5b97b66c1",
+    "tests/test_communication_timing.py": "d95aff2aba56bfa418b3ebd9362b7bf12ba313b1d6021a506f6a2272db357592",
+    "tests/test_run_configuration.py": "7b81e16e3d85a5065f78e6ecad8db09c3e1a9490260341ba24e44703e2a2c0f8",
+    "tests/test_a2a_tasks.py": "55b498116f91ededbaf0ed6468586c4eb886c8e3270332dba1bed636a7b6db5e",
+    "tests/test_planner_output.py": "54d792443cc956f7f431bf08a9ccc87d0da10119dcea6d7fc24c494b45dcc191",
+    "tests/test_owned_agent_telemetry.py": "f89abd832eae22b2f45a7fc5decc96d277ecdec1a66e558102bb3f3a729f406d",
+    "tests/test_artifact_blob_store.py": "214f00e30be13b659d853371682683fdf2066dbf185fa8c56fca7b791bbac022",
+    "tests/test_owned_host_security_cases.py": "3774ba52c842f6017908a379339bd0e30f6b74527a85e2a23819ea4adfa47383",
+    "tests/test_output_handoff.py": "1387e3bb4ac90c42db4d816b5f90eda010170d5d4d9bef2535c5baaea656c62f",
+    "tests/test_qa_test_store.py": "7fc520ac4ef87c1c675d82f22b396c98b8e2d0486a5a4345e6999b27230efe30",
+    "tests/test_security_agent_contract.py": "4385e55ff2ad89c7ae63838d42082505f012a4ae00f772fb5fc92da9817b5cd7",
+    "tests/test_output_envelope.py": "8ac2107f25bf4c77cc10f584c2af45c75e9af47da631008f5581fcd25823fc51",
+    "tests/test_mcp_file_io.py": "255ef84752921dee047e947ac4287db852bc65089aa71d5441fddde9372b25ae",
+    "tests/test_artifact_service.py": "ffd01528730bec4130dea3b20b8567d63f0744666ab1668e9e3f12323a675e65",
+    "tests/test_orchestrator_mcp_capability.py": "e8b8a855a23a31729e169a5c539ce8651ca34d44d2354f1e70442b8ac9954ee8",
+    "tests/test_a2a_delivery.py": "36fbfc415a287db59e49dd3cb662ee8208a8a030d4dc35d4313e403e8417f019",
+    "tests/test_security_verifier.py": "10338c0337a6162b798c423ed92b665909d0b30d623bf66966ef1e52b869e674",
+    "tests/test_agent_server.py": "0fada26c499b766531a6bd5c9c061badeb0ef00a3939b0966adadd8b5e9d7484",
+    "tests/test_planner_contract.py": "3e601353d2e6145b53b0e151110b160b8789a08174cf84836a09d6460a371cb2",
+    "tests/test_pricing.py": "8b42673a823ff021b21962a18007471597849e004b2b953c3778396583be32e1",
+    "tests/test_owned_agent_fix_pipeline.py": "18d7d657c490e3187369bbeb10ac2f092944f43abf7f54dec4a66e40c2652c43",
+    "tests/test_planner_developer_continuation.py": "9c655ae7cdfd3202a19c61b3f2a5f93238046297aea2cc2041c88ac14dca9319",
+    "tests/test_source_credentials.py": "ab8875d957351bf841a6e634621f0d0ed90e1fdd10b549b173567b66b49fdbfd",
+    "tests/test_single_agent_evaluation_export.py": "8df78a80d39c651abbe2990c8fd3d2659f18107d560c91fd43dd1f2539bcf5d8",
+    "tests/test_workflow_controls.py": "9135d76d6e6c274fd222559ca51c72e76383691647b0442a2e11e44ccdedfc78",
+    "tests/test_security_proof_store.py": "0a83af0dab2045c7870782b8206c68cce028bff5a74f848bbca48abacba605b4",
+    "tests/test_qa_contract.py": "52edd91406ec8574b181ce943fc54a56b1cc294fd8cd1623fad002b74566c8e6",
+    "tests/test_workspace_registry.py": "fb296ccc8485fa5777db7b8a2c069799e907f876f36a56608ac2bfd23d1f7e62",
+    "tests/test_runtime_secret_logging.py": "7c3a55527f9794f097dabf0989343f2d92b829c30446654d28139971bc22a58e",
+    "tests/test_api_dependencies.py": "f850eed3c11c0823300aa00e0f47b58f5d2b3a52952cd0d386a62e755ad8d2ae",
+    "tests/test_single_agent_prompts.py": "1048a45053296a2c38be7b6ec1c659afa1252b4397a3fd8068c7c6ac32456460",
+    "tests/test_priced_telemetry.py": "2b3d8c9ee1b3ac27589813834e0f3c741a7a357b792d15f0521b82d17d528079",
+    "tests/test_mcp_security_runner.py": "292274e427724caf5fefff02baeba37ef4664712e506889765caddf0310e50c3",
+    "tests/test_evaluation_policy_pinning.py": "813df528d093f38df908578d44188af56d90443b0ef4f0e087c55efe145b78d9",
+    "tests/test_git_object_export.py": "0cd20f21d37c19a0b96ab1904a994690384ada9fe2ed1c897299b090d7674dd9",
+    "tests/test_product_semantic_review.py": "8b1cc3adff18b98a6a5e0cd31254b830aef82337f97baa7b873fc9449ab016a4",
+    "tests/test_agent_platform_budgets.py": "e4999c8d9730e43ea9d60a7bb7f89ac16712ae47ff8a6205e2e7796c5b08e911",
+    "tests/test_agent_runner_contracts.py": "d1f1e7a83859cc27d0a065423250ef75e19f51a2d09178897d68c5dc57973ceb",
+    "tests/test_llm_runtime.py": "bacb8d548c39b076d896422461e787852f4ececba832da9398f54703b2fbba6a",
+    "tests/test_priced_host.py": "e05b6f33d4fec6558c6c5823673b73d1964b902ee0349b8fa20c23a966c4e875",
+    "tests/test_mcp_security_config.py": "2d7fd1a0ed1c372d57275a4eee2e5c5b767fe178082b127448253c06151c7eb6",
+    "tests/test_sandbox_browser_environment.py": "c63c5fd4ea70101b83608c0da67930576c5141fc4c9969f696c1a234e5bf1e76",
+    "tests/test_single_agent_pipeline.py": "142bcd63cda2e23ba64eec9125e169157c7c468897a4c26a391368f5aa209206",
+    "tests/test_mcp_unit_inputs.py": "f8f15a2d131525b34b9ec5315658212fb1920adc72e722b3251795cf2ce2ed2e",
+    "tests/test_control_owner_lifecycle.py": "e5533277b8405e5c4a1edbdcd352edc9aa449590079531213ada44f0bdf89e23",
+    "tests/test_workflow_recovery.py": "f8e03dbe677d959f2c31bf869e8622c337675916f842e9d1e5994a1a52a877b1",
+    "tests/test_a2a_client.py": "ac5c8d1739de559db72192973b6cabe0af0c261a3986a9a3bf898745eb39386d",
+    "tests/test_agent_server_safety.py": "9ea5e67794665898aa9005a2230b25638c45fe9f92d17ded9adc48098ffa2c52",
+    "tests/test_mcp_file_snapshots.py": "1b2136e28641f27081ecd231d5b07251c3394fb3067c93d9b8ef1ff156e1ffd2",
+    "tests/test_runs_api.py": "b2e179db74b8b4cf9af42018814b577f65dbffe61b85319eae717d2761964291",
+    "tests/test_mcp_unit.py": "28a96cc8c5e1de52525ab0fcd97ce240f39f391585aa5287eea69ac3b686ba65",
+    "tests/test_agent_platform_runner.py": "efcd0f54641b4991eaa1e496a100a8bc187b788313e60ee40c2728cc5e62e049",
+    "tests/test_owned_host_cli.py": "ff4ec564da7ed78d51f979e9f56146bf13a1c5cc0e93512293c6f7b7d43af593",
+    "tests/test_communication_peer_sessions.py": "8e3a12a64ab1cfe62e69ca41e4aa7e6195a577a708d7019e28b2414f3776fd89",
+    "tests/test_security_agent_services.py": "b5a5ac2680dabba754b7400c585b7668da8f488fb0e7aa837901c4e782097ee3",
+    "tests/test_owned_host.py": "25efcd897a11bb3e573d0784304475dc5f4864e0ea1bb1357bfbd26cb6236101",
+    "tests/test_sandbox_runtime.py": "784d6bb5234b2527c7e4bbfcbcc9b53e996933a1698351223f97fac2c11dd916",
+    "tests/test_mcp_security.py": "19e568dd3a6ec53a56a325d6768e88e17d678c3c051eef641921b5f55b225cc4",
+    "tests/test_security_approval.py": "e28ef08e8a10a9a735f3d9d27022fcd66d12817641a38dac21d931b311cea358",
+    "tests/test_health.py": "3446721e07e164a9d975f1c14815201219eeecd1933630bac741733f40d89b7d",
+    "tests/test_mcp_browser_runner.py": "da670566c96360af8018abfc478b59e9490d03e2234054b7684994cbd29bf3f5",
+    "tests/test_mcp_stdio.py": "d74aea34c75d1e9f2af7fd2b5adc74770b6aa0e9da1ea2981994fdbf3c1cc02e",
+    "tests/test_sandbox_docker_cli.py": "bed622a7f5d427f6794a8413c6315461d6fc9ceffd0a2178243fb0374c371633",
+    "tests/test_communication_natural.py": "4051b1f15ff30f33a8197595d75c292e9e17e481c5ec361c1a7d0282c0221793",
+    "tests/test_artifact_contract_boundaries.py": "614af68d5f5841947df73dfacc8a5db34f687bacee48bf560644e9c8414e6ac0",
+    "tests/test_mcp_browser.py": "d30683c2757e212570dc4f54c45f0bb94f2479e5b60f47926a5fbad6c75c9883",
+    "tests/test_mcp_execution_policy.py": "fa379abda68b21fb3175d20eb515e70fba817505824aa90cf40bbaf824ffe486",
+    "tests/test_workspace_access.py": "8ebffaf9e8fd48df80fd779cba15facff5aafa05b2b47ad0dedd2fba63863610",
+    "tests/test_scenario_external_contract.py": "67e0f32a1ce3d272babc40af23356bfadd27cbfe194f6a6e0c3d7843a7332e74",
+    "tests/test_a2a_response_metadata.py": "8aedc7d4515ed0305016331129a654959261f6564add2c9aaa37cb010a6b9e5a",
+    "tests/test_owned_dispatch_controls.py": "92e71cf5c486c2d6ec576f65f05df9c81d298aadb6e08abf0cec6c804d4323d7",
+    "tests/test_tool_configuration.py": "56b4d8b71e728f4e9cd025f0a887ddc46807a05f36c0f8fcddb66db917606a82",
+    "tests/test_owned_agent_pipeline.py": "400a24ae58eae7540847faba8ce92c3af46fa2537ade594b4b36c01dd9e806b5",
+    "tests/test_developer_artifacts.py": "dbdce0130bc8bd2debc4560d72c73b129b1d7671dc5e6f81e92f440daaddaa30",
+    "tests/test_mcp_execution_runtime.py": "b303d832a3359365d56d5e1332aed4380662036ad76790b700162015ce734114",
+    "tests/test_package_production_api.py": "49aea20e3ac3e378ddcf50c17516077fad17665de7c8b7eb538110db60a8ce68",
+    "tests/test_validation_revalidation_contexts.py": "e326e3b08f692fdb7cb54ce63393d019624a037a14e4ab3fba593f7e84319864",
+    "tests/test_mcp_unit_report.py": "5352ead405b554acd4d63709f89e748fc79b99427d4dd2d3aee399b737d9735d",
+    "tests/test_host_policy_store.py": "1b2b7b3745b44ce52fa1781a03e9600de35b6ae7fb4d70366e5cd7531186bc67",
+    "tests/test_developer_workspace.py": "259470852bcba5485d231d114ba6bdbf84a33ed329d26274e6c932b2b5a1a435",
+    "tests/test_mcp_security_store.py": "1a635540ddb3eb124b9d5859d1813a91186a42efa014a67882366ffe82d1a508",
+    "tests/test_observation_failure_isolation.py": "9d35b4e4ed734e5a3ecaad871922d2f4546bd3213d0e63f44cda7dc19ae66285",
+    "tests/test_workflow_repository.py": "5f4823012560d9c92b65a5869cd5e5ae55e91aa23a7476862a10f0dce064cfc8",
+    "tests/test_communication_guarded.py": "bd45f4d8d52e8628f2a624e316ea16121536d96238bebd0552571eb2b531faef",
+    "tests/test_single_agent_host.py": "091be0e325957146b86d2d8b5d5d847b438fad9b7e616e406aab15499a62a3c4",
+    "tests/test_starting_source.py": "1f5ee486c75419f20ee5cf86b6006c07d5e628d93edcebc649124d89cf0f6638",
+    "tests/test_host_services.py": "0edf0c3eefe815b28577d936fac669dba985eb504a0b91e5a301e758ffbf0a15",
+    "tests/test_communication_delivery.py": "d5d3a25cbd7f8d41a691c6f478aaf9a070097e5c21f3106469ff44c7414a21a6",
+    "tests/test_developer_context.py": "72d8c2b9ed5f3a0d9a2279e3e568cf9ae123d2d51de3fc8ebda913dd4871d2d2",
+    "tests/test_git_snapshot.py": "103977803a41c01d43310872658b289e40d1e7bbf0e7e25f18acb8ed8376ac60",
+    "tests/test_snapshot_handoff.py": "fe8356d961efd1a2711e6d9c743189439626b4a82377d73109db69e03ecbbdeb",
+    "tests/test_mcp_build_store.py": "5633e3175d8be7c2fa19e61f7f155cd15c151275df4e7105004d8f3ff1030a93",
+    "tests/test_mcp_patching.py": "43e36476c654a1483a922252262c772018451ec43c46f2c9b45143a316362c70",
+    "tests/test_communication_guarded_reporting.py": "0dc49ea1c6a22208e0e910db7fea0c8731dca4fcbfa6ccf1904e785731b5cd7e",
+    "tests/test_mcp_browser_config.py": "b03575a7240dd2a9398b2717a5dff8e63610dc3d20daf45621831f1db1af5349",
+    "tests/test_agent_lifecycle_safety.py": "1258367a69252466d7609c5ffa8f76ebdd337cd1a460f7771f1512d03e199400",
+    "tests/test_communication_reporting.py": "525ccf3153bfe112c69af519538667aa46d654c1eeaab41ef85adcbd534a2d03",
+    "tests/test_agent_role_outputs.py": "30c8dad024670b9af2fc50f09fe041f9d7f954628fab5440eb48df9e1dafacaf",
+    "tests/test_openai_responses.py": "b2b68b957077bc06a158ba1e7dbcca77ae42d33d7ad9049d8c794d7e1b7f0659",
+    "tests/test_workflow_contract_regressions.py": "fd73a0b17c916caf98d0b703d4e5ddc0be5fb2ce9dd999eb8592039d6faffd76",
+    "tests/test_agent_task_store.py": "a3fbf456d50d02bd5bd297ecf5232a7c869a3fabfcbb86832c37cb48f737e2be",
+    "tests/test_agent_lifecycle.py": "ba581e1084ce06d30aff3ad1c42393ee850c50449d9131fae780b4ee8bf6e090",
+    "tests/evaluation/test_starting_source_builder.py": "74515fa50f1cbac25365eb90a2eb9631143a21b494ee7c133bdac38ef7156fc3",
+    "tests/evaluation/test_execution_order_guard.py": "6f67e4971dd065d42aa50e760866d850a0a5e408789b2b6108e87a59332ed32f",
+    "tests/evaluation/signup_examples.py": "f6978a006423cd2cacc559adae1b7b549cd2e30189411e394d7743586168c83c",
+    "tests/evaluation/test_experiment_image_skeleton.py": "d349f34987237435baca52e43f569bbefd873941cfc02b7e37dd7da8c6c69e9f",
+    "tests/evaluation/test_host_evidence.py": "c582505524998e87ce2a519f0cbba5f4b1a6be9b27a45e9fc975842fadc3e587",
+    "tests/evaluation/test_comparison_report.py": "699f552aa2b24fa8d27377dbe5291f3a5a01ed09d358166aed95fa344b4a3aaa",
+    "tests/evaluation/test_scn002_draft.py": "b78e55a8e6be21806271e1ea126a1fffa716915378e0477a9fd8bc556c118f58",
+    "tests/evaluation/test_independent.py": "8a7c4bf657cc0517d2ac63556bd17175e0913085731f201804c18302b82280a6",
+    "tests/evaluation/test_coverage_line_numbers.py": "b93ee6513c5ed11450c4d4844d913c98e4e6159b59d1ece358fd55e09b31b385",
+    "tests/evaluation/test_review_repeatability.py": "2b9103682c7a5fb0bf4ea0a37638f997ce5f5d439fa7960b776bd54e54d181bc",
+    "tests/evaluation/signup_service.py": "0d6c6fe4582a810c2d95ea337c8816b5db3220b138bc26237d187c2d1133f168",
+    "tests/evaluation/test_check_adapter_invalid_reports.py": "2a58b3462365dd851a9c908f266794a9ad831128875137783109de3086da1c23",
+    "tests/evaluation/test_evidence_metrics.py": "555f7c57ad15df8abc1f4e8e12fbb5a4ff38a23c071b87ca01bece5651a36ff5",
+    "tests/evaluation/test_token_accounting.py": "e1159cc774245c0939954a8b1c296e131e3fb6481c7a3d6389b2df2813bc774e",
+    "tests/evaluation/test_experiment_run_recovery.py": "f021839a2108f222f18dcc80d7510f6cccb1b13c7a156b7eedf6ac5f2e43b410",
+    "tests/evaluation/test_input_replay.py": "59f2ffa72ef7806100bad0ec8c945c2689cb5ff924dc5c4160657930e81322ee",
+    "tests/evaluation/test_product_accuracy_status.py": "feba5b6dd907ebddfcb341cec37037bc6452bd42688aee9a927cef64a67d855e",
+    "tests/evaluation/test_reporting.py": "2ed885e803b6c5bbe6a0b0fcf13f7ede80a45c51e16f9f4b3f05da32d8bdcaf8",
+    "tests/evaluation/test_docker_evaluation_integration.py": "392405061162b360f69746042a624453b4fc1a72d4cca67dfcfd1e99d6da3bae",
+    "tests/evaluation/test_preflight.py": "c78189910b5acb7ff6faae98ba069ddeb1d982d07d3ec41d28e74c639a44ca5f",
+    "tests/evaluation/test_experiment.py": "b1f161f8adb3987e5b4570c3725a97833ced1018ea76cb895d406b8e3f3b8114",
+    "tests/evaluation/test_run_metrics.py": "794f0a6371ac870c4478f91f9dc4c5593fe15a40d86ae96d85405150078b1fe7",
+    "tests/evaluation/test_protected_signup.py": "c982f5eacab2eec2355b96e4e76d8a1d3239ff25843931d426287c86cd7ba418",
+    "tests/evaluation/test_import_stage_exposure.py": "77544315dc4868d538bb30b7807d719d702689de565a96db56184f66c0d82a56",
+    "tests/evaluation/test_security_review_paths.py": "854b4c957e14930038d6c5985b5c2a40c7871591f88100ca53a857bf03108be4",
+    "tests/evaluation/test_aggregation.py": "71df69bc47ab8358e45381bc1f8f83602e97681fb2c864b90aba5174fabb0788",
+    "tests/evaluation/test_security_evidence_limits.py": "239ea53f4ffbc22bccdf0bda14da601c9859d222e1c7c4b0e6564140d35b75e4",
+    "tests/evaluation/test_security_limits.py": "b44a4a557f2392aeec48bf1de5d675ee9e49140c028b318ae149b51f8e64768e",
+    "tests/evaluation/test_host_process.py": "3eb638da20f41465b98d17c1719f57d8f0d81b29ee8e7c888c728024020ab289",
+    "tests/evaluation/test_requirement_baseline.py": "0918196c6f6d3bd1ebe19d435aada941bc3f5a5f4ad952cf02e91f67d1828e84",
+    "tests/evaluation/test_starting_skeleton.py": "3eeaf4ccbeacfed2c71061bb1393d054c19761f347d25624bc0896bf95b3505b",
+    "tests/evaluation/test_manifest.py": "89de2da1405a979906de161b28c2b9789dd853ac23073943f7a868a15d133f72",
+    "tests/evaluation/test_final_evaluation.py": "27574400206ee4050875b6d8e7fd9c2343c79d6ddadf4a427fe7d0faad3aa386",
+    "tests/evaluation/test_package_evidence.py": "44c745c9c68755fc4c7aa7ccab68be9ebc2049bab0728fd4377fbcde2bbcc0fd",
+    "tests/evaluation/test_preflight_browser_cleanup.py": "adc2de3cc2bd63b69373d7be576c891242f79d9611b57453992f8dbd9a8890b1",
+    "tests/evaluation/test_review_safeguards.py": "a3b18bc51237569cec0a7ec8f06b22d53520ec80cd84c93cd721ac102c906e00",
+    "tests/evaluation/test_workflow.py": "17368711358a4438f757eaff322aba41ad14f6235d25ab19bf2284e5f3436c77",
+    "tests/evaluation/test_agent_eval_receipts.py": "ffd854b72b301e2b4dc08b3acc487797610508aa30b46a0bd3205e4844676313",
+    "tests/evaluation/test_trace_checks.py": "c3203a6066bcbd04d6971b9d15a9aed6c37c6f7ecefdd5aa0fe18f6966c23df6",
+    "tests/evaluation/test_execution_journal.py": "7d01b06c65acf24f5703627c940165267d45b77ff956809064651c83cdd7c1d9",
+    "tests/evaluation/test_preflight_offline.py": "cc6a95dcb9ed8e255f7aa4ee17ec78af71849191d95531db157ca3f5aedfa87c",
+    "tests/evaluation/test_native_database.py": "4f6d096c7c411afca709b9f6512b39597bc820a4c9bd9553a91e37bb4c5322bb",
+    "tests/evaluation/test_experiment_selection.py": "f0024825086fd9f922d7b9840efc69bee73e548d99c4d5b1c332eb49161aac1f",
+    "tests/evaluation/test_output_evidence.py": "16d0ce310567c1483040cd637b8ad85f881fe3e95c6b7b6bbeb96d707723f152",
+    "tests/evaluation/test_harness_cleanup.py": "7111d2955625a905af6b185b4cd7197e497712c5b2e3fff23a19df9df82651c7",
+    "tests/evaluation/test_summary.py": "a00a3cbb0152a35fd67ac05dbda7357bb3226e39cc5e7ddce923af4488909da4",
+    "tests/evaluation/test_parity.py": "c381b872eb46f4f7f6548be955c78384e0cce0e68ccd7982f1ba51216dc158ec",
+    "tests/evaluation/test_outcomes.py": "73d4a6a3f565747c83de8fa2f788df8e79777f6ab285a5ad5e6615285da1ddc9",
+    "tests/evaluation/test_security_overwrite_matrix.py": "3a87f2d8c42a0a369c59aacdafee79a119938ac4fe4d5098d10831a6a7efd52a",
+    "tests/evaluation/test_security_hasher_forms.py": "c551e7e414d1c292cccc11862e3d640318295af9de084a31929d2fa656d05ee3",
+    "tests/evaluation/test_dev_compatibility.py": "26a22e197c203d835661afb0524dd45c79f78df50b2d0e46958395e2abbed5f7",
+    "tests/evaluation/test_external_contract_link.py": "c02e6ac5d406288a07e9b82f690220061e119a40effcacbb94672e223c948bf2",
+    "tests/evaluation/test_package_production_wait.py": "dd1cc4bdbb09c89ad350960dc788b92c993741e5ebd9c5b78abeeea7008177f2",
+    "tests/evaluation/test_security_assess.py": "7ac7620063a86a46d5761f0a2535e9de77484f0e18da6b901dd102c353112b18",
+    "tests/evaluation/test_experiment_input_records.py": "00f3796389c5e46cbed8643c2ebc978c82461329ce5085ce4778a36b4a8a5c90",
+    "tests/evaluation/test_demo_index.py": "e73c9517d0d3598216e1d528cdab0c9f3255db249e72b68b4546f396ab99d787",
+    "tests/evaluation/test_automatic_boundary_entrypoints.py": "8639adc4f1396a8a0189ea068f1e19b7ffbf30e022b9860a16112548cdaf093d",
+    "tests/evaluation/test_agent_eval.py": "c640de89c8f2d407efd8113d6d4f9975dee1f09a19bb641cd2b46b8b9dc63c1b",
+    "tests/evaluation/test_environment.py": "d1f6a608809c2ae882b0e36d3fceb4e083aab5a1407affdb34752f4b0ced645d",
+    "tests/evaluation/test_experiment_run.py": "5c006116cc704032b901fb4cdc31b5b3c81cbe45983edb806a32386b3e0a92af",
+    "tests/evaluation/dev_harness_exports.py": "55a7cfb59bf22f637cc6f1856564af9400e9f46932da3ec66abdc1e47bf9632b",
+    "tests/evaluation/test_static_storage_bindings.py": "2e1f346191597bc6e7a94ab585224922846efc89fbf9ce10e152756036d0bc72",
+    "tests/evaluation/fixtures/reference_backend/models.py": "1107f5ded2c062179b015c80002875264c647072b8a607aeb46dfe2a2a6db273",
+    "tests/evaluation/fixtures/reference_backend/database.py": "70fbe8011ad05101313522d360515699091007c3354279f2bf1ca828ed2371d1",
+    "tests/evaluation/fixtures/reference_backend/security.py": "d05ba629393b02cd2955d89d5eda9e481c6356f1df0aad17b06addcf005a13b9",
+    "tests/evaluation/fixtures/reference_backend/schemas.py": "67476173e3e438e785654871daac11dfae2695fc22290562d8144ad83c09921c",
+    "tests/evaluation/fixtures/reference_backend/main.py": "dfa23c9c068ebd18db90334b11c686389bf2c9940c2ae4942ef46a1abe839a71",
+    "tests/evaluation/fixtures/reference_backend/routers/auth.py": "9c5ff3a19041360936b13ae2f4e80bbd0079ef35196460fbd8451fe4e19aa05d",
+    "checks/test_setup.py": "04ed65324f82673c01cae628c5f11fe77e87ab7af7940794d6d71e14fa0b61d1"
+  },
+  "notes": [
+    "The full suite began before the review fixes; affected scopes were retested separately. Counts overlap and must not be added.",
+    "Real OpenAI authentication, generation runs and measured comparison remain unexecuted.",
+    "PyCharm contains only local credentials; no secret values are included in this record.",
+    "The timeout test was identified tentatively from progress dots; the final JUnit identified the replay test instead. Its input record retained suite 0.5.1 while the working tree had been updated to 0.5.2. The separate timeout-test deadline improvement is not the fix for that recorded failure."
+  ],
+  "fullSuiteFailureAnalysis": {
+    "test": "test_real_docker_confirms_regression_with_two_replays_per_version",
+    "reason": "SUITE_CHANGED_DURING_RUNNING_TESTS",
+    "recordedSuiteVersion": "0.5.1",
+    "currentSuiteVersion": "0.5.2",
+    "privateRecordMetadataVerified": true,
+    "harnessBindingMatches": true,
+    "suiteBindingMatches": false,
+    "sameTestInFinalDockerSuite": "PASS",
+    "replayBindingGuardPreserved": true
+  },
+  "finalChecks": {
+    "sourceUnchangedSinceFollowups": true,
+    "gitDiffCheck": "PASS",
+    "artifactSecretCheck": "PASS",
+    "reportLinksValid": true,
+    "evaluationContainersRemaining": 0,
+    "otherContainersUnchanged": true,
+    "pycharmConfigurations": {
+      "Multi Host": {
+        "apiKeyPresent": true,
+        "internalTokensPresent": 4
+      },
+      "Single Host": {
+        "apiKeyPresent": true,
+        "internalTokensPresent": 1
+      }
+    }
+  }
+}

@@ -15,7 +15,7 @@ def build_validation_request(configuration, plan, scenario, requirement_ids, rol
     requirements = [item for item in plan.model_dump(mode="json", by_alias=True)["requirements"]
                     if item["requirementId"] in assigned]
     policies = {key: value for key, value in scenario.planner_contract().items()
-                if key in {"securityPolicy", "emailPolicy"}}
+                if key in {"securityPolicy", "emailPolicy", "externalContract"}}
     duty = ("기능 테스트를 수행하고 QA 결과를 보고한다." if role is AgentRole.QA else
             "보안 취약점을 점검하고 Security 결과를 보고한다.")
     encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":"))

@@ -1,6 +1,6 @@
 # 팀 시스템(dev Orchestrator)이 알려 주는 "개발 실행(Run) 기록"을 평가용 숫자(지표)로 바꾸는 파일이다.
 # 또 두 실험 조건을 "공정하게 비교해도 되는지" 확인하고, 조건별로 요약한다. 비교 기준(group_by)은 두 가지다.
-#   - 'architecture': Single(에이전트 1개)과 Multi(에이전트 4개) 구조 비교(D6, Single 실행기는 주호 개발). 보호 테스트
+#   - 'architecture': Single(에이전트 1개)과 Multi(에이전트 4개) 구조 비교(D6, Single 실행기는 주호가 구현). 보호 테스트
 #                     조건(protectedTestSuiteRef)이 같은 Run들, 즉 같은 방안 안에서만 비교한다.
 #   - 'loopPolicy'  : 같은 Multi 구조에서 Ver1(순환 안 보호 테스트 + 최종, IN_LOOP_AND_FINAL)과
 #                     Ver2(최종만, FINAL_ONLY) 비교(10.29 회의록의 방안 1·2를 회의 뒤 방침으로 멀티에 적용). 두 조건의 의도한 차이는 순환 안 보호 테스트
@@ -21,7 +21,9 @@ from statistics import median  # 중앙값(가운데 값)을 구하는 도구
 
 from .aggregation import _uuid4
 from .common import ARCHITECTURES, aware_time
-from .scoring import exam_score, practice_effect
+from .scoring import exam_score, practice_effect, product_accuracy
+from .evidence_metrics import summarize_process
+from .outcomes import has_resumed
 
 LOOP_POLICIES = ('IN_LOOP_AND_FINAL', 'FINAL_ONLY')  # Ver1(순환 안 보호 테스트 + 최종), Ver2(최종만)
 GROUPINGS = {'architecture': ARCHITECTURES, 'loopPolicy': LOOP_POLICIES}  # 비교 기준별로 허용하는 이름표
@@ -69,6 +71,26 @@ def fetch_run_bundle(get, run_id: str) -> dict:
             if offset >= page['total'] or not page[key]:
                 return items, page['total']
 
+    def usage_pages():
+        # 입력/출력을 나누려면 요약뿐 아니라 모든 호출 영수증이 필요하다.
+        first = get(f'{base}/usage', {'limit': PAGE_LIMIT, 'offset': 0})
+        if not isinstance(first.get('records'), list) or type(first.get('total')) is not int:
+            return first
+        records, total = list(first['records']), first['total']
+        consistent = True
+        while len(records) < total:
+            page = get(f'{base}/usage', {'limit': PAGE_LIMIT, 'offset': len(records)})
+            if (page.get('total') != total or page.get('summary') != first.get('summary')
+                    or page.get('runId') != first.get('runId')):
+                consistent = False
+                break
+            rows = page.get('records')
+            if not isinstance(rows, list) or not rows:
+                consistent = False
+                break
+            records.extend(rows)
+        return {**first, 'records': records, 'recordsConsistent': consistent and len(records) == total}
+
     # 받는 도중에 Run이 바뀌면(재개·종료) 예전 사건 목록과 새 상태가 섞인다. 그래서 Run 상태를 처음과 끝에 두 번 받고,
     # 사건 전체 개수도 끝에 다시 확인한다. 셋이 같을 때만 한 시점의 자료로 본다. 다르면 FETCH_ATTEMPTS번까지 다시 받고,
     # 끝내 같지 않으면 snapshotConsistent=False로 표시해 run_metrics가 시간을 계산하지 않게 한다.
@@ -78,8 +100,7 @@ def fetch_run_bundle(get, run_id: str) -> dict:
         collected = {
             'issues': get(f'{base}/issues', None)['issues'],
             'toolAttempts': get(f'{base}/tool-attempts', None)['attempts'],
-            # usage 요약은 "Run 전체"의 합계라서 기록 1건만 요청해도 요약값은 전체 기준으로 온다.
-            'usage': get(f'{base}/usage', {'limit': 1, 'offset': 0}),
+            'usage': usage_pages(),
             'configuration': get(f'{base}/configuration', None),
         }
         after = get(base, None)
@@ -98,6 +119,9 @@ PRICE_BOOK_KEYS = ('currency', 'priceBookId', 'priceBookVersion', 'priceBookSha2
 def _run_state(run):
     # 받는 도중에 바뀌었는지 비교할 Run 상태 값들
     return tuple(run.get(key) for key in ('status', 'verdict', 'codeVersion', 'fixAttempt', 'updatedAt'))
+
+
+PAUSED_STATUSES = ('WAITING_INPUT', 'HUMAN_REVIEW')  # 측정 Run에서는 재개하지 않고 종료로 집계하는 멈춤 상태
 
 
 def _terminal_events_match(run, events):
@@ -119,8 +143,40 @@ def _terminal_events_match(run, events):
 
 def _millis(start, end):
     # 두 시각의 차이를 밀리초(1/1000초)로 돌려준다. 둘 중 하나라도 모르면(None) 시간도 모르는 것이므로 None.
-    # max(0, ...)는 혹시 끝이 시작보다 빠르게 기록돼도 음수가 나오지 않게 한다.
-    return None if start is None or end is None else max(0, int((end - start).total_seconds() * 1000))
+    # 끝이 시작보다 빠르게 기록됐으면(시계 역전·잘못된 기록) 0으로 보정하지 않고 미측정(None)으로 둔다.
+    # 그 이유는 run_metrics가 notes의 EVENT_TIME_REVERSED로 남긴다.
+    if start is None or end is None or end < start:
+        return None
+    return int((end - start).total_seconds() * 1000)
+
+
+def token_breakdown(usage):
+    """호출 영수증의 입력/출력. 누락·중복·수집 중 변경은 전체 합으로 인정하지 않는다."""
+    usage = usage or {}
+    summary = usage.get('summary') or {}
+    records = usage.get('records')
+    result = {'inputTokens': None, 'outputTokens': None, 'knownInputTokens': None,
+              'knownOutputTokens': None, 'tokenBreakdownComplete': False}
+    if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):
+        return result
+    sequences = [row.get('sequence') for row in records]
+    if any(type(key) is not int or key < 0 for key in sequences) or len(set(sequences)) != len(sequences):
+        return result
+    for key in ('inputTokens', 'outputTokens'):
+        known = [row[key] for row in records if type(row.get(key)) is int and row[key] >= 0]
+        verified_empty = not records and usage.get('total') == 0 and summary.get('modelCalls') == 0
+        result['known' + key[0].upper() + key[1:]] = sum(known) if known else (0 if verified_empty else None)
+    complete = (type(usage.get('total')) is int and len(records) == usage['total']
+                and usage.get('recordsConsistent', True) is True and summary.get('usageComplete') is True
+                and summary.get('modelCalls') == len(records)
+                and not summary.get('pendingModelSequences') and not summary.get('missingUsageSequences')
+                and all(type(row.get(key)) is int and row[key] >= 0
+                        for row in records for key in ('inputTokens', 'outputTokens')))
+    if complete:
+        incoming, outgoing = result['knownInputTokens'], result['knownOutputTokens']
+        if summary.get('totalTokens') == incoming + outgoing:
+            result.update(inputTokens=incoming, outputTokens=outgoing, tokenBreakdownComplete=True)
+    return result
 
 
 def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
@@ -177,6 +233,17 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
         start = None
     builds, verdicts = times('BUILD_PASSED'), times('VERDICT_CREATED')   # 첫 빌드 성공 / 판정이 만들어진 사건들
     ends = sorted(times('RUN_FINISHED') + times('RUN_ABORTED'))          # 끝남 또는 중단 사건 (시간순 정렬)
+    ended_by = 'ENDED' if ends else None
+    # 측정 Run은 질문·의미 검토 보류 등으로 멈추면 재개하지 않고 종료로 집계한다(자동 구간 마감). 그런 Run은
+    # 그 상태로 바뀐 사건(WORKFLOW_STATE_CHANGED)의 시각을 끝으로 쓴다. 그 뒤에 다른 상태 기록이 섞이면 끝을 정하지 않는다.
+    if not ends and run['status'] in PAUSED_STATUSES:
+        entered = [index for index, event in enumerate(events) if event['eventType'] == 'WORKFLOW_STATE_CHANGED'
+                   and event.get('workflowState') == run['status']]
+        if entered and all(event.get('workflowState') in (None, run['status']) for event in events[entered[-1]:]):
+            ends, ended_by = [aware_time(events[entered[-1]]['occurredAt'], 'occurredAt')], 'PAUSED'
+            notes.append('TOTAL_TIME_ENDS_AT_PAUSE')
+        else:
+            notes.append('PAUSE_TIME_UNKNOWN')
     if start is None:
         notes.append('RUN_START_UNKNOWN')
 
@@ -208,21 +275,36 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
     # 협업 시간(전달·병렬·에이전트 밖 시간·사람 대기)은 사건을 모두 받았을 때만 계산한다.
     collaboration = collaboration_metrics(events) if start is not None else None
 
+    # 시간 지표의 끝 사건들. 끝이 시작보다 빠르게 기록된 것이 있으면 그 시간은 미측정(None)이고 이유를 남긴다.
+    ends_of = {'firstBuildPassMs': builds[0] if builds else None,   # 시작 ~ 첫 빌드 성공
+               'verdictMs': verdicts[-1] if verdicts else None,     # 시작 ~ (마지막) 판정 생성
+               'totalMs': ends[-1] if ends else None}               # 시작 ~ 끝남/중단
+    if start is not None and any(end is not None and end < start for end in ends_of.values()):
+        notes.append('EVENT_TIME_REVERSED')
+
     return {
         'runId': run_id, 'scenarioId': run.get('scenarioId'), 'experimentId': settings.get('experimentId'),
         'architecture': architecture,
+        # Keep the frozen comparison fields with standalone metrics, so a pair
+        # cannot silently compare different models, budgets or environments.
+        'comparisonConfiguration': None if configuration is None else {
+            key: configuration.get(key) for key in ('runId', 'scenarioId', 'scenarioContractSha256', 'configuration')},
         # 순환 안 테스트 정책(Ver1·Ver2). 동결 설정을 받지 못했으면 모른다(None).
         'loopPolicy': loop_policy(settings) if configuration is not None else None,
         'workflowStatus': run['status'], 'verdict': run.get('verdict'), 'codeVersion': run.get('codeVersion'),
+        'resumedDuringRun': has_resumed(bundle),
         'terminationReason': run.get('terminationReason'),
         'fixAttempts': run['fixAttempt'], 'toolRetries': retries, 'toolAttemptRecords': len(attempts),
-        'firstBuildPassMs': _millis(start, builds[0] if builds else None),    # 시작 ~ 첫 빌드 성공
-        'verdictMs': _millis(start, verdicts[-1] if verdicts else None),      # 시작 ~ (마지막) 판정 생성
-        'totalMs': _millis(start, ends[-1] if ends else None),                # 시작 ~ 끝남/중단
+        'firstBuildPassMs': _millis(start, ends_of['firstBuildPassMs']),
+        'verdictMs': _millis(start, ends_of['verdictMs']),
+        'totalMs': _millis(start, ends_of['totalMs']),
+        # 전체 시간의 끝: ENDED(끝남·중단 사건), PAUSED(멈춘 상태로 바뀐 사건, 재개하지 않는 측정 규칙), None(모름)
+        'endedBy': ended_by if ends_of['totalMs'] is not None else None,
         # 사람을 기다린 시간(HUMAN_REVIEW·WAITING_INPUT에 머문 끝난 구간의 합). 상태 변화 사건이 없거나 사건이 모자라면 None.
         'humanWaitMs': collaboration['humanWaitMs'] if collaboration else None,
         'collaboration': collaboration,
         **spent,  # 사용량·비용 항목들을 여기에 풀어서 넣는다
+        **token_breakdown(usage),
         'issues': len(issues), 'issuesByReporter': reporters, 'issuesByCategory': categories,
         # newCodeVersion은 Developer에게 "수정을 요청한 시점"에 기록된다. 요청했다고 해결된 것은 아니므로 둘을 나눠 센다.
         #   issuesFixRequested : 수정을 요청한 문제 수
@@ -244,7 +326,13 @@ def _mean(values):
     return sum(values) / len(values) if values else None
 
 
-def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: str = 'architecture') -> dict:
+def is_assisted_run(metrics):
+    outcome = (metrics.get('outcomeRecord') or {}).get('outcome') or {}
+    return (metrics.get('resumedDuringRun') is True or outcome.get('resumedDuringRun') is True
+            or outcome.get('comparisonValidity') == 'ASSISTED')
+
+
+def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: str = 'architecture', execution_slots=()) -> dict:
     # 실험 조건별로 결과를 요약한다. group_by='architecture'면 구조(SINGLE_AGENT / MULTI_AGENT)별,
     # 'loopPolicy'면 순환 안 테스트 정책(IN_LOOP_AND_FINAL=Ver1 / FINAL_ONLY=Ver2)별이다.
     # 성공률의 분모는 "시작하지 못한 Run까지 포함한 계획한 전체 Run 수"이다.
@@ -282,17 +370,27 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
         evaluated_version = (report.get('expectedManifest') or {}).get('codeVersion')
         if type(run.get('codeVersion')) is not int or evaluated_version != run['codeVersion']:
             raise ValueError('evaluation was not made for the final code version of the run')
-        by_evaluation[report['sourceRunId']] = report
+        if not is_assisted_run(run):
+            by_evaluation[report['sourceRunId']] = report
 
     result = {}
     for group, planned in planned_runs.items():
-        mine = [item for item in runs if item.get(group_by) == group]  # 이 조건의 Run들
-        if len(mine) > planned:
+        recorded = [item for item in runs if item.get(group_by) == group]
+        missing = [slot for slot in execution_slots if slot.get(group_by) == group and slot.get('runId') not in by_run]
+        unrecorded = planned - len(recorded)
+        if len(missing) > unrecorded:
+            raise ValueError('more execution slots than planned')
+        started_missing = sum(bool(slot.get('runId')) for slot in missing)
+        unknown_execution = unrecorded - started_missing
+        assisted = [item for item in recorded if is_assisted_run(item)]
+        mine = [item for item in recorded if not is_assisted_run(item)]
+        if len(recorded) > planned:
             raise ValueError('more runs than planned')
         # count("SUCCESS")처럼 부르면 "판정이 SUCCESS인 Run이 몇 개인지" 센다.
         count = lambda verdict: sum(1 for item in mine if item['verdict'] == verdict)
         aborted = sum(1 for item in mine if item['workflowStatus'] == 'ABORTED')                      # 중단된 Run
-        in_progress = sum(1 for item in mine if item['verdict'] is None and item['workflowStatus'] != 'ABORTED')  # 판정 전(진행 중·일시정지)
+        in_progress = sum(1 for item in mine if item['verdict'] is None
+                          and item['workflowStatus'] not in ('ABORTED', *PAUSED_STATUSES))
         success, failed = count('SUCCESS'), count('FAIL')
         # 비용·토큰·모델 호출 수는 계획한 Run 전부가 확인되었을 때만 전체 합계를 낸다.
         # 모델 호출 수는 확인된 부분 합을 knownModelCalls로 구분하며, 한 건도 측정하지 못했으면 None이다.
@@ -313,8 +411,28 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
         scores = [exam_score(r) for r in reports]  # 요구사항별 같은 비중 점수(코드·환경 신분을 확인한 보고서만 점수가 있음)
         qualified = [item for item in mine if item['runId'] in by_evaluation
                      and by_evaluation[item['runId']]['evaluationVerdict'] == 'PASS']  # 최종 독립 평가 PASS인 Run
+        split_tokens = {}
+        for field in ('inputTokens', 'outputTokens'):
+            known_field = 'known' + field[0].upper() + field[1:]
+            known_parts = [item[known_field] for item in mine if item.get(known_field) is not None]
+            complete_parts = len(mine) == planned and all(item.get(field) is not None for item in mine)
+            split_tokens[known_field] = sum(known_parts) if known_parts else None
+            split_tokens[field] = sum(item[field] for item in mine) if complete_parts else None
+        accuracy = [product_accuracy(r) for r in reports]
+        paused = {state: sum(1 for item in mine if item['workflowStatus'] == state) for state in sorted(HUMAN_WAIT_STATES)}
+        external_unverified = sum(1 for r in reports if r['evaluationVerdict'] == 'UNVERIFIED')
         result[group] = {
-            'plannedRuns': planned, 'recordedRuns': len(mine), 'notStarted': planned - len(mine),
+            'plannedRuns': planned, 'recordedRuns': len(recorded),
+            'unrecordedRuns': unrecorded, 'startedRuns': len(recorded) + started_missing,
+            'startedWithoutResults': started_missing, 'unknownExecutionSlots': unknown_execution,
+            'submissionUnconfirmedSlots': sum(not slot.get('runId') for slot in missing),
+            'notStarted': None if unknown_execution else 0,
+            'autonomousRecordedRuns': len(mine), 'quarantinedAssistedRuns': len(assisted),
+            # 이 비용·시간은 재개 이후를 포함한 실제 기록이며 자동 구간 값으로 집계하지 않는다.
+            'assistedDiagnostics': [{'runId': item['runId'], 'scope': 'FULL_RUN_INCLUDING_ASSISTED_CONTINUATION',
+                **{key: item.get(key) for key in ('workflowStatus', 'verdict', 'codeVersion', 'totalMs', 'verdictMs',
+                    'knownCostUsd', 'costUsd', 'costComplete', 'modelCalls', 'knownTotalTokens', 'totalTokens')}}
+                for item in assisted],
             'success': success, 'fail': failed, 'unverified': count('UNVERIFIED'), 'humanReview': count('HUMAN_REVIEW'),
             'aborted': aborted, 'inProgress': in_progress,
             # 성공률 = 성공 ÷ 계획 전체 / Verified Rate = (성공+실패) ÷ 계획 전체 / 미검증률 = 미검증 ÷ 계획 전체
@@ -329,16 +447,20 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
             'meanToolRetries': _mean([item['toolRetries'] for item in mine]),
             'modelCalls': known_calls if calls_complete else None,
             'knownModelCalls': known_calls, 'modelCallsComplete': calls_complete,
-            'runsWithoutUsage': sum(1 for item in mine if item['modelCalls'] is None),  # 사용량을 모르는 Run 수
+            'runsWithoutUsage': len(assisted) + sum(1 for item in mine if item['modelCalls'] is None),
             'totalTokens': known_tokens if tokens_complete else None, 'knownTotalTokens': known_tokens,
+            **split_tokens,
+            'runsWithUnknownTokenBreakdown': len(assisted) + sum(not item.get('tokenBreakdownComplete', False) for item in mine),
             'costUsd': format(total_cost, 'f') if cost_complete and total_cost is not None else None,
             'knownCostUsd': format(total_cost, 'f') if total_cost is not None else None,
-            'runsWithUnknownCost': sum(1 for item in mine if not item['costComplete']),
+            'costPerProductPassUsd': (format(total_cost / len(qualified), 'f')
+                                     if qualified and cost_complete and total_cost is not None else None),
+            'runsWithUnknownCost': len(assisted) + sum(1 for item in mine if not item['costComplete']),
             # 비용을 계산한 단가표들(다르면 비용 차이에 단가 차이가 섞인다. 토큰·호출 수는 단가와 무관하다).
             'priceBooks': [dict(book) for book in sorted({tuple(sorted(item['priceBook'].items()))
                                                           for item in mine if item.get('priceBook')})],
             'evaluation': {
-                'evaluatedRuns': len(reports), 'unevaluatedRuns': len(mine) - len(reports),
+                'evaluatedRuns': len(reports), 'unevaluatedRuns': len(recorded) - len(reports),
                 'meanRequirementPassRate': _mean(requirement_rates), 'meanCheckPassRate': _mean(check_rates),
                 'unmeasuredRuns': len(reports) - len(requirement_rates),  # 통과율을 측정하지 못한 보고서 수
                 'evaluationVerdicts': {verdict: sum(1 for r in reports if r['evaluationVerdict'] == verdict)
@@ -364,8 +486,203 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
                 'qualifiedVerdictMs': _distribution([item['verdictMs'] for item in qualified if item['verdictMs'] is not None]),
                 'qualifiedRunsWithUnknownTime': sum(1 for item in qualified if item['verdictMs'] is None),
             },
+            # 시험지 v4 정확도(ACC-01·04)와 개발정의서 11-A 지표(QA 통과율·보안 차단 결함 수). 보고서별 값의 분포(STAB-03)다.
+            'accuracy': _accuracy_summary(accuracy),
+            'process': summarize_process([item.get('processMetrics') for item in mine], planned),
+            # STAB-02: 내부 상태(중단·멈춤·미시작)와 외부 시험 미검증을 따로 센다(겹칠 수 있어 합이 100%가 아니다).
+            'stability': {
+                'abortedRate': aborted / planned, 'notStartedRate': None if unknown_execution else 0,
+                'unrecordedRate': unrecorded / planned, 'unknownExecutionRate': unknown_execution / planned,
+                'startedWithoutResultsRate': started_missing / planned,
+                'automaticBoundaryUnverifiedRuns': len(assisted),
+                'pausedRuns': paused, 'pausedRate': sum(paused.values()) / planned,
+                'externalUnverifiedRuns': external_unverified, 'externalUnverifiedRate': external_unverified / planned,
+                # STAB-04: 측정 가능한 전체 Run과 제품 통과 Run의 시간 분포를 나눠 본다(TIME-01 판정, TIME-06 끝·중단).
+                'allVerdictMs': _distribution([item['verdictMs'] for item in mine if item['verdictMs'] is not None]),
+                'productPassVerdictMs': _distribution([item['verdictMs'] for item in qualified if item['verdictMs'] is not None]),
+                'allEndMs': _distribution([item['totalMs'] for item in mine if item['totalMs'] is not None]),
+                'packageMs': _distribution([item['outcomeRecord']['packageTiming']['packageMs']
+                    for item in mine if ((item.get('outcomeRecord') or {}).get('packageTiming') or {}).get('status') == 'PASS'
+                    and type(item['outcomeRecord']['packageTiming'].get('packageMs')) is int]),
+                'packageUnverifiedRuns': len(assisted) + sum(((item.get('outcomeRecord') or {}).get('packageTiming') or {}).get('status') != 'PASS'
+                    for item in mine),
+                'firstPassingSnapshotMs': _distribution([(item.get('firstPassTiming') or {}).get('firstPassingSnapshotMs')
+                    for item in mine if (item.get('firstPassTiming') or {}).get('firstPassingSnapshotMs') is not None]),
+                'firstPassUnverifiedRuns': len(assisted) + sum((item.get('firstPassTiming') or {}).get('status') != 'PASS' for item in mine),
+            },
+            **_outcome_summary(recorded, planned),
         }
     return result
+
+
+def _accuracy_summary(accuracy):
+    # 보고서별 product_accuracy 결과를 모은다. 신분을 확인하지 못해 값이 없는 보고서는 빼고 그 수를 적는다.
+    measured = [item for item in accuracy if item['requirementCount'] is not None]
+    pick = lambda key: [item[key] for item in measured if item[key] is not None]
+    lower, upper = pick('fullSatisfactionLower'), pick('fullSatisfactionUpper')
+    decidability, qa = pick('checkDecidability'), pick('qaPassRate')
+    findings = pick('blockingSecurityFindings')
+    return {
+        'measuredReports': len(measured), 'unmeasuredReports': len(accuracy) - len(measured),
+        'fullSatisfactionLower': _distribution(lower), 'fullSatisfactionUpper': _distribution(upper),
+        'meanFullSatisfactionLower': _mean(lower), 'meanFullSatisfactionUpper': _mean(upper),
+        'runsWithUnverifiedRequirements': sum(1 for item in measured if item['unverifiedRequirements']),
+        'unverifiedWithConfirmedFailures': sum(item.get('unverifiedWithConfirmedFailures', 0) for item in measured),
+        'requirementOutcomes': {key: sum(item[name] for item in measured)
+                                for key, name in (('passed', 'passedRequirements'), ('failed', 'failedRequirements'),
+                                                  ('unverified', 'unverifiedRequirements'))},
+        'checkDecidability': _distribution(decidability), 'meanCheckDecidability': _mean(decidability),
+        'qaPassRate': _distribution(qa), 'meanQaPassRate': _mean(qa),
+        'blockingSecurityFindings': sum(findings) if findings else None,
+        'runsWithBlockingSecurityFindings': sum(1 for value in findings if value),
+    }
+
+
+def _tally(values):
+    found = {}
+    for value in values:
+        found[str(value)] = found.get(str(value), 0) + 1
+    return found
+
+
+def _outcome_summary(mine, planned):
+    # workflow가 남긴 outcome.json(원인·의미 검토 사용량·자동 완료)을 모은다. 기록이 없는 Run은 모름으로 따로 센다.
+    records = []
+    for item in mine:
+        record = item.get('outcomeRecord')
+        if is_assisted_run(item):
+            # 구버전 outcome이 자동 PASS라고 하더라도 원본 사건의 재개 증거가 우선한다.
+            # 재개를 포함한 의미 검토 비용 역시 자동 구간 합계에 넣지 않는다.
+            record = {'outcome': {'cause': 'ASSISTED_CONTINUATION', 'comparisonValidity': 'ASSISTED',
+                                  'resume': 'SEPARATE_EXPERIMENT'},
+                      'semanticReview': None, 'autoCompletion': {'status': 'FAIL'}}
+        records.append((item['runId'], record))
+    recorded = [(run_id, record) for run_id, record in records if record]
+    validity = {run_id: (record.get('outcome') or {}).get('comparisonValidity') for run_id, record in recorded}
+    reviews = [record.get('semanticReview') for _run_id, record in recorded]
+    complete_reviews = (len(recorded) == len(mine) == planned
+                        and all(item is not None and item.get('complete') for item in reviews))
+
+    def review_total(key, money=False):
+        values = [item.get(key) for item in reviews if item]
+        if not complete_reviews or any(value is None for value in values):
+            return None
+        return format(sum((Decimal(str(value)) for value in values), Decimal(0)), 'f') if money else sum(values)
+
+    auto = [((record.get('autoCompletion') or {}).get('status')) for _run_id, record in recorded]
+    return {
+        'outcomes': {
+            'recorded': len(recorded), 'notRecorded': len(mine) - len(recorded),
+            'causes': _tally((record.get('outcome') or {}).get('cause') for _run_id, record in recorded),
+            'comparisonValidity': _tally(validity.values()),
+            'resume': _tally((record.get('outcome') or {}).get('resume') for _run_id, record in recorded),
+            # 개발정의서 11-A "모델 API 장애 → UNVERIFIED": 구조와 무관한 환경 문제로 멈춘 Run(다시 실행할지 팀이 정한다)
+            'environmentFailureRuns': sorted(run_id for run_id, value in validity.items() if value == 'UNVERIFIED'),
+            'reviewRequiredRuns': sorted(run_id for run_id, value in validity.items() if value == 'REVIEW_REQUIRED'),
+        },
+        'semanticReview': {
+            'runsWithRecords': sum(1 for item in reviews if item is not None),
+            'reviews': sum(item['reviews'] for item in reviews if item), 'held': sum(item['held'] for item in reviews if item),
+            'knownReviewModelCalls': sum(item['knownReviewModelCalls'] for item in reviews if item),
+            'reviewModelCalls': review_total('reviewModelCalls'),
+            'reviewInputTokens': review_total('reviewInputTokens'),
+            'reviewOutputTokens': review_total('reviewOutputTokens'),
+            'reviewCostUsd': review_total('reviewCostUsd', money=True),
+            'complete': complete_reviews,
+        },
+        # STAB-06 자동 완료율: 자동 완료 통과 Run 수 / 계획 Run 수(제품 통과율과 별도). 미확인·기록 없음은 통과로 세지 않는다.
+        'autoCompletion': {
+            'pass': auto.count('PASS'), 'fail': auto.count('FAIL'), 'unverified': auto.count('UNVERIFIED'),
+            'notRecorded': len(mine) - len(recorded), 'rate': auto.count('PASS') / planned,
+        },
+    }
+
+
+PAIR_METRICS = ('fullSatisfactionLower', 'fullSatisfactionUpper', 'productPass', 'verdictMs', 'costUsd',
+                'modelCalls', 'totalTokens', 'packageMs', 'firstPassingSnapshotMs')
+
+
+def _pair_value(run, report, metric):
+    # 짝 비교에 쓸 한 Run의 값. 확인하지 못한 값은 None이다(0으로 채우지 않는다).
+    if metric in ('fullSatisfactionLower', 'fullSatisfactionUpper'):
+        return None if report is None else product_accuracy(report)[metric]
+    if metric == 'productPass':
+        if report is not None:
+            verdict = report.get('evaluationVerdict')
+            return 1 if verdict == 'PASS' else 0 if verdict == 'FAIL' else None
+        # 채점할 최종 코드가 아예 없는 Run은 제품 통과가 불가능하다는 것이 확인된 값이다.
+        return 0 if run.get('codeVersion') is None and run.get('workflowStatus') in ('FINISHED', 'ABORTED',
+                                                                                    'HUMAN_REVIEW', 'WAITING_INPUT') else None
+    if metric == 'costUsd':
+        return float(Decimal(run['knownCostUsd'])) if run.get('costComplete') and run.get('knownCostUsd') is not None else None
+    if metric == 'packageMs':
+        timing = (run.get('outcomeRecord') or {}).get('packageTiming') or {}
+        return timing.get('packageMs') if timing.get('status') == 'PASS' else None
+    if metric == 'firstPassingSnapshotMs':
+        timing = run.get('firstPassTiming') or {}
+        return timing.get(metric) if timing.get('status') == 'PASS' else None
+    return run.get(metric)
+
+
+def architecture_pairs(runs, evaluations=(), pairs=None) -> dict:
+    """STAB-05 짝 비교: 같은 시나리오·조건으로 함께 실행한 Single/Multi 한 쌍(pairId)마다 Multi − Single 차이.
+
+    쌍 양쪽 값이 확인된 지표만 계산하고, 쌍이 깨졌거나 조건이 다르면 그 쌍을 제외 사유와 함께 남긴다.
+    """
+    pairs = pairs or {}
+    by_report = {report['sourceRunId']: report for report in evaluations}
+    grouped, unpaired = {}, []
+    for item in runs:
+        pair = pairs.get(item['runId'])
+        if pair is None:
+            unpaired.append(item['runId'])
+        else:
+            grouped.setdefault(str(pair), []).append(item)
+    rows, excluded = [], []
+    differences = {metric: [] for metric in PAIR_METRICS}
+    for pair, members in sorted(grouped.items()):
+        kinds = sorted(item['architecture'] for item in members)
+        if kinds != ['MULTI_AGENT', 'SINGLE_AGENT']:
+            excluded.append({'pairId': pair, 'reason': 'NOT_ONE_SINGLE_AND_ONE_MULTI',
+                             'runs': sorted(item['runId'] for item in members)})
+            continue
+        single = next(item for item in members if item['architecture'] == 'SINGLE_AGENT')
+        multi = next(item for item in members if item['architecture'] == 'MULTI_AGENT')
+        if any(is_assisted_run(item) for item in members):
+            excluded.append({'pairId': pair, 'reason': 'ASSISTED_CONTINUATION',
+                             'runs': [single['runId'], multi['runId']]})
+            continue
+        if single.get('scenarioId') != multi.get('scenarioId') or single.get('loopPolicy') != multi.get('loopPolicy'):
+            excluded.append({'pairId': pair, 'reason': 'CONDITION_MISMATCH', 'runs': [single['runId'], multi['runId']]})
+            continue
+        if any(not isinstance(item.get('comparisonConfiguration'), dict) for item in members):
+            excluded.append({'pairId': pair, 'reason': 'CONDITION_EVIDENCE_MISSING',
+                             'runs': [single['runId'], multi['runId']]})
+            continue
+        conditions = comparison_validity([
+            {'architecture': item['architecture'], 'configuration': item['comparisonConfiguration'],
+             'evaluation': by_report.get(item['runId']), 'priceBook': item.get('priceBook')}
+            for item in members], group_by='architecture')
+        if not conditions['valid'] or conditions['violations']:
+            excluded.append({'pairId': pair, 'reason': 'CONDITION_MISMATCH',
+                             'runs': [single['runId'], multi['runId']], 'violations': conditions['violations']})
+            continue
+        values, unknown = {}, []
+        for metric in PAIR_METRICS:
+            left = _pair_value(single, by_report.get(single['runId']), metric)
+            right = _pair_value(multi, by_report.get(multi['runId']), metric)
+            if left is None or right is None:
+                unknown.append(metric)
+                continue
+            values[metric] = {'single': left, 'multi': right, 'difference': right - left}
+            differences[metric].append(right - left)
+        rows.append({'pairId': pair, 'singleRunId': single['runId'], 'multiRunId': multi['runId'],
+                     'metrics': values, 'unknownMetrics': unknown, 'conditionWarnings': conditions['warnings']})
+    return {'direction': 'MULTI_MINUS_SINGLE', 'pairs': rows, 'excludedPairs': excluded, 'unpairedRuns': sorted(unpaired),
+            'differences': {metric: {**_distribution(values), 'multiHigher': sum(1 for value in values if value > 0),
+                                     'singleHigher': sum(1 for value in values if value < 0),
+                                     'equal': sum(1 for value in values if value == 0)}
+                            for metric, values in differences.items()}}
 
 
 A2A_STEP_END_STATES = frozenset({'TASK_STATE_COMPLETED', 'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_REJECTED',
@@ -449,7 +766,8 @@ def collaboration_metrics(events) -> dict:
     active = int(_merged_length([(start.timestamp() * 1000, finish.timestamp() * 1000) for start, finish in intervals]))
     starts = [moment for moment, _index, event in stamped if event.get('eventType') == 'RUN_STARTED']
     verdicts = [moment for moment, _index, event in stamped if event.get('eventType') == 'VERDICT_CREATED']
-    wall = millis(verdicts[-1] - starts[0]) if starts and verdicts else None
+    # 판정이 시작보다 빠르게 기록됐으면(시계 역전) 경과 시간을 음수로 만들지 않고 미측정(None)으로 둔다.
+    wall = millis(verdicts[-1] - starts[0]) if starts and verdicts and verdicts[-1] >= starts[0] else None
 
     changes = [(moment, event.get('workflowState')) for moment, _index, event in stamped
                if event.get('eventType') == 'WORKFLOW_STATE_CHANGED' and event.get('workflowState')]
@@ -532,6 +850,11 @@ def loop_policy_effect(runs, evaluations, references, pairs=None, unscored=()) -
     # unscored: 채점하지 못한 Run 번호들(짝지은 실험이면 그 짝 Run도 확정 계산에서 뺀다).
     # 모든 최종 보고서는 같은 시험지(suite 지문), 모든 참고 보고서도 같은 시험지여야 하고 둘은 서로 달라야 한다
     # (다른 날의 다른 순환용 시험지로 채점한 결과가 섞이거나, 두 보고서를 바꿔 넣으면 거부).
+    runs = list(runs)
+    assisted = {item['runId'] for item in runs if is_assisted_run(item)}
+    evaluations = [report for report in evaluations if report['sourceRunId'] not in assisted]
+    references = [report for report in references if report['sourceRunId'] not in assisted]
+    unscored = set(unscored) | assisted
     policies = {item['runId']: item.get('loopPolicy') for item in runs}
     exam_suites = {(report.get('suite') or {}).get('sha256') for report in evaluations}
     reference_suites = {(reference.get('suite') or {}).get('sha256') for reference in references}
@@ -612,7 +935,7 @@ def comparison_validity(entries, *, group_by: str = 'architecture') -> dict:
         label = item['architecture']
         if label not in ARCHITECTURES:
             raise ValueError('entry architecture must be SINGLE_AGENT or MULTI_AGENT')
-        if group_by == 'loopPolicy':
+        if group_by == 'loopPolicy' or item.get('loopPolicy') is not None:
             # Ver1·Ver2 이름표는 동결 설정의 보호 테스트 참조와 맞아야 한다(이름표만 바꿔 붙이지 못하게).
             if item.get('loopPolicy') not in LOOP_POLICIES:
                 raise ValueError('entry loopPolicy must be IN_LOOP_AND_FINAL or FINAL_ONLY')

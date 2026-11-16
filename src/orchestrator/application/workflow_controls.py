@@ -257,7 +257,10 @@ class WorkflowControlService:
                 confirmed[step.workflow_step_id] = A2ATaskState.CANCELED
             return self.repository.complete_remote_cancellation(run_id, reason, confirmed)
         finally:
-            self.repository.release_control(run_id, token)
+            try:
+                await self.dispatcher.notify_settled(run_id)
+            finally:
+                self.repository.release_control(run_id, token)
 
     def _cancel_targets(self, run_id):
         run = self.repository.get_run(run_id)

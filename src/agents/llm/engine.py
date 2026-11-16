@@ -20,6 +20,7 @@ from mcp_tools.core.policy import SINGLE_PHASE_TOOL_ROLES
 from orchestrator.core.security import redact_data, redact_text
 from orchestrator.domain.run_configuration import ModelConfiguration
 from orchestrator.domain.states import AgentRole
+from orchestrator.observability import capture_engine_output
 
 
 class LLMEngine:
@@ -57,12 +58,15 @@ class LLMEngine:
         self._definitions = {tool.name: tool for tool in tools}
         self._executor = tool_executor
 
+    @capture_engine_output
     async def run(
         self, *, prompt: PreparedRolePrompt | PreparedSinglePrompt | PreparedSemanticPrompt, model: ModelConfiguration,
         output: StructuredOutput, budget: ExecutionBudget,
         workspace_id: str | None = None,
         usage_sink: Callable[[UsageRecord], None] | None = None,
         call_started_sink: Callable[[int], None] | None = None,
+        input_observed_sink: Callable[[dict], None] | None = None,
+        output_observed_sink: Callable[[dict], None] | None = None,
     ) -> LLMResult:
         records: list[UsageRecord] = []
         seen_calls: set[str] = set()
@@ -116,6 +120,15 @@ class LLMEngine:
                     input_items_json=history, tools=self._tools, output=output,
                     max_output_tokens=output_cap, timeout_seconds=timeout,
                 )
+                if input_observed_sink is not None:
+                    try:
+                        from .input_evidence import observe_input
+                        input_observed_sink(observe_input(sequence, request))
+                    except Exception:
+                        budget.invalidate()
+                        raise
+                budget.check()
+                timeout = min(timeout, budget.remaining_seconds())
                 started = monotonic()
                 try:
                     response = await asyncio.wait_for(self._provider.complete(request), timeout=timeout)
@@ -175,6 +188,16 @@ class LLMEngine:
                 records.append(record)
                 if usage_sink is not None:
                     self._publish_usage(usage_sink, record, budget)
+                if output_observed_sink is not None:
+                    try:
+                        # Usage is durable even if output observation fails.
+                        # Provider reasoning/continuation internals are excluded.
+                        output_observed_sink({'sequence': sequence, 'outputText': response.output_text,
+                            'toolCalls': [{'name': call.name, 'arguments': call.arguments_json}
+                                          for call in response.tool_calls]})
+                    except Exception:
+                        budget.invalidate()
+                        raise
                 budget.check()
                 if response.refused:
                     raise LLMRuntimeError(LLMErrorCode.REFUSAL)

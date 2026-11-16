@@ -42,7 +42,7 @@ class OwnedPlatformTCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_actual_five_servers_run_initial_cycle_and_release_all_listeners(self):
         fixture = self.fixture
         ports = _unused_loopback_ports()
-        limits = LLMLimits(max_model_calls=8, max_tool_calls=12, model_timeout_seconds=2, max_output_tokens=4096)
+        limits = LLMLimits(max_model_calls=16, max_tool_calls=12, model_timeout_seconds=2, max_output_tokens=4096)
         roles = {role: selected.model_copy(update={"port": port, "llm_limits": limits})
             for (role, selected), port in zip(fixture.settings.items(), ports[1:], strict=True)}
         settings = fixture.orchestrator_settings.model_copy(update={
@@ -95,8 +95,8 @@ class OwnedPlatformTCPTests(unittest.IsolatedAsyncioTestCase):
                 for report in (item for item in artifacts if item.artifact_type in {"QA_REPORT", "SECURITY_REPORT"}):
                     self.assertEqual(report.execution_manifest, source.execution_manifest())
                 configuration = fixture.repository.get_run_configuration(run_id)
-                self.assertEqual(platform.budgets.resolve(configuration).model_calls, 6)
-                self.assertEqual(sum(len(provider.requests) for provider in providers.values()), 6)
+                self.assertEqual(platform.budgets.resolve(configuration).model_calls, 10)
+                self.assertEqual(sum(len(provider.requests) for provider in providers.values()), 10)
         finally:
             runner.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -175,7 +175,7 @@ class OwnedPlatformFixTCPTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len({step.agent_context_id for step in role_steps}), 1)
                     self.assertEqual(len({step.a2a_task_id for step in role_steps}), 2)
                 budget = platform.budgets.resolve(fixture.repository.get_run_configuration(run_id))
-                self.assertEqual(budget.model_calls, 13)
+                self.assertEqual(budget.model_calls, 20)
                 self.assertTrue(all(value is budget for value in harness.budgets))
                 self.assertEqual(len(harness.fix_inputs), 1)
         finally:

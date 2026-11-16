@@ -1,0 +1,245 @@
+> **suite 0.7.0 자동 테스트용 예제**: 검사용 회원가입 코드를 로컬에서 평가해 생성했습니다. 실제 에이전트 개발·싱글/멀티 비교 실험·모델 API 호출 결과가 아닙니다. 구조와 실행 이미지 표시는 테스트 대역의 메타데이터입니다.
+
+# QA·Security 세부 결과
+
+- 실행: 00000000-0000-4000-8000-000000000002 · 구조: MULTI_AGENT
+- 채점 ID: 168b940a-8b89-46bc-bae7-6161fda7cfaa · 시험: final
+- 코드 Snapshot: 3329a26e2ee6a0a587ba27555ce507ed9490d70753e67b9c48172cb19b5cbf9d
+- 시험지: 0.7.0 · cd7a246d2309ac7e3e281355be270a9ea8866e837da03058f8caaf10ef8f121f
+- 상세 기록 상태: COMPLETE
+
+세부 상태: PASS / FAIL / 미실행(NOT_RUN) / 미검증(UNVERIFIED). 준비 조건은 제품 검증 항목과 구분합니다.
+
+- 공식 판정은 기존 9개 검사 결과를 사용하며 세부 항목 수로 점수를 바꾸지 않습니다.
+- 비밀번호·해시·이메일·응답 본문·로그 원문은 저장하지 않습니다.
+- 노출 검사는 수집된 응답과 앱 시작~종료 로그·출력에 한정됩니다. 별도 파일 등 미수집 경로는 포함하지 않습니다.
+
+## 검사별 목차
+
+- [QA-SIGNUP-001](#qa-signup-001) · 상위 판정 PASS
+- [QA-SIGNUP-002](#qa-signup-002) · 상위 판정 PASS
+- [QA-SIGNUP-003](#qa-signup-003) · 상위 판정 PASS
+- [QA-SIGNUP-004](#qa-signup-004) · 상위 판정 PASS
+- [QA-SIGNUP-005](#qa-signup-005) · 상위 판정 PASS
+- [QA-SIGNUP-006](#qa-signup-006) · 상위 판정 PASS
+- [SEC-SIGNUP-002](#sec-signup-002) · 상위 판정 FAIL
+- [SEC-SIGNUP-003](#sec-signup-003) · 상위 판정 PASS
+- [SEC-SIGNUP-005](#sec-signup-005) · 상위 판정 PASS
+
+## 실패·미실행·미검증 항목
+
+- SEC-SIGNUP-002 / storage / no_plaintext: FAIL (EXPECTATION_MISMATCH)
+- SEC-SIGNUP-002 / storage / argon2id: FAIL (EXPECTATION_MISMATCH)
+- SEC-SIGNUP-002 / account_1 / m: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_1 / t: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_1 / p: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_2 / m: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_2 / t: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_2 / p: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / storage / distinct_salts: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_1 / correct_password: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_1 / wrong_password: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_2 / correct_password: NOT_RUN (HASH_FORMAT_REQUIRED)
+- SEC-SIGNUP-002 / account_2 / wrong_password: NOT_RUN (HASH_FORMAT_REQUIRED)
+
+## QA-SIGNUP-001
+
+QA-SIGNUP-001 유효한 이메일·비밀번호로 가입 · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| 점·하위 도메인 포함 이메일 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| 점·하위 도메인 포함 이메일 | 제품 검사 | 사용자 수 증가량 | 1 | 1 | PASS | — |
+| 점·하위 도메인 포함 이메일 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+| 2글자 최상위 도메인 이메일 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| 2글자 최상위 도메인 이메일 | 제품 검사 | 사용자 수 증가량 | 1 | 1 | PASS | — |
+| 2글자 최상위 도메인 이메일 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+
+## QA-SIGNUP-002
+
+QA-SIGNUP-002 형식 오류 이메일 거부 · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| 정상 가입 사전조건 | 준비 조건 | 응답 상태 | 200–299 | 201 | PASS | — |
+| 빈 이메일 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| 빈 이메일 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| 빈 이메일 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| 공백만 있는 이메일 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| 공백만 있는 이메일 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| 공백만 있는 이메일 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| @ 없는 이메일 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| @ 없는 이메일 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| @ 없는 이메일 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| 로컬 부분 없는 이메일 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| 로컬 부분 없는 이메일 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| 로컬 부분 없는 이메일 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| 도메인 없는 이메일 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| 도메인 없는 이메일 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| 도메인 없는 이메일 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| @ 두 개인 이메일 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| @ 두 개인 이메일 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| @ 두 개인 이메일 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| 중간 공백 포함 이메일 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| 중간 공백 포함 이메일 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| 중간 공백 포함 이메일 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+
+## QA-SIGNUP-003
+
+QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지 · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| 정상 가입 사전조건 | 준비 조건 | 응답 상태 | 200–299 | 201 | PASS | — |
+| variant_same | 제품 검사 | 응답 상태 | 400–499 | 409 | PASS | — |
+| variant_same | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| variant_swapcase | 제품 검사 | 응답 상태 | 400–499 | 409 | PASS | — |
+| variant_swapcase | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| variant_trail | 제품 검사 | 응답 상태 | 400–499 | 409 | PASS | — |
+| variant_trail | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| variant_swap_lead | 제품 검사 | 응답 상태 | 400–499 | 409 | PASS | — |
+| variant_swap_lead | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| 모든 요청 이후 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+
+## QA-SIGNUP-004
+
+QA-SIGNUP-004 비밀번호 최소 8자 · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| reject_length_7 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| reject_length_7 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| reject_length_7 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| reject_length_5 | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| reject_length_5 | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| reject_length_5 | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| accept_length_8 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| accept_length_8 | 제품 검사 | 사용자 수 증가량 | 1 | 1 | PASS | — |
+| accept_length_16 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| accept_length_16 | 제품 검사 | 사용자 수 증가량 | 1 | 1 | PASS | — |
+| lower_length_11 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| lower_length_11 | 제품 검사 | 사용자 수 증가량 | 1 | 1 | PASS | — |
+| digits_length_8 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| digits_length_8 | 제품 검사 | 사용자 수 증가량 | 1 | 1 | PASS | — |
+
+## QA-SIGNUP-005
+
+QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지 · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| attempt_1 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+| attempt_1 | 제품 검사 | 성공 응답 수 | 1 | 1 | PASS | — |
+| attempt_1 | 제품 검사 | 모든 응답이 2xx 또는 4xx | 5건, 모두 2xx 또는 4xx | [409, 409, 409, 409, 201] | PASS | — |
+| attempt_2 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+| attempt_2 | 제품 검사 | 성공 응답 수 | 1 | 1 | PASS | — |
+| attempt_2 | 제품 검사 | 모든 응답이 2xx 또는 4xx | 5건, 모두 2xx 또는 4xx | [409, 409, 409, 409, 201] | PASS | — |
+| attempt_3 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+| attempt_3 | 제품 검사 | 성공 응답 수 | 1 | 1 | PASS | — |
+| attempt_3 | 제품 검사 | 모든 응답이 2xx 또는 4xx | 5건, 모두 2xx 또는 4xx | [409, 409, 409, 409, 201] | PASS | — |
+
+## QA-SIGNUP-006
+
+QA-SIGNUP-006 응답과 실제 가입 결과 일치 · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| step_1_new | 제품 검사 | 응답 성공 여부와 계정 생성 일치 | 참 | 참 | PASS | — |
+| step_1_new | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| step_2_duplicate | 제품 검사 | 응답 성공 여부와 계정 생성 일치 | 참 | 참 | PASS | — |
+| step_2_duplicate | 제품 검사 | 응답 상태 | 400–499 | 409 | PASS | — |
+| step_2_duplicate | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| step_2_duplicate | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| step_3_short | 제품 검사 | 응답 성공 여부와 계정 생성 일치 | 참 | 참 | PASS | — |
+| step_3_short | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| step_3_short | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| step_3_short | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+| step_4_new | 제품 검사 | 응답 성공 여부와 계정 생성 일치 | 참 | 참 | PASS | — |
+| step_4_new | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| step_5_invalid | 제품 검사 | 응답 성공 여부와 계정 생성 일치 | 참 | 참 | PASS | — |
+| step_5_invalid | 제품 검사 | 응답 상태 | 400–499 | 422 | PASS | — |
+| step_5_invalid | 제품 검사 | 사용자 수 증가량 | 0 | 0 | PASS | — |
+| step_5_invalid | 제품 검사 | 기존 사용자 정보 불변 | 참 | 참 | PASS | — |
+
+## SEC-SIGNUP-002
+
+SEC-SIGNUP-002 비밀번호 저장값 · 상위 판정 **FAIL**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| account_1_setup | 준비 조건 | 응답 상태 | 200–299 | 201 | PASS | — |
+| account_2_setup | 준비 조건 | 응답 상태 | 200–299 | 201 | PASS | — |
+| 저장값·계정 간 비교 | 제품 검사 | 저장값이 문자열이며 비밀번호 원문 미포함 | 참 | 거짓 | FAIL | EXPECTATION_MISMATCH |
+| 저장값·계정 간 비교 | 제품 검사 | 모든 저장값의 Argon2id 형식 | 참 | 거짓 | FAIL | EXPECTATION_MISMATCH |
+| account_1 | 제품 검사 | Argon2 메모리 m | 19456 이상 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_1 | 제품 검사 | Argon2 반복 t | 2 이상 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_1 | 제품 검사 | Argon2 병렬도 p | 1 이상 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_2 | 제품 검사 | Argon2 메모리 m | 19456 이상 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_2 | 제품 검사 | Argon2 반복 t | 2 이상 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_2 | 제품 검사 | Argon2 병렬도 p | 1 이상 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| 저장값·계정 간 비교 | 제품 검사 | 서로 다른 salt 수 | 2 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_1 | 제품 검사 | 가입 비밀번호 검증 성공 | 참 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_1 | 제품 검사 | 다른 비밀번호 검증 성공 | 거짓 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_2 | 제품 검사 | 가입 비밀번호 검증 성공 | 참 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+| account_2 | 제품 검사 | 다른 비밀번호 검증 성공 | 거짓 | 미관찰 | 미실행 | HASH_FORMAT_REQUIRED |
+
+## SEC-SIGNUP-003
+
+SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| 정상 가입 사전조건 | 준비 조건 | 응답 상태 | 200–299 | 201 | PASS | — |
+| variant_swapcase | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| variant_swapcase | 제품 검사 | 저장 이메일이 정규화 정책과 일치 | 참 | 참 | PASS | — |
+| variant_swapcase | 제품 검사 | DB 직접 중복 삽입 거부 | 참 | 참 | PASS | — |
+| variant_trail | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| variant_trail | 제품 검사 | 저장 이메일이 정규화 정책과 일치 | 참 | 참 | PASS | — |
+| variant_trail | 제품 검사 | DB 직접 중복 삽입 거부 | 참 | 참 | PASS | — |
+| variant_swap_lead | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| variant_swap_lead | 제품 검사 | 저장 이메일이 정규화 정책과 일치 | 참 | 참 | PASS | — |
+| variant_swap_lead | 제품 검사 | DB 직접 중복 삽입 거부 | 참 | 참 | PASS | — |
+| alias_1_address_1 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| alias_1_address_1 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+| alias_1_address_2 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| alias_1_address_2 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+| alias_2_address_1 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| alias_2_address_1 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+| alias_2_address_2 | 제품 검사 | 응답 상태 | 200–299 | 201 | PASS | — |
+| alias_2_address_2 | 제품 검사 | 해당 이메일 계정 수 | 1 | 1 | PASS | — |
+
+## SEC-SIGNUP-005
+
+SEC-SIGNUP-005 비밀번호·해시 노출 · 상위 판정 **PASS**
+
+| 사례 | 구분 | 세부 항목 | 기대값 | 실제값 | 결과 | 사유 |
+|---|---|---|---|---|---|---|
+| 앱·DB 준비 | 준비 조건 | 앱·DB 관찰 준비 | 참 | 참 | PASS | — |
+| 정상 가입 사전조건 | 준비 조건 | 응답 상태 | 200–299 | 201 | PASS | — |
+| DB 오류 요청 | 준비 조건 | DB 오류 주입 확인 | 참 | 참 | PASS | — |
+| 정상 가입 응답 | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 정상 가입 응답 | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 잘못된 이메일 응답 | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 잘못된 이메일 응답 | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 짧은 비밀번호 응답 | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 짧은 비밀번호 응답 | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 중복 가입 응답 | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 중복 가입 응답 | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| malformed_misspelled | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| malformed_misspelled | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| malformed_missing_email | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| malformed_missing_email | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| malformed_list | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| malformed_list | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| DB 오류 요청 | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| DB 오류 요청 | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 앱 시작~종료 로그·출력 | 제품 검사 | 비밀번호 노출 여부 | 거짓 | 거짓 | PASS | — |
+| 앱 시작~종료 로그·출력 | 제품 검사 | 해시 또는 해시 부분 노출 여부 | 거짓 | 거짓 | PASS | — |

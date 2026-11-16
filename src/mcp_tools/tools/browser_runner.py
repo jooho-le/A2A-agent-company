@@ -305,7 +305,11 @@ def run_browser_tests(host_payload, suite, *, contract_parser, playwright_factor
             raise _RunnerError("BROWSER_START_FAILED") from None
         try:
             try:
-                browser = playwright.chromium.launch(headless=True, chromium_sandbox=True,
+                # 2026-11-15 (4번, 사용자 승인): Chromium 자체 샌드박스는 사용자 네임스페이스가 필요한데, 샌드박스
+                # 컨테이너의 기본 seccomp가 이를 막아 매번 "No usable sandbox"로 실패했다. 이 컨테이너는 생성된 서버
+                # 코드를 이미 같은 UID·권한으로 실행하므로 렌더러 샌드박스가 더하는 격리는 거의 없다. 격리 경계는
+                # 컨테이너(네트워크 없음·권한 전부 제거·no-new-privileges·읽기 전용·기본 seccomp)로 유지한다.
+                browser = playwright.chromium.launch(headless=True, chromium_sandbox=False,
                                                       timeout=host["action_timeout_ms"])
                 version = browser.version
                 if type(version) is not str or _BROWSER_VERSION.fullmatch(version) is None:

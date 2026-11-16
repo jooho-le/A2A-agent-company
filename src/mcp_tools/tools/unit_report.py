@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import json
 
 from orchestrator.core.security import redact_text
+from orchestrator.domain.validation_feedback import observation_json
 
 
 MAX_UNIT_REPORT_BYTES = 1024 * 1024
@@ -28,11 +29,17 @@ class UnitTestCase:
     test_id: str = field(repr=False)
     outcome: str
     details: str | None = field(default=None, repr=False)
+    observations_json: str | None = field(default=None, repr=False)
+    observation_error: str | None = field(default=None, repr=False)
 
     def to_dict(self):
         result = {"testId": self.test_id, "outcome": self.outcome}
         if self.details is not None:
             result["details"] = self.details
+        if self.observations_json is not None:
+            result["observations"] = json.loads(self.observations_json)
+        if self.observation_error is not None:
+            result["observationError"] = self.observation_error
         return result
 
 
@@ -98,7 +105,7 @@ def parse_unit_report(stdout: str, exit_code: int) -> UnitTestReport:
         seen, cases = set(), []
         outcomes = {"PASS": 0, "FAIL": 0, "SKIP": 0}
         for row in data["tests"]:
-            if type(row) is not dict or not {"testId", "outcome"} <= set(row) <= {"testId", "outcome", "details"}:
+            if type(row) is not dict or not {"testId", "outcome"} <= set(row) <= {"testId", "outcome", "details", "observations", "observationError"}:
                 raise UnitReportError()
             test_id = _string(row["testId"], MAX_UNIT_TEST_ID_BYTES, nonempty=True)
             if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in test_id) or redact_text(test_id) != test_id:
@@ -110,7 +117,11 @@ def parse_unit_report(stdout: str, exit_code: int) -> UnitTestReport:
             if "details" in row:
                 details = redact_text(_string(row["details"], MAX_UNIT_DETAILS_BYTES))
                 _string(details, MAX_UNIT_DETAILS_BYTES)
-            cases.append(UnitTestCase(test_id, row["outcome"], details))
+            observations = observation_json(row['observations']) if 'observations' in row else None
+            error = row.get('observationError')
+            if 'observationError' in row and (error != 'DETAIL_RECORD_INVALID' or observations is not None):
+                raise UnitReportError()
+            cases.append(UnitTestCase(test_id, row["outcome"], details, observations, error))
             outcomes[row["outcome"]] += 1
         if (outcomes["PASS"], outcomes["FAIL"], outcomes["SKIP"]) != (counts["passed"], counts["failed"], counts["skipped"]):
             raise UnitReportError()

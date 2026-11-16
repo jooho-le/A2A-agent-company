@@ -19,6 +19,7 @@
 # - Issue: QA·Security(또는 빌드)가 찾은 문제 기록. 어느 버전에서 찾았는지, 몇 번 버전으로 고치라고 했는지(newCodeVersion) 등이 있다.
 # - JSON 경로(JSON Pointer): 문서 안의 위치를 "/0/arguments/password"처럼 적는 방법. 값 대신 위치만 남길 때 쓴다.
 import re  # 글자 모양을 찾는 정규식 도구
+from hashlib import sha256
 from dataclasses import dataclass, field  # 값을 담는 "데이터 상자"를 짧게 만드는 도구
 from typing import Iterable, Mapping, Optional  # 자료형 이름표(실행에는 영향 없음)
 
@@ -47,6 +48,9 @@ EXPOSURE_DOCUMENTS = ('events', 'issues', 'artifacts', 'toolAttempts', 'telemetr
 NOT_COLLECTED_OUTPUTS = ('A2A_MESSAGE_BODY', 'ARTIFACT_FILE_CONTENT', 'AGENT_PROCESS_OUTPUT')
 A2A_DOCUMENT = 'a2aMessages'  # (선택) dev a2a_export가 꺼낸 A2A Message 본문 문서. 주면 A2A_MESSAGE_BODY를 본 것으로 센다
 A2A_ROLES = ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')  # A2A 본문 문서의 역할(에이전트 작업 저장소 하나씩)
+# Single Run의 A2A 문서(dev a2a_export 스키마 2)는 저장소가 하나다. 기획·구현·검증을 한 에이전트가 하므로
+# 어느 단계든 일을 했으면 이 저장소에 기록이 있어야 한다.
+SINGLE_A2A_ROLES = ('SINGLE_AGENT',)
 A2A_ROWS = ('contexts', 'tasks', 'history', 'receipts', 'events')  # 역할마다 있어야 하는 목록
 # A2A 본문 문서는 에이전트 저장소에 저장된 기록이고, 저장할 때 이미 가린(마스킹) 값이다. 그래서 문서를 보더라도
 # "가리기 전 송수신 본문"은 보지 못한 출력으로 남긴다(PASS를 송수신 경계의 증거로 넓히지 않게).
@@ -193,12 +197,140 @@ def check_trace_exposure(documents: Mapping, criteria: Mapping, *, known_values:
         walk(A2A_DOCUMENT, [], a2a['roles'], 0)
         not_collected.remove('A2A_MESSAGE_BODY')
         not_collected.append(A2A_BEFORE_REDACTION)
-        empty_roles = sorted(role for role in _working_roles(documents.get('events'))
+        empty_roles = sorted(role for role in _working_roles(documents.get('events'), a2a)
                              if role in a2a['roles'] and not (a2a['roles'][role]['contexts'] and a2a['roles'][role]['tasks']))
         (incomplete if a2a['missingRoles'] or empty_roles else checked).append(A2A_DOCUMENT)
     # 검사 범위: 끝까지 읽은 기록, 못 받았거나 일부만 받은 기록, 수집 경로가 없어 보지 못하는 출력, 알려 준 값 개수(값은 남기지 않음)
     coverage = {'checkedDocuments': checked, 'missingDocuments': missing, 'incompleteDocuments': incomplete,
                 'notCollectedOutputs': not_collected, 'knownValues': len(secrets)}
+    # Receipts are bound to the exact Host/Agent read snapshots in the handoff.
+    # They prove the scanner saw bytes before masking, without storing secrets.
+    # New arbitrary known-values cannot be searched in historical hash receipts.
+    observed = []
+    observation_sets = []
+    if documents.get('observations') is not None:
+        observation_sets.append(('host', documents['observations']))
+    if a2a is not None:
+        observation_sets += [(role, rows['outputObservations']) for role, rows in a2a['roles'].items()
+                             if rows.get('outputObservations') is not None]
+    for origin, observation in observation_sets:
+        from orchestrator.observability import KINDS, scopes_complete
+        if (not isinstance(observation, dict) or observation.get('schemaVersion') != 1
+                or observation.get('runId') != documents.get('runId')
+                or not isinstance(observation.get('records'), list)):
+            raise ValueError('OUTPUT_OBSERVATION_INVALID')
+        if (observation.get('recordsTotal') != len(observation['records'])
+                or observation.get('snapshotConsistent') is not True):
+            incomplete.append('outputObservations:' + origin)
+        if (origin == 'host' and (observation.get('policy') or observation.get('records'))
+                or observation.get('scopes')) and (
+                observation.get('scopesComplete') is not True or not scopes_complete(observation.get('scopes'))):
+            incomplete.append('outputScopes')
+        for index, receipt in enumerate(observation['records']):
+            if (not isinstance(receipt, dict) or receipt.get('runId') != documents.get('runId')
+                    or set(receipt) - {'schemaVersion', 'runId', 'kind', 'sourceId', 'sha256', 'bytes', 'status',
+                                       'boundary', 'findings', 'knownValuesChecked', 'observedBytes', 'hashScope'}
+                    or receipt.get('schemaVersion') != 1 or receipt.get('knownValuesChecked') is not False
+                    or receipt.get('boundary') not in ('BEFORE_REDACTION', 'REGISTERED_BYTES')
+                    or 'observedBytes' in receipt and (type(receipt['observedBytes']) is not int or receipt['observedBytes'] < 0)
+                    or 'hashScope' in receipt and receipt['hashScope'] != 'OBSERVED_PREFIX'
+                    or receipt.get('kind') not in KINDS or receipt.get('status') not in ('OBSERVED', 'PARTIAL')
+                    or any(not isinstance(receipt.get(key), str) or not re.fullmatch(r'[0-9a-f]{64}', receipt[key])
+                           for key in ('sha256', 'sourceId'))
+                    or type(receipt.get('bytes')) is not int or receipt['bytes'] < 0
+                    or not isinstance(receipt.get('findings'), list)
+                    or any(code not in ('PASSWORD_HASH_FORMAT', 'PASSWORD_FIELD_VALUE', 'SECRET_PATTERN', 'REGISTERED_SECRET_VALUE')
+                           for code in receipt['findings'])):
+                raise ValueError('OUTPUT_OBSERVATION_INVALID')
+            for code in receipt['findings']:
+                if code == 'SECRET_PATTERN':
+                    # Generic redaction also matches code/schema examples.
+                    # Keep this candidate visible without calling it a proven leak.
+                    incomplete.append('outputPatternReview')
+                else:
+                    add('outputObservations', [origin, index], code)
+            if receipt['status'] != 'OBSERVED':
+                incomplete.append('outputObservations:' + origin)
+            observed.append({**receipt, 'origin': origin})
+        identities = [row['sourceId'] for row in observation['records']]
+        if len(identities) != len(set(identities)):
+            raise ValueError('OUTPUT_OBSERVATION_DUPLICATE')
+        if scopes_complete(observation.get('scopes')):
+            expected_streams = {sha256(f"{scope['scope']}:{scope['scopeId']}:{kind}".encode()).hexdigest()
+                                for scope in observation['scopes'] if scope['state'] == 'ENDED'
+                                for kind in ('HOST_STDOUT', 'HOST_STDERR')}
+            actual_streams = {row['sourceId'] for row in observation['records']
+                              if row['kind'] in ('HOST_STDOUT', 'HOST_STDERR')}
+            if not expected_streams <= actual_streams:
+                incomplete.append('outputScopeReceipts')
+        if origin == 'host' and observation.get('policy'):
+            expected = {sha256(f"model-output:{row['detail']['sequence']}".encode()).hexdigest()
+                        for row in documents.get('telemetry') or [] if row.get('recordType') == 'USAGE'
+                        and row.get('detail', {}).get('outcome') in ('completed', 'incomplete', 'failed', 'refused')}
+            actual = {row['sourceId'] for row in observation['records'] if row['kind'] == 'LLM_OUTPUT'}
+            if not expected <= actual:
+                incomplete.append('modelOutputObservations')
+            # A returned sandbox result has a physical executionId, unlike
+            # file operations or a call interrupted before a result arrived.
+            # Its two streams were observed before the result was published.
+            expected_tools = set()
+            for row in documents.get('telemetry') or []:
+                if (row.get('kind') != 'MCP'
+                        or row.get('binding', {}).get('eventType') != 'MCP_TOOL_FINISHED'):
+                    continue
+                execution_id = row.get('detail', {}).get('executionId')
+                if execution_id is None:
+                    continue
+                try:
+                    _uuid4(execution_id)
+                except (ValueError, TypeError, AttributeError):
+                    incomplete.append('toolOutputObservations')
+                    continue
+                expected_tools.update((sha256(f'sandbox:{execution_id}:{stream}'.encode()).hexdigest(), kind)
+                    for stream, kind in (('stdout', 'TOOL_STDOUT'), ('stderr', 'TOOL_STDERR')))
+            actual_tools = {(row['sourceId'], row['kind']) for row in observation['records']
+                            if row['kind'] in ('TOOL_STDOUT', 'TOOL_STDERR')}
+            if not expected_tools <= actual_tools:
+                incomplete.append('toolOutputObservations')
+        if origin != 'host':
+            tasks = a2a['roles'][origin]['tasks']
+            if any(type(task.get('version')) is not int or not 1 <= task['version'] <= 4096 for task in tasks):
+                incomplete.append('a2aOutputObservations:' + origin)
+            else:
+                expected = {sha256(f"task:{task['taskId']}:{version}".encode()).hexdigest()
+                            for task in tasks for version in range(1, task['version'] + 1)}
+                actual = {row['sourceId'] for row in observation['records'] if row['kind'] == 'A2A_OUTPUT'}
+                if expected != actual:
+                    incomplete.append('a2aOutputObservations:' + origin)
+    if observation_sets:
+        coverage['outputObservations'] = {'scope': 'RUN_ATTRIBUTED_OUTPUT_BOUNDARIES', 'records': observed,
+            'knownValuesChecked': False,
+            'limitations': ['Receipts retain hashes/findings only; new known-values cannot be matched after collection.',
+                            'Unattributed OS output, raw file-descriptor writes, and interrupted Tool streams are outside this scope.']}
+        if secrets and observed:
+            # Explicitly requested arbitrary values cannot be recovered from a
+            # hash receipt. Raw registered files are still checked below, and a
+            # confirmed finding takes precedence over incomplete coverage.
+            incomplete.append('runtimeKnownValueMatching')
+    extra = documents.get('additionalOutputs')
+    if extra is not None:
+        if (not isinstance(extra, Mapping) or extra.get('runId') != documents.get('runId')
+                or extra.get('scope') != 'DECLARED_FILES_ONLY' or not isinstance(extra.get('items'), list)):
+            raise ValueError('Additional outputs belong to another Run or are malformed')
+        collected, unread = [], []
+        for index, item in enumerate(extra['items']):
+            if not isinstance(item, Mapping) or item.get('kind') not in ('ARTIFACT_FILE_CONTENT', 'AGENT_PROCESS_OUTPUT'):
+                raise ValueError('Additional outputs are malformed')
+            evidence = {key: item.get(key) for key in ('kind', 'sourceId', 'sha256', 'bytes', 'error')}
+            if item.get('status') == 'COLLECTED' and isinstance(item.get('text'), str):
+                walk('additionalOutputs', [index], item['text'], 0)
+                collected.append(evidence)
+            else:
+                unread.append(evidence)
+        coverage['additionalOutputs'] = {'scope': 'DECLARED_FILES_ONLY',
+            'collectionScope': extra.get('collectionScope', 'OPERATOR_DECLARED_FILES'), 'collected': collected, 'unread': unread}
+        if unread:
+            incomplete.append('additionalOutputs')
     if a2a is not None:
         coverage['a2aEmptyRoles'] = empty_roles
     # 판정 순서: 실제로 찾은 노출이 있으면 기록이 모자라도 FAIL(확인된 위반) → 기록이 모자라면 UNVERIFIED → 아니면 PASS.
@@ -219,16 +351,27 @@ def _check_a2a_shape(a2a, run_id):
         raise ValueError('A2A message document belongs to another Run or is malformed')
     roles, missing = a2a.get('roles'), a2a.get('missingRoles')
     if (not isinstance(roles, Mapping) or not isinstance(missing, list) or set(roles) & set(missing)
-            or sorted([*roles, *missing]) != sorted(A2A_ROLES)
+            or sorted([*roles, *missing]) != sorted(_a2a_roles(a2a))
             or any(not isinstance(rows, Mapping) or any(not isinstance(rows.get(name), list) for name in A2A_ROWS)
                    for rows in roles.values())):
         raise ValueError('A2A message document belongs to another Run or is malformed')
 
 
-def _working_roles(events):
-    # Run 기록(사건)으로 보아 이 Run에서 일을 받은 역할. 사건을 못 받았으면 네 역할 모두로 본다.
+def _a2a_roles(a2a):
+    # 문서가 담아야 할 저장소 목록. Single 문서는 스키마 2와 구조 표시가 함께 있어야 한다(한쪽만 있으면 모양이 틀린 문서).
+    if a2a.get('architecture') == 'SINGLE_AGENT' and a2a.get('schemaVersion') == 2:
+        return SINGLE_A2A_ROLES
+    if a2a.get('architecture') not in (None, 'MULTI_AGENT') or a2a.get('schemaVersion', 1) != 1:
+        raise ValueError('A2A message document belongs to another Run or is malformed')
+    return A2A_ROLES
+
+
+def _working_roles(events, a2a=None):
+    # Run 기록(사건)으로 보아 이 Run에서 일을 받은 역할. 사건을 못 받았으면 모든 역할로 본다.
+    # Single 문서면 단계 역할 대신 하나뿐인 저장소(SINGLE_AGENT)를 돌려준다.
+    single = a2a is not None and _a2a_roles(a2a) == SINGLE_A2A_ROLES
     if not isinstance(events, list):
-        return set(A2A_ROLES)
+        return set(SINGLE_A2A_ROLES if single else A2A_ROLES)
     kinds = {(event.get('eventType'), event.get('actor')) for event in events if isinstance(event, Mapping)}
     found = set()
     if any(kind == 'PLANNER_OUTPUT_VALIDATED' for kind, _actor in kinds):
@@ -236,7 +379,7 @@ def _working_roles(events):
     if any(kind in ('SNAPSHOT_FROZEN', 'DEVELOPER_ARTIFACTS_VALIDATED', 'FIX_COMPLETED') for kind, _actor in kinds):
         found.add('DEVELOPER')
     found |= {actor for kind, actor in kinds if kind == 'VALIDATION_FINISHED' and actor in ('QA', 'SECURITY')}
-    return found
+    return set(SINGLE_A2A_ROLES) if single and found else found
 
 
 # ---------------------------------------------------------------- REQ-008: 추적 가능성

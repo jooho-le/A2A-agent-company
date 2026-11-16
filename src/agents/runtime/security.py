@@ -269,7 +269,9 @@ class SecurityAgentExecutor(AgentExecutor):
                     output=build_security_output_contract(execution.metadata.requirement_ids, measured.finding_ids,
                                                           measured.source_paths, services.test_selectors or None),
                     budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
-                    usage_sink=usage_sink, call_started_sink=call_started_sink)
+                    usage_sink=usage_sink, call_started_sink=call_started_sink,
+                    output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                    input_observed_sink=telemetry.model_input if telemetry is not None else None)
                 decision = validate_security_decision(result.data, execution.metadata.requirement_ids, measured.finding_ids,
                                                       measured.source_paths, services.test_selectors or None)
                 if decision.kind == "READY" and services.test_selectors:

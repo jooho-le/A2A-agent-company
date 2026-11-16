@@ -53,10 +53,24 @@ def collect_records(repository, run_id):
               "events": [event.to_trace_json() for event in events], "eventsTotal": total,
               "issues": [item.model_dump(mode="json", by_alias=True) for item in repository.list_issue_records(run_id)],
               "toolAttempts": repository.list_tool_attempts(run_id), "usage": usage, "snapshotConsistent": True}
+    # 같은 읽기 트랜잭션의 예산 장부. 카운터·한도만 포함하고 프롬프트/키는 저장하지 않는다.
+    with repository._connection() as connection:
+        has_budget = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_budget_ledger'").fetchone()
+    if has_budget:
+        try:
+            budget = store.load_budget(run_id, validate_clock=False)
+            bundle['budgetEvidence'] = {'schemaVersion': 1, 'runId': str(run_id),
+                'snapshot': budget.model_dump(mode='json') if budget is not None else None}
+        except Exception:
+            bundle['budgetEvidence'] = {'schemaVersion': 1, 'runId': str(run_id), 'snapshot': None,
+                                        'reason': 'BUDGET_LEDGER_INVALID'}
     trace = {"runId": str(run_id), "events": bundle["events"], "eventsTotal": total,
              "issues": bundle["issues"], "artifacts": [configuration.to_artifact_json(), *artifacts],
              "toolAttempts": bundle["toolAttempts"], "telemetry": telemetry if available else None,
              "telemetryTotal": telemetry_total}
+    from orchestrator.observability import collect_observations
+    with repository._connection() as connection:
+        trace['observations'] = collect_observations(connection, run_id)
     return bundle, trace
 
 

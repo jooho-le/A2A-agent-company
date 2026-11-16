@@ -102,8 +102,10 @@ def _check_same_sources(report, metrics, run_bundle, trace, runner, regression=N
     if runner is not None and runner.get('evaluationId') != report.get('evaluationId'):
         raise ValueError('Runner details belong to another evaluation')
     if regression is not None and (regression.get('runId') != run_id
-                                   or regression.get('suiteSha256') != (report.get('suite') or {}).get('sha256')):
-        raise ValueError('Regression results differ from the evaluated Run or protected suite')
+                                   or regression.get('suiteSha256') != (report.get('suite') or {}).get('sha256')
+                                   or type(regression.get('finalCodeVersion')) is not int
+                                   or regression['finalCodeVersion'] != version):
+        raise ValueError('Regression results differ from the evaluated Run, protected suite or final code version')
 
 
 def _exposure_line(exposure: Optional[Mapping]) -> str:
@@ -238,9 +240,10 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
     if regression:
         # 비교할 수 없는 검사(미검증)가 있으면 숨은 Regression이 있을 수 있어 "최소 n건"으로 적는다.
         count = regression.get('regressionCount')
-        lines += ['', '## Regression(수정으로 새로 생긴 실패)', '',
+        lines += ['', '## Regression(버전 간 PASS → FAIL)', '',
                   f"- {'' if regression.get('complete') else '최소 '}{count}건 · 비교한 버전 쌍 "
-                  f"{regression.get('comparedVersionPairs')}개 · 비교 못 한 검사 {regression.get('uncomparedChecks')}개"]
+                  f"{regression.get('comparedVersionPairs')}개 · 비교 못 한 검사 {regression.get('uncomparedChecks')}개",
+                  '- 같은 검사 결과의 변화이며, 수정이 원인인지 확정하려면 동일 입력 재실행으로 확인해야 합니다.']
         lines += [f"  - v{item['fromVersion']} → v{item['toVersion']}: {_cell(titles.get(item['checkId'], item['checkId']).split(' ', 1)[0])}"
                   for item in regression.get('regressions', [])]
     if reference_report is not None:

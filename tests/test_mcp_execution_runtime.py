@@ -4,7 +4,9 @@ import asyncio
 from dataclasses import replace
 import json
 from pathlib import Path
+import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -180,20 +182,52 @@ class ExecutionRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slow_sync_verifier_does_not_block_event_loop_or_extend_deadline(self):
         self.session.errors = ["TIMEOUT"]
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        release, returned = threading.Event(), threading.Event()
+        observed = {}
+
         def slow(record, token, error):
-            time.sleep(0.15)
-            return self.proof(record, token, error)
+            loop.call_soon_threadsafe(entered.set)
+            # This is a deadlock watchdog, not the tool's time budget. The
+            # event loop must release this worker while it is still waiting.
+            observed['released_by_loop'] = release.wait(5)
+            try:
+                return self.proof(record, token, error)
+            finally:
+                returned.set()
+
         executor = self.make_executor(safety_verifier=slow)
-        ticks = []
-        async def tick():
-            await asyncio.sleep(0.015)
-            ticks.append(True)
-        ticker = asyncio.create_task(tick())
-        with self.assertRaises(TrackedMCPError):
-            await executor.invoke("run_build", self.arguments, deadline_monotonic=time.monotonic() + 0.1)
-        await ticker
-        self.assertEqual(ticks, [True])
+        # Freeze only the two capability clocks while real SQLite/Git journal
+        # preparation runs. Host load must not exhaust a 100ms budget before
+        # the first call, which would test setup speed rather than inspection.
+        now, deadline = [0.0], 10.0
+        clock = SimpleNamespace(monotonic=lambda: now[0])
+        with patch('mcp_tools.execution_runtime.time', clock), patch('mcp_tools.client.time', clock):
+            invocation = asyncio.create_task(executor.invoke(
+                'run_build', self.arguments, deadline_monotonic=deadline))
+            try:
+                await asyncio.wait_for(entered.wait(), 5)
+                self.assertFalse(returned.is_set(), 'synchronous verifier blocked the event loop')
+                self.assertFalse(invocation.done())
+                # The proof now arrives after the original shared deadline.
+                # It must not authorize a second physical attempt.
+                now[0] = deadline + 1
+                release.set()
+                with self.assertRaises(TrackedMCPError) as caught:
+                    await asyncio.wait_for(invocation, 5)
+                self.assertEqual(caught.exception.retry_decision, RetryDecision.DO_NOT_RETRY)
+                self.assertTrue(observed['released_by_loop'])
+            finally:
+                release.set()
+                if not invocation.done():
+                    invocation.cancel()
+                await asyncio.gather(invocation, return_exceptions=True)
         self.assertEqual(len(self.session.calls), 1)
+        evidence = self.record(executor).to_tool_evidence()
+        self.assertEqual(len(evidence.attempts), 1)
+        self.assertEqual(evidence.retries_used, 0)
+        self.assertEqual(evidence.outcome, ToolExecutionOutcome.UNVERIFIED)
 
     async def test_async_verifier_uses_same_exact_proof(self):
         self.session.errors = ["TIMEOUT"]

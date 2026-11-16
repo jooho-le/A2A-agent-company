@@ -17,7 +17,8 @@
 #      점수(scoring.exam_score)는 요구사항별 같은 비중이고, 순환용 참고 보고서는 차이의 차이(보조 지표) 계산에만 쓴다.
 #   6) (선택) Run 기록이 있으면 trace_checks로 노출(REQ-006 중 Run 기록, A2A 본문 문서를 주면 그것까지)과 추적(REQ-008)을 함께 본다.
 #
-# 이 모듈이 하지 않는 일: Snapshot을 시스템에서 받아 오는 일(dev snapshot_export가 꺼내고 experiment score가 넘김), 결과 보관(experiment score), A2A 전송.
+# 이 모듈이 하지 않는 일: Snapshot 수집(dev snapshot_export), 공개 결과 보관(experiment score), A2A 전송.
+# 시험 입력 원본은 private_input_dir에만 저장한다. 공개 결과에는 해시·개수만 남긴다.
 #
 # [처음 읽는 분을 위한 용어]
 # - Snapshot: 개발 실행이 고정(동결)한 코드 묶음. dev는 이것을 압축하지 않은 tar 파일 하나로 만들고, 그 파일 전체의
@@ -57,6 +58,10 @@ MAX_FILE_BYTES = 8 * 1024 * 1024      # 파일 하나의 최대 크기(8MiB)
 MAX_STATIC_BYTES = 4 * 1024 * 1024   # dev Security 승인 함수에 넘기는 구현 크기 한도와 같은 값
 RUNNER_FILE = '_unit_runner.py'      # dev가 컨테이너에 읽기 전용으로 넣는 실행기 이름과 같다
 COVERAGE_FILE = '_coverage_runner.py'  # 줄 기록 실행기(coverage_runner.py)를 넣는 이름
+REPLAY_FILE = '_replay_runner.py'
+IMAGE_LOCK_PATHS = ('/opt/evaluation/requirements.lock', '/opt/owned-runtime/requirements.lock')
+UNCERTAIN_CLEANUP_ERRORS = frozenset({'TIMEOUT_CLEANUP_FAILED', 'TIMEOUT_CLEANUP_TIMEOUT',
+                                    'TIMEOUT_CLEANUP_UNAVAILABLE'})
 EXAMS = ('pilot', 'final')           # 채점에 쓸 수 있는 시험지(순환용 practice는 참고 채점에만)
 
 
@@ -74,6 +79,9 @@ class RunnerOutcome:
     image_digest: Optional[str]       # 실제로 쓴 컨테이너 이미지 해시. 확인할 수 없는 실행(로컬)은 None
     kind: str                         # 'docker' 또는 'local'
     coverage: Optional[dict] = None   # (줄 기록 실행기만) 파일별 실행 가능한 줄·지나간 줄·지나가지 않은 줄
+    private_inputs: Optional[dict] = None  # evaluator-only; never included by to_dict()
+
+    detail_results: Optional[dict] = None  # safe observations from the same protected execution
 
     def to_dict(self):
         # 증거·결과에 남길 실행 정보(보고서 본문은 따로 담는다).
@@ -85,18 +93,18 @@ def _checked_outcome(outcome: RunnerOutcome) -> RunnerOutcome:
     # JSON이 있어도 실행 오류·신호 종료·건수/종료 코드 불일치는 검증 근거가 아니다.
     #   종료 코드 규칙(dev 실행기): 0 = 모두 통과, 1 = 실패가 있음, 2 = 실행기 오류. 음수는 신호로 강제 종료된 경우다.
     if outcome.error is not None:
-        return replace(outcome, report=None)
+        return replace(outcome, report=None, coverage=None, detail_results=None)
     if type(outcome.exit_code) is not int or outcome.exit_code not in (0, 1):
-        return replace(outcome, report=None, error='RUNNER_EXIT_INVALID')
+        return replace(outcome, report=None, coverage=None, detail_results=None, error='RUNNER_EXIT_INVALID')
     try:
         valid = _valid_report(outcome.report)
     except (TypeError, ValueError):
         valid = False
     if not valid:
-        return replace(outcome, report=None, error='UNIT_REPORT_INVALID')
+        return replace(outcome, report=None, coverage=None, detail_results=None, error='UNIT_REPORT_INVALID')
     expected_exit = 1 if outcome.report['failed'] else 0  # 보고서에 실패가 있으면 1, 없으면 0이어야 앞뒤가 맞는다
     if outcome.exit_code != expected_exit:
-        return replace(outcome, report=None, error='RUNNER_EXIT_REPORT_MISMATCH')
+        return replace(outcome, report=None, coverage=None, detail_results=None, error='RUNNER_EXIT_REPORT_MISMATCH')
     return outcome
 
 
@@ -125,6 +133,38 @@ def _parse_coverage(stdout: str) -> Optional[dict]:
     return None
 
 
+def _parse_details(stdout):
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('DETAIL_DUPLICATE_KEY')
+            value[key] = item
+        return value
+    rows = []
+    for line in stdout.splitlines()[:-1]:
+        if len(line.encode('utf-8')) > 1024 * 1024:
+            continue
+        try:
+            value = json.loads(line, object_pairs_hook=unique)
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(value, dict) and set(value) == {'protected-details-v1'}:
+            rows.append(value['protected-details-v1'])
+    return rows[0] if len(rows) == 1 and isinstance(rows[0], dict) else None
+
+
+def _parse_private_inputs(stdout):
+    for line in reversed(stdout.splitlines()[:-1]):
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and set(value) == {'protected-inputs-v1'}:
+            return value['protected-inputs-v1'] if isinstance(value['protected-inputs-v1'], dict) else None
+    return None
+
+
 class LocalRunner:
     # 합성 표본(우리가 만든 회원가입 서비스) 시험용 실행기. 같은 컴퓨터의 새 파이썬 프로세스에서 dev 실행기를 돌린다.
     # 실제 생성 코드를 호스트에서 실행하면 안 되므로 trusted=True를 명시해야만 쓸 수 있다.
@@ -148,7 +188,11 @@ class LocalRunner:
                 'spec = importlib.util.spec_from_file_location("trusted_runner", sys.argv[1])\n'
                 'runner = importlib.util.module_from_spec(spec)\n'
                 'spec.loader.exec_module(runner)\n'
-                'if hasattr(runner, "run_tests_with_coverage"):\n'
+                'if hasattr(runner, "run_tests_with_inputs"):\n'
+                '    report, code, inputs = runner.run_tests_with_inputs(sys.argv[2], sys.argv[3], sys.argv[4])\n'
+                '    sys.__stdout__.write(json.dumps({"protected-inputs-v1": inputs}) + "\\n")\n'
+                '    sys.__stdout__.write(json.dumps({"protected-details-v1": runner.detail_results()}) + "\\n")\n'
+                'elif hasattr(runner, "run_tests_with_coverage"):\n'
                 '    report, code, coverage = runner.run_tests_with_coverage(sys.argv[2], sys.argv[3], sys.argv[4])\n'
                 '    sys.__stdout__.write(json.dumps({"coverage-v1": coverage}) + "\\n")\n'
                 'else:\n'
@@ -164,7 +208,7 @@ class LocalRunner:
                 return RunnerOutcome(None, None, 'TIMEOUT', None, self.kind)
         report, error = _parse_runner_output(done.stdout)
         return _checked_outcome(RunnerOutcome(report, done.returncode, error, None, self.kind,
-                                              _parse_coverage(done.stdout)))
+                                              _parse_coverage(done.stdout), _parse_private_inputs(done.stdout), _parse_details(done.stdout)))
 
 
 class DockerRunner:
@@ -208,22 +252,78 @@ class DockerRunner:
         #   --network none: 인터넷 차단, --read-only: 루트 파일 시스템 읽기 전용, --user 10001: 관리자 아닌 사용자,
         #   --cap-drop ALL·no-new-privileges: 특수 권한 제거, --pull never: 이미지를 새로 받아 오지 않음,
         #   --tmpfs: 쓰기는 메모리 위 임시 폴더(/tmp·/work)에만, --mount ...readonly: Snapshot·보호 테스트는 읽기만
-        tmpfs = f'rw,nosuid,nodev,size={self.tmpfs_bytes},mode=1777'
-        args = ['run', '--rm', '--name', name, '--pull', 'never', '--read-only', '--network', 'none',
-                '--user', '10001:10001', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
-                '--cpus', str(self.cpus), '--memory', str(self.memory_bytes), '--memory-swap', str(self.memory_bytes),
-                '--pids-limit', str(self.pids), '--ipc', 'none', '--workdir', '/work',
-                '--tmpfs', f'/tmp:{tmpfs}', '--tmpfs', f'/work:{tmpfs}']
+        args = self._base_command(name)
         for source, target in ((snapshot, '/snapshot'), (inputs, '/inputs')):
             # --mount 값은 쉼표로 항목을 나누므로, 경로에 쉼표·줄바꿈·따옴표가 있으면 다른 설정으로 끼어들 수 있어 거부한다.
             if any(char in str(source) for char in (',', '\n', '\r', '"')):
                 raise ValueError('Mount path contains separator characters')
             args += ['--mount', f'type=bind,src={source},dst={target},readonly']
-        if script not in (RUNNER_FILE, COVERAGE_FILE):
+        if script not in (RUNNER_FILE, COVERAGE_FILE, REPLAY_FILE):
             raise ValueError('Unknown runner script')
         args += ['--entrypoint', self.python, self.image, '-I', '-B', f'/inputs/{script}',
                  '--kind', 'PROTECTED', '--directory', directory, '--pattern', pattern]
         return args
+
+    def _base_command(self, name):
+        tmpfs = f'rw,nosuid,nodev,size={self.tmpfs_bytes},mode=1777'
+        return ['run', '--rm', '--name', name, '--pull', 'never', '--read-only', '--network', 'none',
+                '--user', '10001:10001', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+                '--cpus', str(self.cpus), '--memory', str(self.memory_bytes), '--memory-swap', str(self.memory_bytes),
+                '--pids-limit', str(self.pids), '--ipc', 'none', '--workdir', '/work',
+                '--tmpfs', f'/tmp:{tmpfs}', '--tmpfs', f'/work:{tmpfs}']
+
+    def image_dependency_lock(self):
+        """Observe approved image lock bytes without mounting or running source.
+
+        This binds the declared build lock to the image, not a fresh proof that
+        every installed package matches it. Image preparation owns installation
+        from hashed wheels and pip check; its immutable digest is pinned here.
+        """
+        result = {'status': 'UNVERIFIED', 'sha256': None, 'paths': [], 'imageDigest': None,
+                  'scope': 'APPROVED_IMAGE_LOCK_BYTES', 'error': 'IMAGE_DEPENDENCY_LOCK_UNAVAILABLE'}
+        digest = self.image_digest()
+        if digest is None:
+            return {**result, 'error': 'IMAGE_UNAVAILABLE_OR_MISMATCH'}
+        result['imageDigest'] = digest
+        code = ('import hashlib,json\nfrom pathlib import Path\nlocks={}\n'
+                f'for name in {IMAGE_LOCK_PATHS!r}:\n'
+                ' p=Path(name)\n'
+                ' if p.is_file():\n'
+                f'  assert 0 < p.stat().st_size <= {MAX_FILE_BYTES}\n'
+                '  locks[name]="sha256:"+hashlib.sha256(p.read_bytes()).hexdigest()\n'
+                'print(json.dumps({"format":"evaluation-image-lock-v1","locks":locks}))\n')
+        name = f'eval-image-lock-{uuid.uuid4().hex[:12]}'
+        try:
+            done = self._call(self._base_command(name) +
+                              ['--entrypoint', self.python, self.image, '-I', '-B', '-c', code], min(self.timeout, 60))
+        except subprocess.TimeoutExpired:
+            cleanup = self._remove_timed_out_container(name)
+            return {**result, 'error': 'IMAGE_DEPENDENCY_LOCK_TIMEOUT' + ('_' + cleanup if cleanup else '')}
+        except OSError:
+            return result
+        try:
+            payload = json.loads(done.stdout)
+            locks = payload['locks']
+            if (done.returncode != 0 or payload.get('format') != 'evaluation-image-lock-v1'
+                    or not isinstance(locks, dict) or not locks or not set(locks) <= set(IMAGE_LOCK_PATHS)
+                    or any(not isinstance(value, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', value)
+                           for value in locks.values()) or len(set(locks.values())) != 1):
+                return result
+        except (KeyError, TypeError, ValueError):
+            return result
+        return {**result, 'status': 'OBSERVED', 'sha256': next(iter(locks.values())),
+                'paths': sorted(locks), 'error': None}
+
+    def _remove_timed_out_container(self, name):
+        # Killing the client after its timeout does not stop daemon-owned code.
+        # A failed/unknown removal must not be reported as confirmed cleanup.
+        try:
+            removed = self._call(('rm', '-f', name), 60)
+        except subprocess.TimeoutExpired:
+            return 'CLEANUP_TIMEOUT'
+        except OSError:
+            return 'CLEANUP_UNAVAILABLE'
+        return None if removed.returncode == 0 else 'CLEANUP_FAILED'
 
     def run(self, snapshot: Path, inputs: Path, directory: str, pattern: str,
             script: str = RUNNER_FILE) -> RunnerOutcome:
@@ -235,16 +335,13 @@ class DockerRunner:
         try:
             done = self._call(self.command(name, snapshot, inputs, directory, pattern, script), self.timeout)
         except subprocess.TimeoutExpired:
-            try:
-                self._call(('rm', '-f', name), 60)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-            return RunnerOutcome(None, None, 'TIMEOUT', digest, self.kind)
+            cleanup = self._remove_timed_out_container(name)
+            return RunnerOutcome(None, None, 'TIMEOUT' + ('_' + cleanup if cleanup else ''), digest, self.kind)
         except OSError:
             return RunnerOutcome(None, None, 'DOCKER_UNAVAILABLE', None, self.kind)
         report, error = _parse_runner_output(done.stdout)
         return _checked_outcome(RunnerOutcome(report, done.returncode, error, digest, self.kind,
-                                              _parse_coverage(done.stdout)))
+                                              _parse_coverage(done.stdout), _parse_private_inputs(done.stdout), _parse_details(done.stdout)))
 
 
 def _sha256(data: bytes) -> str:
@@ -334,9 +431,21 @@ def _static_assessment(files: Mapping[str, bytes], criteria: dict, contract: dic
 
 def _coverage_summary(coverage: Optional[dict]) -> Optional[dict]:
     # 줄 기록을 요약한다: 전체·테스트가 불러온 파일의 실행 가능한 줄 수와 지나간 줄 수, 파일별 지나가지 않은 줄.
-    if not coverage:
+    if coverage is None:
         return None
+    if not isinstance(coverage, dict) or set(coverage) != {'files'} or not isinstance(coverage['files'], dict):
+        raise ValueError('COVERAGE_INVALID')
     files = coverage['files']
+    for path, item in files.items():
+        if (not isinstance(path, str) or not path.endswith('.py') or path.startswith('/') or '\\' in path
+                or any(part in ('', '.', '..') for part in path.split('/'))
+                or not isinstance(item, dict) or set(item) != {'lines', 'executed', 'missing'}):
+            raise ValueError('COVERAGE_INVALID')
+        lines, executed, missing = item['lines'], item['executed'], item['missing']
+        if (type(lines) is not int or type(executed) is not int or not 0 <= executed <= lines
+                or not isinstance(missing, list) or any(type(line) is not int or line < 0 for line in missing)
+                or missing != sorted(set(missing)) or len(missing) + executed != lines):
+            raise ValueError('COVERAGE_INVALID')
     loaded = {path: item for path, item in files.items() if item['executed']}  # 테스트 중에 한 줄이라도 지나간 파일
 
     def rate(group):
@@ -351,7 +460,8 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
                             criteria: Optional[dict] = None, evaluation_id: Optional[str] = None,
                             created_at: Optional[str] = None, source_run: Optional[SourceRunSummary] = None,
                             run_bundle: Optional[Mapping] = None, trace_documents: Optional[Mapping] = None,
-                            known_values: Iterable[str] = ()) -> dict:
+                            known_values: Iterable[str] = (), private_input_dir: Optional[Path] = None,
+                            replay_record: Optional[Mapping] = None, replay_mode: str = 'repeat') -> dict:
     # archive        : 최종 Snapshot의 dev canonical tar 바이트
     # expected       : 신뢰할 수 있는 경로로 받은 기준 Manifest(어떤 코드·환경을 채점해야 하는지)
     # runner         : DockerRunner(실제 평가) 또는 LocalRunner(trusted=True, 합성 표본 시험)
@@ -379,13 +489,21 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     suite = protected_tests.load_suite()
     sets = {exam: protected_tests.evaluation_inputs(scenario_contract, exam, suite),
             'practice': protected_tests.evaluation_inputs(scenario_contract, 'practice', suite)}
+    from .replay import validate_replay_binding, record_inputs, public_replay_status, public_unit_report
+    if replay_record is not None:
+        validate_replay_binding(replay_record, expected=expected, source_run_id=source_run_id,
+                                architecture=architecture, exam=exam, scenario_contract=scenario_contract,
+                                runner=runner, mode=replay_mode)
     evidence_ids = {name: str(uuid.uuid4()) for name in (exam, 'practice', 'coverage', 'static')}
     evaluation_id = evaluation_id or str(uuid.uuid4())
     reference_id = str(uuid.uuid4())
     created_at = created_at or datetime.now(timezone.utc).isoformat()
     snapshot_sha256 = _sha256(bytes(archive)) if isinstance(archive, (bytes, bytearray)) else None
     snapshot_info = {'sha256': snapshot_sha256, 'matchesExpected': snapshot_sha256 == expected.snapshot_sha256,
-                     'lockFound': False, 'files': 0, 'error': None, 'examExposure': []}
+                     'lockFound': False, 'files': 0, 'error': None, 'examExposure': [],
+                     'imageDependencyLock': {'status': 'NOT_OBSERVED', 'sha256': None,
+                         'scope': 'APPROVED_IMAGE_LOCK_BYTES',
+                         'error': 'NOT_RUN' if isinstance(runner, DockerRunner) else 'NON_DOCKER_RUNNER'}}
     kind = getattr(runner, 'kind', 'unknown')
     outcomes = {name: RunnerOutcome(None, None, 'NOT_RUN', None, kind) for name in (exam, 'practice', 'coverage')}
     static_requirements = static_evidence = static_error = None
@@ -410,7 +528,26 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     #       돌린다. 이어서 정적 판정(보조).
     if files is not None:
         snapshot_info['files'] = len(files)
-        snapshot_info['lockFound'] = any('sha256:' + _sha256(data) == expected.dependency_lock_hash for data in files.values())
+        # SCN-001's public starting contract fixes this path. An unrelated file
+        # containing the expected bytes cannot stand in for the dependency lock.
+        lock = files.get('requirements.lock')
+        snapshot_info['lockFound'] = lock is not None and 'sha256:' + _sha256(lock) == expected.dependency_lock_hash
+        if not snapshot_info['lockFound']:
+            files, snapshot_info['error'] = None, 'DEPENDENCY_LOCK_MISSING_OR_MISMATCH'
+            runner_error = snapshot_info['error']
+        elif isinstance(runner, DockerRunner):
+            observed_lock = runner.image_dependency_lock()
+            snapshot_info['imageDependencyLock'] = observed_lock
+            failure = observed_lock['error']
+            if failure is None and observed_lock['sha256'] != expected.dependency_lock_hash:
+                failure = 'IMAGE_DEPENDENCY_LOCK_MISMATCH'
+            if failure is None and observed_lock['imageDigest'] != expected.container_image_digest:
+                failure = 'IMAGE_DIGEST_MISMATCH'
+            if failure is not None:
+                files, snapshot_info['error'] = None, failure
+                runner_error = failure
+                snapshot_info['imageDependencyLock'] = {**observed_lock, 'status': 'UNVERIFIED', 'error': failure}
+    if files is not None:
         with tempfile.TemporaryDirectory(prefix='eval-final-') as directory:
             root = Path(directory)
             _write_tree(root / 'snapshot', files)
@@ -418,17 +555,38 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
                          for path, content in protected_tests.protected_files(scope, suite).items()}
             protected[RUNNER_FILE] = _runner_source()
             protected[COVERAGE_FILE] = (Path(__file__).resolve().parent / 'coverage_runner.py').read_bytes()
+            protected[REPLAY_FILE] = (Path(__file__).resolve().parent / 'replay_runner.py').read_bytes()
             _write_tree(root / 'inputs', protected)
-            os.chmod(root, 0o755)  # 컨테이너 안 일반 사용자(10001)도 읽을 수 있게 임시 폴더 권한을 연다
-            for name, scope, script in ((exam, exam, RUNNER_FILE), ('practice', 'practice', RUNNER_FILE),
+            # Docker mounts snapshot/ and inputs/ themselves (both 0755). The
+            # host-only parent need not be traversable by other host users.
+            os.chmod(root, 0o700)
+            for name, scope, script in ((exam, exam, REPLAY_FILE), ('practice', 'practice', REPLAY_FILE),
                                         ('coverage', exam, COVERAGE_FILE)):
+                request = ({'tests': replay_record['scopes'][name]['tests']}
+                           if replay_record is not None and name != 'coverage' else {})
+                replay_path = root / 'inputs' / '_input_replay.json'
+                replay_path.write_text(json.dumps(request), encoding='utf-8')
+                # Like the protected files, this bind-mounted input must be
+                # readable by container UID 10001 even under host umask 077.
+                # The host-only parent remains 0700; persisted tapes are 0600.
+                replay_path.chmod(0o644)
                 outcomes[name] = _checked_outcome(runner.run(  # 사용자가 넘긴 실행기도 같은 규칙으로 확인한다.
                     root / 'snapshot', root / 'inputs', suite['sourceDirectory'], suite['scopes'][scope]['pattern'],
                     script=script))
+                if outcomes[name].error in UNCERTAIN_CLEANUP_ERRORS:
+                    # Do not overlap another evaluation with a possibly live
+                    # previous container. Keep the original timeout cause.
+                    for pending, outcome in outcomes.items():
+                        if outcome.error == 'NOT_RUN':
+                            outcomes[pending] = replace(outcome, error='NOT_RUN_AFTER_UNVERIFIED_CLEANUP')
+                    break
         runner_error = outcomes[exam].error or 'TEST_RUNNER_ERROR'
         static_requirements, static_evidence, static_error = _static_assessment(
             files, criteria, dict(scenario_contract), evidence_ids['static'])
 
+    private_outcomes = outcomes
+    outcomes = {name: replace(outcome, report=public_unit_report(outcome.report, outcome.private_inputs))
+                for name, outcome in outcomes.items()}
     # 5) 보고서: 채점 시험지 보고서와 순환용 시험지 참고 보고서. 실제로 확인한 신분(Snapshot 해시·lock·이미지)이
     #    하나라도 없으면 Manifest 없음으로 두어 결과를 쓰지 않는다. 확인하지 않은 값을 기준값으로 채우지 않는다.
     def build(name, report_id):
@@ -446,6 +604,12 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
             expected=expected, observed=observed, plan=inputs['plan'], results=results, bindings=inputs['bindings'],
             source_run=source_run)
     report, reference = build(exam, evaluation_id), build('practice', reference_id)
+    # Tape errors are a reproduction limitation, separate from observed product
+    # failures. The reproduction API never treats mismatched inputs as evidence.
+    input_record = record_inputs(private_input_dir, outcomes=private_outcomes, report=report,
+                                 reference_report=reference, expected=expected, scenario_contract=scenario_contract,
+                                 source_run_id=source_run_id, architecture=architecture, exam=exam, runner=runner)
+    replay_status = public_replay_status(outcomes, exam, replay_record) if replay_record is not None else None
     # 6) (선택) Run 기록 검사와 증거 문서 정리
     trace = None
     if run_bundle is not None or trace_documents is not None:
@@ -455,17 +619,38 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
                               if trace_documents is not None else None)}
     evidence = {evidence_ids[name]: {'kind': 'UNIT_TEST_REPORT', 'exam': name, 'runner': outcomes[name].to_dict(),
                                      'report': outcomes[name].report} for name in (exam, 'practice')}
-    coverage = _coverage_summary(outcomes['coverage'].coverage)
+    # 보조 실행이 실패하거나 자료가 손상돼도 주 시험 결과를 버리지 않는다.
+    # 다른 환경·다른 파일의 줄 기록을 현재 Snapshot의 확인된 커버리지로 표시하지 않는다.
+    coverage_outcome = outcomes['coverage']
+    coverage, coverage_error = None, coverage_outcome.error
+    if coverage_error is None:
+        if (coverage_outcome.image_digest != expected.container_image_digest or not snapshot_info['lockFound']):
+            coverage_error = 'COVERAGE_ENVIRONMENT_UNVERIFIED'
+        elif coverage_outcome.coverage is None:
+            coverage_error = 'COVERAGE_UNAVAILABLE'
+        else:
+            try:
+                coverage = _coverage_summary(coverage_outcome.coverage)
+                if not set(coverage['files']) <= set(files or {}):
+                    raise ValueError('COVERAGE_INVALID')
+                if set(coverage['files']) != {path for path in files if path.endswith('.py')}:
+                    coverage, coverage_error = None, 'COVERAGE_INCOMPLETE'
+            except (KeyError, TypeError, ValueError):
+                coverage, coverage_error = None, 'COVERAGE_INVALID'
     evidence[evidence_ids['coverage']] = {'kind': 'LINE_COVERAGE', 'runner': outcomes['coverage'].to_dict(),
-                                          'coverage': outcomes['coverage'].coverage}
+                                          'coverage': coverage_outcome.coverage if coverage is not None else None,
+                                          'error': coverage_error}
     if static_evidence is not None or static_error is not None:
         evidence[evidence_ids['static']] = {'kind': 'STATIC_ASSESSMENT', 'error': static_error, 'evidence': static_evidence}
     supplementary = {
         'examExposure': snapshot_info['examExposure'],
-        'coverage': {'evidenceId': evidence_ids['coverage'], 'error': outcomes['coverage'].error, **(coverage or {})},
+        'coverage': {'evidenceId': evidence_ids['coverage'], 'error': coverage_error, **(coverage or {})},
         'static': {'evidenceId': evidence_ids['static'], 'error': static_error,
                    'requirements': static_requirements if static_requirements is not None else None},
     }
+    from .check_details import build_details
+    check_details = build_details(report, outcomes[exam].detail_results, exam=exam,
+                                  runner_error=outcomes[exam].error)
     score, reference_score = exam_score(report), exam_score(reference)
     if snapshot_info.get('examExposure'):
         # 점수에 관한 값은 모두 비운다(실행하지 않았으므로 "미검증을 모두 통과로 볼 때의 위쪽 끝"도 의미가 없다).
@@ -475,7 +660,8 @@ def evaluate_final_snapshot(*, archive: bytes, expected: ExecutionManifest, scen
     return {'exam': exam, 'report': report, 'score': score,
             'referenceReport': reference, 'referenceScore': reference_score,
             'supplementary': supplementary, 'evidence': evidence, 'snapshot': snapshot_info,
-            'runner': {**outcomes[exam].to_dict(), 'evaluationId': evaluation_id}, 'trace': trace}
+            'runner': {**outcomes[exam].to_dict(), 'evaluationId': evaluation_id}, 'trace': trace,
+            'inputRecord': input_record, 'inputReplay': replay_status, 'checkDetails': check_details}
 
 
 def _runner_source() -> bytes:

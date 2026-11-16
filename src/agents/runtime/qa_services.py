@@ -38,6 +38,7 @@ from orchestrator.domain.models import WorkflowRun, WorkflowStep
 from orchestrator.domain.states import AgentRole, A2ATaskState, WorkflowStatus, WorkflowStepStatus
 from orchestrator.domain.tool_evidence import ToolExecutionOutcome
 from orchestrator.domain.validation_artifacts import QAReportArtifact, QATestResult, ValidationOutcome
+from orchestrator.domain.validation_feedback import case_feedback
 from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
 from orchestrator.sandbox.runtime import SandboxRuntime
 from orchestrator.workspaces.registry import WorkspaceRegistry
@@ -352,10 +353,13 @@ class QARuntimeServices:
                 code = "PLANNED_CASE_NOT_REPORTED" if actual is None else "RUNNER_REPORTED_SKIP" if actual.outcome == "SKIP" else "MEASURED_" + actual.outcome
                 verified = actual is not None and actual.outcome in {"PASS", "FAIL"}
                 outcome = ValidationOutcome(actual.outcome) if verified else ValidationOutcome.UNVERIFIED
+                detail = code
+                if actual is not None and hasattr(actual, 'observations_json'):
+                    detail = json_text({'code': code, 'evidenceRefs': [evidence.evidence_ref], **case_feedback(actual)})
                 results.append(QATestResult(
                     test_id=f"{binding.tool_name}:{binding.selector}:{binding.test_id}",
                     requirement_id=binding.requirement_id, outcome=outcome, title=binding.title,
-                    expected_result=binding.expected_result, actual_result=code, details=code,
+                    expected_result=binding.expected_result, actual_result=code, details=detail,
                     normalized_location=binding.test_id, tool_evidence=evidence if verified else None))
             if not results or {result.requirement_id for result in results} != set(execution.metadata.requirement_ids):
                 raise ValueError

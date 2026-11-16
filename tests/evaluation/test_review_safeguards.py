@@ -30,15 +30,30 @@ from evaluation.summary import _flow, render_summary
 from evaluation.trace_checks import check_traceability
 
 
+def _with_startup_action(source, action, lifecycle):
+    """앱의 실제 시작 경로에 동작을 넣는다. 두 방식 모두 앱이 직접 DB를 준비한다."""
+    initialize = '    Base.metadata.create_all(bind=engine)\n'
+    assert source.count(initialize) == 1
+    if lifecycle == 'lifespan':
+        return source.replace(initialize, initialize + '    ' + action + '\n')
+    # FastAPI의 lifespan과 on_event는 동시에 실행되지 않는다. legacy 사례는 lifespan을 연결하지 않는다.
+    assert source.count('app = FastAPI(lifespan=lifespan)') == 1
+    return (source.replace('app = FastAPI(lifespan=lifespan)', 'app = FastAPI()')
+            + '\n@app.on_event("startup")\nasync def startup():\n'
+            + initialize + '    ' + action + '\n')
+
+
 @pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
-def test_startup_failure_must_not_pass_all_protected_checks(monkeypatch):
+@pytest.mark.parametrize('lifecycle', ['lifespan', 'startup_event'])
+def test_startup_failure_must_not_pass_all_protected_checks(monkeypatch, lifecycle):
     """서비스 시작(startup)이 실패하면 보호 테스트 9개가 모두 SERVICE_SETUP_FAILED 미검증(SKIP)이다.
     (시작 단계를 건너뛰고 요청만 보내 PASS가 되지 않게 한다.)"""
     original = signup_service.build
     def broken_startup(variant):
         """정상 서비스에 시작할 때 예외를 내는 startup 처리기를 붙인다."""
         files = original(variant)
-        files['main.py'] += '\n@app.on_event("startup")\nasync def startup():\n    raise RuntimeError("synthetic startup failure")\n'
+        files['main.py'] = _with_startup_action(
+            files['main.py'], 'raise RuntimeError("synthetic startup failure")', lifecycle)
         return files
     monkeypatch.setattr(signup_service, 'build', broken_startup)
     result = run_protected('good')
@@ -60,18 +75,30 @@ def hash_password(password: str) -> str:
 
 def test_killed_docker_process_must_not_produce_pass():
     """컨테이너가 강제 종료(137)되면 출력에 전부 PASS인 보고서가 있어도 최종 판정이 PASS가 아니다."""
+    archive = snapshot()
+    expected = manifest(archive)
+    executions = []
+
     class KilledDocker(DockerRunner):
-        """시험 대역: 이미지 확인은 성공하고, 실행은 전부 PASS 보고서를 출력한 뒤 종료 코드 137로 끝난다."""
+        """이미지/lock 사전 확인 뒤 본시험이 PASS 출력과 종료 코드 137을 함께 반환하는 대역."""
         def _call(self, args, timeout):
             if args[0] == 'image':
                 return subprocess.CompletedProcess(args, 0, json.dumps([{'Os': 'linux', 'Id': IMAGE}]), '')
+            if args[0] == 'run' and '-c' in args:
+                # 새 이미지 lock 관문을 통과해야 이 검사가 의도한 실행 중
+                # 강제 종료까지 도달한다. 관문 실패를 종료 검사로 오인하지 않는다.
+                payload = {'format': 'evaluation-image-lock-v1',
+                           'locks': {'/opt/evaluation/requirements.lock': expected.dependency_lock_hash}}
+                return subprocess.CompletedProcess(args, 0, json.dumps(payload) + '\n', '')
+            executions.append(args)
             rows = [{'testId': test_id, 'outcome': 'PASS'} for test_id in pt.evaluation_inputs(CONTRACT, 'final')['unit_cases']]
             payload = {'format': 'unittest-v1', 'total': len(rows), 'passed': len(rows), 'failed': 0, 'skipped': 0, 'tests': rows}
             return subprocess.CompletedProcess(args, 137, json.dumps(payload)+'\n', '')
-    archive = snapshot()
-    result = final(archive, manifest(archive), KilledDocker(IMAGE))
+    result = final(archive, expected, KilledDocker(IMAGE))
+    assert len(executions) == 3
     assert result['runner']['exitCode'] == 137
-    assert result['report']['evaluationVerdict'] != 'PASS'
+    assert result['runner']['error'] == 'RUNNER_EXIT_INVALID'
+    assert result['report']['evaluationVerdict'] == 'UNVERIFIED'
 
 
 def test_foreign_run_events_must_not_pass():
@@ -99,13 +126,14 @@ def test_missing_security_proof_must_not_be_shown_as_no_problem():
 
 
 @pytest.mark.skipif(not RUNTIME, reason="합성 서비스 실행 의존성 필요")
-def test_startup_initialization_is_available_to_requests(monkeypatch):
+@pytest.mark.parametrize('lifecycle', ['lifespan', 'startup_event'])
+def test_startup_initialization_is_available_to_requests(monkeypatch, lifecycle):
     """보호 테스트가 실제 서버처럼 startup을 실행해서, 시작 때 준비한 값을 가입 요청이 쓸 수 있다(정상 서비스는 9개 PASS)."""
     original = signup_service.build
     def with_startup(variant):
         """정상 서비스에 startup 처리기를 붙이고, 가입 처리에서 그 처리기가 준비한 값을 확인하게 바꾼다."""
         files = original(variant)
-        files['main.py'] += '\n@app.on_event("startup")\nasync def startup():\n    app.state.ready = True\n'
+        files['main.py'] = _with_startup_action(files['main.py'], 'app.state.ready = True', lifecycle)
         files['routers/auth.py'] = files['routers/auth.py'].replace(
             '    user = User(', '    from main import app\n    assert app.state.ready\n    user = User(')
         return files

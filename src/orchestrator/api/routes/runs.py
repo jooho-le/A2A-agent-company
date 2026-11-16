@@ -233,6 +233,17 @@ def get_run_metrics(run_id: UUID, repository: Repository):
         raise HTTPException(status_code=503, detail="RUN_METRICS_UNAVAILABLE") from None
 
 
+@router.get("/{run_id}/package-production")
+def get_package_production(run_id: UUID, repository: Repository):
+    """Read Host completion progress; querying never creates a result package."""
+    _get_run_or_404(repository, run_id)
+    from agents.platform.package_records import package_production_status
+    try:
+        return package_production_status(repository, run_id)
+    except Exception:
+        raise HTTPException(status_code=503, detail="PACKAGE_STATUS_UNAVAILABLE") from None
+
+
 @router.get("/{run_id}/telemetry")
 def get_run_telemetry(run_id: UUID, request: Request, repository: Repository,
                       limit: int = Query(default=100, ge=1, le=500),

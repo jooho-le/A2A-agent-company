@@ -81,6 +81,45 @@ def test_suite_lists_the_execution_checks_of_the_criteria_table():
         assert {check['requirementKey'] for check in SUITE['checks'] if check['perspective'] == role} == owned
 
 
+@pytest.mark.parametrize('duplicate_index', [1, -1])
+def test_contract_cannot_merge_different_requirement_ids(duplicate_index):
+    from copy import deepcopy
+    from orchestrator.domain.scenario_registry import ScenarioDefinition
+    contract = deepcopy(CONTRACT)
+    contract['requirements'][duplicate_index]['requirementId'] = contract['requirements'][0]['requirementId']
+    # Match Host restoration, including a duplicate outside the scored QA/Security subset.
+    with pytest.raises(ValueError, match='unique'):
+        ScenarioDefinition.from_contract(contract)
+    for exam in pt.SETS:
+        with pytest.raises(ValueError, match='Duplicate requirement ID'):
+            pt.evaluation_inputs(contract, exam)
+    for role in pt.ROLES:
+        with pytest.raises(ValueError, match='Duplicate requirement ID'):
+            pt.owned_cases(contract, role)
+
+
+def test_unique_contract_ids_keep_each_check_and_role_assignment():
+    from copy import deepcopy
+    from orchestrator.domain.scenario_registry import ScenarioDefinition
+    contract = deepcopy(CONTRACT)
+    for index, requirement in enumerate(contract['requirements']):
+        requirement['requirementId'] = uid(700 + index)
+    restored = ScenarioDefinition.from_contract(contract)
+    ids = {item['key']: item['requirementId'] for item in contract['requirements']}
+    assert len(restored.requirement_ids) == len(ids)
+    for exam in pt.SETS:
+        inputs = pt.evaluation_inputs(contract, exam)
+        assert len(inputs['required_requirement_ids']) == 7
+        assert {item.test_id for item in inputs['plan']} == {check['checkId'] for check in SUITE['checks']}
+        for check in SUITE['checks']:
+            binding = inputs['bindings'][check['checkId']]
+            assert (binding.requirement_id, binding.perspective) == (ids[check['requirementKey']], check['perspective'])
+            assert inputs['unit_cases'][pt.unit_test_id(check, exam, SUITE)] == check['checkId']
+    for role in pt.ROLES:
+        assert {case['requirementId'] for case in pt.owned_cases(contract, role)['cases']} == {
+            ids[check['requirementKey']] for check in SUITE['checks'] if check['perspective'] == role}
+
+
 @pytest.mark.parametrize('scope', pt.SCOPES)
 def test_every_protected_test_is_bound_and_every_bound_test_exists(scope):
     """dev는 대응표에 없는 테스트가 보고서에 있으면 보고서 전체를 거부한다. 범위마다 빠짐없이 1:1이어야 한다."""
@@ -323,15 +362,29 @@ def _dev_size(config):
 
 def test_dev_accepts_protected_files_and_cases():
     """dev 코드가 우리 설정을 그대로 받아 준다: 역할별 보호 파일 설정(UnitTestScope)과 보호 QA 케이스(QACaseBinding).
-    dev는 Unit 설정 전체를 64KiB 이하로 받으므로(unit_config.py) 순환 안 두 범위를 합쳐도 여유가 있어야 한다."""
+    dev는 Unit 설정 전체(모든 범위 + 실행기·한도·이미지 칸)를 64KiB 이하로 받는다(unit_config.py). 그래서 예시 도구 설정의
+    기본 범위에 순환 안 보호 범위 두 개를 더한 실제 Ver1 Unit 설정을 dev 직렬화기로 만들어 보고, 범위 이름·한도 값이
+    길어져도 버티도록 4KiB 이상 여유가 남는지 확인한다(2026-11-15, 임의의 '두 범위 합 56KiB' 대신 실제 한도로 확인)."""
     from agents.roles.qa_contract import QACaseBinding
-    from mcp_tools.tools.unit_config import UnitTestScope
+    from mcp_tools.tools.unit_config import (MAX_UNIT_CONFIGURATION_BYTES, UnitTestConfiguration, UnitTestScope,
+                                             decode_unit_configuration, encode_unit_configuration)
+    from orchestrator.sandbox.contracts import SandboxLimits
     configs = {scope: pt.unit_test_scope(scope, suite_ref='artifact://protected-suite/scn-001/signup') for scope in pt.SCOPES}
     for scope, config in configs.items():
         UnitTestScope(**config)
         assert _dev_size(config) < 64 * 1024
     assert configs['in-loop-security']['role'] == 'SECURITY' and 'role' not in configs['in-loop-qa']
-    assert _dev_size(configs['in-loop-qa']) + _dev_size(configs['in-loop-security']) < 56 * 1024
+    example = json.loads((Path(__file__).resolve().parents[2] / 'configs/owned-tools.example.json').read_text(encoding='utf-8'))
+    scopes = [UnitTestScope(**scope) for scope in example['unit']['scopes']]
+    scopes += [UnitTestScope(**configs[name]) for name in ('in-loop-qa', 'in-loop-security')]
+    # dev가 허용하는 가장 큰 한도 값(숫자 길이가 가장 긴 경우)으로 잰다.
+    limits = SandboxLimits(cpus=4.0, memory_bytes=4 * 1024 ** 3, pids=1024, timeout_seconds=600.0, tmpfs_bytes=1024 ** 3,
+                           max_stdout_bytes=4 * 1024 ** 2, max_stderr_bytes=4 * 1024 ** 2, control_timeout_seconds=30.0)
+    ver1 = UnitTestConfiguration(scopes=tuple(scopes), limits=limits,
+                                 image_reference='registry.example.invalid/capstone/sandbox@sha256:' + 'f' * 64)
+    text = encode_unit_configuration(ver1)
+    decode_unit_configuration(text)
+    assert MAX_UNIT_CONFIGURATION_BYTES - len(text.encode('utf-8')) >= 4 * 1024
     for role in ('QA', 'SECURITY'):
         for case in pt.owned_cases(CONTRACT, role)['cases']:
             QACaseBinding(tool_name=case['toolName'], selector=case['selector'], test_id=case['testId'],
@@ -524,6 +577,15 @@ EXPECTED_FAILURES = {
     'concurrent_rejected': {'QA-SIGNUP-005'},
     # 모든 가입이 500: 서버 오류를 관찰한 검사는 FAIL이고, 정상 가입이 전제인 검사는 미검증이다.
     'signup_server_error': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
+    # 점검 1(2026-11-14): 원래 DB 연결이 고장 난 앱은 시험용 세션으로 바꿔 끼운 검사만으로 통과하지 않는다.
+    'broken_get_db': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
+    'get_db_other_database': None,
+    # 점검(2026-11-15): 평가용 DB에 쓰고도 커밋하지 않는 앱. 저장 누락은 미검증(DATABASE_URL_NOT_USED)이 아니라 FAIL이다.
+    'no_commit': {'QA-SIGNUP-001', 'QA-SIGNUP-003', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006', 'SEC-SIGNUP-003'},
+    'engine_echo_hash': {'SEC-SIGNUP-005'},
+    'engine_echo_hidden_parameters': set(),
+    'missing_bootstrap': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
+    'lazy_bootstrap': set(),
     'app_missing': None,
     'wrong_signup_path': None,
     # 시작할 때 테이블을 만드는 앱: DB 위치를 DATABASE_URL로 받으면 정상, 소스 폴더 옆에 고정하면 읽기 전용
@@ -561,12 +623,19 @@ EXPECTED_FAILURES = {
 }
 # 모두 미검증이 되는 변형의 근거 코드
 UNVERIFIED_CODES = {'app_missing': {'APP_IMPORT_FAILED'}, 'wrong_signup_path': {'SIGNUP_ROUTE_NOT_FOUND'},
-                    'lifespan_source_database': {'SERVICE_SETUP_FAILED'}}
+                    'lifespan_source_database': {'SERVICE_SETUP_FAILED'},
+                    'get_db_other_database': {'DATABASE_URL_NOT_USED'}}
 # FAIL도 PASS도 아닌(미검증) 검사가 있는 변형
 EXPECTED_UNVERIFIED = {'different_request_field': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'QA-SIGNUP-005',
                                                    'SEC-SIGNUP-002', 'SEC-SIGNUP-003', 'SEC-SIGNUP-005'},
                        'signup_server_error': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'SEC-SIGNUP-002', 'SEC-SIGNUP-003',
-                                               'SEC-SIGNUP-005'}}
+                                               'SEC-SIGNUP-005'},
+                       'broken_get_db': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'SEC-SIGNUP-002', 'SEC-SIGNUP-003',
+                                         'SEC-SIGNUP-005'},
+                       'missing_bootstrap': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'SEC-SIGNUP-002', 'SEC-SIGNUP-003',
+                                            'SEC-SIGNUP-005'},
+                       # 저장된 사용자가 없어 해시·노출을 확인할 수 없다.
+                       'no_commit': {'SEC-SIGNUP-002', 'SEC-SIGNUP-005'}}
 
 
 def _set_read_only(folder, read_only):
@@ -657,7 +726,9 @@ def test_export_writes_dev_ready_files(tmp_path):
     cases = json.loads(written['owned-protected-cases.local.json'].read_text(encoding='utf-8'))
     scopes = json.loads(written['unit-protected-scopes.json'].read_text(encoding='utf-8'))
     handoff = json.loads(written['handoff.json'].read_text(encoding='utf-8'))
-    assert cases['cases'] == pt.owned_cases(CONTRACT, 'QA')['cases'] + pt.owned_cases(CONTRACT, 'SECURITY')['cases']
+    assert cases['schemaVersion'] == 2 and cases == pt.protected_case_file(CONTRACT)
+    assert cases['cases'] == [dict(case, role=role) for role in ('QA', 'SECURITY')
+                              for case in pt.owned_cases(CONTRACT, role)['cases']]
     assert len(cases['cases']) == 9
     assert [scope['name'] for scope in scopes] == ['protected-signup-qa', 'protected-signup-security']
     for scope in scopes:

@@ -266,6 +266,32 @@ def test_secret_in_a_key_is_not_copied_into_the_finding_path():
         assert SECRET not in text and digest not in text and '[SENSITIVE_KEY]' in text
 
 
+def test_single_agent_a2a_document_has_one_store():
+    """Single Run의 A2A 문서(dev a2a_export 스키마 2)는 저장소가 SINGLE_AGENT 하나다. 모양이 틀린 문서로 거부하지 않고
+    본문을 찾으며, 그 저장소가 비어 있으면 미검증이다(dev evaluation_export의 handoff가 이 형식을 받아 달라고 요구함).
+    Single 문서에 Multi 역할이 섞이거나 Multi 문서에 SINGLE_AGENT가 섞이면 거부한다."""
+    run_id = RUNS[QA_FIX]['run']['runId']
+    base = documents(runId=run_id)
+    single = {'runId': run_id, 'schemaVersion': 2, 'architecture': 'SINGLE_AGENT',
+              'roles': {'SINGLE_AGENT': a2a_rows('SINGLE_AGENT')}, 'missingRoles': []}
+    clean = check_trace_exposure({**base, 'a2aMessages': single}, CRITERIA)
+    assert clean.status == 'PASS' and 'a2aMessages' in clean.coverage['checkedDocuments']
+    leaked = copy.deepcopy(single)
+    leaked['roles']['SINGLE_AGENT']['history'] = [{'taskId': 't', 'message': {'parts': [{'data': {'password': SECRET}}]}}]
+    assert check_trace_exposure({**base, 'a2aMessages': leaked}, CRITERIA).status == 'FAIL'
+    hollow = copy.deepcopy(single)
+    hollow['roles']['SINGLE_AGENT'] = {'contexts': [], 'tasks': [], 'history': [], 'receipts': [], 'events': []}
+    empty = check_trace_exposure({**base, 'a2aMessages': hollow}, CRITERIA)
+    assert empty.status == 'UNVERIFIED' and empty.coverage['a2aEmptyRoles'] == ['SINGLE_AGENT']
+    missing = {**single, 'roles': {}, 'missingRoles': ['SINGLE_AGENT']}
+    assert check_trace_exposure({**base, 'a2aMessages': missing}, CRITERIA).status == 'UNVERIFIED'
+    for mixed in ({**single, 'roles': {**single['roles'], 'QA': a2a_rows('QA')}},
+                  {**a2a_document(run_id), 'roles': {**a2a_document(run_id)['roles'], 'SINGLE_AGENT': a2a_rows('SINGLE_AGENT')}},
+                  {**single, 'schemaVersion': 1}):
+        with pytest.raises(ValueError):
+            check_trace_exposure({**base, 'a2aMessages': mixed}, CRITERIA)
+
+
 def test_empty_or_malformed_a2a_document_is_not_counted_as_checked():
     """Run 기록상 일을 한 역할의 저장소에 이 Run의 기록이 없으면(엉뚱한 빈 저장소를 연결) A2A 본문을 다 본 것이 아니라
     미검증이다(Codex 10.30 R8). 역할 목록이 비었거나 빠진 저장소 표시가 없는 문서는 모양이 틀린 문서로 거부한다.

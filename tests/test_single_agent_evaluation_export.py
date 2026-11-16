@@ -35,7 +35,9 @@ class SingleEvaluationExportTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.base = pipeline.SingleAgentPipelineTests("runTest")
         self.base.setUp()
-        self.addCleanup(self.base.doCleanups)
+        for function, arguments, keywords in self.base._cleanups:
+            self.addCleanup(function, *arguments, **keywords)
+        self.base._cleanups.clear()
         self.base.measured_security = True
         self.f = self.base.f
 
@@ -44,7 +46,7 @@ class SingleEvaluationExportTests(unittest.IsolatedAsyncioTestCase):
             stores={"SINGLE_AGENT": self.f.directory / "single.sqlite3"}, **changes)
 
     async def test_success_exports_exact_snapshots_one_identity_all_records_readonly_and_metrics_api(self):
-        async with self.base.running() as (client, _):
+        async with self.base.running() as (client, provider):
             run_id = await self.base.submit(client)
             response = await client.get(f"/api/v1/runs/{run_id}/metrics")
             self.assertEqual(response.status_code, 200, response.text)
@@ -69,8 +71,18 @@ class SingleEvaluationExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({step["agentIdentity"] for step in handoff["steps"]}, {"SINGLE_AGENT"})
         self.assertEqual(bundle["eventsTotal"], len(bundle["events"]))
         self.assertEqual(trace["telemetryTotal"], len(trace["telemetry"]))
-        self.assertEqual(bundle["usage"]["total"], 7)
-        self.assertEqual(metrics["modelCalls"], 7)
+        # Current dev includes four publication reviews in the same Run budget.
+        work = [request for request in provider.requests if request.output.name != 'product_semantic_review_v1']
+        reviews = [request for request in provider.requests if request.output.name == 'product_semantic_review_v1']
+        self.assertEqual((len(work), len(reviews)), (7, 4))
+        self.assertEqual(bundle["usage"]["total"], len(work) + len(reviews))
+        self.assertEqual(metrics["modelCalls"], len(provider.requests))
+        from evaluation.agent_eval import agent_tables
+        from evaluation.host_evidence import budget_assessment
+        from evaluation.workflow import load_handoff
+        exported, _ = load_handoff(files['handoff.json'].parent)
+        self.assertEqual({row['modelInput']['status'] for row in agent_tables(exported)['handoffs']}, {'PASS'})
+        self.assertEqual(budget_assessment(bundle)['status'], 'PASS')
         self.assertEqual(metrics["totalTokens"], bundle["usage"]["summary"]["totalTokens"])
         self.assertIsNone(metrics["costUsd"])  # no approved operational price
         self.assertFalse(metrics["costComplete"])
@@ -157,7 +169,8 @@ class SingleEvaluationExportTests(unittest.IsolatedAsyncioTestCase):
         result = collect_run_metrics(self.f.repository, run_id)
         self.assertTrue(result["costComplete"])
         self.assertIsNotNone(result["costUsd"])
-        self.assertEqual(result["modelCalls"], 7)
+        self.assertEqual(result["modelCalls"], len(provider.requests))
+        self.assertEqual(sum(request.output.name == 'product_semantic_review_v1' for request in provider.requests), 4)
 
 
 class SingleFailureExportTests(unittest.IsolatedAsyncioTestCase):

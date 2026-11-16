@@ -12,7 +12,7 @@ _PROTECTED = frozenset({
     "scenarioId", "requirementIds", "projectArtifactIds", "projectArtifactId",
     "artifactVersion", "model", "limits", "codeVersion", "fixRequest", "snapshot",
     "testSelectors", "testTargets", "qaRequirements", "userRequest", "protectedCases",
-    "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest",
+    "runtimeInstructions", "securityPolicy", "emailPolicy", "externalContract", "executionManifest",
     "sourceAccess", "taskId", "contextId", "a2aTaskId", "agentContextId", "role",
     "request", "configuration", "fixAttempt", "fix_attempt", "fixIssues", "fix_issues",
     "previousSource", "previous_source", "previousArtifacts", "previous_artifacts",

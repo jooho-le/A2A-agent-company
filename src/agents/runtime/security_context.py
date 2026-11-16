@@ -49,7 +49,7 @@ def _dispatch_request(configuration, plan, scenario, requirement_ids):
         if item["requirementId"] in {str(value) for value in requirement_ids}
     ]
     policies = {key: value for key, value in scenario.planner_contract().items()
-                if key in {"securityPolicy", "emailPolicy"}}
+                if key in {"securityPolicy", "emailPolicy", "externalContract"}}
     encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return (
         f"workspaceId={configuration.workspace_id}\n"

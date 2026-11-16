@@ -103,10 +103,29 @@ class ProjectRequestHandler(DefaultRequestHandler):
             result = await super().on_message_send(params, context)
             if not isinstance(result, Task):
                 raise InvalidAgentResponseError(message="Project workflow requires a Task response")
+            result_metadata = parse_workflow_metadata(MessageToDict(result.metadata))
+            if (
+                params.message.task_id
+                and result.id == claim.task.id
+                and result.context_id == claim.task.context_id
+                and result.status.state in {TaskState.TASK_STATE_INPUT_REQUIRED, TaskState.TASK_STATE_AUTH_REQUIRED}
+                and result_metadata.attempt + 1 == metadata.attempt
+                and result_metadata.model_copy(update={"attempt": metadata.attempt}) == metadata
+            ):
+                # The SDK publishes a saved interrupted status asynchronously.
+                # A continuation admitted after that save can subscribe before
+                # its old status is delivered. The new request is already
+                # queued: read its authoritative state, never submit it again.
+                stored = await self._store.get(claim.task.id, context)
+                if (stored is not None and stored.task.id == claim.task.id
+                        and stored.task.context_id == claim.task.context_id
+                        and parse_workflow_metadata(MessageToDict(stored.task.metadata)) == metadata):
+                    result = apply_history_length(stored.task, params.configuration)
+                    result_metadata = metadata
             if (
                 result.id != claim.task.id
                 or result.context_id != claim.task.context_id
-                or parse_workflow_metadata(MessageToDict(result.metadata)) != metadata
+                or result_metadata != metadata
             ):
                 raise InvalidAgentResponseError(message="Task response must preserve workflow identity")
             return result

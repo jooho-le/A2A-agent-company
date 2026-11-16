@@ -30,7 +30,9 @@ class _SingleFixHarness:
                  build_failures=(), measured=True, cap=40):
         self.base = single_fixture.SingleAgentPipelineTests("runTest")
         self.base.setUp()
-        owner.addCleanup(self.base.doCleanups)
+        for function, arguments, keywords in self.base._cleanups:
+            owner.addCleanup(function, *arguments, **keywords)
+        self.base._cleanups.clear()
         self.f = self.base.f
         self.f.configuration = self.f.configuration.model_copy(update={"limits": ExecutionLimits(runtime_budget_ms=60000)})
         self.base.measured_security = measured

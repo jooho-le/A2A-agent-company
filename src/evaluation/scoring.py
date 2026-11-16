@@ -58,6 +58,55 @@ def exam_score(report: Mapping) -> dict:
             'reason': None if shares else 'NO_SCORED_REQUIREMENTS'}
 
 
+def product_accuracy(report: Mapping) -> dict:
+    # 시험지 v4의 정확도 지표를 보고서 하나에서 계산한다. 신분(Manifest)을 확인하지 못한 보고서는 값을 만들지 않는다.
+    #   ACC-01 요구사항 완전 충족률: 하한 P/N, 상한 (P+U)/N. P = 필수 검사가 모두 PASS인 요구사항 수,
+    #          U = 미검증이지만 확인된 실패가 없는 요구사항 수, N = 적용 요구사항 수(SCN-001은 REQ-001~007의 7개).
+    #          확인된 실패가 있는 요구사항은 다른 검사가 미검증이어도 상한에 넣지 않는다.
+    #          판정별 개수는 보고서의 PASS·FAIL·UNVERIFIED를 그대로 센다. FAIL 검사와 미검증 검사가 섞인
+    #          UNVERIFIED 요구사항은 실패로 바꾸지 않고, 확인된 실패가 있는 미검증 항목으로 따로 표시한다.
+    #   ACC-02 제품 시험 통과: 필수 검사 모두 PASS + 신분 확인(evaluationVerdict == PASS).
+    #   ACC-04 검사 판정 가능률: PASS 또는 FAIL인 필수 상위 검사 수 / 적용 필수 검사 수(SCN-001은 9개).
+    #   QA 통과율(개발정의서 11-A): 보호된 QA 필수 검사 중 PASS 비율(QA 관점 requiredPassRate).
+    #   보안 차단 결함 수(개발정의서 11-A Blocking Security Findings): 실행 근거로 확인된 보안 필수 검사 실패 수.
+    #          시험지의 보안 검사는 모두 필수·차단 항목이라 확인된 FAIL 하나가 차단 결함 하나다.
+    empty = {'requirementCount': None, 'passedRequirements': None, 'failedRequirements': None,
+             'unverifiedRequirements': None, 'fullSatisfactionLower': None, 'fullSatisfactionUpper': None,
+             'unverifiedWithConfirmedFailures': None, 'unverifiedWithConfirmedFailureRequirementIds': [],
+             'checkCount': None, 'decidedChecks': None, 'checkDecidability': None, 'qaPassRate': None,
+             'blockingSecurityFindings': None, 'securityChecks': [], 'productPass': False}
+    manifest = report.get('manifestCheck') or {}
+    if manifest.get('errorCode') or manifest.get('metadataMatches') is not True:
+        return {**empty, 'reason': 'MANIFEST_NOT_CONFIRMED'}
+    applicable = [row for row in report.get('requirements', [])
+                  if any(count for status, count in ((row.get('summary') or {}).get('required') or {}).items()
+                         if status != 'notApplicable')]
+    passed = sum(row.get('validationVerdict') == 'PASS' for row in applicable)
+    failed = sum(row.get('validationVerdict') == 'FAIL' for row in applicable)
+    unverified_rows = [row for row in applicable if row.get('validationVerdict') == 'UNVERIFIED']
+    unverified = len(unverified_rows)
+    unverified_with_failures = sorted(str(row['requirementId']) for row in unverified_rows
+                                      if row.get('confirmedFailureIds'))
+    count = len(applicable)
+    required = [row for row in report.get('checks', []) if row.get('required', True) and row.get('status') != 'NOT_APPLICABLE']
+    decided = sum(row.get('status') in ('PASS', 'FAIL') for row in required)
+    perspectives = report.get('perspectives') or {}
+    qa, security = perspectives.get('QA'), perspectives.get('SECURITY')
+    security_rows = [row for row in report.get('checks', []) if row.get('perspective') == 'SECURITY']
+    return {'requirementCount': count, 'passedRequirements': passed, 'failedRequirements': failed,
+            'unverifiedRequirements': unverified,
+            'unverifiedWithConfirmedFailures': len(unverified_with_failures),
+            'unverifiedWithConfirmedFailureRequirementIds': unverified_with_failures,
+            'fullSatisfactionLower': passed / count if count else None,
+            'fullSatisfactionUpper': (passed + unverified - len(unverified_with_failures)) / count if count else None,
+            'checkCount': len(required), 'decidedChecks': decided,
+            'checkDecidability': decided / len(required) if required else None,
+            'qaPassRate': None if qa is None else qa.get('requiredPassRate'),
+            'blockingSecurityFindings': None if security is None else len(security.get('confirmedFailureIds') or []),
+            'securityChecks': [{'testId': row.get('testId'), 'status': row.get('status')} for row in security_rows],
+            'productPass': report.get('evaluationVerdict') == 'PASS', 'reason': None if count else 'NO_APPLICABLE_REQUIREMENTS'}
+
+
 def _mean(values) -> Optional[float]:
     # None을 뺀 평균. 남는 값이 없으면 None.
     values = [value for value in values if value is not None]

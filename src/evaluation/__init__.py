@@ -12,6 +12,7 @@
 #   check_adapters.py unittest 보고서와 정적 판정 결과를 검사 결과(CheckResult)로 바꾼다.(결과 어댑터)
 #   run_metrics.py   시스템의 실행 기록을 평가 숫자(지표)로 바꾸고, 두 구조를 비교해도 되는지 확인한다.
 #   trace_checks.py  실행 기록(Trace)에서 비밀번호·해시 노출(REQ-006)과 추적 연결(REQ-008)을 확인한다.
+#   agent_eval.py    한 Run의 Agent별 평가표 세 개(작업 정확성·정보 전달·처리시간과 오류)를 만든다.
 #   final_evaluation.py 최종 Snapshot을 받아 보호 테스트(컨테이너)·정적 판정으로 채점하고 독립 평가 보고서를 만든다.(D5)
 #   summary.py       독립 평가 결과를 회의·발표용 Markdown 요약으로 만든다.
 #   demo_index.py    시연 자료(로그·생성 파일·화면)의 목록표를 만든다.
