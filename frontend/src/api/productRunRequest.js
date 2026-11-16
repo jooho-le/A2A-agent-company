@@ -54,7 +54,11 @@ export function createProductRunFetch({
     // 인증 실패 본문을 읽거나 재출력하지 않고, 자동 갱신·재전송하지 않습니다.
     if (response.status === 401) throw loginRequired()
     if (!response.ok) {
-      throw new ProductRunRequestError(response.status === 503 ? '실행 서버가 준비되지 않았습니다. 서버 연결과 승인 설정을 확인해 주세요.' : '제품 API 요청을 처리할 수 없습니다.', 'HTTP_ERROR', response.status)
+      const error = new ProductRunRequestError(response.status === 503 ? '실행 서버가 준비되지 않았습니다. 서버 연결과 승인 설정을 확인해 주세요.' : '제품 API 요청을 처리할 수 없습니다.', 'HTTP_ERROR', response.status)
+      // 제품 서버가 외부 POST 전 미접수를 확정한 경우만 재입력을 허용합니다.
+      error.submissionNotAccepted = path === '/api/v1/runs' && options.method === 'POST'
+        && response.status === 503 && response.headers?.get('X-Submission-Status') === 'NOT_ACCEPTED'
+      throw error
     }
     return response
   }

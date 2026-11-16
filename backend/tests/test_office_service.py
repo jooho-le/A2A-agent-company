@@ -1,6 +1,7 @@
 """임시 SQLite와 ASGI에서 실제 제품 라우트/소유권/접수 복구를 검증합니다."""
 import json
 import unittest
+from unittest.mock import patch
 from copy import deepcopy
 from uuid import uuid4
 
@@ -11,7 +12,8 @@ import test_projects_api as fixtures
 import main
 from host_reads import HostRunNotFound, HostUnavailable, get_host_read_client
 from models import Project, ProjectRun, RunSubmission
-from routers.run_submissions import digest
+from project_scenarios import ScenarioRegistryUnavailable
+from routers.run_submissions import digest, unavailable
 
 
 class Host:
@@ -129,4 +131,60 @@ class OfficeServiceTests(unittest.TestCase):
     def test_concurrent_duplicate_headers_are_not_accepted(self):
         self.assertEqual(self.request("POST", "/api/v1/runs", self.body,
             extra_headers=[(b"idempotency-key", self.key.encode()), (b"idempotency-key", str(uuid4()).encode())])[0], 422)
+        self.assertEqual(self.rows(RunSubmission), [])
+
+    def test_preflight_failure_is_not_accepted_and_can_retry_after_reconnect(self):
+        self.host.offline = True
+        with patch('routers.run_submissions.unavailable', wraps=unavailable) as error:
+            self.assertEqual(self.post()[0], 503)
+            error.assert_called_once_with(not_accepted=True)
+        self.assertEqual(unavailable(not_accepted=True).headers, {'X-Submission-Status': 'NOT_ACCEPTED'})
+        self.assertEqual(self.rows(RunSubmission), [])
+        self.assertEqual(self.rows(Project), [])
+        self.assertFalse(any(call[0] == 'POST' for call in self.host.calls))
+        self.host.offline = False
+        self.assertEqual(self.post()[0], 201)
+        self.assertEqual(len([call for call in self.host.calls if call[0] == 'POST']), 1)
+
+    def test_malformed_post_receipts_remain_unknown_without_creating_links(self):
+        original = self.host.exchange
+        for malformed in (None, [], {'run': None}, {'run': {'runId': 123}}, {'run': {'runId': str(uuid4())}}):
+            with self.subTest(receipt=malformed):
+                def exchange(method, path, **options):
+                    if method == 'POST':
+                        return malformed
+                    return original(method, path, **options)
+                with patch.object(self.host, 'exchange', side_effect=exchange):
+                    status, result = self.post(key=str(uuid4()))
+                self.assertEqual((status, result['submissionStatus']), (202, 'UNKNOWN'))
+        self.assertEqual(self.rows(ProjectRun), [])
+
+    def test_malformed_recovery_does_not_turn_an_uncertain_run_into_success(self):
+        self.host.timeout = True
+        self.post()
+        record = self.rows(RunSubmission)[0]
+        for malformed in (None, [], {'run': None}, {'run': {'runId': 123}}):
+            self.host.responses[record.internal_key]['originalResponse'] = malformed
+            status, result = self.request('GET', '/api/v1/submissions/' + self.key)
+            self.assertEqual((status, result['submissionStatus']), (200, 'UNKNOWN'))
+        self.assertEqual(self.rows(ProjectRun), [])
+        self.assertEqual(len([call for call in self.host.calls if call[0] == 'POST']), 1)
+
+    def test_non_finite_configuration_is_unavailable_without_host_post(self):
+        self.host.configuration['bad'] = float('nan')
+        def exchange(method, path, **_options):
+            self.assertEqual(method, 'GET')
+            return {'scenarioId': self.fixture.scenario_id, 'configurationId': '0' * 64,
+                    'configuration': self.host.configuration}
+        with patch.object(self.host, 'exchange', side_effect=exchange):
+            self.assertEqual(self.post()[0], 503)
+        self.assertEqual(self.rows(RunSubmission), [])
+
+    def test_missing_scenario_registry_blocks_safely_without_host_io(self):
+        with patch('routers.run_submissions.is_supported_project_scenario', side_effect=ScenarioRegistryUnavailable('private path')):
+            status, data = self.request('GET', '/api/v1/host/approved-configuration?scenarioId=' + self.fixture.scenario_id)
+            self.assertEqual(status, 503)
+            self.assertNotIn('private path', str(data))
+            self.assertEqual(self.post()[0], 503)
+        self.assertEqual(self.host.calls, [])
         self.assertEqual(self.rows(RunSubmission), [])

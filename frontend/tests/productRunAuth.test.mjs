@@ -21,7 +21,7 @@ test('JWT: 기존 sessionStorage 토큰으로 보호 요청 헤더 구성, 제�
     return Response.json(path.includes('/events')
       ? { runId, events: [], total: 0, limit: 2, offset: 0 } : run)
   })
-  // 현재 제품 전환이 꺼진 앱 경로는 토큰을 읽거나 추가하지 않습니다.
+  // 앱 경로도 기존 JWT를 사용하며 인증되지 않은 Host 직접 연결은 없습니다.
   await getAgentRun(runId)
   assert.equal(new Headers(requests[0].options.headers).get('Authorization'), `Bearer ${token}`)
   assert.deepEqual(reads, ['access_token'])
@@ -37,6 +37,22 @@ test('JWT: 기존 sessionStorage 토큰으로 보호 요청 헤더 구성, 제�
     assert.ok(!path.includes(token))
   }
   assert.ok(reads.every(key => key === 'access_token'))
+})
+
+test('접수 전 실패 헤더만 미접수로 인정하고 일반 503은 불명확한 전송으로 유지', async () => {
+  for (const header of [null, 'NOT_ACCEPTED', 'UNKNOWN']) {
+    const fetch = createProductRunFetch({ productApiReady: true, readAccessToken: () => token,
+      fetchImpl: async () => new Response(null, { status: 503, headers: header ? { 'X-Submission-Status': header } : {} }) })
+    await assert.rejects(fetch('/api/v1/runs', { method: 'POST' }), error => {
+      assert.equal(error.status, 503)
+      assert.equal(error.submissionNotAccepted, header === 'NOT_ACCEPTED')
+      return true
+    })
+    await assert.rejects(fetch('/api/v1/scenarios', { method: 'GET' }), error => {
+      assert.equal(error.submissionNotAccepted, false)
+      return true
+    })
+  }
 })
 
 test('JWT 없음: 보호 Run·Step·Trace 요청은 fetch 전에 차단', async t => {

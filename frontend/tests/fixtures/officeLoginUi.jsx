@@ -1,4 +1,4 @@
-import { act, StrictMode } from 'react'
+import { act, StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from '../../src/App.jsx'
 import useOfficeRunSubmission from '../../src/hooks/useOfficeRunSubmission.js'
@@ -44,7 +44,11 @@ const approval = { approved: true, scenarioId: '70000000-0000-4000-8000-00000000
     hardwareProfile: 'mock-only', networkPolicy: 'DENY', allowedHosts: [] },
 } }
 const onCreated = () => { throw new Error('Anonymous submission created a Run') }
-function Probe() { probe = useOfficeRunSubmission(approval, onCreated); return null }
+export function Probe() {
+  const value = useOfficeRunSubmission(approval, onCreated)
+  useEffect(() => { probe = value }, [value])
+  return null
+}
 
 async function verify() {
   const passed = []

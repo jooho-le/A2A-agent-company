@@ -31,7 +31,7 @@ test('오피스 로그인 진입·복귀·JWT 없는 업무 차단', { timeout: 
         if (id === '\0style') return ''
       } }],
     })
-    const { output } = await build.generate({ format: 'iife' }); await build.close()
+    const { output } = await build.generate({ format: 'iife', name: 'OfficeLoginAudit' }); await build.close()
     const code = output.find(item => item.type === 'chunk').code
     await writeFile(join(dir, 'test.js'), code)
     await writeFile(join(dir, 'test.html'), '<!doctype html><meta charset="utf-8"><body><script src="test.js"></script></body>')

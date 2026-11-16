@@ -52,6 +52,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
     window.scrollTo({ top: 0, behavior: 'instant' })
   }
   const connectCreatedRun = useCallback(response => {
+    setRestoreError('')
     dispatchRunQuery({ type: 'created', runId: response.run.runId })
     setActiveWork(response)
     setView('home'); setDrawerOpen(false)
@@ -70,6 +71,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
 
   const openRun = useCallback((savedProject, run) => {
     if (run.hostKey !== 'local-multi') return
+    setRestoreError('')
     setActiveWork({ projectId: savedProject.projectId, projectName: savedProject.name,
       run: { runId: run.runId, scenarioId: savedProject.scenarioId } })
     dispatchRunQuery({ type: 'select', runId: run.runId })
@@ -83,7 +85,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
     loadSelectedProject(selected, { signal: controller.signal }).then(saved => {
       const run = saved.runs.find(item => item.hostKey === 'local-multi')
       if (!controller.signal.aborted && run) openRun(saved, run)
-    }).catch(error => { if (!controller.signal.aborted) setRestoreError(error.message) })
+    }).catch(error => { if (!controller.signal.aborted && error.name !== 'AbortError') setRestoreError(error.message) })
     return () => controller.abort()
   }, [openRun])
   useEffect(() => {

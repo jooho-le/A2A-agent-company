@@ -134,6 +134,11 @@ class HostReadAPITests(unittest.TestCase):
         self.assertEqual(self.request("POST", self.path())[0], 405)
         self.constructor.assert_called_once()
 
+    def test_nonfinite_host_json_is_rejected_without_forwarding_invalid_data(self):
+        for value in ('NaN', 'Infinity', '-Infinity'):
+            self.response.read.return_value = ('{"runId":"' + self.run_id + '","value":' + value + '}').encode()
+            self.assertEqual(self.request('GET', self.path()), (503, {'detail': 'Host 조회를 사용할 수 없습니다.'}))
+
     def test_unverified_auth_missing_token_and_host_errors_fail_safely(self):
         unavailable = (503, {"detail": "Host 조회를 사용할 수 없습니다."})
         with patch.object(host_reads, "HOST_SERVICE_AUTH_VERIFIED", False):

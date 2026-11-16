@@ -31,6 +31,10 @@ class HostRejected(Exception):
         self.status = status
 
 
+def _reject_nonfinite_json(_value):
+    raise ValueError("Non-finite JSON value")
+
+
 class HostReadClient:
     def get(self, run_id, resource="", *, limit=100, offset=0):
         # 승인 플래그/토큰을 클라이언트 요청으로 받지 않습니다.
@@ -105,7 +109,7 @@ class HostReadClient:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise HostUnavailable()
-                payload = json.loads(body)
+                payload = json.loads(body, parse_constant=_reject_nonfinite_json)
         if not isinstance(payload, dict):
             raise HostUnavailable()
         # Host가 서비스 토큰을 잘못 반사하더라도 브라우저로 전달하지 않습니다.

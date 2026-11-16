@@ -41,7 +41,7 @@ test('통합 업무 입력창: 단일 UI·승인 차단·자동 Run/Trace 연결
     assert.ok(result, `isolated browser produced a result: ${stdout.slice(-1500)}`)
     const report = JSON.parse(result.replaceAll('&quot;', '"').replaceAll('&amp;', '&').replaceAll('&gt;', '>').replaceAll('&lt;', '<'))
     assert.equal(report.failed, undefined, report.failed)
-    assert.equal(report.passed.length, 4)
+    assert.equal(report.passed.length, 8)
     report.passed.forEach(check => t.diagnostic(check))
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

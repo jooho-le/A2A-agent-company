@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from host_reads import HOST_KEY, HostReadClient, HostRunNotFound, HostRejected, HostUnavailable, get_host_read_client
 from models import Project, ProjectRun, RunSubmission, User
-from project_scenarios import is_supported_project_scenario
+from project_scenarios import ScenarioRegistryUnavailable, is_supported_project_scenario
 from routers.auth import read_current_user
 from routers.projects import owned_project, project_storage
 
@@ -29,12 +29,17 @@ def digest(value):
     return sha256(canonical(value).encode("utf-8")).hexdigest()
 
 
-def unavailable():
-    return HTTPException(503, "실행 서버가 준비되지 않았습니다. 서버 연결과 승인 설정을 확인해 주세요.")
+def unavailable(*, not_accepted=False):
+    headers = {"X-Submission-Status": "NOT_ACCEPTED"} if not_accepted else None
+    return HTTPException(503, "실행 서버가 준비되지 않았습니다. 서버 연결과 승인 설정을 확인해 주세요.", headers=headers)
 
 
 def supported(scenario_id):
-    if not is_supported_project_scenario(scenario_id):
+    try:
+        valid = is_supported_project_scenario(scenario_id)
+    except ScenarioRegistryUnavailable:
+        raise HostUnavailable() from None
+    if not valid:
         raise HTTPException(422, "현재 등록된 회원가입 시나리오만 실행할 수 있습니다.")
 
 
@@ -45,7 +50,13 @@ def approval(client, scenario_id):
     configuration = result.get("configuration")
     if (result.get("scenarioId") != str(scenario_id) or not isinstance(configuration, dict)
             or configuration.get("architecture") != "MULTI_AGENT"
-            or digest(configuration) != result.get("configurationId")):
+            or not isinstance(result.get("configurationId"), str)):
+        raise HostUnavailable()
+    try:
+        valid = digest(configuration) == result["configurationId"]
+    except (TypeError, ValueError):
+        raise HostUnavailable() from None
+    if not valid:
         raise HostUnavailable()
     return result
 
@@ -95,9 +106,13 @@ def receipt(row):
 
 
 def link_result(db, row, data):
+    if not isinstance(data, dict) or not isinstance(data.get("run"), dict):
+        raise HostUnavailable()
     run = data.get("run", {})
     original = json.loads(row.host_request_json)
     try:
+        if not isinstance(run.get("runId"), str):
+            raise ValueError()
         run_id = str(UUID(run["runId"], version=4))
         if (run_id != run["runId"] or run.get("scenarioId") != original["scenarioId"]
                 or data.get("dispatchStatus") not in ("SCHEDULED", "NOT_CONFIGURED")):
@@ -138,7 +153,8 @@ def submit(payload: RunRequest, request: Request, response: Response,
         try:
             approved = approval(client, payload.scenarioId)
         except (HostUnavailable, HostRunNotFound, HostRejected):
-            raise unavailable() from None
+            # 아직 접수 원장 생성·Host POST를 하지 않았음을 명시합니다.
+            raise unavailable(not_accepted=True) from None
         if payload.configurationId != approved["configurationId"]:
             raise HTTPException(409, "승인 설정이 변경되었습니다. 실행 설정을 다시 확인해 주세요.")
         if project is None:

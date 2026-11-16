@@ -10,7 +10,7 @@ import { createOfficeTraceController, isTraceActionCurrent } from './officeTrace
 import { tidyOfficeHair } from './office3dAppearance'
 import { buildOfficeRunPopups, popupResultNotice, renderOfficeRunPopups } from './officeRunPopups'
 
-// 제공된 HTML의 시연·카메라 로직을 영역 내부로 한정한 수명 주기 어댑터입니다.
+// 실제 Run·Trace 표시와 카메라의 수명 주기를 관리합니다.
 export function mountAgentOffice(root, {
   motionEnabled,
   runDisplayState = null,
@@ -31,14 +31,9 @@ export function mountAgentOffice(root, {
     ct,
     Ku,
     tr,
-    al,
     bn,
-    At,
-    ci,
     Qt,
     En,
-    pt,
-    Zo,
     vs,
     Ms,
     getOfficeAgentPose,
@@ -241,7 +236,6 @@ export function mountAgentOffice(root, {
     Ku(office, background);
     const agentCamera = createAgentCloseupCamera(office, engine);
     const displayRole = (index) => humanAgents[index].name;
-    const stateAt = (index, atTime) => index === orchestratorIndex ? atTime >= En ? 'completed' : atTime > 0 ? 'working' : 'waiting' : ci(index, atTime);
     var bubble = element("bubble"),
       cameraButton = element("home"),
       celebration = element("celebration"),
@@ -378,27 +372,6 @@ export function mountAgentOffice(root, {
         z: projectedPoint.z
       };
     }
-    var cornerPoint = new P();
-    function faceBounds({
-      head: i,
-      g: e,
-      i: t
-    }, n = !1) {
-      let s = {
-          left: 1 / 0,
-          right: -1 / 0,
-          top: 1 / 0,
-          bottom: -1 / 0
-        },
-        r = t === 0 ? 1.13 : .88,
-        o = n ? .2 : 0;
-      for (let a of [-.78, .78]) for (let c of [-.68, r + o]) for (let l of [-.64, .66]) {
-        n ? cornerPoint.set(a, c + 2.5, l - .51).applyMatrix4(e.matrixWorld) : cornerPoint.set(a, c, l).applyMatrix4(i.matrixWorld);
-        let h = projectPoint(cornerPoint.x, cornerPoint.y, cornerPoint.z);
-        h.z < -1 || h.z > 1 || (s.left = Math.min(s.left, h.x), s.right = Math.max(s.right, h.x), s.top = Math.min(s.top, h.y), s.bottom = Math.max(s.bottom, h.y));
-      }
-      return s;
-    }
     function positionOverlays(i, e, finaleTime = null) {
       bubble.hidden = true;
       for (let t = 0; t < office.agents.length; t++) {
@@ -474,7 +447,7 @@ export function mountAgentOffice(root, {
       }
       if (statusOpen) {
         const index = selectedAgent >= 0 ? selectedAgent : info?.agent ?? 0;
-        const agent = actualAgents[index], model = office.agents[index];
+        const agent = actualAgents[index];
         element('selected').textContent = displayRole(index) + ' · 실제 Run';
         element('vector-data').textContent = `상태 ${agent.label}\n시도 ${agent.step?.attempt ?? '-'}\n코드 버전 ${agent.step?.codeVersion ?? '-'}`;
       }

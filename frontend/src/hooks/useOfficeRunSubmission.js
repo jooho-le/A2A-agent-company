@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { hasStoredAccessToken, loginRequired } from '../api/productRunRequest'
 import { loadOfficeApproval, lookupOfficeWork, submitOfficeWork } from '../api/officeService'
+import { pendingOfficeSubmissionKey } from './pendingOfficeSubmission.js'
+import { runUuid } from '../api/agentRunSubmission.js'
 
-const pendingKey = 'ai-company.pending-office-submission'
 const empty = { busy: false, locked: false, error: '', result: null, name: '', requestText: '', uncertain: false }
 
 export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
@@ -10,14 +11,15 @@ export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
   const [configuration, setConfiguration] = useState({ value: null, loading: false, error: '' })
   const [revision, refreshApproval] = useState(0)
   const pending = useRef(false)
-  const current = useRef(0)
   const requestId = useRef(null)
-  const mounted = useRef(true)
+  const lifecycle = useRef({ mounted: false, sequence: 0 })
   const hasToken = hasStoredAccessToken()
+  const pendingKey = pendingOfficeSubmissionKey()
 
   useEffect(() => {
-    mounted.current = true
-    return () => { mounted.current = false; current.current++ }
+    const instance = lifecycle.current
+    instance.mounted = true
+    return () => { instance.mounted = false; instance.sequence++ }
   }, [])
   useEffect(() => {
     if (!hasToken) return
@@ -29,15 +31,30 @@ export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
       if (!controller.signal.aborted) setConfiguration({ value: null, loading: false, error: error.message })
     })
     try {
-      const key = sessionStorage.getItem(pendingKey)
-      if (key) { requestId.current = key; setState(value => ({ ...value, locked: true, uncertain: true })) }
+      let key = pendingKey && sessionStorage.getItem(pendingKey)
+      if (pendingKey && !runUuid.test(key)) {
+        const legacyKey = 'ai-company.pending-office-submission'
+        const legacy = sessionStorage.getItem(legacyKey)
+        if (runUuid.test(legacy)) {
+          // 이전 버전의 접수 식별자를 잃지 않습니다. 실제 소유권은 GET으로 검증합니다.
+          key = legacy
+          try {
+            sessionStorage.setItem(pendingKey, legacy)
+            sessionStorage.removeItem(legacyKey)
+          } catch { /* 저장 실패 시에도 기존 ID와 메모리 중복 차단을 보존합니다. */ }
+        }
+      }
+      if (key && runUuid.test(key)) { requestId.current = key; setState(value => ({ ...value, locked: true, uncertain: true })) }
+      else if (key) sessionStorage.removeItem(pendingKey)
     } catch { /* 저장소를 사용할 수 없으면 현재 화면에서만 중복을 차단합니다. */ }
     return () => controller.abort()
-  }, [hasToken, revision])
+  }, [hasToken, pendingKey, revision])
 
   function remember(key) {
     requestId.current = key
-    try { key ? sessionStorage.setItem(pendingKey, key) : sessionStorage.removeItem(pendingKey) } catch { /* 메모리 중복 차단은 유지 */ }
+    try {
+      if (pendingKey) key ? sessionStorage.setItem(pendingKey, key) : sessionStorage.removeItem(pendingKey)
+    } catch { /* 메모리 중복 차단은 유지 */ }
   }
   function accept(result, name, requestText) {
     const uncertain = ['UNKNOWN', 'PENDING'].includes(result.submissionStatus)
@@ -50,17 +67,21 @@ export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
     if (!hasStoredAccessToken()) { setState(value => ({ ...value, error: loginRequired().message })); return false }
     if (pending.current || state.locked || !configuration.value || !name.trim() || !requestText.trim()) return false
     pending.current = true
-    const sequence = ++current.current
+    const sequence = ++lifecycle.current.sequence
     const key = crypto.randomUUID()
     remember(key)
     setState(value => ({ ...value, busy: true, error: '', name: name.trim(), requestText: requestText.trim() }))
     try {
       const result = await submitOfficeWork({ ...configuration.value, projectName: name.trim(), requestText: requestText.trim() }, key)
-      if (mounted.current && sequence === current.current) accept(result, name.trim(), requestText.trim())
+      if (lifecycle.current.mounted && sequence === lifecycle.current.sequence) accept(result, name.trim(), requestText.trim())
     } catch (error) {
-      if (mounted.current && sequence === current.current) {
-        const uncertain = ![400, 401, 403, 404, 409, 413, 415, 422, 429].includes(error.status)
+      if (lifecycle.current.mounted && sequence === lifecycle.current.sequence) {
+        const uncertain = !error.submissionNotAccepted && ![400, 401, 403, 404, 409, 413, 415, 422, 429].includes(error.status)
         if (!uncertain) remember(null)
+        if (error.submissionNotAccepted || error.status === 409) {
+          setConfiguration({ value: null, loading: false, error: error.status === 409
+            ? '요청 또는 승인 설정이 변경되었습니다. 실행 설정을 다시 확인해 주세요.' : error.message })
+        }
         setState(value => ({ ...value, busy: false, locked: uncertain, uncertain, error: uncertain
           ? '접수 결과를 확인하지 못했습니다. 다시 생성하지 말고 접수 상태를 확인해 주세요.' : error.message }))
       }
@@ -70,18 +91,18 @@ export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
   async function recover() {
     if (pending.current || !requestId.current) return
     pending.current = true
-    const sequence = ++current.current
+    const sequence = ++lifecycle.current.sequence
     setState(value => ({ ...value, busy: true, error: '' }))
     try {
       const result = await lookupOfficeWork(requestId.current)
-      if (mounted.current && sequence === current.current) accept(result, state.name, state.requestText)
+      if (lifecycle.current.mounted && sequence === lifecycle.current.sequence) accept(result, state.name, state.requestText)
     } catch (error) {
-      if (mounted.current && sequence === current.current) setState(value => ({ ...value, busy: false, error: error.message }))
+      if (lifecycle.current.mounted && sequence === lifecycle.current.sequence) setState(value => ({ ...value, busy: false, error: error.message }))
     } finally { pending.current = false }
   }
   function reset() {
     if (pending.current || state.uncertain) return false
-    remember(null); current.current++; setState(empty)
+    remember(null); lifecycle.current.sequence++; setState(empty)
     return true
   }
   return { ...state, submit, recover, reset, refreshApproval: () => refreshApproval(value => value + 1),
