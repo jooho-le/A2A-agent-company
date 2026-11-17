@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from functools import lru_cache
 from pathlib import Path
+from uuid import UUID
 
 
 REGISTRY_PATH = Path(__file__).resolve().parents[1] / "src/orchestrator/domain/scenario_registry.py"
@@ -33,7 +34,13 @@ def _load_registry():
 
 def is_supported_project_scenario(scenario_id):
     try:
-        scenario = _load_registry().get_scenario(scenario_id)
+        registry = _load_registry()
+        # Host JSON의 문자열과 Pydantic의 UUID를 같은 등록 키로 비교합니다.
+        try:
+            identifier = UUID(str(scenario_id))
+        except (ValueError, TypeError, AttributeError):
+            return False
+        scenario = registry.get_scenario(identifier)
         return scenario is not None and scenario.key == "SCN-001"
     except ScenarioRegistryUnavailable:
         raise

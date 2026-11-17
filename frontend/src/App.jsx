@@ -32,7 +32,7 @@ function App() {
   }
 
   function openLogin() {
-    setLoginNotice('로그인 후 업무 요청과 프로젝트 관리를 이용할 수 있습니다.')
+    setLoginNotice('')
     setShowSignup(false)
     setShowLogin(true)
   }
@@ -62,6 +62,7 @@ function App() {
       return (
         <SignupPage
           onBack={() => setShowSignup(false)}
+          onClose={() => { setShowLogin(false); setShowSignup(false) }}
           onSignupSuccess={(message) => {
             setLoginNotice(`${message} 로그인하여 시작해주세요.`)
             setShowSignup(false)

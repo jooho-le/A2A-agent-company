@@ -12,6 +12,7 @@ from orchestrator.api.routes.runs import router as runs_router
 from orchestrator.api.routes.scenarios import router as scenarios_router
 from orchestrator.api.routes.submissions import router as submissions_router
 from orchestrator.api.routes.downloads import router as downloads_router
+from orchestrator.api.routes.interactions import router as interactions_router
 from orchestrator.application import PlannerRunDispatcher
 from orchestrator.core.config import Settings, get_settings
 from orchestrator.core.logging import configure_logging
@@ -63,6 +64,7 @@ def create_app(
     app.include_router(host_router, prefix=settings.api_prefix)
     app.include_router(submissions_router, prefix=settings.api_prefix)
     app.include_router(downloads_router, prefix=settings.api_prefix)
+    app.include_router(interactions_router, prefix=settings.api_prefix)
     return app
 
 

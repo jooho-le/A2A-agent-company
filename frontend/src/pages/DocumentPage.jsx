@@ -1,3 +1,4 @@
+import { StudioBanner } from '../components/atelier/StudioVisuals'
 import { useEffect, useRef, useState } from 'react'
 import './DocumentPage.css'
 
@@ -268,16 +269,15 @@ function DocumentPage({ onBack }) {
           <span>A2A Agent Company</span>
         </div>
         <button type="button" className="app-button" onClick={onBack} disabled={isSubmitting}>
-          Dashboard로 돌아가기
+          오피스로 돌아가기
         </button>
       </header>
 
       <div className="dashboard-content document-content">
-        <header className="dashboard-intro">
-          <p className="eyebrow">시나리오 2</p>
-          <h1>전자문서 제출</h1>
-          <p>PDF 문서를 선택하고 담당자 ID를 입력하여 제출해주세요.</p>
-        </header>
+        <StudioBanner kind="paper"><header className="dashboard-intro">
+          <h1>문서 보내기</h1>
+          <p>PDF와 받는 사람의 회원번호를 입력해주세요.</p>
+        </header></StudioBanner>
 
         <form className="document-card document-form" onSubmit={handleSubmit} noValidate aria-busy={isSubmitting}>
           <div className="document-field">
@@ -295,34 +295,34 @@ function DocumentPage({ onBack }) {
             <p id="document-file-hint">PDF 파일 1개 · 최대 10MiB</p>
           </div>
           <div className="document-field">
-            <label htmlFor="document-assignee">담당자 ID</label>
+            <label htmlFor="document-assignee">받는 사람의 회원번호</label>
             <input
               id="document-assignee"
               name="assignee_id"
               type="number"
               min="1"
               step="1"
-              placeholder="사용자 ID 입력"
+              placeholder="예: 12"
               aria-describedby="document-assignee-hint"
               required
               value={assigneeId}
               disabled={isSubmitting}
               onChange={(event) => setAssigneeId(event.target.value)}
             />
-            <p id="document-assignee-hint">기존 가입 사용자의 ID를 입력해주세요.</p>
+            <p id="document-assignee-hint">받을 사람에게 회원번호를 확인해주세요.</p>
           </div>
 
           {isSubmitting && <p role="status">문서를 제출하고 있습니다.</p>}
           {errorMessage && <p className="document-message document-message--error" role="alert">{errorMessage}</p>}
           {uploadResult && (
             <section className="document-message document-message--success" aria-labelledby="document-success-title">
-              <h2 id="document-success-title" role="status">문서가 성공적으로 제출되었습니다.</h2>
-              <dl className="document-result">
+              <h2 id="document-success-title" role="status">문서를 보냈어요.</h2>
+              <details className="ux-details"><summary>문서 정보</summary><dl className="document-result">
                 <dt>문서 ID</dt><dd>{uploadResult.id}</dd>
                 <dt>원본 파일명</dt><dd>{uploadResult.original_filename}</dd>
                 <dt>파일 크기</dt><dd>{uploadResult.file_size.toLocaleString('ko-KR')} bytes</dd>
                 <dt>담당자 ID</dt><dd>{uploadResult.assignee_id}</dd>
-              </dl>
+              </dl></details>
             </section>
           )}
           <button type="submit" className="app-button app-button--primary" disabled={isSubmitting}>
@@ -349,7 +349,7 @@ function DocumentPage({ onBack }) {
               aria-pressed={selectedView === 'submitted'}
               onClick={() => handleViewChange('submitted')}
             >
-              내가 제출한 문서
+              보낸 문서
             </button>
             <button
               type="button"
@@ -357,7 +357,7 @@ function DocumentPage({ onBack }) {
               aria-pressed={selectedView === 'assigned'}
               onClick={() => handleViewChange('assigned')}
             >
-              나에게 배정된 문서
+              받은 문서
             </button>
           </div>
           <div className="document-list-panel" aria-busy={isLoadingDocuments}>
@@ -377,14 +377,14 @@ function DocumentPage({ onBack }) {
                   <li key={document.id}>
                     <article className="document-list-item">
                       <h3>{document.original_filename}</h3>
-                      <dl className="document-result">
+                      <details className="ux-details"><summary>문서 정보</summary><dl className="document-result">
                         <dt>문서 ID</dt><dd>{document.id}</dd>
                         <dt>제출 일시</dt>
                         <dd><time dateTime={document.created_at}>{document.created_at.replace('T', ' ')}</time></dd>
                         <dt>파일 크기</dt><dd>{formatFileSize(document.file_size)}</dd>
                         <dt>제출자 ID</dt><dd>{document.submitter_id}</dd>
                         <dt>담당자 ID</dt><dd>{document.assignee_id}</dd>
-                      </dl>
+                      </dl></details>
                       <div className="document-download-actions">
                         <button
                           type="button"

@@ -52,7 +52,11 @@
 .atelier-dashboard .agent-office-3d .office3d-agent-label { position:absolute; top:0; left:0; display:flex; align-items:center; gap:5px; white-space:nowrap; padding:6px 8px; font-size:10px; border-radius:20px; background:#0a0f15dd; backdrop-filter:blur(12px); will-change:transform; }
 .atelier-dashboard .office3d-agent-label small { font-size:9px; color:#9aa5b3; }
 .atelier-dashboard .office3d-agent-label .status-dot { width:5px; height:5px; border-radius:50%; background:#747986; }
-.atelier-dashboard .agent-office-3d .office3d-agent-label[data-state=working] { border-color:#d4ff2460; }
+.atelier-dashboard .agent-office-3d .office3d-agent-label[data-state=working] { border-color:#d4ff2499; background:#172619e8; color:#edffba; box-shadow:0 0 0 3px #d4ff2412,0 5px 18px #0003; }
+.atelier-dashboard .agent-office-3d .office3d-agent-label[data-state=working] small { color:#d9ecac; }
+.atelier-dashboard .agent-office-3d .office3d-agent-label.selected:not([data-state=working]) { border-color:#dbe5ff80; }
+.atelier-dashboard .agent-office-3d .office3d-agent-label[data-state=waiting_input] { border-color:#e9c98285; }
+.atelier-dashboard .office3d-agent-label[data-state=waiting_input] .status-dot { background:#e9c982; }
 .atelier-dashboard .office3d-agent-label[data-state=working] .status-dot { background:#d4ff24; }
 .atelier-dashboard .office3d-agent-label[data-state=handoff] .status-dot { background:#1558c9; }
 .atelier-dashboard .office3d-agent-label[data-state=completed] .status-dot { background:#9dc88f; }

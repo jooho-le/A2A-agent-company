@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import OfficeAuthLayout from '../components/atelier/OfficeAuthLayout'
 
-function SignupPage({ onBack, onSignupSuccess }) {
+function SignupPage({ onBack, onClose = onBack, onSignupSuccess }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -50,10 +50,9 @@ function SignupPage({ onBack, onSignupSuccess }) {
   return (
     <OfficeAuthLayout reviewAccents>
         <section className="auth-card" aria-labelledby="signup-title">
+          {onClose && <button type="button" className="auth-close" onClick={onClose} disabled={isSubmitting} aria-label="회원가입 닫기">×</button>}
           <header className="auth-heading">
-            <p className="office-auth-form-label">우리 회사 시작하기</p>
-            <h1 id="signup-title">계정 만들기</h1>
-            <p>대표님의 첫 프로젝트를 함께 준비해요.</p>
+            <h1 id="signup-title">회원가입</h1>
           </header>
           <form className="signup-form" onSubmit={handleSubmit} noValidate>
             <div className="signup-field">

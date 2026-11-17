@@ -1,0 +1,54 @@
+import { runApiTransport } from './productRunRequest'
+import { runUuid } from './agentRunSubmission'
+
+const commandStates = new Set(['QUEUED', 'RUNNING', 'SUCCEEDED', 'REJECTED', 'UNKNOWN'])
+const roles = new Set(['PLANNER', 'DEVELOPER', 'QA', 'SECURITY'])
+
+function path(runId) {
+  if (!runUuid.test(runId)) throw new Error('작업을 먼저 선택해주세요.')
+  return `/api/v1/runs/${runId}`
+}
+async function read(url, options = {}) {
+  try {
+    const response = await runApiTransport.fetch(url, { ...options, cache: 'no-store' })
+    return await response.json()
+  } catch (error) {
+    if (error.name === 'AbortError') throw error
+    const message = ({ 401: '다시 로그인해주세요.', 404: '요청 기록을 아직 확인할 수 없어요.',
+      409: '작업 상태가 바뀌었어요. 최신 내용을 확인하고 다시 선택해주세요.',
+      422: '답변할 직원과 입력 내용을 확인해주세요.' })[error.status]
+    throw Object.assign(new Error(message || '서버의 처리 결과를 확인하지 못했어요. 처리 상태를 다시 확인해주세요.'), { status: error.status })
+  }
+}
+export async function getRunInteraction(runId, signal) {
+  const data = await read(path(runId) + '/interaction', { signal })
+  if (data?.runId !== runId || !/^[0-9a-f]{64}$/.test(data.revision) || !Array.isArray(data.requests)
+      || typeof data.canCancel !== 'boolean' || data.requests.some(row => !row || !runUuid.test(row.workflowStepId)
+        || !roles.has(row.agentRole) || !['ANSWER', 'NEW_RUN', 'OPERATOR', 'UNAVAILABLE'].includes(row.replyMode)
+        || typeof row.reason !== 'string' || !Array.isArray(row.questions)
+        || row.questions.length > 8 || row.questions.some(text => typeof text !== 'string' || text.length > 2000))) {
+    throw new Error('직원의 확인 요청을 읽을 수 없어요.')
+  }
+  return data
+}
+function receipt(data, runId, commandId) {
+  if (data?.runId !== runId || data.commandId !== commandId || !commandStates.has(data.status)
+      || !['CANCEL', 'RESUME'].includes(data.action)) throw new Error('요청 접수를 확인하지 못했어요. 처리 상태를 확인해주세요.')
+  return data
+}
+export async function sendRunCommand(runId, commandId, body) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
+  try {
+    const data = await read(path(runId) + '/commands', { method: 'POST', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': commandId }, body: JSON.stringify(body) })
+    return receipt(data, runId, commandId)
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('접수 응답이 늦어 처리 상태를 확인하고 있어요. 요청을 다시 보내지 않아요.', { cause: error })
+    throw error
+  } finally { clearTimeout(timer) }
+}
+export async function getRunCommand(runId, commandId, signal) {
+  if (!runUuid.test(commandId)) throw new Error('요청 식별자를 확인할 수 없어요.')
+  return receipt(await read(path(runId) + '/commands/' + commandId, { signal }), runId, commandId)
+}

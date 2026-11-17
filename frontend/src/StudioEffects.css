@@ -1,0 +1,221 @@
+/* 서브 페이지의 시각 언어. 업무 데이터 및 메인 3D 오피스 레이아웃과 분리합니다. */
+.studio-banner, [data-studio-tilt], .studio-empty {
+  --studio-accent: #7c9fff;
+  --studio-tint: #1d4887;
+}
+[data-palette="1"] { --studio-accent: #c5a4f5; --studio-tint: #59416d; }
+[data-palette="2"] { --studio-accent: #a8d8bc; --studio-tint: #3d6557; }
+[data-palette="3"] { --studio-accent: #efb994; --studio-tint: #79523b; }
+[data-palette="4"] { --studio-accent: #ddda94; --studio-tint: #666235; }
+
+/* 한 화면 안에 머무는 종이·폴더·모니터. CSS 3D이므로 WebGL을 추가하지 않습니다. */
+.studio-object { display: block; width: 230px; height: 190px; position: relative; perspective: 750px; flex: none; pointer-events: none; }
+.studio-object-space { position: absolute; inset: 20px 25px; display: block; transform-style: preserve-3d; transform: rotateX(14deg) rotateY(-24deg) rotateZ(-8deg); }
+.studio-object-space > span { display: block; position: absolute; box-sizing: border-box; }
+.studio-object-shadow { position: absolute; bottom: 2px; left: 25%; width: 62%; height: 22px; border-radius: 50%; background: #0006; filter: blur(12px); }
+.studio-folder-back { inset: 14px 0 0; border-radius: 12px; background: #315cab; box-shadow: 4px 8px 0 #173b79; transform: translateZ(-18px); }
+.studio-folder-back::before { content: ''; position: absolute; top: -14px; left: 0; width: 44%; height: 24px; border-radius: 12px 12px 0 0; background: inherit; }
+.studio-sheet { inset: 0 10px 8px; border: 1px solid #fff5; border-radius: 10px; background: #e0e8e7; box-shadow: 2px 3px 0 #9cabb5; }
+.studio-sheet--one { transform: translateZ(-8px) rotateZ(7deg); }
+.studio-sheet--two { transform: translateZ(1px) rotateZ(-4deg); background: #cbd8ec; }
+.studio-folder-front { inset: 42px -2px -5px; padding: 26px 22px; border: 1px solid #aec6ff70; border-radius: 8px 8px 14px 14px; background: linear-gradient(150deg, #5891f0, #1558c9 62%, #194590); box-shadow: 3px 6px 0 #133f88, 12px 18px 24px #0005; transform: translateZ(23px) rotateX(-15deg); }
+.studio-folder-front > .icon { width: 30px; height: 30px; color: #e0eaff; }
+.studio-folder-front > span { position: absolute; right: 15px; bottom: 20px; width: 44px; height: 9px; border-radius: 3px; background: #d4ff24; }
+.studio-document { inset: 0 16px -8px 4px; padding: 20px; border-radius: 10px; color: #3352a4; border: 1px solid #fff9; background: linear-gradient(135deg, #faf6eb, #d1dbdf); box-shadow: 3px 6px 0 #95a8b2, 10px 18px 20px #0005; transform: translateZ(24px) rotateZ(-5deg); }
+.studio-document > .icon { width: 29px; height: 29px; }
+.studio-screen-lines { display: block; height: 42px; margin-top: 14px; background: repeating-linear-gradient(to bottom, currentColor 0 3px, transparent 3px 10px); opacity: .45; clip-path: polygon(0 0, 88% 0, 88% 25%, 100% 25%, 100% 75%, 62% 75%, 62% 100%, 0 100%); }
+.studio-document-seal { position: absolute; right: 16px; top: 18px; width: 22px; height: 22px; border-radius: 50%; background: #1558c9; box-shadow: 0 0 0 5px #1558c920; }
+.studio-monitor { inset: 0 -10px 25px; padding: 12px 18px; border: 6px solid #5f738b; border-radius: 15px; color: #afc9f7; background: linear-gradient(135deg, #1b3455, #0a1428); box-shadow: 5px 6px 0 #2c3a4d, 10px 15px 20px #0006; transform: translateZ(12px); }
+.studio-monitor > .icon { width: 36px; height: 32px; margin-top: 9px; color: #d4ff24; }
+.studio-monitor-bar { display: block; height: 3px; width: 44%; border-radius: 4px; background: #afc9f790; }
+.studio-monitor .studio-screen-lines { height: 24px; margin-top: 4px; }
+.studio-monitor-stand { width: 76px; height: 58px; left: 54px; bottom: -8px; background: linear-gradient(90deg, #738699, #bac8cf, #566a7d); clip-path: polygon(34% 0, 66% 0, 66% 76%, 100% 86%, 100% 100%, 0 100%, 0 86%, 34% 76%); transform: translateZ(-10px); }
+.studio-monitor-note { right: -32px; top: 70px; padding: 12px; border: 1px solid #e6ffc677; border-radius: 12px; background: #d4ff24; box-shadow: 2px 4px 0 #7a921a, 5px 10px 16px #0004; color: #183b33; transform: translateZ(45px) rotateZ(14deg); }
+.studio-monitor-note .icon { width: 26px; height: 26px; }
+
+/* 페이지마다 색·오브젝트가 다른 작은 전시 패널. */
+.studio-banner { position: relative; isolation: isolate; overflow: hidden; display: flex; align-items: center; justify-content: space-between; min-height: 198px; margin: 0 0 24px; padding: 26px 36px; border: 1px solid #749eff38; border-radius: 28px; background: radial-gradient(ellipse at 80% 110%, #4469ad55, transparent 65%), linear-gradient(120deg, #142645ed, #152437bd); }
+.studio-banner::after { content: ''; position: absolute; inset: 0; z-index: -1; opacity: .22; background-image: linear-gradient(#c8daff20 1px, transparent 1px), linear-gradient(90deg, #c8daff20 1px, transparent 1px); background-size: 36px 36px; mask-image: linear-gradient(to right, transparent 30%, black); }
+.studio-banner--paper { --studio-accent: #d2aef4; background: radial-gradient(ellipse at 80% 110%, #9e6cb43b, transparent 65%), linear-gradient(120deg, #28243fed, #242d45bf); border-color: #b69bd039; }
+.studio-banner-copy { position: relative; z-index: 1; flex: 1; min-width: 0; }
+.studio-banner-label { display: block; margin-bottom: 4px; color: #c3cee1; font-size: 13px; }
+.studio-banner-number { font-size: clamp(58px, 6vw, 86px); font-weight: 650; line-height: 1.15; letter-spacing: -.065em; }
+.studio-banner-number small { margin-left: 10px; font-size: 18px; font-weight: 500; letter-spacing: 0; color: #b7c8e2; }
+.studio-banner-art { position: relative; flex: none; width: 270px; height: 165px; }
+.studio-banner-art > .studio-object { position: absolute; left: 22px; top: -12px; }
+.studio-orbit-tile { position: absolute; width: 24px; height: 24px; border: 1px solid #ffffff4d; border-radius: 7px; background: #a9b8db42; box-shadow: 3px 4px 0 #ffffff12; transform: rotate(-17deg); }
+.studio-orbit-tile--one { left: 7px; top: 40px; }
+.studio-orbit-tile--two { right: -4px; bottom: 25px; width: 16px; height: 16px; background: #d4ff2470; transform: rotate(14deg); }
+.atelier-dashboard.workspace-shell .studio-banner h2 { margin: 12px 0 18px; font-size: clamp(22px, 2.3vw, 32px); letter-spacing: -.04em; line-height: 1.3; overflow-wrap: anywhere; }
+.studio-banner .output-selector { display: block; max-width: 320px; }
+.studio-banner .output-selector select { width: 100%; min-width: 0; max-width: 100%; }
+
+/* 가로로 넘기는 카드뉴스. 숨기거나 재마운트하지 않아 기존 버튼·내용을 보존합니다. */
+.studio-collection { position: relative; min-width: 0; }
+.studio-rail-controls { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
+.studio-rail-controls button, .team-story-navigation button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid #ffffff25; border-radius: 50%; background: #ffffff09; color: #e7edfa; cursor: pointer; transition: background .2s, transform .2s; }
+.studio-rail-controls button:first-child .icon, .team-story-navigation > div:last-child button:first-child .icon { transform: rotate(180deg); }
+.studio-rail-controls button:disabled, .team-story-navigation button:disabled { opacity: .3; cursor: default; }
+.studio-rail-controls button:not(:disabled):hover, .team-story-navigation button:not(:disabled):hover { background: #1558c9; transform: translateY(-2px); }
+.atelier-dashboard.workspace-shell :is(.project-grid, .output-grid).studio-rail { display: flex; align-items: stretch; gap: 20px; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; scroll-padding-inline: 4px; padding: 8px 4px 24px; margin: -8px -4px 0; scrollbar-width: thin; scrollbar-color: #7189b66b transparent; }
+.studio-rail > * { flex: 0 0 calc((100% - 40px) / 3); scroll-snap-align: start; min-width: 0; }
+.atelier-dashboard.workspace-shell .studio-rail > .empty-state { grid-column: 1 / -1; width: 100%; }
+.atelier-dashboard.workspace-shell .studio-rail:has(> .empty-state) { display: block; }
+.atelier-dashboard.workspace-shell .studio-rail:empty { display: none; }
+.atelier-dashboard.workspace-shell .studio-rail .project-card { width: 100%; min-height: 330px; text-align: left; padding: 22px; background: linear-gradient(160deg, color-mix(in srgb, var(--studio-tint) 33%, #111b26) 0%, #0d1623f2 70%); border-color: color-mix(in srgb, var(--studio-accent) 25%, transparent); }
+.studio-project-cover, .studio-output-cover { position: relative; display: block; isolation: isolate; height: 158px; margin: -22px -22px 20px; border-radius: 27px 27px 4px 4px; overflow: hidden; background: radial-gradient(ellipse at 50% 65%, color-mix(in srgb, var(--studio-accent) 30%, transparent), transparent 70%); }
+.studio-project-cover .studio-object, .studio-output-cover .studio-object { position: absolute; left: calc(50% - 115px); top: -12px; transform: scale(.82); }
+.studio-cover-grid { position: absolute; inset: 20% 5%; z-index: -1; background-image: linear-gradient(#ffffff12 1px, transparent 1px), linear-gradient(90deg, #ffffff12 1px, transparent 1px); background-size: 25px 25px; transform: perspective(500px) rotateX(58deg) rotateZ(-12deg); mask-image: radial-gradient(ellipse, black, transparent 70%); }
+.studio-project-cover .studio-folder-front { background: linear-gradient(140deg, color-mix(in srgb, var(--studio-accent) 70%, #5e78be), var(--studio-tint)); border-color: color-mix(in srgb, var(--studio-accent) 65%, transparent); box-shadow: 3px 6px 0 var(--studio-tint), 12px 18px 24px #0005; }
+.studio-project-cover .studio-folder-back { background: color-mix(in srgb, var(--studio-tint) 65%, #6a7c98); box-shadow: 4px 8px 0 var(--studio-tint); }
+.atelier-dashboard.workspace-shell .studio-rail .project-monogram { width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--studio-accent) 15%, transparent); color: var(--studio-accent); }
+.atelier-dashboard.workspace-shell .studio-rail .project-card h2 { font-size: 22px; margin-top: 18px; }
+.atelier-dashboard.workspace-shell .studio-rail .project-card-footer { margin-top: 20px; }
+.atelier-dashboard.workspace-shell .studio-rail .output-card { padding: 22px; background: linear-gradient(160deg, color-mix(in srgb, var(--studio-tint) 33%, #16202b), #101824f5 65%); border-color: color-mix(in srgb, var(--studio-accent) 25%, transparent); }
+.atelier-dashboard.workspace-shell .studio-rail .output-card h3 { margin-top: 18px; font-size: 23px; }
+.studio-output-cover { height: 180px; }
+.studio-output-cover .studio-object { top: -2px; }
+.studio-output-cover .studio-document-seal { background: var(--studio-accent); }
+.studio-output-cover .studio-document { color: var(--studio-tint); }
+.atelier-dashboard.workspace-shell .studio-rail .file-icon { background: color-mix(in srgb, var(--studio-accent) 13%, transparent); color: var(--studio-accent); }
+.atelier-dashboard.workspace-shell .studio-empty { position: relative; overflow: hidden; border: 1px solid #829bc02e; border-radius: 28px; background: radial-gradient(ellipse at 50% 10%, #31538e40, transparent 75%), #121c2a80; }
+.studio-empty-art { height: 170px; display: flex; justify-content: center; }
+.studio-empty-art .studio-object { transform: scale(.9); }
+.studio-banner--folder ~ .studio-collection .studio-empty-art { display: none; }
+.atelier-dashboard.workspace-shell .workflow-empty.studio-empty { min-height: 410px; background: radial-gradient(ellipse at 50% 30%, #574b874d, transparent 65%), #121b28ae; }
+
+/* 직원: 각자의 색과 입체적인 인물 카드. 제목은 작은 설명 대신 큰 진입점입니다. */
+.atelier-dashboard.workspace-shell .employee-grid { padding-block: 10px 16px; gap: 16px; }
+.atelier-dashboard.workspace-shell .employee-grid .agent-card { background: linear-gradient(165deg, color-mix(in srgb, var(--studio-tint) 40%, #111a25), #101824ee 80%); border-color: color-mix(in srgb, var(--studio-accent) 30%, transparent); }
+.atelier-dashboard.workspace-shell .employee-grid .portrait { height: 235px; position: relative; background: radial-gradient(ellipse at 50% 85%, color-mix(in srgb, var(--studio-accent) 27%, transparent), transparent 65%); }
+.atelier-dashboard.workspace-shell .employee-grid .portrait::after { content: ''; position: absolute; width: 110px; height: 25px; left: calc(50% - 55px); bottom: 8px; border-radius: 50%; background: #03040760; box-shadow: 0 0 0 1px #ffffff17; transform: rotate(-12deg); }
+.atelier-dashboard.workspace-shell .employee-grid .portrait img { position: relative; z-index: 1; filter: drop-shadow(10px 12px 9px #0006); transition: transform .45s; }
+.atelier-dashboard.workspace-shell .employee-grid .agent-card:hover .portrait img { transform: translateY(-7px) scale(1.035); }
+.atelier-dashboard.workspace-shell .employee-grid .employee-name { color: var(--studio-accent); font-size: 17px; }
+.atelier-dashboard.workspace-shell .employee-grid .employee-link { color: #e0e9fa; margin-top: auto; }
+.atelier-dashboard.workspace-shell .team-story { margin: 0 0 28px; padding: 0; overflow: hidden; border-radius: 28px; border: 1px solid #97b3df36; background: linear-gradient(120deg, #1d2b48ef, #22293dbd); }
+.atelier-dashboard.workspace-shell .team-story > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; position: relative; overflow: hidden; padding: 32px 36px; font-size: clamp(36px, 4.5vw, 64px); line-height: 1.13; letter-spacing: -.055em; font-weight: 650; color: #f4f6fc; list-style: none; }
+.atelier-dashboard.workspace-shell .team-story > summary::before { content: ''; position: absolute; right: 10%; top: -60px; width: 230px; height: 300px; border: 1px solid #c0cfff20; border-radius: 32px; background: linear-gradient(140deg, #1558c942, #a58bea12); box-shadow: 25px 15px 0 #1558c91f, 50px 30px 0 #ac8cdc14; transform: rotate(28deg); pointer-events: none; }
+.team-story > summary > span { position: relative; }
+.team-story-open { display: grid; place-items: center; flex: none; width: 64px; height: 64px; border-radius: 50%; background: #d4ff24; color: #15200b; transition: transform .3s; }
+.team-story-open > .icon { width: 28px; height: 28px; transform: rotate(-35deg); }
+.team-story[open] .team-story-open { transform: rotate(90deg); }
+.atelier-dashboard.workspace-shell .team-story > .ux-details { margin: 8px 24px 24px; }
+.team-story-deck { margin: 0 24px 24px; border-radius: 22px; overflow: hidden; border: 1px solid #d6ddf72b; }
+.team-story-slide { --story-ink: #dae3f8; position: relative; display: flex; min-height: 280px; align-items: center; padding: 32px; overflow: hidden; isolation: isolate; background: radial-gradient(ellipse at 90% 90%, #85704880, transparent 60%), #252c38; }
+.team-story-slide[data-story-role=planner] { background: radial-gradient(ellipse at 90% 90%, #668ed380, transparent 60%), #203458; }
+.team-story-slide[data-story-role=developer] { background: radial-gradient(ellipse at 90% 90%, #c18ed180, transparent 60%), #3c3154; }
+.team-story-slide[data-story-role=qa] { background: radial-gradient(ellipse at 90% 90%, #7baf9580, transparent 60%), #273f3d; }
+.team-story-slide[data-story-role=security] { background: radial-gradient(ellipse at 90% 90%, #658ab380, transparent 60%), #23344d; }
+.team-story-copy { position: relative; z-index: 2; max-width: 64%; }
+.team-story-role { font-size: 12px; color: var(--story-ink); }
+.atelier-dashboard.workspace-shell .team-story-copy h3 { max-width: 460px; font-size: clamp(27px, 3vw, 42px); line-height: 1.24; letter-spacing: -.05em; margin: 20px 0 14px; text-wrap: balance; }
+.team-story-copy p { color: var(--story-ink); font-size: 13px; }
+.team-story-portrait { width: 250px; height: 280px; position: absolute; right: 24px; bottom: -15px; perspective: 600px; }
+.team-story-portrait > span { position: absolute; inset: 40px 0 12px 20px; border: 1px solid #e0eaff30; border-radius: 36px; transform: rotateY(-20deg) rotateZ(12deg); background: #ffffff0d; box-shadow: 12px 12px 0 #ffffff08; }
+.team-story-portrait img { position: relative; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(16px 12px 8px #0005); }
+.team-story-count { position: absolute; top: 16px; right: 20px; font-size: 12px; font-variant-numeric: tabular-nums; color: #e5eaf8; }
+.team-story-count small { opacity: .6; }
+.team-story-navigation { display: flex; justify-content: space-between; gap: 10px; padding: 14px 18px; background: #101a2be6; }
+.team-story-navigation > div { display: flex; gap: 8px; align-items: center; }
+.team-story-navigation .team-story-dots button { width: 30px; height: 34px; border-radius: 7px; border: 0; background: transparent; position: relative; }
+.team-story-dots button::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #90a0b5; transition: width .25s; }
+.team-story-dots button[aria-current]::after { width: 22px; border-radius: 8px; background: #d4ff24; }
+
+/* 실제 조회 상태를 보여주는 보드. 동작 강조는 working 상태에만 적용합니다. */
+.atelier-dashboard.workspace-shell .workflow-run-layout { max-width: none; }
+.atelier-dashboard.workspace-shell .studio-flowboard { padding: 24px; background: radial-gradient(ellipse at 90% 0, #40599c38, transparent 70%), #111c2cdc; }
+.atelier-dashboard.workspace-shell .studio-flowboard header { display: flex; padding-bottom: 18px; border-color: #8fa7d333; }
+.studio-flow-leader { display: flex; align-items: center; gap: 8px; color: #c7b781; font-size: 11px; }
+.studio-flow-leader img { width: 36px; height: 42px; object-fit: contain; border-radius: 10px; background: #c7aa6810; }
+.atelier-dashboard.workspace-shell .studio-flowboard ol { margin-top: 22px; gap: 18px; }
+.atelier-dashboard.workspace-shell .studio-flowboard li { position: relative; min-height: 160px; gap: 18px; padding: 18px 24px; border: 1px solid color-mix(in srgb, var(--studio-accent) 27%, transparent); border-radius: 24px; overflow: hidden; background: radial-gradient(ellipse at 0 110%, color-mix(in srgb, var(--studio-tint) 65%, transparent), transparent 70%), #111a2b9e; }
+.atelier-dashboard.workspace-shell .studio-flowboard li:last-child { padding-bottom: 18px; border: 1px solid color-mix(in srgb, var(--studio-accent) 27%, transparent); }
+.atelier-dashboard.workspace-shell .studio-flowboard li > img { width: 110px; height: 130px; flex: none; border-radius: 0; background: none; filter: drop-shadow(8px 9px 7px #0006); }
+.atelier-dashboard.workspace-shell .studio-flowboard li strong { font-size: 23px; letter-spacing: -.04em; }
+.atelier-dashboard.workspace-shell .studio-flowboard li span { font-size: 12px; line-height: 1.6; }
+.atelier-dashboard.workspace-shell .studio-flowboard li[data-state=working] { border-color: #d4ff2480; box-shadow: inset 0 0 35px #d4ff240a, 0 8px 30px #0002; }
+.studio-flowboard li[data-state=working] > div::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #d4ff24; box-shadow: 0 0 0 5px #d4ff2418; margin-bottom: 8px; }
+.document-page .studio-banner { margin-bottom: 24px; }
+.document-page .studio-banner .dashboard-intro { margin: 0; padding: 0; }
+.document-page .studio-banner .dashboard-intro h1 { font-size: clamp(28px, 3vw, 40px); }
+
+/* 눈에 보이는 카드만 한 번 등장. 터치와 모션 끄기에서는 기울임을 만들지 않습니다. */
+.atelier-dashboard.workspace-shell [data-studio-tilt], .atelier-dashboard.workspace-shell [data-studio-tilt]:hover { transform: perspective(900px) rotateX(var(--studio-rx, 0deg)) rotateY(var(--studio-ry, 0deg)); transition: transform .25s ease, box-shadow .25s, opacity .45s; }
+.workspace-shell [data-studio-tilt]:hover { box-shadow: 0 18px 36px #0004; }
+.workspace-shell [data-studio-tilt]:focus-visible { outline: 2px solid #d4ff24; outline-offset: -3px; }
+.studio-rail:focus-visible, .team-story-deck:focus-visible, .team-story > summary:focus-visible, .studio-rail-controls button:focus-visible, .team-story-navigation button:focus-visible { outline: 2px solid #d4ff24; outline-offset: -3px; }
+@media (prefers-reduced-motion: no-preference) {
+  .motion-ready .studio-object-space { animation: studio-float 7s ease-in-out infinite; }
+  .motion-ready .studio-orbit-tile { animation: studio-orbit 6s ease-in-out infinite alternate; }
+  .motion-ready .studio-orbit-tile--two { animation-delay: -3s; }
+  .motion-ready .team-story-slide { animation: studio-slide-in .4s both; }
+  .motion-ready .studio-reveal:not(.studio-visible) { opacity: 0; transform: translateY(14px); }
+  .motion-ready .studio-flowboard li[data-state=working] > img { animation: studio-person-work 3s ease-in-out infinite; }
+  .motion-ready .studio-flowboard li[data-state=working] > div::before { animation: studio-status 2.5s ease-in-out infinite; }
+}
+.atelier-dashboard.workspace-shell.motion-paused [data-studio-tilt], .atelier-dashboard.workspace-shell.motion-paused [data-studio-tilt]:hover { transform: none; transition: none; }
+.atelier-dashboard.workspace-shell.motion-paused .employee-grid .portrait img { transition: none; }
+.atelier-dashboard.workspace-shell.motion-paused .employee-grid .agent-card:hover .portrait img { transform: none; }
+.motion-paused .team-story-open { transition: none; }
+.motion-paused :is(.studio-rail-controls, .team-story-navigation) button { transition: none; }
+.motion-paused :is(.studio-rail-controls, .team-story-navigation) button:hover { transform: none; }
+@keyframes studio-float { 0%, 100% { transform: translateY(0) rotateX(14deg) rotateY(-24deg) rotateZ(-8deg); } 50% { transform: translateY(-7px) rotateX(10deg) rotateY(-18deg) rotateZ(-5deg); } }
+@keyframes studio-orbit { to { translate: 0 -10px; rotate: 10deg; } }
+@keyframes studio-slide-in { from { opacity: .4; translate: 12px 0; } to { opacity: 1; translate: 0 0; } }
+@keyframes studio-person-work { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-5px) rotate(1deg); } }
+@keyframes studio-status { 50% { box-shadow: 0 0 0 8px #d4ff2407; } }
+@media (prefers-reduced-motion: reduce) {
+  .atelier-dashboard.workspace-shell [data-studio-tilt], .atelier-dashboard.workspace-shell [data-studio-tilt]:hover { transform: none; transition: none; }
+  .atelier-dashboard.workspace-shell .employee-grid .agent-card:hover .portrait img { transform: none; }
+  .studio-object *, .studio-orbit-tile, .team-story-slide, .team-story-portrait *, .team-story-navigation *, .studio-rail-controls *, .team-story-open { animation: none; transition: none; }
+}
+@media (max-width: 1200px) {
+  .atelier-dashboard.workspace-shell .studio-rail > * { flex-basis: calc((100% - 20px) / 2); }
+  .atelier-dashboard.workspace-shell .studio-flowboard li { padding-inline: 16px; gap: 10px; }
+  .atelier-dashboard.workspace-shell .studio-flowboard li > img { width: 90px; }
+  .atelier-dashboard.workspace-shell .studio-flowboard li strong { font-size: 20px; }
+}
+@media (max-width: 760px) {
+  .studio-banner { min-height: 170px; padding: 22px; border-radius: 24px; }
+  .studio-banner-art { width: 145px; height: 140px; margin-right: -28px; }
+  .studio-banner-art > .studio-object { transform: scale(.68); transform-origin: left center; left: 0; top: -14px; }
+  .studio-orbit-tile { display: none; }
+  .studio-banner-label { font-size: 11px; }
+  .studio-banner-number { font-size: 65px; }
+  .studio-banner-copy { flex: 1 1 0; }
+  .studio-banner--paper .studio-banner-art { width: 115px; }
+  .atelier-dashboard.workspace-shell .studio-rail > * { flex-basis: 87%; }
+  .atelier-dashboard.workspace-shell .employee-grid { gap: 12px; }
+  .atelier-dashboard.workspace-shell .employee-grid .portrait { height: 180px; }
+  .atelier-dashboard.workspace-shell .employee-grid .employee-name { font-size: 16px; }
+  .atelier-dashboard.workspace-shell .employee-grid .employee-body { padding: 14px; }
+  .atelier-dashboard.workspace-shell .team-story > summary { padding: 26px 24px; font-size: 37px; }
+  .team-story-open { width: 46px; height: 46px; }
+  .team-story-open > .icon { width: 23px; height: 23px; }
+  .team-story-deck { margin: 0 12px 12px; border-radius: 20px; }
+  .team-story-slide { min-height: 330px; padding: 24px 20px; align-items: flex-start; }
+  .team-story-copy { max-width: 100%; }
+  .atelier-dashboard.workspace-shell .team-story-copy h3 { font-size: 28px; max-width: 250px; margin: 16px 0 10px; }
+  .team-story-copy p { font-size: 12px; max-width: 180px; }
+  .team-story-portrait { width: 190px; height: 205px; right: 0; bottom: -15px; z-index: -1; }
+  .team-story-navigation { padding: 12px 10px; gap: 0; }
+  .team-story-navigation > div { gap: 3px; }
+  .team-story-navigation > div:last-child button { width: 44px; height: 44px; }
+  .team-story-navigation .team-story-dots button { width: 25px; }
+  .team-story-count { top: 12px; right: 12px; }
+  .atelier-dashboard.workspace-shell .studio-flowboard { padding: 18px; }
+  .atelier-dashboard.workspace-shell .studio-flowboard ol { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .atelier-dashboard.workspace-shell .studio-flowboard li { min-height: 145px; gap: 22px; }
+  .atelier-dashboard.workspace-shell .studio-flowboard li > img { width: 100px; height: 120px; }
+  .atelier-dashboard.workspace-shell .studio-flowboard li strong { font-size: 22px; }
+  .document-page .studio-banner .studio-banner-art { width: 100px; }
+}
+@media (max-width: 370px) {
+  .atelier-dashboard.workspace-shell .team-story > summary { padding: 24px 18px; font-size: 32px; }
+  .team-story-open { width: 40px; height: 40px; }
+  .team-story-navigation .team-story-dots button { width: 22px; }
+  .studio-banner--paper .studio-banner-art { width: 80px; opacity: .65; }
+  .atelier-dashboard.workspace-shell .studio-banner h2 { font-size: 21px; }
+  .atelier-dashboard.workspace-shell .employee-grid .employee-name { font-size: 14px; }
+}

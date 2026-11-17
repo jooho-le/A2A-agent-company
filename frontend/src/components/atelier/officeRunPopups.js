@@ -7,7 +7,7 @@ const problem = '검증 과정에서 문제가 발견되었습니다. 상세 결
 const verdicts = { SUCCESS: '성공', FAIL: '실패', UNVERIFIED: '미검증', HUMAN_REVIEW: '사람의 검토 필요' }
 const runLabels = { RECEIVED: '요청 접수', PLANNING: '계획 수립', IMPLEMENTING: '개발 진행', SNAPSHOT_READY: '코드 버전 확정',
   VALIDATING: '검증 진행', FIX_REQUIRED: '수정 필요', FIXING: '수정 진행', REVALIDATING: '재검증 진행',
-  WAITING_INPUT: '입력 대기', HUMAN_REVIEW: '사람의 검토 필요', FINISHED: '실행 종료', ABORTED: '실행 중단' }
+  WAITING_INPUT: '확인 대기', HUMAN_REVIEW: '사람의 검토 필요', FINISHED: '실행 종료', ABORTED: '실행 중단' }
 const readable = status => ['success', 'empty', 'loading'].includes(status)
 const unique = rows => rows.length === 1 ? rows[0] : null
 

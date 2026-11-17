@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { AtelierIcons } from '../components/atelier/AtelierArtwork'
-import { AtelierHeader, AtelierSidebar, OfficeDate } from '../components/atelier/AtelierChrome'
+import { AtelierHeader, AtelierSidebar } from '../components/atelier/AtelierChrome'
 import AgentOffice3D from '../components/atelier/AgentOffice3D'
+import { runLabel } from '../components/atelier/roleLabels'
+import useStudioMotion from '../components/atelier/useStudioMotion'
+import RunWorkPanel from '../components/atelier/RunWorkPanel'
+import { humanAgents } from '../components/atelier/humanAgents'
+import useRunInteraction from '../hooks/useRunInteraction'
+import WorkflowRunView from '../components/atelier/WorkflowRunView'
 import useOfficeRunSubmission from '../hooks/useOfficeRunSubmission'
 import { initialRunSelection, runEventLimit, runQueryReducer } from '../hooks/agentRunSelection'
 import { savedProjectCards, submittedRunProject } from '../components/atelier/agentRunProject'
@@ -30,8 +36,9 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [officePanelOpen, setOfficePanelOpen] = useState(() => window.innerWidth > 760)
+  const [officePanelOpen, setOfficePanelOpen] = useState(true)
   const [motionRequested, setMotionRequested] = useState(true)
+  const [selectedRole, setSelectedRole] = useState(null)
   const [activeWork, setActiveWork] = useState(null)
   const [restoreError, setRestoreError] = useState('')
   const [runQuery, dispatchRunQuery] = useReducer(runQueryReducer, initialRunSelection)
@@ -39,10 +46,15 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
     traceFromStart: runQuery.traceFromStart, collectEvents: ['home', 'workflow'].includes(view), includeResults: true,
     polling: ['home', 'workflow', 'projects', 'outputs'].includes(view) })
   const runDisplayState = buildAgentRunDisplayState(runMonitor)
+  const controls = useRunInteraction(runQuery.runId, ['home', 'workflow'].includes(view), runMonitor.refresh)
+  const selectOfficeAgent = useCallback(index => {
+    setSelectedRole(humanAgents[index]?.id.toUpperCase() || 'ORCHESTRATOR'); setOfficePanelOpen(true)
+  }, [])
   const mobile = useMediaQuery('(max-width:760px)')
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const motion = motionRequested && !reducedMotion
   const copy = viewCopy[view]
+  useStudioMotion(rootRef, motion, view)
 
   function changeView(next) {
     if (!Object.hasOwn(viewCopy, next)) return
@@ -52,6 +64,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
     window.scrollTo({ top: 0, behavior: 'instant' })
   }
   const connectCreatedRun = useCallback(response => {
+    setSelectedRole(null)
     setRestoreError('')
     dispatchRunQuery({ type: 'created', runId: response.run.runId })
     setActiveWork(response)
@@ -71,6 +84,7 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
 
   const openRun = useCallback((savedProject, run) => {
     if (run.hostKey !== 'local-multi') return
+    setSelectedRole(null)
     setRestoreError('')
     setActiveWork({ projectId: savedProject.projectId, projectName: savedProject.name,
       run: { runId: run.runId, scenarioId: savedProject.scenarioId } })
@@ -105,6 +119,8 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
     if (clearDraft) onRequestDraftChange?.({ name: '', requestText: '' })
     changeView('home'); setOfficePanelOpen(true)
     requestAnimationFrame(() => {
+      const requestPanel = rootRef.current?.querySelector('.office3d-request')
+      if (requestPanel) requestPanel.open = true
       const input = rootRef.current?.querySelector('#request-name')
       const textarea = rootRef.current?.querySelector('#request-text')
       if (clearDraft && input) input.value = ''
@@ -121,33 +137,32 @@ export default function AtelierDashboard({ onOpenDocuments, onLogout, onLogin, h
     setDrawerOpen(false); setModal({ type, ...extra })
   }
   const workflowStatus = runQuery.runId ? Object.values(runMonitor.errors).some(Boolean)
-    ? '연결 상태를 확인해 주세요. 마지막으로 확인된 업무 상태를 유지합니다.'
-    : runMonitor.run?.status === 'FINISHED' ? ({ SUCCESS: '업무가 성공적으로 완료되었습니다.', FAIL: '검증을 통과하지 못했습니다.', UNVERIFIED: '검증이 완료되지 않았습니다.', HUMAN_REVIEW: '담당자의 검토가 필요합니다.' })[runMonitor.run.verdict] || '업무가 종료되었습니다.'
-      : activeWork?.dispatchStatus === 'NOT_CONFIGURED' ? '업무는 저장되었지만 실행 서버가 연결되지 않아 대기 중입니다.' : '팀의 업무 진행 상황을 자동으로 확인하고 있습니다.' : ''
+    ? '일부 상태를 불러오지 못했어요. 다시 확인해주세요.'
+    : activeWork?.dispatchStatus === 'NOT_CONFIGURED' ? '실행 서버 연결을 확인해주세요.'
+      : runMonitor.run ? runLabel(runMonitor.run) : '진행 상황을 확인하고 있어요.' : ''
 
-  return <div ref={rootRef} className={'atelier-dashboard workspace-shell ' + (motion ? 'motion-ready' : 'motion-paused') + (view === 'home' ? ' office-immersive' : '') + (mobile && drawerOpen ? ' nav-open' : '')}>
+  const workPanel = runQuery.runId ? <RunWorkPanel key={runQuery.runId} runId={runQuery.runId} projectName={activeWork?.projectName}
+    displayState={runDisplayState} controls={controls} selectedRole={selectedRole} onSelectRole={setSelectedRole}
+    onResults={() => changeView('outputs')} onNew={requestNew} /> : null
+
+  return <div ref={rootRef} className={'atelier-dashboard workspace-shell ux-simple ' + (motion ? 'motion-ready' : 'motion-paused') + (view === 'home' ? ' office-immersive' : '') + (mobile && drawerOpen ? ' nav-open' : '')}>
     <button type="button" className="sidebar-dismiss" aria-label="회사 메뉴 닫기" tabIndex={-1} onClick={() => closeDrawer(true)} />
     <AtelierIcons />
     <div className="app"><div className="layout">
       <AtelierSidebar view={view} mode="multi" count={listedProjects.length} onView={changeView} mobile={mobile} open={drawerOpen} onClose={closeDrawer}
         onRunScenario={requestNew} onOpenDocuments={onOpenDocuments} onLogout={onLogout} onLogin={onLogin} hasAccessToken={hasAccessToken} />
-      <main className="main"><AtelierHeader view={view} drawerOpen={mobile && drawerOpen} onMenu={() => setDrawerOpen(!drawerOpen)} motion={motion} reducedMotion={reducedMotion} onMotion={() => setMotionRequested(!motionRequested)} onNew={requestNew} />
-        <div className="content"><header className="page-header"><div><p className="eyebrow">{copy[1]}</p><h1 id="page-title" tabIndex={-1}>{copy[2]}</h1><p>{copy[3]}</p></div><OfficeDate /></header>
+      <main className="main"><AtelierHeader view={view} drawerOpen={mobile && drawerOpen} onMenu={() => setDrawerOpen(!drawerOpen)} motion={motion} reducedMotion={reducedMotion} onMotion={() => setMotionRequested(!motionRequested)} onNew={requestNew} hasWork={Boolean(runQuery.runId)} />
+        <div className="content"><header className="page-header"><div><h1 id="page-title" tabIndex={-1}>{copy[2]}</h1></div></header>
           {restoreError && <p role="alert">{restoreError}</p>}
           <div id="home-view" className="view" hidden={view !== 'home'}><HomeView mode="multi"
-            submission={{ ...submission, draft: requestDraft, onDraftChange: onRequestDraftChange, workflowStatus, finished: ['FINISHED', 'ABORTED'].includes(runMonitor.run?.status) }} onCreate={submission.submit}
-            officeScene={view === 'home' ? <AgentOffice3D motionEnabled={motion} runDisplayState={runDisplayState} panelOpen={officePanelOpen} onPanelChange={setOfficePanelOpen} onRefresh={runMonitor.refresh} /> : null} /></div>
+            submission={{ ...submission, draft: requestDraft, onDraftChange: onRequestDraftChange, onLogin: hasAccessToken ? null : onLogin, workflowStatus, finished: ['FINISHED', 'ABORTED'].includes(runMonitor.run?.status) }} onCreate={submission.submit}
+            officeScene={view === 'home' ? <AgentOffice3D motionEnabled={motion} runDisplayState={runDisplayState} panelOpen={officePanelOpen} onPanelChange={setOfficePanelOpen} onRefresh={runMonitor.refresh} onProgress={() => changeView('workflow')} workPanel={workPanel} onAgentSelect={selectOfficeAgent} /> : null} /></div>
           <section id="workflow-view" hidden={view !== 'workflow'} aria-label="실제 업무 흐름">
-            <h2>{activeWork?.projectName || '우리 팀의 업무 흐름'}</h2>
-            {!runQuery.runId ? <p>업무를 맡기면 이곳에 진행 기록이 표시됩니다.</p> : <>
-              <p role="status">{workflowStatus}</p><button type="button" className="button" onClick={runMonitor.refresh}>기록 새로고침</button>
-              <ol className="activities">{runDisplayState.agents.map(agent => <li className="activity-item" key={agent.agentRole}><strong>{agent.name}</strong><span>{agent.label}</span></li>)}</ol>
-              <ol className="activities">{(runMonitor.trace?.entries || []).map(({ event }) => <li className="activity-item" key={event.eventId}><strong>{event.actor}</strong><span>{event.eventType}</span><time>{event.occurredAt}</time></li>)}</ol>
-            </>}
+            <WorkflowRunView runId={runQuery.runId} projectName={activeWork?.projectName} monitor={runMonitor} displayState={runDisplayState} status={workflowStatus} workPanel={view === 'workflow' ? workPanel : null} onNew={requestNew} onResults={() => changeView('outputs')} />
           </section>
-          <section id="projects-view" hidden={view !== 'projects'}><ProjectsView projects={listedProjects} search={search} onSearch={setSearch} onSelect={() => changeView('home')} actual onRetry={runMonitor.refresh} saved={savedProjects} onLogin={onLogin} onStoredSelect={projectId => openModal('saved-project', { projectId })} /></section>
+          <section id="projects-view" hidden={view !== 'projects'}><ProjectsView projects={listedProjects} search={search} onSearch={setSearch} onSelect={() => changeView('home')} actual onNew={requestNew} onRetry={runMonitor.refresh} saved={savedProjects} onLogin={onLogin} onStoredSelect={projectId => openModal('saved-project', { projectId })} /></section>
           <section id="team-view" hidden={view !== 'team'}><TeamView project={project} onEmployee={index => openModal('employee', { index })} actualStates={runDisplayState.agents} /></section>
-          <section id="outputs-view" hidden={view !== 'outputs'}><OutputsView projects={actualProjects} project={actualProject} onSelect={() => changeView('home')} actual catalog={runMonitor.artifactCatalog} onRetry={runMonitor.refresh} /></section>
+          <section id="outputs-view" hidden={view !== 'outputs'}><OutputsView projects={actualProjects} project={actualProject} onSelect={() => changeView('home')} actual catalog={runMonitor.artifactCatalog} onRetry={runMonitor.refresh} onBrowseProjects={() => changeView('projects')} /></section>
         </div>
       </main>
     </div></div>

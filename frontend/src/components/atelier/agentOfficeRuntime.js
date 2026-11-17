@@ -1,7 +1,7 @@
 import { applyOfficeSeating } from './office3dLayout'
 import { addPlannerLeadership } from './office3dLeader'
-import { createAgentCloseupCamera } from './office3dPlannerCamera'
 import { humanAgents } from './humanAgents'
+import { roleLabel, runLabel } from './roleLabels'
 import { createOfficePerformance, finaleOptions } from './office3dPerformance'
 import { createOfficeRunController } from './office3dRunController'
 import { createRunSuccessCeremony } from './runSuccessCeremony'
@@ -14,6 +14,7 @@ import { buildOfficeRunPopups, popupResultNotice, renderOfficeRunPopups } from '
 export function mountAgentOffice(root, {
   motionEnabled,
   runDisplayState = null,
+  onAgentSelect,
   successCeremony = createRunSuccessCeremony()
 }, engine) {
   const {
@@ -231,11 +232,27 @@ export function mountAgentOffice(root, {
       element('live-agents').append(row);
       return row;
     });
-    var background = new Eo().load("/agent-office-3d/office-background.png");
+    var background = new Eo().load("/agent-office-3d/office-background.png", () => {
+      if (!disposed) fitPhotoBackground();
+    });
     background.colorSpace = ct;
     Ku(office, background);
-    const agentCamera = createAgentCloseupCamera(office, engine);
-    const displayRole = (index) => humanAgents[index].name;
+    const sceneColor = scene.background;
+    function fitPhotoBackground() {
+      const narrow = stage.clientWidth <= 760;
+      scene.background = narrow ? background : sceneColor;
+      office.backdrop.visible = !narrow;
+      // 휴대폰은 인물 전체를 담되 배경 사진은 화면을 계속 채웁니다.
+      const imageAspect = background.image?.width && background.image?.height
+        ? background.image.width / background.image.height : 1.8;
+      const viewAspect = stage.clientWidth / Math.max(1, stage.clientHeight);
+      const x = narrow ? Math.min(1, viewAspect / imageAspect) : 1;
+      const y = narrow ? Math.min(1, imageAspect / viewAspect) : 1;
+      background.repeat.set(x, y);
+      background.offset.set((1 - x) / 2, (1 - y) / 2);
+      background.updateMatrix();
+    }
+    const displayRole = (index) => roleLabel(humanAgents[index].id, humanAgents[index].name);
     var bubble = element("bubble"),
       cameraButton = element("home"),
       celebration = element("celebration"),
@@ -245,9 +262,12 @@ export function mountAgentOffice(root, {
         let t = document.createElement("button");
         return t.className = `office3d-agent-label${e === orchestratorIndex ? " is-lead" : ""}`, t.innerHTML = `<span class="status-dot"></span><span>${displayRole(e)}</span>${e === orchestratorIndex ? '<b class="office3d-lead-tag">리더</b>' : ''}<small></small>`, listen(t, "click", () => {
           selectedAgent = e;
-          statusOpen = true;
-          element("vector-panel").hidden = false;
-          element("vectors").setAttribute("aria-pressed", "true");
+          if (onAgentSelect) onAgentSelect(e);
+          else {
+            statusOpen = true;
+            element("vector-panel").hidden = false;
+            element("vectors").setAttribute("aria-pressed", "true");
+          }
           updateUi();
         }), stage.append(t), t;
       }),
@@ -260,19 +280,18 @@ export function mountAgentOffice(root, {
       finale = 'team';
     function setAutoCamera(i) {
       if (!i) {
-        agentCamera.hide();
         camera.clearViewOffset();
         camera.position.copy(homeEye);
         cameraTarget.copy(homeTarget);
         camera.zoom = Math.min(1, camera.aspect / 1.15) * (camera.aspect > 1.6 ? 1.05 : 1);
         camera.updateProjectionMatrix();
       }
-      autoCamera = i, controls.enabled = !autoCamera, cameraButton.textContent = autoCamera ? "전체 보기" : "자동 추적", cameraButton.setAttribute("aria-pressed", String(autoCamera)), controls.target.copy(cameraTarget), controls.update();
+      autoCamera = i, controls.enabled = !autoCamera, cameraButton.textContent = autoCamera ? "둘러보기" : "전체 보기", cameraButton.setAttribute("aria-pressed", String(!autoCamera)), controls.target.copy(cameraTarget), controls.update();
     }
     setAutoCamera(!0);
     listen(cameraButton, "click", () => setAutoCamera(!autoCamera));
     stepButtons.forEach((button, index) => listen(button, "click", () => {
-      selectedAgent = index; setAutoCamera(true); updateUi();
+      selectedAgent = index; if (onAgentSelect) onAgentSelect(index); setAutoCamera(true); updateUi();
     }));
     listen(element("fullscreen"), "click", () => {
       const action = document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen?.();
@@ -281,8 +300,11 @@ export function mountAgentOffice(root, {
     listen(element("vectors"), "click", i => {
       statusOpen = !statusOpen, element("vector-panel").hidden = !statusOpen, i.currentTarget.setAttribute("aria-pressed", String(statusOpen)), updateUi();
     });
+    let cameraResized = true;
     function resize() {
+      cameraResized = true;
       renderer.setSize(Math.max(1, stage.clientWidth), Math.max(1, stage.clientHeight), !1), camera.aspect = Math.max(1, stage.clientWidth) / Math.max(1, stage.clientHeight), camera.zoom = Math.min(1, camera.aspect / 1.45) * (camera.aspect > 1.6 ? 1.05 : 1), camera.updateProjectionMatrix();
+      fitPhotoBackground();
     }
     var resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(stage);
@@ -291,23 +313,14 @@ export function mountAgentOffice(root, {
     const projectedPoint = new P();
     const focusPoint = new P();
     const digitalView = { zoom: 1, x: 0, y: 0 };
-    // 전체 보기·세리머니는 사진의 원래 투영을 유지합니다.
-    // 개별 캐릭터를 볼 때는 아래 공통 정면 카메라로 분기합니다.
-    function updateCamera(bubbleInfo, delta, finaleTime = null) {
-      let active = -1;
+    // 실제 작업·직원 선택에 따라 카메라를 바꾸거나 다른 직원을 숨기지 않습니다.
+    function updateCamera(delta, finaleTime = null) {
+      stage.dataset.cameraView = autoCamera ? 'overview' : 'free';
       if (!autoCamera) {
-        agentCamera.hide();
         controls.update();
         cameraTarget.copy(controls.target);
-        return active;
+        return;
       }
-      if (displayMode === 'actual' && finaleTime === null) active = selectedAgent >= 0 ? selectedAgent : bubbleInfo?.agent ?? -1;
-
-      if (active >= 0 && true) {
-        cameraTarget.copy(agentCamera.update(camera, stage.clientWidth, stage.clientHeight, active));
-        return active;
-      }
-      agentCamera.hide();
       // 폭이 좁아져도 양쪽의 자리와 캐릭터가 함께 보이도록 여유를 둡니다.
       const baseZoom = Math.min(1, camera.aspect / 1.45);
       referenceCamera.aspect = camera.aspect;
@@ -317,7 +330,7 @@ export function mountAgentOffice(root, {
       referenceCamera.updateMatrixWorld();
       referenceCamera.updateProjectionMatrix();
       const finaleCamera = finaleTime !== null;
-      const agents = finaleCamera ? office.agents : active >= 0 ? [office.agents[active]] : [];
+      const agents = finaleCamera ? office.agents : [];
       // 넓은 화면의 전체 보기만 소폭 확대합니다. 높이·인물 비율과 세리머니 구도는 유지합니다.
       let zoom = baseZoom * (camera.aspect > 1.6 ? 1.05 : 1), offsetX = 0, offsetY = 0;
       if (agents.length) {
@@ -353,7 +366,7 @@ export function mountAgentOffice(root, {
       offsetX = minX <= maxX ? Qt.clamp(offsetX, minX, maxX) : (minX + maxX) / 2;
       offsetY = minY <= maxY ? Qt.clamp(offsetY, minY, maxY) : (minY + maxY) / 2;
       const moving = motionEnabled && !reducedMotion.matches;
-      const blend = !moving ? 1 : 1 - Math.exp(-delta * 2.8);
+      const blend = cameraResized || !moving ? 1 : 1 - Math.exp(-delta * 2.8);
       digitalView.zoom = Qt.lerp(digitalView.zoom, zoom, blend);
       digitalView.x = Qt.lerp(digitalView.x, offsetX, blend);
       digitalView.y = Qt.lerp(digitalView.y, offsetY, blend);
@@ -363,7 +376,7 @@ export function mountAgentOffice(root, {
       camera.zoom = digitalView.zoom;
       camera.setViewOffset(stage.clientWidth,stage.clientHeight,digitalView.x,digitalView.y,stage.clientWidth,stage.clientHeight);
       camera.updateMatrixWorld();
-      return active;
+      cameraResized = false;
     }
     function projectPoint(i, e, t) {
       return projectedPoint.set(i, e, t).project(camera), {
@@ -372,11 +385,11 @@ export function mountAgentOffice(root, {
         z: projectedPoint.z
       };
     }
-    function positionOverlays(i, e, finaleTime = null) {
+    function positionOverlays(finaleTime = null) {
       bubble.hidden = true;
       for (let t = 0; t < office.agents.length; t++) {
         let n = office.agents[t],
-          s = finaleTime !== null || e >= 0 && e !== t || i?.agent === t;
+          s = finaleTime !== null;
         if (agentLabels[t].hidden = s, agentLabels[t].style.display = s ? "none" : "flex", s) continue;
         let r = n.g.localToWorld(new P(0, 3.65, -.4)),
           o = projectPoint(...r.toArray());
@@ -412,15 +425,15 @@ export function mountAgentOffice(root, {
         actualPopupKey = popupKey;
         renderOfficeRunPopups(root, popups, notice);
       }
+      stage.dataset.visibleAgents = String(office.agents.filter(agent => agent.g.visible).length);
       const refreshing = actualAgents.some(agent => agent.refreshing);
       const unknown = actualAgents.some(agent => agent.displayState === 'unknown');
       const queryFailed = runDisplayState?.errors?.run || runDisplayState?.errors?.steps;
       element('live-notice').textContent = !runDisplayState?.runId ? '요청을 기다리고 있어요.' : (refreshing
-        ? '갱신 중 · 확인된 상태가 있으면 그대로 표시합니다.' : queryFailed
-          ? '조회 오류 · Agent 작업 실패가 아닙니다. 수동 새로고침으로 다시 확인해주세요.'
-          : unknown ? '상태 확인 불가 · 불명확한 Step을 임의로 실행하거나 실패 처리하지 않습니다.'
-            : `Run 상태 ${runDisplayState?.run.status ?? '-'} · 최종 판정 ${runDisplayState?.run.verdict ?? '아직 최종 판정 없음'}`);
-      if (runDisplayState?.errors?.events) element('live-notice').textContent += ' · Event 조회 실패(Step 표시는 유지).';
+        ? '진행 상황을 새로 확인하고 있어요.' : queryFailed
+          ? '진행 상황을 불러오지 못했어요. 다시 확인해주세요.'
+          : unknown ? '일부 직원의 상태를 확인할 수 없어요.' : runLabel(runDisplayState?.run));
+      if (runDisplayState?.errors?.events) element('live-notice').textContent += ' 작업 기록 연결을 확인해주세요.';
       const success = successCeremony.info();
       element('success-notice').textContent = success.playback ? '업무가 성공적으로 완료됐어요.' : '';
       actualAgents.forEach((agent, index) => {
@@ -435,6 +448,7 @@ export function mountAgentOffice(root, {
         liveRows[index].textContent = `${displayRole(index)} · ${agent.label}${suffix}`;
         label.querySelector('small').textContent = agent.label + suffix;
         label.classList.toggle('selected', selectedAgent === index);
+        label.setAttribute('aria-pressed', String(selectedAgent === index));
         stepButtons[index].classList.toggle('current', agent.displayState === 'working');
         stepButtons[index].classList.toggle('done', agent.displayState === 'succeeded');
       });
@@ -486,17 +500,16 @@ export function mountAgentOffice(root, {
           acting.updateActual(actualAgents);
           updateActualHandoffs(e, enabled);
         }
-        const info = actualPlayback ? null : actualBubble();
         stage.dataset.finale = actualPlayback?.pose ?? 'none';
         stage.dataset.actualCeremony = actualPlayback ? actualPlayback.completed ? 'completed' : 'playing' : 'none';
         stage.dataset.actualCeremonyRun = actualPlayback?.runId ?? '';
         stage.dataset.actualCeremonyTime = String(actualPlayback?.elapsed ?? 0);
         stage.dataset.expression = actualAgents.some(agent => agent.expression === 'worried') ? 'worried' : 'normal';
         const performanceTime = actualPlayback ? En + actualPlayback.elapsed : null;
-        const active = updateCamera(info, e, performanceTime);
+        updateCamera(e, performanceTime);
         camera.updateProjectionMatrix();
         if (i - lastUiFrame > 75) { updateUi(); lastUiFrame = i; }
-        positionOverlays(info, active, performanceTime);
+        positionOverlays(performanceTime);
         renderer.render(scene, camera);
         renderedOnce = true;
         frame = requestAnimationFrame(renderFrame);

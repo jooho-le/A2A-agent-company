@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { ModeSelector } from './ModeSelector'
+import { StudioObject } from './StudioVisuals'
+import { roleLabel } from './roleLabels'
 import { Icon, OfficeDesk } from './AtelierArtwork'
 import { agentStates, employees, motionPortraits, portraits, progress, projectStatus } from './atelierMock'
 
@@ -20,14 +22,12 @@ export function Portrait({ employee, index, state = '' }) {
 
 export function EmployeeCard({ employee, index, state, profile = false, onEmployee, portrait }) {
   return (
-      <button key={employee.id} type="button" className={`agent-card ${state.state}${profile ? ' staff-profile' : ''}`} data-lead={Boolean(employee.leadership)} onClick={() => onEmployee(index)} aria-label={`${employee.name} ${employee.job} 직원 상세`}>
+      <button key={employee.id} type="button" className={`agent-card ${state.state}${profile ? ' staff-profile' : ''}`} data-lead={Boolean(employee.leadership)} data-studio-tilt="" data-palette={index % 5} onClick={() => onEmployee(index)} aria-label={`${employee.name} ${employee.job} 직원 상세`}>
         {portrait || <Portrait employee={employee} index={index} state={profile ? '' : state.state} />}
         <span className="employee-body">
-          <span className="employee-name-line"><span className="employee-name">{employee.name}</span>{!profile && <span className="agent-status">{state.label}</span>}</span>
-          {employee.leadership && <span className="leader-rank">{employee.leadership.title} · {employee.leadership.badge}</span>}
-          {!employee.leadership && <span className="employee-role">{employee.roleLabel || `${employee.job} · ${employee.role} AI`}</span>}
-          {profile ? <><span className="employee-quote">{employee.quote}</span><span className="personality-tag">{employee.personality}</span></> : <span className="agent-task">{state.task}</span>}
-          <span className="employee-link">{profile ? '직원 소개 보기' : '작업 자세히 보기'}<Icon name="chevron" /></span>
+          <span className="employee-name-line"><span className="employee-name">{profile ? roleLabel(employee.id, employee.name) : employee.name}</span>{!profile && <span className="agent-status">{state.label}</span>}</span>
+          {profile ? <span className="employee-quote">{employee.responsibilities?.[0] || employee.purpose}</span> : <><span className="employee-role">{employee.roleLabel || `${employee.job} · ${employee.role} AI`}</span><span className="agent-task">{state.task}</span></>}
+          <span className="employee-link">{profile ? '소개 보기' : '자세히'}<Icon name="chevron" /></span>
         </span>
       </button>
   )
@@ -42,17 +42,18 @@ export function ProjectOptions({ projects, selectedId, onSelect, id }) {
   return <select id={id} value={selectedId} onChange={(event) => onSelect(event.target.value)}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
 }
 
-export function ProjectCard({ project, onSelect, status = project.status || projectStatus(project), amount = project.actual ? null : progress(project), staffCount = project.actual ? project.agents.filter(agent => agent.assigned).length : 5 }) {
+export function ProjectCard({ project, onSelect, status = project.status || projectStatus(project), amount = project.actual ? null : progress(project), staffCount = project.actual ? project.agents.filter(agent => agent.assigned).length : 5, palette = 0 }) {
   const interactive = !project.stored || typeof onSelect === 'function'
   const Card = interactive ? 'button' : 'article'
   return (
-    <Card {...(interactive ? { type: 'button', onClick: () => onSelect(project.id) } : {})} className="project-card" aria-label={project.stored ? `${project.name} 상세 보기` : `${project.name} 업무 보기`}>
+    <Card {...(interactive ? { type: 'button', onClick: () => onSelect(project.id) } : {})} className="project-card" data-studio-tilt="" data-palette={palette % 5} aria-label={project.stored ? `${project.name} 상세 보기` : `${project.name} 업무 보기`}>
+      <span className="studio-project-cover" aria-hidden="true"><StudioObject kind="folder" /><span className="studio-cover-grid" /></span>
       <span className="project-card-top"><span className={`project-monogram ${['flow', 'desk'].includes(project.id) ? project.id : ''}`}>{({ orbit: 'O', flow: 'F', desk: 'D' })[project.id] || '+'}</span><span className={`badge ${status.kind}`}>{status.text}</span></span>
-      <h2>{project.name}</h2><p>{project.stored && <>프로젝트 ID: {project.projectId}<br /></>}{project.description}</p>
+      <h2>{project.name}</h2>{!project.stored && <p>{project.description}</p>}
       <span className="project-card-meta"><span>의뢰인 · 대표님</span><span>{project.stored ? <>생성일 · <time dateTime={project.createdAt}>{project.time}</time></> : project.time}</span></span>
-      {project.actual ? <span className="project-agent-states">{project.agents.map(agent => <span key={agent.role}>{agent.name} · {agent.label}</span>)}<small>{project.notice}</small></span> : <><span className="progress-meta"><span>프로젝트 진행</span><strong>{amount}%</strong></span>
+      {project.actual ? !project.stored && <span className="project-agent-states">{project.agents.map(agent => <span key={agent.role}>{roleLabel(agent.role, agent.name)} · {agent.label}</span>)}</span> : <><span className="progress-meta"><span>프로젝트 진행</span><strong>{amount}%</strong></span>
       <span className="progress-track"><span className="progress-fill" style={{ display: 'block', width: `${amount}%` }} /></span></>}
-      <span className="project-card-footer">{project.stored ? <span>{interactive ? '프로젝트 상세 · Run 연결 이력' : '저장 정보 · 목록 조회'}</span> : <><span>{project.actual ? '확인된 작업 Agent' : '담당 직원'} {staffCount}명</span><Icon name="arrow" /></>}</span>
+      <span className="project-card-footer">{project.stored ? <span>{interactive ? '프로젝트 열기 →' : '저장된 프로젝트'}</span> : <><span>담당 직원 {staffCount}명</span><Icon name="arrow" /></>}</span>
     </Card>
   )
 }
@@ -84,8 +85,29 @@ export function RequestForm({ mode = 'multi', onMode, modal = false, onCreate, o
   const fields = <>
     <label className={modal ? 'field-label' : 'sr-only'} htmlFor={`${prefix}-name`}>{modal ? '프로젝트 이름' : '새 업무의 프로젝트 이름'}</label>
     <input id={`${prefix}-name`} name="projectName" className={modal ? 'field' : 'request-name'} placeholder={modal ? '예: 우리 팀의 업무 도구' : '프로젝트 이름'} maxLength={60} required autoComplete="off" disabled={submission?.busy || submission?.locked} defaultValue={submission?.draft?.name || ''} onInput={rememberDraft} />
-    {modal ? <div className="blue-field"><label className="field-label" htmlFor={`${prefix}-request`}>업무 요청</label><textarea id={`${prefix}-request`} name="request" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." maxLength={1600} rows={5} required /><span>{planner.name} · 요청을 받아 계획을 정리합니다.</span></div> : <textarea id={`${prefix}-text`} name="request" className="request-text" placeholder="어떤 걸 만들고 싶으세요? 필요한 기능과 원하는 모습을 편하게 적어주세요." maxLength={1600} rows={2} required disabled={submission?.busy || submission?.locked} defaultValue={submission?.draft?.requestText || ''} onInput={rememberDraft} />}
+    {modal ? <div className="blue-field"><label className="field-label" htmlFor={`${prefix}-request`}>업무 요청</label><textarea id={`${prefix}-request`} name="request" placeholder="예: 이메일로 가입하는 회원가입 화면을 만들어줘" maxLength={1600} rows={5} required /><span>{planner.name} · 요청을 받아 계획을 정리합니다.</span></div> : <textarea id={`${prefix}-text`} name="request" className="request-text" placeholder="예: 이메일로 가입하는 회원가입 화면을 만들어줘" maxLength={1600} rows={2} required disabled={submission?.busy || submission?.locked} defaultValue={submission?.draft?.requestText || ''} onInput={rememberDraft} />}
   </>
   if (modal) return <form id="new-form" onSubmit={submit}><div className="dialog-body">{fields}<p className="dialog-note">디자인 목업입니다. 실제 서버에 요청을 보내지 않습니다.</p></div><div className="dialog-footer"><button className="button" type="button" onClick={onClose}>취소</button><button className="button start" type="submit">{mode === 'single' ? '목업 업무 시작' : '업무 시작'}<Icon name="arrow" /></button></div></form>
-  return <form className="request-composer" id={`${prefix}-form`} onSubmit={submit}><div className="composer-top"><label htmlFor={`${prefix}-text`}><Icon name="plan" />직원들에게 새 업무 맡기기</label><span>{mode === 'single' ? '한 AI와 차근차근, 처음부터 끝까지.' : '기획부터 결과 보고까지, 한 팀으로.'}</span></div>{onMode && <ModeSelector mode={mode} onMode={onMode} />}{fields}<div className="composer-office" data-scene-review={String(deskRole.includes('QA') || deskRole.includes('Security'))}><OfficeDesk role={deskRole} /></div><div className="composer-bottom"><p><span className="mini-avatar">{planner.initial}</span>{mode === 'single' ? '싱글 AI가 기획 → 개발 → QA → 보안 검토를 순차 수행합니다.' : <><strong>{planner.leadership?.title || planner.name}</strong> · 개발 계획과 협업 방향을 정리할게요.</>}</p><button className="button start" type="submit" disabled={submission?.disabled}>{submission?.busy ? '업무 접수 중…' : submission?.result?.submissionStatus === 'CREATED' ? '업무 접수됨' : submission?.uncertain ? '접수 확인 필요' : mode === 'single' ? '목업 업무 시작' : '업무 시작'}<Icon name="arrow" /></button></div>{submission && <div className="composer-feedback">{!submission.finished && <p role="status">{submission.notice}</p>}{submission.error && <p role="alert">{submission.error}</p>}{submission.uncertain && <button type="button" className="button" disabled={submission.busy} onClick={submission.recover}>접수 상태 확인</button>}{submission.configurationError && <button type="button" className="button" onClick={submission.refreshApproval}>서버 연결 다시 확인</button>}{submission.workflowStatus && <p role="status">{submission.name && <strong>{submission.name} · </strong>}{submission.workflowStatus}</p>}</div>}</form>
+  const loginFirst = typeof submission?.onLogin === 'function'
+  const problem = submission?.error || submission?.configurationError
+  const needsStatus = submission?.busy || submission?.uncertain || submission?.configurationLoading
+  return <form className="request-composer" id={`${prefix}-form`} onSubmit={submit}>
+    <div className="composer-top"><label htmlFor={`${prefix}-text`}><Icon name="plan" />무엇을 만들까요?</label></div>
+    {submission && !submission.locked && <p className="request-scope">지금은 회원가입 기능을 만들 수 있어요.</p>}
+    {onMode && <ModeSelector mode={mode} onMode={onMode} />}
+    {fields}
+    {!submission && <div className="composer-office"><OfficeDesk role={deskRole} /></div>}
+    <div className="composer-bottom">
+      <button className="button start" type={loginFirst ? 'button' : 'submit'} disabled={loginFirst ? false : submission?.disabled} onClick={loginFirst ? submission.onLogin : undefined}>
+        {loginFirst ? '로그인하고 시작' : submission?.busy ? '요청 보내는 중…' : submission?.result?.submissionStatus === 'CREATED' ? '요청 보냄' : submission?.uncertain ? '접수 확인 필요' : mode === 'single' ? '목업 업무 시작' : '만들기 시작'}<Icon name="arrow" />
+      </button>
+    </div>
+    {submission && <div className="composer-feedback">
+      {needsStatus && !submission.finished && <p role="status">{submission.notice}</p>}
+      {problem && <p role="alert">{problem}</p>}
+      {submission.uncertain && <button type="button" className="button" disabled={submission.busy} onClick={submission.recover}>접수 상태 확인</button>}
+      {submission.configurationError && <button type="button" className="button" onClick={submission.refreshApproval}>다시 연결</button>}
+      {submission.workflowStatus && <p role="status">{submission.workflowStatus}</p>}
+    </div>}
+  </form>
 }

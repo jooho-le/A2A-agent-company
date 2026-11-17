@@ -111,7 +111,7 @@ async function verify() {
     scenario = problem; await mount(); fill(); await submit()
     check(!sessionStorage.getItem('ai-company.pending-office-submission.1'), 'definitely unaccepted request is not uncertain')
     check(![...document.querySelectorAll('.composer-feedback button')].some(button => button.textContent.includes('접수 상태 확인')), 'no misleading recovery')
-    const reconnect = [...document.querySelectorAll('.composer-feedback button')].find(button => button.textContent.includes('서버 연결 다시 확인'))
+    const reconnect = [...document.querySelectorAll('.composer-feedback button')].find(button => button.textContent.includes('다시 연결'))
     check(reconnect, 'approval can be refreshed after a preflight failure')
     scenario = 'ready'; await act(async () => reconnect.click()); await submit()
     check(postCount() === 2 && globalThis.__officeProps.runDisplayState.runId === runId, 'explicit retry after refreshing approval succeeds')
@@ -148,7 +148,8 @@ async function verify() {
 
   scenario = 'rejected'; await mount(); fill(); await submit()
   check(!document.querySelector('#request-form button[type=submit]').disabled, 'rejected request can be corrected')
-  check(document.querySelector('#request-form button[type=submit]').textContent.includes('업무 시작'), 'rejected is not labelled accepted')
+  check(document.querySelector('#request-form button[type=submit]').textContent.includes('만들기 시작'), 'rejected is not labelled accepted')
+  check(document.querySelector('.composer-feedback [role=alert]').textContent.includes('거절'), 'rejection remains visible')
   checks.push('rejected receipt is displayed as rejected, never as successfully accepted')
   await act(async () => root.unmount())
   return checks

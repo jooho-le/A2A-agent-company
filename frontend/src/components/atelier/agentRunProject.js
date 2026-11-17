@@ -2,7 +2,7 @@ import { buildAgentRunDisplayState } from './agentRunDisplayState.js'
 
 const states = { RECEIVED: '요청 접수', PLANNING: '요구사항 분석', IMPLEMENTING: '개발 중', SNAPSHOT_READY: '소스 Snapshot 준비',
   VALIDATING: '검증 중', FIX_REQUIRED: '수정 필요', FIXING: '수정 중', REVALIDATING: '재검증 중',
-  WAITING_INPUT: '입력 대기', HUMAN_REVIEW: '사람 검토 필요', ABORTED: '실행 중단' }
+  WAITING_INPUT: '확인 대기', HUMAN_REVIEW: '사람 검토 필요', ABORTED: '실행 중단' }
 const verdicts = { SUCCESS: '업무 완료', FAIL: '종료 · 실패', UNVERIFIED: '종료 · 검증 미완료', HUMAN_REVIEW: '종료 · 사람 검토 필요' }
 
 // 제품 목록 API에는 Run/Step 상태가 없습니다. 실행 상태·진행률·담당 Agent를 추측하지 않습니다.

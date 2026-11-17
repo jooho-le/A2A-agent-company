@@ -7,7 +7,7 @@ function Timestamp({ value }) {
 }
 
 export function SavedProjectDetailContent({ status, project, error, onRetry, onLogin, onOpenRun }) {
-  if (status === 'loading') return <p role="status">프로젝트 상세와 Run 연결 이력을 불러오는 중입니다.</p>
+  if (status === 'loading') return <p role="status">프로젝트를 여는 중…</p>
   if (status === 'error') return <div role="alert">
     <p>{error.message}</p>
     {error.code === 'AUTH_REQUIRED'
@@ -17,24 +17,24 @@ export function SavedProjectDetailContent({ status, project, error, onRetry, onL
   if (!project) return null
   return <>
     <h3>{project.name}</h3>
-    <dl className="saved-project-fields">
+    <details className="ux-details"><summary>프로젝트 정보</summary><dl className="saved-project-fields">
       <dt>프로젝트 ID</dt><dd>{project.projectId}</dd>
       <dt>시나리오 ID</dt><dd>{project.scenarioId}</dd>
       <dt>생성일</dt><dd><Timestamp value={project.createdAt} /></dd>
-    </dl>
-    <h3 className="detail-section-title">Run 연결 이력 <span>({project.runs.length})</span></h3>
+    </dl></details>
+    <h3 className="detail-section-title">작업 기록 <span>({project.runs.length})</span></h3>
     {project.runs.length ? <ol className="saved-project-runs" aria-label="저장된 Run 연결 이력">
-      {project.runs.map(run => <li key={JSON.stringify([run.hostKey, run.runId])}>
-        <dl className="saved-project-fields">
+      {project.runs.map((run, index) => <li key={JSON.stringify([run.hostKey, run.runId])}>
+        <div className="saved-run-heading"><strong>작업 {index + 1}</strong><Timestamp value={run.linkedAt} /></div>
+        {run.hostKey === 'local-multi' && onOpenRun && <button type="button" className="button start" onClick={() => onOpenRun(project, run)}>진행 보기</button>}
+        <details className="ux-details"><summary>기술 정보</summary><dl className="saved-project-fields">
           <dt>Run ID</dt><dd>{run.runId}</dd>
           <dt>Host</dt><dd>{run.hostKey}</dd>
           <dt>Configuration ID</dt><dd>{run.configurationId}</dd>
           <dt>연결 시각</dt><dd><Timestamp value={run.linkedAt} /></dd>
-        </dl>
-        {run.hostKey === 'local-multi' && onOpenRun && <button type="button" className="button start" onClick={() => onOpenRun(project, run)}>오피스에서 업무 보기</button>}
+        </dl></details>
       </li>)}
-    </ol> : <p className="dialog-description">아직 연결된 Run이 없습니다.</p>}
-    <p className="dialog-note">저장된 Run 연결 이력입니다. 업무를 선택하면 실제 실행 상태를 이어서 확인할 수 있습니다.</p>
+    </ol> : <p className="dialog-description">아직 시작한 작업이 없어요.</p>}
   </>
 }
 

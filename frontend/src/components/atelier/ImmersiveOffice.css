@@ -168,10 +168,10 @@
 }
 @media (max-width: 760px) {
   .atelier-dashboard.office-immersive { --office-popup-top-min: 136px; }
-  /* 세로 화면에서는 사무실의 중앙을 채우고, 직원 버튼으로 각 자리에 접근합니다. */
+  /* 가로 장면을 잘라내지 않고 다섯 직원을 화면 폭 안에 함께 담습니다. */
   .atelier-dashboard.office-immersive .office3d-stage,
   .atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-stage {
-    left: 50%; right: auto; width: max(100%, 180dvh); transform: translateX(-50%);
+    left: 0; right: 0; width: 100%; transform: none;
   }
   .atelier-dashboard.workspace-shell .sidebar { inset: 16px auto 16px 16px; z-index: 60; width: min(252px, 85vw); height: calc(100dvh - 32px); max-height: calc(100dvh - 32px); padding: 24px 16px 16px; transform: translateX(calc(-100% - 32px)); }
   .atelier-dashboard.workspace-shell.nav-open .sidebar { transform: translateX(0); }

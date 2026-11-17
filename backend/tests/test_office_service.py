@@ -70,7 +70,9 @@ class OfficeServiceTests(unittest.TestCase):
     def test_jwt_precedes_host_and_only_registered_approval_is_returned(self):
         self.assertEqual(self.request("GET", "/api/v1/scenarios", user=None)[0], 401)
         self.assertEqual(self.host.calls, [])
-        self.assertEqual(self.request("GET", "/api/v1/scenarios")[0], 200)
+        status, result = self.request("GET", "/api/v1/scenarios")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["scenarios"], [{"scenarioId": self.fixture.scenario_id, "name": "회원가입"}])
         status, result = self.request("GET", "/api/v1/host/approved-configuration?scenarioId=" + self.fixture.scenario_id)
         self.assertEqual(status, 200)
         self.assertEqual(result["configurationId"], digest(result["configuration"]))

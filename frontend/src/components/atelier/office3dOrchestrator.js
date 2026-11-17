@@ -31,7 +31,7 @@ export function managementDisplay(snapshot) {
   const state = !valid ? 'unknown' : ['FINISHED', 'ABORTED'].includes(status) ? 'idle'
     : status === 'RECEIVED' ? 'pending' : ['WAITING_INPUT', 'HUMAN_REVIEW'].includes(status) ? 'waiting_input' : 'working'
   return { agentRole: 'ORCHESTRATOR', displayState: state, label: !valid ? refreshing ? '조회 중' : '상태 확인 불가'
-    : ['FINISHED', 'ABORTED'].includes(status) ? '실행 관리 종료' : state === 'pending' ? '요청 접수' : state === 'waiting_input' ? '입력 대기' : '실행 관리 중',
+    : ['FINISHED', 'ABORTED'].includes(status) ? '실행 관리 종료' : state === 'pending' ? '요청 접수' : state === 'waiting_input' ? '확인 대기' : '실행 관리 중',
   expression: 'normal', refreshing, step: null, poseState: state === 'working' ? 'working' : 'waiting',
   hasConfirmedState: Boolean(valid), managementServer: true }
 }

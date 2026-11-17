@@ -12,6 +12,7 @@ from routers.documents import router as documents_router
 from routers.projects import router as projects_router
 from routers.host_runs import router as host_runs_router
 from routers.run_submissions import router as run_submissions_router
+from routers.run_controls import router as run_controls_router
 
 
 @asynccontextmanager
@@ -35,6 +36,7 @@ app.include_router(documents_router)
 app.include_router(projects_router)
 app.include_router(host_runs_router)
 app.include_router(run_submissions_router)
+app.include_router(run_controls_router)
 
 
 @app.exception_handler(RequestValidationError)

@@ -49,10 +49,9 @@ function LoginPage({ onSignup, onLoginSuccess, onBack, notice = '' }) {
   return (
     <OfficeAuthLayout reviewAccents>
         <section className="auth-card" aria-labelledby="login-title">
+          {onBack && <button type="button" className="auth-close" onClick={onBack} disabled={isSubmitting} aria-label="로그인 닫기">×</button>}
           <header className="auth-heading">
-            <p className="office-auth-form-label">대표님 계정</p>
             <h1 id="login-title">로그인</h1>
-            <p>우리 회사의 업무를 이어서 시작하세요.</p>
           </header>
           <form className="login-form" onSubmit={handleSubmit} noValidate>
             <div className="login-field">

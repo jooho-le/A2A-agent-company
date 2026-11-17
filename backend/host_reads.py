@@ -62,17 +62,17 @@ class HostReadClient:
             raise HostUnavailable()
         return payload
 
-    def exchange(self, method, path, *, body=None, key=None):
+    def exchange(self, method, path, *, body=None, key=None, accepted_statuses=(200, 201)):
         if not HOST_SERVICE_AUTH_VERIFIED:
             raise HostUnavailable()
         try:
-            return self._exchange(method, path, body=body, key=key)
+            return self._exchange(method, path, body=body, key=key, accepted_statuses=accepted_statuses)
         except (HostRunNotFound, HostRejected):
             raise
         except Exception:
             raise HostUnavailable() from None
 
-    def _exchange(self, method, path, *, body, key):
+    def _exchange(self, method, path, *, body, key, accepted_statuses=(200, 201)):
         token = os.environ.get("A2A_HOST_API_TOKEN", "")
         if not token or not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", token):
             raise HostUnavailable()
@@ -102,7 +102,7 @@ class HostReadClient:
                     raise HostRunNotFound()
                 if 400 <= response.status < 500 and response.status not in (401, 403):
                     raise HostRejected(response.status)
-                if response.status not in (200, 201):
+                if response.status not in accepted_statuses:
                     raise HostUnavailable()
                 if response.getheader("Content-Type", "").split(";")[0].strip().lower() != "application/json":
                     raise HostUnavailable()

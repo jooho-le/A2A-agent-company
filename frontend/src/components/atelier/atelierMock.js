@@ -52,9 +52,9 @@ export const progress = project => project.needsApproval ? 20 : [12, 62, 86, 100
 export function projectStatus(project){return project.needsApproval?{text:'대표님 확인 대기',kind:'review'}:[{text:'기획 중',kind:''},{text:'개발 중',kind:''},{text:'품질·보안 검토',kind:''},{text:'작업 완료',kind:'complete'}][project.phase];}
 
 export const viewCopy = {
-  home: ['오피스', 'YOUR COMPANY, YOUR TEAM.', '대표님, 오늘도 좋은 일 만들어봐요.', '아이디어를 맡기고, 직원들의 진행 상황을 확인하세요.'],
-  projects: ['프로젝트', 'WORK IN PROGRESS.', '우리 회사가 만들어가는 일.', '진행 중인 업무부터 완료한 프로젝트까지 한곳에서 살펴보세요.'],
-  team: ['우리 직원', 'PEOPLE BEHIND THE WORK.', '대표님의 든든한 동료들이에요.', '오케스트레이터 리더와 네 작업 에이전트를 소개합니다.'],
-  workflow: ['업무 흐름', 'HOW YOUR TEAM WORKS.', '팀의 업무가 이어지는 순간.', '하나의 일이 기획부터 개발·품질·보안까지 이어지는 과정을 살펴보세요.'],
-  outputs: ['결과물 보관함', 'DELIVERED BY YOUR TEAM.', '팀의 작업을 하나씩 꺼내보세요.', '기획 문서부터 소스 코드까지, 프로젝트별로 모아뒀어요.'],
+  home: ['만들기', '', '무엇을 만들까요?', ''],
+  projects: ['내 프로젝트', '', '내 프로젝트', ''],
+  team: ['직원 소개', '', '함께 일하는 직원', ''],
+  workflow: ['진행 상황', '', '진행 상황', ''],
+  outputs: ['결과물', '', '결과물', ''],
 }

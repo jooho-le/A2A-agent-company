@@ -35,7 +35,7 @@ test('RECEIVED + Planner PENDING은 완료가 아니며 다른 세 명은 Step �
 for (const [status, displayState, label] of [
   ['PENDING', 'pending', '대기'], ['RUNNING', 'working', '작업'],
   ['SUCCEEDED', 'succeeded', '단계 완료'], ['FAILED', 'failed', '단계 실패'],
-  ['WAITING_INPUT', 'waiting_input', '입력 대기'], ['CANCELED', 'canceled', '취소'],
+  ['WAITING_INPUT', 'waiting_input', '확인 대기'], ['CANCELED', 'canceled', '취소'],
 ]) {
   test(`실제 Step 상태 ${status}를 독립적인 표시 상태로 변환한다`, () => {
     const source = step('PLANNER', status)

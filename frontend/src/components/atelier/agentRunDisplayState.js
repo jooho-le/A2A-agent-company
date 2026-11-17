@@ -14,7 +14,7 @@ const stepStates = {
   RUNNING: ['working', '작업'],
   SUCCEEDED: ['succeeded', '단계 완료'],
   FAILED: ['failed', '단계 실패'],
-  WAITING_INPUT: ['waiting_input', '입력 대기'],
+  WAITING_INPUT: ['waiting_input', '확인 대기'],
   CANCELED: ['canceled', '취소'],
 }
 const isVersion = value => value === null || (Number.isSafeInteger(value) && value >= 1)
@@ -35,7 +35,7 @@ function selectStep(agentRole, steps, run) {
   }
 
   // Developer 생성 시의 code_version_for_fix_attempt와 같은 기준입니다.
-  // 입력 대기·중단 중에도 마지막 개발 시도는 fixAttempt + 1이며, QA·Security는
+  // 확인 대기·중단 중에도 마지막 개발 시도는 fixAttempt + 1이며, QA·Security는
   // Run의 확정된 코드 버전을 검증합니다. Planner는 코드 버전과 무관합니다.
   const targetVersion = agentRole === 'PLANNER' ? null
     : agentRole === 'DEVELOPER' ? run.fixAttempt + 1 : run.codeVersion

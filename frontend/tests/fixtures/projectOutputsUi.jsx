@@ -81,10 +81,10 @@ async function navigate(view) { await act(async () => document.querySelector(`[d
 async function verify() {
   const checks = []
   await mount(null); await navigate('projects')
-  check(document.querySelector('#projects-view').textContent.includes('저장된 프로젝트가 없습니다'), 'projects empty')
+  check(document.querySelector('#projects-view').textContent.includes('첫 프로젝트를 만들어보세요'), 'projects empty')
   check(!document.querySelector('#projects-view .project-card'), 'no demo projects')
   await navigate('outputs')
-  check(document.querySelector('#outputs-view').textContent.includes('접수한 실제 업무가 없습니다'), 'outputs empty')
+  check(document.querySelector('#outputs-view').textContent.includes('프로젝트를 먼저 선택해주세요'), 'outputs empty')
   check(!document.querySelector('#outputs-view .output-card') && calls.every(call => !call.url.startsWith('/api/v1/runs')), 'no demo files or Run API calls without run')
   checks.push('empty projects and outputs contain no demo data')
 
@@ -92,7 +92,7 @@ async function verify() {
   await navigate('projects')
   const card = document.querySelector('#projects-view .project-card')
   check(card.textContent.includes('테스트 프로젝트') && card.textContent.includes('요구사항 분석'), 'name and run state')
-  check(card.textContent.includes('계획에이전트 · 작업') && !card.textContent.includes('%'), 'step state and no invented percent')
+  check(card.textContent.includes('기획 · 작업') && !card.textContent.includes('%'), 'step state and no invented percent')
   check(!card.querySelector('.progress-track'), 'no numeric progress graphic')
   await act(async () => card.click())
   check(globalThis.__officeProps.runDisplayState.runId === runId && !globalThis.__officeProps.onDisplayModeChange, 'project selects same actual office run')
@@ -106,14 +106,14 @@ async function verify() {
   check(output.textContent.includes('src/form.js') && output.textContent.includes('입력 검사 · FAIL'), 'report paths and verdicts')
   check(!output.querySelector('a') && !output.querySelector('.file-open') && !output.querySelector('.output-actions'), 'no invented content/download action')
   check(!output.textContent.includes('hidden-test-value') && !output.textContent.includes('/private/mock-only'), 'private data absent')
-  check(output.textContent.includes('다운로드 API는 제공되지 않습니다'), 'unsupported download explained')
+  check(output.textContent.includes('파일 다운로드는 아직 지원하지 않아요'), 'unsupported download explained')
   checks.push('artifact metadata/report summary shown without secrets or fake downloads')
 
   scenario = 'artifact-error'; await navigate('home'); await navigate('outputs')
-  check(output.querySelector('[role=alert]') && !output.textContent.includes('아직 등록된 산출물이 없습니다'), 'error is not empty result')
+  check(output.querySelector('[role=alert]') && !output.textContent.includes('아직 결과가 없어요'), 'error is not empty result')
   scenario = 'empty'
   await act(async () => output.querySelector('[role=alert] button').click())
-  check(output.textContent.includes('아직 등록된 산출물이 없습니다') && !output.querySelector('.output-card'), 'retry empty response clears old artifacts')
+  check(output.textContent.includes('아직 결과가 없어요') && !output.querySelector('.output-card'), 'retry empty response clears old artifacts')
   check(postCount() === 1, 'retry only GET')
   checks.push('artifact error and empty results are distinct; retry uses GET only')
   await act(async () => root.unmount())

@@ -9,7 +9,8 @@ const studentYaw = radians(-54)
 // 배경 사진에는 별도의 충돌 메시가 없습니다. 선반·소파·전경 난간을 제외한
 // 빈 바닥에 다섯 좌석 전체가 들어오도록 작업 공간을 한꺼번에 맞춥니다.
 // 좌석 사이 간격·가구 비율·합류 경로는 같은 로컬 좌표로 보존합니다.
-export const officeFloorFit = { scale: 1.42, position: [-.7, 0, 2] }
+// 전체 사무실에서 왼쪽 리더석이 사이드바에 가려지지 않도록 여유를 둡니다.
+export const officeFloorFit = { scale: 1.1, position: [-.7, 0, 2] }
 function classroomPoint(column, row) {
   return {
     x: column * Math.cos(studentYaw) + row * Math.sin(studentYaw),
