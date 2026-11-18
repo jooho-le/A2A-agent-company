@@ -103,6 +103,7 @@ export function RequestForm({ mode = 'multi', onMode, modal = false, onCreate, o
       </button>
     </div>
     {submission && <div className="composer-feedback">
+      {submission.message && !submission.finished && <p role="status">{submission.message}</p>}
       {needsStatus && !submission.finished && <p role="status">{submission.notice}</p>}
       {problem && <p role="alert">{problem}</p>}
       {submission.uncertain && <button type="button" className="button" disabled={submission.busy} onClick={submission.recover}>접수 상태 확인</button>}

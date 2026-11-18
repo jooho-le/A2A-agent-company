@@ -72,7 +72,7 @@ test('신규 Run: 생성 응답 전에 저장된 첫 Trace부터 페이지·sequ
     { ...rows[0], eventId: id(26), workflowStepId: null }]
   logs.push(...Array.from({ length: 1001 }, (_, n) => ({ ...rows[0], eventType: 'UNBOUND_EVENT', eventId: id(100 + n) })))
   const calls = [], trace = await feed.pull(selection.runId, page(logs, calls), undefined, { fromStart: selection.traceFromStart })
-  assert.deepEqual(calls.map(c => c.offset), [0, 500, 1000])
+  assert.deepEqual(calls.map(c => c.offset), Array.from({ length: Math.ceil(logs.length / 100) }, (_, index) => index * 100))
   assert.equal(trace.entries[0].event.eventId, id(25)); assert.equal(trace.cursor, logs.length)
   assert.deepEqual(trace.entries.map(e => e.event.eventId), [...new Set(logs.map(e => e.eventId))])
   const snapshot = { runId, architecture: 'MULTI_AGENT', availability: 'ready', run: { status: 'VALIDATING' }, errors: {},
@@ -129,7 +129,7 @@ test('기존 Run 수동 조회는 과거 이벤트를 생략하고 이후 이벤
   let resolveOld
   const pending = feed.pull(runId, () => new Promise(resolve => { resolveOld = resolve }))
   const changed = await feed.pull(id(9), page(events(id(9)).rows))
-  resolveOld({ runId, offset: 3, limit: 500, total: 3, events: [] })
+  resolveOld({ runId, offset: 3, limit: 100, total: 3, events: [] })
   await assert.rejects(pending, { name: 'AbortError' }); assert.equal(changed.runId, id(9))
 })
 

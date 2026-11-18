@@ -72,4 +72,6 @@ class RunSubmission(Base):
     configuration_id = Column(String(64), nullable=False)
     state = Column(String(16), nullable=False, default="PENDING")
     response_json = Column(Text, nullable=True)
+    # 동일 접수의 수동 POST는 한 번만 허용합니다. 응답 유실/재시작 후에도 해제하지 않습니다.
+    manual_retry_claimed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())

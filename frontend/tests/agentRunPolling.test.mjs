@@ -31,19 +31,19 @@ function setup(overrides = {}) {
     fire() { const [id, timer] = timers.entries().next().value; timers.delete(id); timer.fn() } }
 }
 
-test('3초 후 시작하고 요청 완료 전에는 다음 조회를 예약하지 않는다', async () => {
+test('2초 후 시작하고 요청 완료 전에는 다음 조회를 예약하지 않는다', async () => {
   const env = setup()
-  assert.equal([...env.timers.values()][0].delay, 3000)
+  assert.equal([...env.timers.values()][0].delay, 2000)
   env.fire()
   assert.equal(env.requests.length, 1)
   assert.equal(env.timers.size, 0)
   env.requests[0].resolve(); await flush()
   assert.equal(env.timers.size, 1)
-  assert.equal([...env.timers.values()][0].delay, 3000)
+  assert.equal([...env.timers.values()][0].delay, 2000)
   env.loop.stop()
 })
 
-test('수동 조회도 완료 후 3초부터 예약하며 같은 Promise로 중복 예약하지 않는다', async () => {
+test('수동 조회도 완료 후 2초부터 예약하며 같은 Promise로 중복 예약하지 않는다', async () => {
   const env = setup(), manual = deferred()
   env.state.pending = manual.promise
   env.loop.waitFor(manual.promise); env.loop.waitFor(manual.promise)
@@ -88,13 +88,13 @@ test('확인된 싱글 Run에는 폴링하지 않는다', () => {
   env.loop.stop()
 })
 
-test('오류 재시도는 6·12·24·최대 30초, 복구 후 3초로 돌아온다', async () => {
-  assert.deepEqual([0,1,2,3,4,10].map(pollingDelay), [3000,6000,12000,24000,30000,30000])
+test('오류 재시도 간격은 2·4·8초, 복구 후 2초로 돌아온다', async () => {
+  assert.deepEqual([0,1,2,3].map(pollingDelay), [2000,2000,4000,8000])
   const env = setup(); env.fire(); env.state.failures = 1
   env.requests[0].reject(new Error('Mock 연결 오류')); await flush()
-  assert.equal([...env.timers.values()][0].delay, 6000)
+  assert.equal([...env.timers.values()][0].delay, 2000)
   env.fire(); env.state.failures = 0; env.requests[1].resolve(); await flush()
-  assert.equal([...env.timers.values()][0].delay, 3000)
+  assert.equal([...env.timers.values()][0].delay, 2000)
   env.loop.stop()
 })
 

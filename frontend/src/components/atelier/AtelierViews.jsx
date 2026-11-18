@@ -2,6 +2,7 @@ import { cloneElement } from 'react'
 import { StudioBanner, StudioObject, StudioRail } from './StudioVisuals'
 import TeamStoryDeck from './TeamStoryDeck'
 import AgentLeadership from './AgentLeadership'
+import SourceArtifactDownload from './SourceArtifactDownload'
 import { Icon, OfficeDesk } from './AtelierArtwork'
 import { ActivityList, AgentCards, ProjectCard, ProjectOptions, RequestForm } from './AtelierCards'
 import { agentStates, employees, progress, projectStatus } from './atelierMock'
@@ -96,11 +97,12 @@ function RunOutputs({ projects, project, onSelect, catalog, onRetry, onBrowsePro
         {item.codeVersion !== null && <p>코드 버전: {item.codeVersion}</p>}
         {item.details.map((detail, index) => <p key={index}>{detail}</p>)}
         {!!item.changes.length && <><p>변경 보고서의 파일 경로입니다. 현재 파일의 존재나 내용을 보장하지 않습니다.</p><ul>{item.changes.map((file, index) => <li key={index}>{file.path} · {file.action}</li>)}</ul></>}
-        {item.source && <p>코드의 등록 정보예요. 파일 원문은 포함되지 않아요.</p>}
+        {item.source && <p>등록된 코드 버전의 기록이에요. ZIP은 보존된 Source의 검증을 통과한 경우에만 다운로드할 수 있어요.</p>}
       </details>
+      {item.source && <SourceArtifactDownload key={`${item.runId}:${item.artifactId}`} item={item} />}
     </article>)}</StudioRail>
     {!failed && !loading && !current.items.length && <div className="empty-state studio-empty"><div className="studio-empty-art"><StudioObject kind="paper" /></div><h2>아직 결과가 없어요</h2><p>작업 중 만들어진 결과가 여기에 모여요.</p></div>}
-    <p className="view-footnote">지금은 결과 정보만 볼 수 있어요. 파일 다운로드는 아직 지원하지 않아요.</p>
+    <p className="view-footnote">등록된 Source는 해당 코드 버전의 ZIP으로 다운로드할 수 있어요. 다른 결과물은 등록 정보만 제공해요.</p>
   </>
 }
 

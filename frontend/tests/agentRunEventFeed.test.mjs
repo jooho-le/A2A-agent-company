@@ -24,7 +24,7 @@ test('한 번에 여러 페이지가 도착해도 offset 순서로 전부 읽는
   rows.push(...Array.from({ length: 1205 }, (_, i) => event(i + 1)))
   const next = await feed.pull('a', server(rows, calls))
   assert.equal(next.entries.length, 1205)
-  assert.deepEqual(calls.map(item => item.offset), [1, 501, 1001])
+  assert.deepEqual(calls.map(item => item.offset), Array.from({ length: 13 }, (_, index) => 1 + index * 100))
   assert.deepEqual(next.entries.map(item => item.offset), Array.from({ length: 1205 }, (_, i) => i + 1))
 })
 test('중복 eventId도 원본 행 수만큼 offset을 전진하되 재생 항목은 한 번만 만든다', async () => {
