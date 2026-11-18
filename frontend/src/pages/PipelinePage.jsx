@@ -271,8 +271,7 @@ function PipelinePage({ onBack }) {
     <main className="pipeline-page">
       <header className="pipeline-header">
         <div>
-          <span className="pipeline-mock-label">A2A Agent Company · 실제 Run / Step / Trace 조회</span>
-          <h1>A2A Agent Pipeline</h1>
+          <h1>업무 실행</h1>
           <p>시나리오: {mockPipeline.scenario}</p>
         </div>
         <button type="button" className="app-button" onClick={onBack}>
@@ -286,7 +285,7 @@ function PipelinePage({ onBack }) {
       </section>
 
       <section className="pipeline-card pipeline-run" aria-labelledby="pipeline-run-title">
-        <h2 id="pipeline-run-title">실제 Run 생성</h2>
+        <h2 id="pipeline-run-title">업무 시작</h2>
         <button type="button" className="app-button" onClick={handleRun} disabled={isSubmitting || isRefreshing}>
           {isSubmitting ? '실행 중...' : '실제 시나리오 실행'}
         </button>
@@ -298,11 +297,11 @@ function PipelinePage({ onBack }) {
               <dl className="pipeline-run-result">
                 <dt>runId</dt>
                 <dd>{runResult.run.runId}</dd>
-                <dt>firstStep.agentRole</dt>
+                <dt>첫 담당 직원</dt>
                 <dd>{runResult.firstStep.agentRole}</dd>
-                <dt>firstStep.status (생성 당시)</dt>
+                <dt>최초 작업 상태</dt>
                 <dd>{runResult.firstStep.status}</dd>
-                <dt>dispatchStatus</dt>
+                <dt>전달 상태</dt>
                 <dd>{runResult.dispatchStatus}</dd>
               </dl>
             </>
@@ -312,7 +311,7 @@ function PipelinePage({ onBack }) {
 
       <section className="pipeline-card pipeline-run" aria-labelledby="pipeline-run-status-title">
         <div className="pipeline-agent-heading">
-          <h2 id="pipeline-run-status-title">현재 Run 상태 · 실제 데이터</h2>
+          <h2 id="pipeline-run-status-title">현재 작업 상태</h2>
           <button
             type="button"
             className="app-button"
@@ -330,13 +329,13 @@ function PipelinePage({ onBack }) {
         {runStatus && (
           <dl className="pipeline-run-result">
             <dt>Run ID</dt><dd>{runStatus.runId}</dd>
-            <dt>현재 Run 상태 (status)</dt><dd>{runStatus.status}</dd>
-            <dt>최종 판정 (verdict)</dt><dd>{runStatus.verdict ?? '아직 최종 판정 없음'}</dd>
-            <dt>코드 버전 (codeVersion)</dt><dd>{runStatus.codeVersion ?? '아직 코드 버전 없음'}</dd>
-            <dt>수정 시도 횟수 (fixAttempt)</dt><dd>{runStatus.fixAttempt}</dd>
+            <dt>현재 상태</dt><dd>{runStatus.status}</dd>
+            <dt>최종 판정</dt><dd>{runStatus.verdict ?? '아직 최종 판정 없음'}</dd>
+            <dt>코드 버전</dt><dd>{runStatus.codeVersion ?? '아직 코드 버전 없음'}</dd>
+            <dt>수정 횟수</dt><dd>{runStatus.fixAttempt}</dd>
           </dl>
         )}
-        <p>FINISHED는 실행 종료 상태입니다. 성공 여부는 최종 판정(verdict)과 구분하여 확인해주세요.</p>
+        <p>실행이 종료돼도 성공한 것은 아닙니다. 최종 판정을 확인해주세요.</p>
       </section>
 
       <p className="pipeline-description">
@@ -347,7 +346,7 @@ function PipelinePage({ onBack }) {
 
       <div className="pipeline-layout">
         <section aria-labelledby="pipeline-agents-title">
-          <h2 id="pipeline-agents-title">Agent 진행 상태 · 실제 데이터</h2>
+          <h2 id="pipeline-agents-title">직원 진행 상태</h2>
           {isLoadingSteps && <p role="status">Step 목록을 조회하고 있습니다.</p>}
           {stepsErrorMessage && (
             <p className="pipeline-run-error" role="alert">Step 조회 오류: {stepsErrorMessage}</p>
@@ -400,10 +399,10 @@ function PipelinePage({ onBack }) {
         </section>
 
         <section aria-labelledby="pipeline-info-title">
-          <h2 id="pipeline-info-title">실행 정보와 Trace</h2>
+          <h2 id="pipeline-info-title">진행 상황과 기록</h2>
           <div className="pipeline-info">
             <article className="pipeline-card" aria-labelledby="pipeline-current-agent-title">
-              <h3 id="pipeline-current-agent-title">현재 Agent · 실제 Step 기준</h3>
+              <h3 id="pipeline-current-agent-title">현재 작업 중인 직원</h3>
               {isLoadingSteps ? (
                 <p role="status">현재 Agent를 조회하고 있습니다.</p>
               ) : stepsErrorMessage ? (
@@ -435,7 +434,7 @@ function PipelinePage({ onBack }) {
             ))}
             <article className="pipeline-card" aria-labelledby="pipeline-trace-title">
               <div className="pipeline-agent-heading">
-                <h3 id="pipeline-trace-title">Trace · 실제 이벤트</h3>
+                <h3 id="pipeline-trace-title">작업 기록</h3>
               </div>
               {isLoadingEvents && <p role="status">실행 이벤트를 조회하고 있습니다.</p>}
               {eventsErrorMessage && (

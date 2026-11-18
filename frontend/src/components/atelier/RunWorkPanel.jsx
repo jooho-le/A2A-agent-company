@@ -45,7 +45,7 @@ function ReplyEditor({ runId, role, target, controls }) {
       placeholder="예: 정해진 회원가입 기능 안에서 진행해주세요." disabled={controls.replyPending} />
     {canReply ? <button type="submit" className="button start" disabled={!text.trim() || controls.replyPending || controls.cancelPending}>
       {controls.replyPending ? '전달 상태 확인 중…' : '답변하고 이어가기'}<Icon name="arrow" /></button>
-      : <p className="run-draft-hint">메모는 이 브라우저에 보관돼요. 직원이 확인을 요청하면 답변을 전달할 수 있어요.</p>}
+      : <p className="run-draft-hint">메모는 브라우저에만 저장돼요. 확인 요청을 받으면 답변할 수 있어요.</p>}
   </form>
 }
 
@@ -72,7 +72,7 @@ export default function RunWorkPanel({ runId, projectName, displayState, control
         : command ? command.action === 'CANCEL' ? '직원들의 중단 확인을 기다리고 있어요…' : '답변을 전달하고 이어서 진행하고 있어요…' : ''
 
   return <section className="run-work-panel" aria-label="직원 작업 내용과 작업 제어">
-    <header><div><span className="run-work-kicker">내 팀의 작업</span>{projectName && <h3>{projectName}</h3>}</div>
+    <header><div>{projectName && <h3>{projectName}</h3>}</div>
       <div className="run-header-actions"><button className="run-refresh" type="button" onClick={controls.refresh} aria-label="직원 작업 새로 확인"><Icon name="clock" /></button>
         {!final && <button type="button" className="button run-header-stop" disabled={!data?.canCancel || controls.cancelPending} onClick={() => setConfirmStop(true)}>
           {controls.cancelPending ? '중단 확인 중…' : '작업 중단'}</button>}</div></header>
@@ -83,7 +83,7 @@ export default function RunWorkPanel({ runId, projectName, displayState, control
       <img src={humanAgents[i].portrait} alt="" /><span>{roleLabel(humanAgents[i].id)}</span><i aria-hidden="true" />
     </button>)}</div>
     <article className="run-person-work" data-state={row?.displayState}>
-      <div className="run-person-heading"><strong>{roleLabel(person.id)} 담당</strong><span>{row?.label || '상태 확인 중'}</span></div>
+      <div className="run-person-heading"><strong>{roleLabel(person.id)}</strong><span>{row?.label || '상태 확인 중'}</span></div>
       {!target && <p className="run-person-purpose">{purposes[safeIndex]}</p>}
       {popup && !target && <div className="run-person-result"><h4>{popup.title}</h4>{popup.source === 'report' ? <p>{popup.detail}</p>
         : <details><summary>현재 작업 자세히</summary><p>{popup.detail}</p></details>}</div>}

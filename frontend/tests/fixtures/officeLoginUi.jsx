@@ -60,7 +60,7 @@ async function verify() {
   check(start.type === 'button' && !start.disabled, 'guest has a login action, not a Run submit')
   await click(start)
   check(!button('로그아웃'), 'guest account does not claim authentication')
-  check(document.querySelector('#login-title') && !document.querySelector('.atelier-dashboard'), 'existing login opened')
+  check(document.querySelector('#login-title') && document.querySelector('.atelier-dashboard')?.closest('[hidden]'), 'existing login opened and office hidden')
   await click(button('회원가입'))
   check(document.querySelector('#signup-title'), 'existing signup reused')
   await click(button('로그인'))

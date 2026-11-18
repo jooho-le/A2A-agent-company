@@ -298,7 +298,7 @@
   .office-auth .office-auth-footer { flex-wrap: wrap; gap: 8px; }
 }
 
-/* 쉬운 사용 흐름: 요청 → 진행 → 결과. 기술 정보는 펼쳤을 때만 보여줍니다. */
+/* 쉬운 사용 흐름: 요청 → 진행 → 결과. */
 .atelier-dashboard.ux-simple .page-header { margin-bottom: 24px; }
 .atelier-dashboard.ux-simple .page-header h1 { font-size: clamp(26px, 2.4vw, 36px); letter-spacing: -.035em; }
 .atelier-dashboard.ux-simple .nav-secondary { margin-top: 24px; color: #adb7c8; font-size: 11px; }
@@ -352,4 +352,57 @@
   .atelier-dashboard.ux-simple .workflow-people ol { grid-template-columns: minmax(0, 1fr); }
   .atelier-dashboard.ux-simple .empty-state h2 { font-size: 21px; }
   .atelier-dashboard.ux-simple .employee-quote { font-size: 11px; line-height: 1.7; }
+}
+
+/* 텍스트 정리: 필수 입력·상태·결과 안내만 읽기 쉬운 크기로 유지합니다. */
+.office-auth :is(.login-field, .signup-field) label,
+.office-auth :is(.auth-message, .auth-switch, #password-hint) {
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple :is(.request-scope, .composer-feedback, .project-card-meta,
+  .project-card-footer, .file-owner, .file-type, .view-footnote, .saved-run-heading time,
+  .saved-project-detail, .artifact-details, .ux-details > summary, .employee-quote, .employee-link) {
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple :is(.project-card-meta, .file-owner, .view-footnote, .saved-run-heading time) {
+  color: #c3ccda;
+}
+.atelier-dashboard.workspace-shell.ux-simple :is(.project-card h2, .studio-banner h2, .saved-project-detail h3, .workflow-summary h2) {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.atelier-dashboard.workspace-shell.ux-simple .project-card-meta { flex-wrap: wrap; gap: 6px 16px; }
+.atelier-dashboard.workspace-shell.ux-simple .saved-run-heading { flex-wrap: wrap; gap: 8px 16px; }
+.atelier-dashboard.workspace-shell.ux-simple .output-actions { flex-wrap: wrap; }
+.atelier-dashboard.workspace-shell.ux-simple :is(.output-actions .button, .composer-feedback .button) {
+  max-width: 100%; white-space: normal; font-size: 14px; line-height: 1.6;
+}
+.atelier-dashboard.workspace-shell.ux-simple .run-work-panel :is(.run-person-heading > span,
+  .run-person-purpose, .run-person-result p, .run-person-result summary, .run-question > strong,
+  .run-question ul, .run-question > p, .run-waiting-work, .run-reply label, .run-draft-hint,
+  .run-command-notice, .run-control-error, .run-attention button) {
+  font-size: 14px; line-height: 1.7; overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple .run-work-panel .run-person-heading { flex-wrap: wrap; }
+.atelier-dashboard.workspace-shell.ux-simple .run-work-panel .run-person-result h4 { font-size: 16px; }
+.atelier-dashboard.workspace-shell.ux-simple .run-work-panel .run-reply textarea { font-size: 14px; }
+.atelier-dashboard.workspace-shell.ux-simple .run-work-panel .run-employee-picker button { font-size: 12px; }
+.atelier-dashboard.workspace-shell.ux-simple .run-employee-picker span { white-space: normal; overflow-wrap: anywhere; }
+.atelier-dashboard.workspace-shell.ux-simple .run-work-panel :is(.run-header-stop, .run-work-actions .button) {
+  font-size: 13px; white-space: normal; overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple .request-text { font-size: 14px; }
+.document-page :is(.document-field p, .document-message),
+.pipeline-page :is(.pipeline-card > p, .pipeline-run-result, .pipeline-run-error) { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .atelier-dashboard.workspace-shell.ux-simple .run-work-panel > header { flex-wrap: wrap; }
+  .atelier-dashboard.workspace-shell.ux-simple .run-header-actions { margin-left: auto; }
+}
+
+.atelier-dashboard.workspace-shell.ux-simple :is(.output-card > p, .studio-banner-label) {
+  font-size: 14px; line-height: 1.7; overflow-wrap: anywhere;
 }

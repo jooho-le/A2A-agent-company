@@ -40,8 +40,8 @@ export default function SourceArtifactDownload({ item }) {
   }
   return <>
     <div className="output-actions"><button type="button" className="button" disabled={!ready || pending || unavailable}
-      onClick={download}><Icon name="down" />{pending ? 'ZIP 확인 중…' : !ready || unavailable ? '다운로드 불가' : 'Source ZIP 다운로드'}</button></div>
-    {!ready && <p>등록된 코드 버전을 확인한 뒤 다운로드할 수 있어요.</p>}
+      onClick={download}><Icon name="down" />{pending ? 'ZIP 확인 중…' : !ready || unavailable ? '다운로드 불가' : '소스 ZIP 다운로드'}</button></div>
+    {!ready && <p>코드 버전 확인이 필요해요.</p>}
     {error && <p role="alert">{error.message}</p>}
   </>
 }

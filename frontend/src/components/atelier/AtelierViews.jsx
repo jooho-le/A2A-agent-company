@@ -46,7 +46,7 @@ export function ProjectsView({ projects, search, onSearch, onSelect, actual = fa
   const needsLogin = saved?.error?.code === 'AUTH_REQUIRED'
   return <>
     <StudioBanner kind="folder"><span className="studio-banner-label">모아둔 프로젝트</span><strong className="studio-banner-number">{pending || (failed && !projects.length) ? '—' : projects.length}<small>개</small></strong></StudioBanner>
-    <div className="view-toolbar"><p className="toolbar-note">프로젝트 <strong>{projects.length}개</strong></p>{projects.length > 0 && <div className="search"><Icon name="search" /><label className="sr-only" htmlFor={presentation.searchId || 'atelier-search'}>프로젝트 검색</label><input id={presentation.searchId || 'atelier-search'} type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="이름으로 찾기" autoComplete="off" /></div>}</div>
+    <div className="view-toolbar">{projects.length > 0 && <div className="search"><Icon name="search" /><label className="sr-only" htmlFor={presentation.searchId || 'atelier-search'}>프로젝트 검색</label><input id={presentation.searchId || 'atelier-search'} type="search" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="이름으로 찾기" autoComplete="off" /></div>}</div>
     {pending && <p role="status">저장된 프로젝트 목록을 불러오는 중입니다.</p>}
     {failed && <p role="alert">{saved.error.message} {needsLogin ? <button className="button" type="button" onClick={onLogin}>로그인</button> : <button className="button" type="button" onClick={saved.retry}>다시 불러오기</button>}</p>}
     {actual && projects.some(item => item.status.text === '상태 조회 오류') && <p role="alert">업무 상태 조회에 실패했습니다. <button className="button" type="button" onClick={onRetry}>다시 불러오기</button></p>}
@@ -83,26 +83,25 @@ function RunOutputs({ projects, project, onSelect, catalog, onRetry, onBrowsePro
   return <>
     <StudioBanner kind="paper"><span className="studio-banner-label">팀이 만든 결과</span><h2>{project.name}</h2>
       <label className="output-selector"><span className="sr-only">결과물을 볼 프로젝트</span><ProjectOptions id="actual-output-project" projects={projects} selectedId={project.id} onSelect={onSelect} /></label></StudioBanner>
-    {failed && <p role="alert">산출물을 불러오지 못했습니다. 이전에 확인한 목록이 있으면 유지합니다. <button type="button" className="button" onClick={onRetry}>다시 불러오기</button></p>}
+    {failed && <p role="alert">결과물을 불러오지 못했어요. <button type="button" className="button" onClick={onRetry}>다시 불러오기</button></p>}
     {loading && <p role="status">산출물 목록을 확인하고 있습니다.</p>}
     <StudioRail className="output-grid" label="결과 카드" count={current.items.length}>{current.items.map((item, index) => <article className="output-card" data-studio-tilt="" data-palette={index % 5} key={item.artifactId}>
       <div className="studio-output-cover" aria-hidden="true"><StudioObject kind={item.source ? 'monitor' : 'paper'} /></div>
-      <div className="output-card-top"><span className="file-icon"><Icon name={item.source ? 'code' : 'file'} /></span><span className="file-type">{item.type}</span></div>
-      <h3>{item.source ? '코드 기록' : item.type}</h3>
-      <div className="file-owner">{item.author}</div>
+      <div className="output-card-top"><span className="file-icon"><Icon name={item.source ? 'code' : 'file'} /></span></div>
+      <h3>{item.source ? '소스 코드' : item.type}</h3>
+      <div className="file-owner">{item.author}{item.source && item.codeVersion !== null && <span> · 버전 {item.codeVersion}</span>}</div>
       <details className="artifact-details"><summary>내용 보기</summary>
-        <p>이름: {item.name || item.type}</p><p>결과 ID: {item.artifactId}</p>
+        <p>이름: {item.name || item.type}</p>
         {item.createdAt && <p>등록 시각: <time dateTime={item.createdAt}>{item.createdAt}</time></p>}
         {item.version !== null && <p>산출물 버전: {item.version}</p>}
-        {item.codeVersion !== null && <p>코드 버전: {item.codeVersion}</p>}
+        {!item.source && item.codeVersion !== null && <p>코드 버전: {item.codeVersion}</p>}
         {item.details.map((detail, index) => <p key={index}>{detail}</p>)}
-        {!!item.changes.length && <><p>변경 보고서의 파일 경로입니다. 현재 파일의 존재나 내용을 보장하지 않습니다.</p><ul>{item.changes.map((file, index) => <li key={index}>{file.path} · {file.action}</li>)}</ul></>}
-        {item.source && <p>등록된 코드 버전의 기록이에요. ZIP은 보존된 Source의 검증을 통과한 경우에만 다운로드할 수 있어요.</p>}
+        {!!item.changes.length && <><p>변경 기록입니다. 현재 파일과 다를 수 있어요.</p><ul>{item.changes.map((file, index) => <li key={index}>{file.path} · {file.action}</li>)}</ul></>}
       </details>
       {item.source && <SourceArtifactDownload key={`${item.runId}:${item.artifactId}`} item={item} />}
     </article>)}</StudioRail>
     {!failed && !loading && !current.items.length && <div className="empty-state studio-empty"><div className="studio-empty-art"><StudioObject kind="paper" /></div><h2>아직 결과가 없어요</h2><p>작업 중 만들어진 결과가 여기에 모여요.</p></div>}
-    <p className="view-footnote">등록된 Source는 해당 코드 버전의 ZIP으로 다운로드할 수 있어요. 다른 결과물은 등록 정보만 제공해요.</p>
+    <p className="view-footnote">소스 코드는 ZIP으로 받을 수 있어요. 보고서는 내용 보기를 눌러주세요.</p>
   </>
 }
 

@@ -5,13 +5,12 @@ import { roleLabel } from './roleLabels'
 import { Icon, OfficeDesk } from './AtelierArtwork'
 import { agentStates, employees, motionPortraits, portraits, progress, projectStatus } from './atelierMock'
 
-export function Portrait({ employee, index, state = '' }) {
+export function Portrait({ employee, state = '' }) {
   const [failedSource, setFailedSource] = useState(null)
   const motion = motionPortraits[employee.id]
   const source = ({ active: motion.working[0], warning: motion.warning, done: motion.done })[state] || portraits[employee.id]
   return (
     <span className="portrait" data-person={employee.id}>
-      <span className="portrait-number">STAFF / 0{index + 1}</span>
       {employee.leadership && <span className="leader-portrait-badge">{employee.leadership.badge}</span>}
       {source && failedSource !== source ? <img src={source} alt={`${employee.name} 캐릭터`} onError={() => setFailedSource(source)} /> : (
         <svg className="person-placeholder" viewBox="0 0 120 130" aria-hidden="true"><circle cx="60" cy="39" r="24" /><path d="M9 134v-22c0-29 22-46 51-46s51 17 51 46v22Z" /></svg>
@@ -50,7 +49,7 @@ export function ProjectCard({ project, onSelect, status = project.status || proj
       <span className="studio-project-cover" aria-hidden="true"><StudioObject kind="folder" /><span className="studio-cover-grid" /></span>
       <span className="project-card-top"><span className={`project-monogram ${['flow', 'desk'].includes(project.id) ? project.id : ''}`}>{({ orbit: 'O', flow: 'F', desk: 'D' })[project.id] || '+'}</span><span className={`badge ${status.kind}`}>{status.text}</span></span>
       <h2>{project.name}</h2>{!project.stored && <p>{project.description}</p>}
-      <span className="project-card-meta"><span>의뢰인 · 대표님</span><span>{project.stored ? <>생성일 · <time dateTime={project.createdAt}>{project.time}</time></> : project.time}</span></span>
+      <span className="project-card-meta"><span>{project.stored ? <>생성일 · <time dateTime={project.createdAt}>{project.time}</time></> : project.time}</span></span>
       {project.actual ? !project.stored && <span className="project-agent-states">{project.agents.map(agent => <span key={agent.role}>{roleLabel(agent.role, agent.name)} · {agent.label}</span>)}</span> : <><span className="progress-meta"><span>프로젝트 진행</span><strong>{amount}%</strong></span>
       <span className="progress-track"><span className="progress-fill" style={{ display: 'block', width: `${amount}%` }} /></span></>}
       <span className="project-card-footer">{project.stored ? <span>{interactive ? '프로젝트 열기 →' : '저장된 프로젝트'}</span> : <><span>담당 직원 {staffCount}명</span><Icon name="arrow" /></>}</span>

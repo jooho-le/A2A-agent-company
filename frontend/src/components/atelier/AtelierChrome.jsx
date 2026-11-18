@@ -79,7 +79,7 @@ export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClos
     <button type="button" className="nav-button nav-secondary" data-view="team" aria-current={view === 'team' ? 'page' : undefined} onClick={() => onView('team')}><Icon name="team" />직원 소개</button>
     <div className="atelier-account">
       <button type="button" className="owner-profile" aria-expanded={hasAccessToken ? accountOpen : undefined} aria-controls={hasAccessToken ? 'atelier-account-menu' : undefined} onClick={() => hasAccessToken ? setAccountOpen(!accountOpen) : onLogin?.()}><span className="owner-avatar">A</span><span><strong>{hasAccessToken ? '내 계정' : '로그인'}</strong></span></button>
-      {hasAccessToken && accountOpen && <div className="atelier-account-menu" id="atelier-account-menu"><p>내 계정</p><button type="button" onClick={onLogin}>{hasAccessToken ? '다시 로그인' : '로그인'}</button><button type="button" onClick={onRunScenario}>새 업무 맡기기</button><button type="button" onClick={onOpenDocuments}>전자문서 관리</button>{hasAccessToken && <button type="button" onClick={onLogout}>로그아웃</button>}</div>}
+      {hasAccessToken && accountOpen && <div className="atelier-account-menu" id="atelier-account-menu"><p>내 계정</p><button type="button" onClick={() => { setAccountOpen(false); onLogin?.() }}>{hasAccessToken ? '다시 로그인' : '로그인'}</button><button type="button" onClick={() => { setAccountOpen(false); onRunScenario?.() }}>새 업무 맡기기</button><button type="button" onClick={() => { setAccountOpen(false); onOpenDocuments?.() }}>전자문서 관리</button>{hasAccessToken && <button type="button" onClick={onLogout}>로그아웃</button>}</div>}
     </div>
   </aside>
 }
