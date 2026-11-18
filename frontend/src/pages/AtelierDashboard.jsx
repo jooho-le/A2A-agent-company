@@ -12,7 +12,7 @@ import useOfficeRunSubmission from '../hooks/useOfficeRunSubmission'
 import { initialRunSelection, runEventLimit, runQueryReducer } from '../hooks/agentRunSelection'
 import { savedProjectCards, submittedRunProject } from '../components/atelier/agentRunProject'
 import useSavedProjects from '../hooks/useSavedProjects'
-import { loadSelectedProject, readProjectSelection } from '../hooks/projectSelection'
+import { loadSelectedProject, readProjectSelection, rememberCreatedRun, rememberProjectRun, resolveProjectRun } from '../hooks/projectSelection'
 import { buildAgentRunDisplayState } from '../components/atelier/agentRunDisplayState'
 import AtelierDialog from '../components/atelier/AtelierDialog'
 import { HomeView, OutputsView, ProjectsView, TeamView } from '../components/atelier/AtelierViews'
@@ -42,6 +42,7 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
   const [activeWork, setActiveWork] = useState(null)
   const [restoreError, setRestoreError] = useState('')
   const [runQuery, dispatchRunQuery] = useReducer(runQueryReducer, initialRunSelection)
+  const selectedRun = useRef(null)
   const observedRunId = hasAccessToken && hasStoredAccessToken() ? runQuery.runId : ''
   const runMonitor = useAgentRunMonitor(observedRunId, { limit: runEventLimit, offset: runQuery.offset, includeArchitecture: true,
     traceFromStart: runQuery.traceFromStart, collectEvents: ['home', 'workflow'].includes(view), includeResults: true,
@@ -76,6 +77,8 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
     window.scrollTo({ top: 0, behavior: 'instant' })
   }
   const connectCreatedRun = useCallback(response => {
+    selectedRun.current = response.run.runId
+    rememberCreatedRun(response)
     setSelectedRole(null)
     setRestoreError('')
     dispatchRunQuery({ type: 'created', runId: response.run.runId })
@@ -83,6 +86,7 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
     setView('home'); setDrawerOpen(false)
     window.history.replaceState(null, '', '#/home')
     if (response.projectId) loadSelectedProject(response.projectId).then(project => {
+      if (selectedRun.current === response.run.runId) rememberProjectRun(project, { hostKey: 'local-multi', runId: response.run.runId })
       setActiveWork(current => current?.run?.runId === response.run.runId ? { ...current, projectName: project.name } : current)
     }).catch(() => { /* Run 관측은 유지하고 프로젝트 재조회 오류를 성공으로 처리하지 않습니다. */ })
   }, [])
@@ -99,7 +103,8 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
   if (actualProject && !storedCards.some(item => item.projectId === activeWork?.projectId)) listedProjects.push(actualProject)
 
   const openRun = useCallback((savedProject, run, navigate = true) => {
-    if (run.hostKey !== 'local-multi') return
+    if (!rememberProjectRun(savedProject, run)) return
+    selectedRun.current = run.runId
     setSelectedRole(null)
     setRestoreError('')
     setActiveWork({ projectId: savedProject.projectId, projectName: savedProject.name,
@@ -115,8 +120,10 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
     if (!selected) return
     const controller = new AbortController()
     loadSelectedProject(selected, { signal: controller.signal }).then(saved => {
-      const run = saved.runs.find(item => item.hostKey === 'local-multi')
-      if (!controller.signal.aborted && run) openRun(saved, run, false)
+      const run = resolveProjectRun(saved)
+      if (controller.signal.aborted || selectedRun.current) return
+      if (run) openRun(saved, run, false)
+      else if (saved.runs.length) setRestoreError('선택했던 작업을 찾을 수 없어요. 내 프로젝트에서 작업을 다시 선택해주세요.')
     }).catch(error => { if (!controller.signal.aborted && error.name !== 'AbortError') setRestoreError(error.message) })
     return () => controller.abort()
   }, [openRun])
@@ -155,6 +162,7 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
     setDrawerOpen(false); setModal({ type, ...extra })
   }
   function logoutOffice() {
+    selectedRun.current = null
     runMonitor.cancel()
     dispatchRunQuery({ type: 'select', runId: '' })
     setActiveWork(null)

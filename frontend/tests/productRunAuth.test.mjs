@@ -41,9 +41,9 @@ test('JWT: 기존 sessionStorage 토큰으로 보호 요청 헤더 구성, 제�
 
 test('접수 전 실패 헤더만 미접수로 인정하고 일반 503은 불명확한 전송으로 유지', async () => {
   for (const header of [null, 'NOT_ACCEPTED', 'UNKNOWN']) {
-    const fetch = createProductRunFetch({ productApiReady: true, readAccessToken: () => token,
+    const fetch = createProductRunFetch({ productApiReady: true, runSubmissionEnabled: true, readAccessToken: () => token,
       fetchImpl: async () => new Response(null, { status: 503, headers: header ? { 'X-Submission-Status': header } : {} }) })
-    await assert.rejects(fetch('/api/v1/runs', { method: 'POST' }), error => {
+    await assert.rejects(fetch('/api/v1/runs', { method: 'POST', confirmed: true }), error => {
       assert.equal(error.status, 503)
       assert.equal(error.submissionNotAccepted, header === 'NOT_ACCEPTED')
       return true
@@ -53,6 +53,19 @@ test('접수 전 실패 헤더만 미접수로 인정하고 일반 503은 불명
       return true
     })
   }
+})
+
+test('실제 생성은 연결 스위치와 명시적 사용자 요청을 모두 통과해야 전송된다', async () => {
+  let calls = 0
+  const options = { productApiReady: true, readAccessToken: () => token,
+    fetchImpl: async () => { calls++; return Response.json({}) } }
+  await assert.rejects(createProductRunFetch({ ...options, runSubmissionEnabled: false })('/api/v1/runs', {
+    method: 'POST', confirmed: true,
+  }), { code: 'RUN_SUBMISSION_DISABLED' })
+  await assert.rejects(createProductRunFetch({ ...options, runSubmissionEnabled: true })('/api/v1/runs', {
+    method: 'POST',
+  }), { code: 'EXPLICIT_SUBMISSION_REQUIRED' })
+  assert.equal(calls, 0)
 })
 
 test('JWT 없음: 보호 Run·Step·Trace 요청은 fetch 전에 차단', async t => {

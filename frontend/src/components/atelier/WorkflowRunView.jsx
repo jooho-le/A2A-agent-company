@@ -12,7 +12,9 @@ export default function WorkflowRunView({ runId, projectName, monitor, displaySt
     <button type="button" className="button start" onClick={onNew}>새 업무 맡기기<Icon name="arrow" /></button>
   </div>
 
-  const entries = monitor.trace?.entries || []
+  const entries = monitor.trace?.historyEntries || monitor.trace?.entries || []
+  const historyReady = Boolean(monitor.trace?.initialized)
+  const historyError = monitor.errors?.trace || monitor.errors?.run
   const hasError = Object.values(monitor.errors || {}).some(Boolean)
   return <>
     <div className="workflow-summary"><div><h2>{projectName || '우리 팀의 업무 흐름'}</h2></div>
@@ -30,11 +32,12 @@ export default function WorkflowRunView({ runId, projectName, monitor, displaySt
           </li>
         })}</ol>
       </section></details>
-      <details className="workflow-records ux-details"><summary>작업 기록 보기 <span className="count-pill">{entries.length}</span></summary>
+      <details className="workflow-records ux-details"><summary>작업 기록 보기 <span className="count-pill">{historyReady ? entries.length : '…'}</span></summary>
         <button type="button" className="button" onClick={monitor.refresh}>새로고침</button>
+        {historyError && <p role="alert">작업 기록을 불러오지 못했어요. 다시 확인해주세요.</p>}
         {entries.length ? <ol className="workflow-event-list">{entries.map(({ event }) => <li key={event.eventId}>
           <span className="workflow-event-dot" aria-hidden="true" /><div><strong>{event.actor}</strong><p>{event.eventType}</p><time dateTime={event.occurredAt}>{event.occurredAt}</time></div>
-        </li>)}</ol> : <p className="workflow-records-empty">아직 기록이 없어요.</p>}
+        </li>)}</ol> : !historyError && <p className="workflow-records-empty">{historyReady ? '아직 기록이 없어요.' : '작업 기록을 불러오고 있어요…'}</p>}
       </details>
     </div>
   </>
