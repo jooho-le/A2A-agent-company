@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, UUID4, model_validator
 
-from host_reads import HostReadClient, HostRejected, HostRunNotFound, HostUnavailable, get_host_read_client
+from host_reads import (HostAuthenticationFailed, HostReadClient, HostRejected, HostRunNotFound,
+                        HostUnavailable, get_host_read_client, require_host_reads_enabled)
 from routers.host_runs import owned_run
 
 router = APIRouter(prefix="/api/v1/runs", tags=["run-controls"])
@@ -32,7 +33,11 @@ def exchange(request, response, client, method, path, **kwargs):
         raise HTTPException(422, "지원하지 않는 요청입니다.")
     response.headers["Cache-Control"] = "no-store"
     try:
+        require_host_reads_enabled()
         return client.exchange(method, path, **kwargs)
+    except HostAuthenticationFailed:
+        raise HTTPException(502, "Host 서비스 인증에 실패했습니다.",
+                            headers={"Cache-Control": "no-store"}) from None
     except HostRunNotFound:
         raise HTTPException(404, "작업 또는 요청 기록을 찾을 수 없습니다.") from None
     except HostRejected as error:

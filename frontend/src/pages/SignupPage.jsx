@@ -74,12 +74,12 @@ function SignupPage({ onBack, onClose = onBack, onSignupSuccess }) {
                 name="password"
                 type="password"
                 autoComplete="new-password"
-                placeholder="최소 8자 이상 입력"
+                placeholder="비밀번호 입력"
                 aria-describedby="password-hint"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
-              <p id="password-hint">비밀번호는 최소 8자 이상이어야 합니다.</p>
+              <p id="password-hint">8자 이상 입력해주세요.</p>
             </div>
             <div className="signup-field">
               <label htmlFor="signup-password-confirm">비밀번호 확인</label>

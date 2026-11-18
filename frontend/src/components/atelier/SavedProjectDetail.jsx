@@ -1,5 +1,6 @@
 import { useEffect, useReducer } from 'react'
 import { loadSelectedProject } from '../../hooks/projectSelection'
+import { officeScenarioId } from '../../api/officeService'
 
 // Preserve the server's timezone information; do not assume naive dates are UTC.
 function Timestamp({ value }) {
@@ -18,8 +19,7 @@ export function SavedProjectDetailContent({ status, project, error, onRetry, onL
   return <>
     <h3>{project.name}</h3>
     <details className="ux-details"><summary>프로젝트 정보</summary><dl className="saved-project-fields">
-      <dt>프로젝트 ID</dt><dd>{project.projectId}</dd>
-      <dt>시나리오 ID</dt><dd>{project.scenarioId}</dd>
+      <dt>작업 유형</dt><dd>{project.scenarioId === officeScenarioId ? '회원가입 기능 제작' : '기타 시나리오'}</dd>
       <dt>생성일</dt><dd><Timestamp value={project.createdAt} /></dd>
     </dl></details>
     <h3 className="detail-section-title">작업 기록 <span>({project.runs.length})</span></h3>
@@ -27,12 +27,6 @@ export function SavedProjectDetailContent({ status, project, error, onRetry, onL
       {project.runs.map((run, index) => <li key={JSON.stringify([run.hostKey, run.runId])}>
         <div className="saved-run-heading"><strong>작업 {index + 1}</strong><Timestamp value={run.linkedAt} /></div>
         {run.hostKey === 'local-multi' && onOpenRun && <button type="button" className="button start" onClick={() => onOpenRun(project, run)}>진행 보기</button>}
-        <details className="ux-details"><summary>기술 정보</summary><dl className="saved-project-fields">
-          <dt>Run ID</dt><dd>{run.runId}</dd>
-          <dt>Host</dt><dd>{run.hostKey}</dd>
-          <dt>Configuration ID</dt><dd>{run.configurationId}</dd>
-          <dt>연결 시각</dt><dd><Timestamp value={run.linkedAt} /></dd>
-        </dl></details>
       </li>)}
     </ol> : <p className="dialog-description">아직 시작한 작업이 없어요.</p>}
   </>

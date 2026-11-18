@@ -276,7 +276,6 @@ function DocumentPage({ onBack }) {
       <div className="dashboard-content document-content">
         <StudioBanner kind="paper"><header className="dashboard-intro">
           <h1>문서 보내기</h1>
-          <p>PDF와 받는 사람의 회원번호를 입력해주세요.</p>
         </header></StudioBanner>
 
         <form className="document-card document-form" onSubmit={handleSubmit} noValidate aria-busy={isSubmitting}>

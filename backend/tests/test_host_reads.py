@@ -39,7 +39,7 @@ class HostReadAPITests(unittest.TestCase):
             db.commit()
         self.db_before = self.snapshot()
         self.addCleanup(self.assert_db_unchanged)
-        self.env = patch.dict(os.environ, {"A2A_HOST_BASE_URL": "http://127.0.0.1:8002", "A2A_HOST_API_TOKEN": "mock-service-token-only"})
+        self.env = patch.dict(os.environ, {"A2A_HOST_READS_ENABLED": "true", "A2A_HOST_BASE_URL": "http://127.0.0.1:8002", "A2A_HOST_API_TOKEN": "mock-host-service-token-for-tests-only"})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.connection = MagicMock()
@@ -53,9 +53,6 @@ class HostReadAPITests(unittest.TestCase):
         https_patch = patch.object(host_reads.http.client, "HTTPSConnection", side_effect=AssertionError("Unexpected HTTPS"))
         https_patch.start()
         self.addCleanup(https_patch.stop)
-        self.auth_patch = patch.object(host_reads, "HOST_SERVICE_AUTH_VERIFIED", True)
-        self.auth_patch.start()
-        self.addCleanup(self.auth_patch.stop)
 
     def snapshot(self):
         with self.fixture.engine.connect() as db:
@@ -108,7 +105,7 @@ class HostReadAPITests(unittest.TestCase):
                 self.assertEqual(self.request("GET", self.path(suffix)), (200, payload))
                 self.constructor.assert_called_with("127.0.0.1", 8002, timeout=5)
                 self.connection.request.assert_called_with("GET", f"/api/v1/runs/{self.run_id}{suffix}",
-                    headers={"Accept": "application/json", "Authorization": "Bearer mock-service-token-only"})
+                    headers={"Accept": "application/json", "Authorization": "Bearer mock-host-service-token-for-tests-only"})
                 self.connection.close.assert_called()
                 self.response.close.assert_called()
         self.mock_json({"runId": self.run_id, "events": [], "total": 0, "limit": 100, "offset": 0})
@@ -126,6 +123,9 @@ class HostReadAPITests(unittest.TestCase):
         for suffix in ("", "/steps", "/events", "/issues", "/artifacts"):
             for token in ("", "invalid"):
                 self.assertEqual(self.request("GET", self.path(suffix), user=None, token=token)[0], 401)
+        for run_id in (self.other_run_id, self.remote_run_id, str(uuid4())):
+            self.assertEqual(self.request("GET", self.path(run_id=run_id))[0], 404)
+        self.assertEqual(self.request("GET", self.path(), user=2)[0], 404)
         for suffix in ("?url=http://example.test", "?hostKey=other-host", "/events?limit=501", "/events?offset=-1", "/events?offset=0&offset=1"):
             self.assertEqual(self.request("GET", self.path(suffix))[0], 422)
         self.constructor.assert_not_called()
@@ -139,29 +139,45 @@ class HostReadAPITests(unittest.TestCase):
             self.response.read.return_value = ('{"runId":"' + self.run_id + '","value":' + value + '}').encode()
             self.assertEqual(self.request('GET', self.path()), (503, {'detail': 'Host 조회를 사용할 수 없습니다.'}))
 
-    def test_unverified_auth_missing_token_and_host_errors_fail_safely(self):
+    def test_readiness_token_and_host_errors_fail_safely(self):
         unavailable = (503, {"detail": "Host 조회를 사용할 수 없습니다."})
         with patch.object(host_reads, "HOST_SERVICE_AUTH_VERIFIED", False):
             self.assertEqual(self.request("GET", self.path()), unavailable)
-        with patch.dict(os.environ, {"A2A_HOST_API_TOKEN": ""}):
-            self.assertEqual(self.request("GET", self.path()), unavailable)
+        for enabled in (None, "", "false", "1"):
+            with patch.dict(os.environ):
+                if enabled is None:
+                    os.environ.pop("A2A_HOST_READS_ENABLED", None)
+                else:
+                    os.environ["A2A_HOST_READS_ENABLED"] = enabled
+                self.assertEqual(self.request("GET", self.path()), unavailable)
+        for token in ("", "short-token", "x" * 8193, "x" * 32 + "\r\n", "한" * 32):
+            with patch.dict(os.environ, {"A2A_HOST_API_TOKEN": token}):
+                self.assertEqual(self.request("GET", self.path()), unavailable)
         for url in ("http://example.test", "http://user:password@127.0.0.1:8002", "http://127.0.0.1:8002/private"):
             with patch.dict(os.environ, {"A2A_HOST_BASE_URL": url}):
                 self.assertEqual(self.request("GET", self.path()), unavailable)
         self.constructor.assert_not_called()
-        for failure in (ConnectionRefusedError("private connection detail"), TimeoutError("mock-service-token-only")):
+        for failure in (ConnectionRefusedError("private connection detail"), TimeoutError("mock-host-service-token-for-tests-only")):
             self.connection.request.side_effect = failure
             self.assertEqual(self.request("GET", self.path()), unavailable)
             self.connection.close.assert_called()
         self.connection.request.side_effect = None
-        for status in (301, 401, 403, 500, 503):
+        self.response.status = 401
+        self.response.read.reset_mock()
+        self.response.read.return_value = b"private upstream error mock-host-service-token-for-tests-only"
+        self.assertEqual(self.request("GET", self.path()),
+                         (502, {"detail": "Host 서비스 인증에 실패했습니다."}))
+        self.response.read.assert_not_called()
+        self.response.close.assert_called()
+        self.connection.close.assert_called()
+        for status in (301, 403, 500, 503):
             self.response.status = status
             self.assertEqual(self.request("GET", self.path()), unavailable)
             self.response.close.assert_called()
         self.response.status = 404
         self.assertEqual(self.request("GET", self.path()), (404, {"detail": "Run을 찾을 수 없습니다."}))
         self.response.status = 200
-        for body in ({"runId": str(uuid4())}, {"runId": self.run_id, "detail": "mock-service-token-only"}):
+        for body in ({"runId": str(uuid4())}, {"runId": self.run_id, "detail": "mock-host-service-token-for-tests-only"}):
             self.mock_json(body)
             self.assertEqual(self.request("GET", self.path()), unavailable)
         self.response.read.return_value = b"not-json private upstream error"

@@ -1,4 +1,4 @@
-export const runEventLimit = 20
+export const runEventLimit = 100
 export const initialRunSelection = { runId: '', offset: 0, followLatest: false, traceFromStart: false }
 
 // 신규 생성과 수동 조회를 구분해 페이지 이동·새로고침으로 최초 수집 옵션을 잃지 않습니다.
