@@ -17,6 +17,7 @@ import unicodedata
 from uuid import UUID
 
 from agents.llm.contracts import JsonSchema, StructuredOutput, json_text, parse_json
+from agents.runtime.test_guidance import UNIT_TEST_ID_DESCRIPTION
 from agents.roles.qa_contract import (
     MAX_QA_CASES, MAX_QA_EXPECTED_RESULT_LENGTH, MAX_QA_TEST_ID_BYTES, MAX_QA_TITLE_LENGTH, QACaseBinding,
 )
@@ -268,7 +269,8 @@ def build_security_output_contract(requirement_ids, finding_ids, source_paths, t
             properties["testCases"] = {"type": "array", "maxItems": MAX_QA_CASES, "items": {
                 "type": "object", "additionalProperties": False, "required": sorted(_TEST_CASE_FIELDS),
                 "properties": {"selector": {"type": "string", "enum": list(selectors)},
-                    "testId": {"type": "string", "minLength": 1, "maxLength": MAX_QA_TEST_ID_BYTES},
+                    "testId": {"type": "string", "minLength": 1, "maxLength": MAX_QA_TEST_ID_BYTES,
+                               "description": UNIT_TEST_ID_DESCRIPTION},
                     "requirementId": {"type": "string", "enum": list(ids)},
                     "title": {"type": "string", "minLength": 1, "maxLength": MAX_QA_TITLE_LENGTH},
                     "expectedResult": {"type": "string", "minLength": 1, "maxLength": MAX_QA_EXPECTED_RESULT_LENGTH}},
