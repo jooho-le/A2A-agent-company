@@ -384,6 +384,28 @@ class LLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await self.assert_error(LLMErrorCode.TOOL_POLICY, FakeProvider(response), tools=(self.tool(),), executor=executor)
         self.assertEqual(executor.calls, [])
 
+    async def test_multiple_reads_share_model_round_but_execute_in_order_and_count_individually(self):
+        order = []
+        async def first(call, arguments, context):
+            order.append("first-start")
+            await asyncio.sleep(0)
+            order.append("first-end")
+            return {"answer": "first"}
+        async def second(call, arguments, context):
+            self.assertEqual(order, ["first-start", "first-end"])
+            order.append("second")
+            return {"answer": "second"}
+        executor = FakeToolExecutor(first, second)
+        provider = FakeProvider(tool_response(self.call(), self.call("call-2", path="src/models.py")), text_response())
+        budget = self.budget(max_model_calls=2, max_tool_calls=2)
+        result = await self.run_engine(provider, tools=(self.tool(),), executor=executor, budget=budget)
+        self.assertEqual(result.data, {"answer": "done"})
+        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(order, ["first-start", "first-end", "second"])
+        self.assertEqual(len(executor.calls), 2)
+        with self.assertRaises(LLMRuntimeError):
+            budget.reserve_tool_call()
+
     async def test_duplicate_call_ids_reject_entire_batch_before_execution(self):
         executor = FakeToolExecutor()
         await self.assert_error(LLMErrorCode.TOOL_POLICY, FakeProvider(tool_response(self.call(), self.call())), tools=(self.tool(),), executor=executor)

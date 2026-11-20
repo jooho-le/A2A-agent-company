@@ -15,6 +15,12 @@ from orchestrator.domain.states import AgentRole
 from agents.core.identity import AgentServiceIdentity
 
 
+class SourceEditStatus(Enum):
+    CHANGED = "CHANGED"
+    UNCHANGED = "UNCHANGED"
+    UNUSED_TEXT_REWRITE = "UNUSED_TEXT_REWRITE"
+
+
 class LLMErrorCode(str, Enum):
     CONFIGURATION = "LLM_CONFIGURATION_ERROR"
     PROVIDER = "LLM_PROVIDER_ERROR"
@@ -27,19 +33,52 @@ class LLMErrorCode(str, Enum):
     TIMEOUT = "LLM_EXECUTION_TIMEOUT"
     TOOL_POLICY = "LLM_TOOL_POLICY_VIOLATION"
     TOOL_FAILED = "LLM_TOOL_EXECUTION_FAILED"
+    NO_PROGRESS = "LLM_DEVELOPMENT_NO_PROGRESS"
+    DEVELOPMENT_BLOCKED = "LLM_DEVELOPMENT_REJECTION_EXHAUSTED"
+    SECURITY_REFERENCE = "LLM_SECURITY_REFERENCE_INVALID"
+    VALIDATION_DRAFT = "LLM_VALIDATION_DRAFT_EXHAUSTED"
 
 
 class LLMRuntimeError(RuntimeError):
-    """Stable reason only; never retain a submitted prompt or exception body."""
+    """Stable code and closed diagnostics; no prompt, value or exception body."""
 
-    def __init__(self, code: LLMErrorCode, *, records: tuple = (), usage=None):
+    def __init__(self, code: LLMErrorCode, *, records: tuple = (), usage=None,
+                 validation=None, validation_recorded=False, transient=False, development_rejection=None):
+        self.development_rejection = None
+        if development_rejection is not None:
+            from agents.llm.development_rejection import RejectionAssessment
+            try:
+                self.development_rejection = RejectionAssessment.model_validate(development_rejection).public()
+            except ValueError:
+                pass  # Invalid diagnostics must not replace or disclose the original failure.
         self.code = LLMErrorCode(code)
         self.records = tuple(records)
         self.usage = usage
+        # Provider adapters set this only when the request certainly produced no
+        # model response (connection never made, HTTP 429/5xx). Whether to call
+        # again is the engine's decision under llmLimits.max_provider_retries.
+        self.transient = transient is True and self.code in (LLMErrorCode.PROVIDER, LLMErrorCode.TIMEOUT)
+        self.validation = None
+        if validation is not None:
+            from agents.llm.validation import LLMValidationReport, LLMPolicyReport
+            try:
+                if type(validation) in (LLMValidationReport, LLMPolicyReport):
+                    self.validation = type(validation).model_validate(
+                        validation.model_dump(mode='json', by_alias=True))
+            except Exception:
+                pass  # Invalid diagnostics cannot replace/expose the original error.
+        self.validation_recorded = self.validation is not None and validation_recorded is True
         super().__init__(self.code.value)
+
+    def public_validation(self):
+        from agents.llm.validation import LLMValidationReport, LLMPolicyReport
+        if type(self.validation) not in (LLMValidationReport, LLMPolicyReport):
+            return None
+        return {**self.validation.public(), 'traceRecorded': self.validation_recorded is True}
 
 
 REPORTED_SERVICE_TIERS = frozenset({"default", "flex", "priority", "scale", "fast", "ultrafast"})
+INCOMPLETE_REASONS = ('max_output_tokens', 'content_filter', 'max_messages', 'steered')
 OPENAI_RESPONSES_GLOBAL_TEXT = "OPENAI_RESPONSES_GLOBAL_TEXT"
 
 
@@ -273,6 +312,10 @@ class LLMRequest:
     output: StructuredOutput
     max_output_tokens: int
     timeout_seconds: float
+    required_tool: str | None = None
+    # Codex review 2026-11-18 #2: other tools that also satisfy the requirement (the provider is told
+    # "call one tool"; the engine accepts only these names). Empty keeps the single forced function.
+    required_tool_alternatives: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -287,9 +330,17 @@ class LLMResponse:
     refused: bool = False
     reported_service_tier: str | None = None
     billing_context: str | None = None
+    tool_arguments_format: Literal['PROJECT_JSON', 'OPENAI_STRICT_OPTIONALS_V1'] = 'PROJECT_JSON'
+    incomplete_reason: str | None = None
 
     def __post_init__(self):
         validate_billing_metadata(self.reported_service_tier, self.billing_context)
+        if self.incomplete_reason is not None and (
+                self.status != 'incomplete' or self.incomplete_reason not in (*INCOMPLETE_REASONS, 'other')):
+            raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+        if type(self.tool_arguments_format) is not str or self.tool_arguments_format not in (
+                'PROJECT_JSON', 'OPENAI_STRICT_OPTIONALS_V1'):
+            raise LLMRuntimeError(LLMErrorCode.RESPONSE)
 
 
 class LLMProvider(Protocol):

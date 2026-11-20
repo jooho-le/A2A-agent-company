@@ -5,6 +5,7 @@ existing execution fixture supplies the actual Dispatcher/receipt boundary.
 """
 
 import asyncio
+from dataclasses import replace
 import unittest
 
 import test_llm_runtime as llm_helpers
@@ -14,6 +15,7 @@ from agents.llm.contracts import (
     LLMErrorCode, LLMRuntimeError, StructuredOutput, ToolCall, json_text, parse_json,
 )
 from agents.llm.engine import LLMEngine
+from agents.llm.tool_wire import STRICT_TOOL_ARGUMENTS
 from agents.roles.prompts import prepare_role_prompt
 from mcp_tools.execution_store import ToolEvidenceStoreError
 from orchestrator.a2a.requests import A2AWorkflowMetadata
@@ -118,6 +120,27 @@ class TrackedLLMIntegrationTests(unittest.IsolatedAsyncioTestCase):
         ), record.to_dict())
         self.assertEqual(self.runtime.fixture.repository.get_run(self.runtime.run.run_id), before)
         self.assertEqual(len(self.runtime.session.calls), 1)
+
+    async def test_strict_optional_null_reaches_real_dispatcher_as_omitted_argument(self):
+        self.model = ModelConfiguration(provider='openai',model_id='fake-model',temperature=0)
+        arguments = {'workspaceId':self.workspace_id,'path':'source/optional.py',
+                     'content':'# inert optional-argument fixture\n','expectedSha256':None}
+        provider = self.provider('write_source_file',arguments)
+        provider.name = 'openai'
+        provider.script[0] = replace(provider.script[0],tool_arguments_format=STRICT_TOOL_ARGUMENTS)
+        result = await self.run_engine(provider)
+        self.assertEqual(result.data,{'answer':'done'})
+        self.assertEqual(len(self.runtime.session.calls),1)
+        name, dispatched, _ = self.runtime.session.calls[0]
+        self.assertEqual(name,'write_source_file')
+        self.assertNotIn('expectedSha256',dispatched)
+        self.assertEqual((self.runtime.fixture.source/'optional.py').read_text(),arguments['content'])
+        record = self.record()
+        self.assertEqual(record.tool_name,'write_source_file')
+        self.assertEqual(len(record.attempts),1)
+        self.assertFalse(record.attempts[0].result_unknown)
+        history = parse_json(provider.requests[1].input_items_json)
+        self.assertIsNone(parse_json(history[1]['arguments'])['expectedSha256'])
 
     async def test_two_busy_retries_are_three_attempts_but_one_llm_budget_call(self):
         self.runtime.session.errors = ["RESOURCE_BUSY", "RESOURCE_BUSY"]

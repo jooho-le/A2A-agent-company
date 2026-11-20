@@ -37,6 +37,11 @@ def model_input_assessment(run, step):
                 observed[seq] = typed
         if not calls or set(observed) != calls or run.trace.get('telemetryTotal') != len(run.telemetry):
             return result(reason='MODEL_INPUT_COVERAGE_INCOMPLETE')
+        # The original input (A2A metadata, task input, first item, system rules) must stay the same
+        # within a Task. Host follow-ups in the same step (in-step test fix, one semantic rewrite)
+        # are excluded from those hashes by the provider boundary and recorded separately under
+        # closed keys (ModelInputEvidence.hostFollowUpSha256); any other addition changes the
+        # original hashes and fails here.
         initial = {(v.initialInputSha256, v.taskInputSha256, v.metadataSha256, v.systemSha256) for v in observed.values()}
         if len(initial) != 1:
             return result('FAIL', 'MODEL_INPUT_CHANGED_WITHIN_TASK')
