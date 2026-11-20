@@ -15,11 +15,11 @@ from google.protobuf.json_format import MessageToDict
 
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
 from agents.llm.engine import LLMEngine
-from agents.semantic_review import judge_result
+from agents.semantic_review import judge_result, policy_evidence
 from agents.semantic_store import SemanticReviewStore
 from orchestrator.domain import AgentRole, A2ATaskState, WorkflowStepStatus, WorkflowStatus
 from orchestrator.domain.json_fingerprint import json_fingerprint
-from semantic_helpers import supported_review, review_input
+from semantic_helpers import supported_review, review_input, policy_catalog_review
 from test_llm_runtime import FakeProvider, text_response
 import test_owned_agent_pipeline as multi_fixture
 import test_single_agent_pipeline as single_fixture
@@ -35,7 +35,7 @@ def held_review(request):
 def unknown_review(request):
     data = supported_review(request)
     row = next(iter(data['fieldReviews'].values()))
-    row.update(status='UNVERIFIED', sourceQuote='', sourceRefs=[], reasonCode='INSUFFICIENT_EVIDENCE')
+    row.update(status='UNVERIFIED', evidence=[], reasonCode='INSUFFICIENT_EVIDENCE')
     return text_response(json_text(data))
 
 
@@ -47,8 +47,8 @@ class SemanticEvidenceTests(unittest.TestCase):
             'acceptanceCriteria': ['이메일 문의 링크를 제공합니다.']}], 'policies': {'excludedFeatures': ['위치정보 수집 제외']}}
         self.hashes = {'candidate_sha': json_fingerprint(self.fields), 'basis_sha': json_fingerprint(self.basis)}
         self.verdict = {'candidateSha256': self.hashes['candidate_sha'], 'basisSha256': self.hashes['basis_sha'],
-            'fieldReviews': {'/summary': {'status': 'SUPPORTED', 'sourceRefs': [self.req],
-                'sourceQuote': '공개 회사 소개 페이지', 'reasonCode': 'DIRECT_SUPPORT'}}}
+            'fieldReviews': {'/summary': {'status': 'SUPPORTED', 'evidence': [{'sourceRef': self.req,
+                'quote': '공개 회사 소개 페이지'}], 'reasonCode': 'DIRECT_SUPPORT'}}}
 
     def check(self, data=None):
         return judge_result(self.verdict if data is None else data, self.fields, self.basis, **self.hashes)
@@ -61,9 +61,9 @@ class SemanticEvidenceTests(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 data = copy.deepcopy(self.verdict)
                 row = data['fieldReviews']['/summary']
-                if mutation == 'emptyQuote': row['sourceQuote'] = ''
-                elif mutation == 'foreignQuote': row['sourceQuote'] = '전 회원의 전화번호 가입을 차단합니다.'
-                elif mutation == 'foreignId': row['sourceRefs'] = [str(uuid4())]
+                if mutation == 'emptyQuote': row['evidence'][0]['quote'] = ''
+                elif mutation == 'foreignQuote': row['evidence'][0]['quote'] = '전 회원의 전화번호 가입을 차단합니다.'
+                elif mutation == 'foreignId': row['evidence'][0]['sourceRef'] = str(uuid4())
                 elif mutation == 'missingField': data['fieldReviews'] = {}
                 else: del row['status']
                 self.assertEqual(self.check(data)[0], 'HELD')
@@ -95,6 +95,54 @@ class SemanticEvidenceTests(unittest.TestCase):
 
 
 class ProductSemanticReviewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_typed_policy_catalog_crosses_all_multi_and_single_phases(self):
+        # Admission/transport only: the judge's interpretation remains synthetic.
+        # Unlike the default workflow fixture, this exercises actual frozen
+        # booleans, integers and strings and explicitly cites catalog entries.
+        for single in (False, True):
+            with self.subTest(single=single):
+                f = self.fixture(single=single)
+                seen = []
+                def review(request):
+                    data = review_input(request)
+                    self.assertEqual(data['basis']['policyEvidence'], policy_evidence(data['basis']['policies']))
+                    paths = ['/emailPolicy/canonicalEmailUniqueConstraint',
+                             '/securityPolicy/passwordHashPolicy/iterations',
+                             '/securityPolicy/passwordHashPolicy/algorithm']
+                    response = policy_catalog_review(request, {field: paths for field in data['fields']})
+                    quotes = next(iter(response['fieldReviews'].values()))['evidence']
+                    self.assertEqual([x['quote'] for x in quotes], [
+                        '/emailPolicy/canonicalEmailUniqueConstraint = true',
+                        '/securityPolicy/passwordHashPolicy/iterations = 2',
+                        '/securityPolicy/passwordHashPolicy/algorithm = "argon2id"'])
+                    seen.append(request)
+                    return text_response(json_text(response))
+                if single:
+                    provider = f.provider()
+                    provider.review_decider = review
+                    running = f.running(provider=provider)
+                    base = f.f
+                else:
+                    providers = f.providers()
+                    for provider in providers.values(): provider.review_decider = review
+                    running = f.running_platform(providers=providers)
+                    base = f
+                async with running as (client, _):
+                    run_id = await self.submit(base, client)
+                    self.assertEqual(len(seen), 4)
+                    steps = base.repository.list_steps(run_id)
+                    self.assertEqual(len(steps), 4)
+                    for step in steps:
+                        record = SemanticReviewStore(base.repository.database_path).latest(
+                            run_id, step.workflow_step_id, step.a2a_task_id)
+                        self.assertEqual(record['status'], 'SUPPORTED')
+                        self.assertEqual(record['binding']['semanticReviewVersion'], 5)
+                        self.assertEqual(record['binding']['evidenceCatalogSha256'],
+                                         json_fingerprint(record['evidenceCatalog']))
+                        for pointer, row in record['wireResult']['fieldReviews'].items():
+                            selected = [record['evidenceCatalog'][item['quoteId']] for item in row['evidence']]
+                            self.assertEqual(record['result']['fieldReviews'][pointer]['evidence'], selected)
+
     def fixture(self, single=False):
         fixture = (single_fixture.SingleAgentPipelineTests if single else multi_fixture.OwnedAgentPipelineTests)('runTest')
         fixture.setUp()
@@ -133,6 +181,32 @@ class ProductSemanticReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(task.artifacts)
         return step, record
 
+    async def assert_technical_failure(self, fixture, run_id, role, *, single=False):
+        step = next(item for item in fixture.repository.list_steps(run_id) if item.agent_role is role)
+        self.assertIs(step.status, WorkflowStepStatus.FAILED)
+        self.assertIs(step.a2a_task_state, A2ATaskState.FAILED)
+        self.assertIs(fixture.repository.get_run(run_id).status, WorkflowStatus.HUMAN_REVIEW)
+        record = SemanticReviewStore(fixture.repository.database_path).latest(run_id, step.workflow_step_id, step.a2a_task_id)
+        self.assertEqual(record['status'], 'HELD')
+        self.assertEqual(record['schemaVersion'], 3)
+        self.assertIn(record['validation']['category'], {'FORMAT', 'EVIDENCE', 'BINDING'})
+        self.assertFalse(record['isRequirementApproval'])
+        self.assertFalse(record['isProductSuccess'])
+        task = await self.task(fixture, step, single=single)
+        public = MessageToDict(task.status.message.parts[0].data)
+        self.assertEqual(public['code'], 'SEMANTIC_REVIEW_FAILED')
+        self.assertEqual(public['questions'], [])
+        self.assertTrue(public['message'])
+        self.assertEqual(public['semanticReview']['reviewId'], record['reviewId'])
+        self.assertEqual(public['semanticReview']['issueCount'], len(record['validation']['issues']))
+        self.assertTrue(all(item['message'] for item in public['semanticReview']['issues']))
+        events, _ = fixture.platform.telemetry_store.list_events(run_id, limit=500)
+        trace = next(item for item in events if item.get('reviewId') == record['reviewId'])
+        self.assertEqual(trace['category'], record['validation']['category'])
+        self.assertEqual(trace['issueCount'], len(record['validation']['issues']))
+        self.assertFalse(task.artifacts)
+        return step, record, public
+
     async def test_default_multi_blocks_each_role_before_artifact_publication(self):
         for role in AgentRole:
             with self.subTest(role=role):
@@ -154,18 +228,120 @@ class ProductSemanticReviewTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(providers[AgentRole.QA].requests)
                     self.assertEqual(len(record['modelCallSequences']), 1)
 
-    async def test_missing_review_proof_becomes_input_required_not_success(self):
+    async def test_missing_review_proof_becomes_technical_failure_not_input_required(self):
         f = self.fixture()
         providers = f.providers()
         def missing(request):
             data = supported_review(request)
-            next(iter(data['fieldReviews'].values()))['sourceQuote'] = ''
+            next(iter(data['fieldReviews'].values()))['evidence'][0]['quote'] = ''
             return text_response(json_text(data))
         providers[AgentRole.PLANNER].review_decider = missing
         async with f.running_platform(providers=providers) as (client, _):
             run_id = await self.submit(f, client)
-            _, record = await self.assert_held(f, run_id, AgentRole.PLANNER)
-            self.assertEqual(record['reasonCode'], 'SEMANTIC_EVIDENCE_UNVERIFIED')
+            _, record, public = await self.assert_technical_failure(f, run_id, AgentRole.PLANNER)
+            self.assertEqual(record['reasonCode'], 'SEMANTIC_EVIDENCE_INVALID')
+            self.assertEqual(public['semanticReview']['issueCount'], 1)
+
+    async def test_technical_evidence_failure_blocks_each_role_without_retry(self):
+        for role in AgentRole:
+            with self.subTest(role=role):
+                f = self.fixture()
+                providers = f.providers()
+                def invalid(request):
+                    data = supported_review(request)
+                    for row in list(data['fieldReviews'].values())[:2]:
+                        row['evidence'][0]['quote'] = 'UNTRUSTED_QUOTE_DO_NOT_PUBLISH'
+                    return text_response(json_text(data))
+                providers[role].review_decider = invalid
+                async with f.running_platform(providers=providers) as (client, _):
+                    run_id = await self.submit(f, client)
+                    _, record, public = await self.assert_technical_failure(f, run_id, role)
+                    self.assertEqual(record['reasonCode'], 'SEMANTIC_EVIDENCE_INVALID')
+                    self.assertNotIn('UNTRUSTED_QUOTE_DO_NOT_PUBLISH', json_text(public))
+                    self.assertEqual(len(record['modelCallSequences']), 1)
+                    reviews = [r for r in providers[role].requests if r.output.name == 'product_semantic_review_v5']
+                    self.assertEqual(len(reviews), 1)
+                    self.assertEqual(public['semanticReview']['issueCount'], min(2, len(record['result']['fieldReviews'])))
+                    if role is AgentRole.PLANNER:
+                        self.assertFalse(providers[AgentRole.DEVELOPER].requests)
+                    if role is AgentRole.DEVELOPER:
+                        self.assertEqual(record['resumePolicy'], 'NEW_RUN_REQUIRED')
+                        self.assertFalse(providers[AgentRole.QA].requests)
+
+    async def test_engine_schema_failure_preserves_private_response_and_all_missing_fields(self):
+        f = self.fixture()
+        providers = f.providers()
+        def missing_fields(request):
+            data = supported_review(request)
+            data['fieldReviews'] = {}
+            return text_response(json_text(data))
+        providers[AgentRole.PLANNER].review_decider = missing_fields
+        async with f.running_platform(providers=providers) as (client, _):
+            run_id = await self.submit(f, client)
+            _, record, public = await self.assert_technical_failure(f, run_id, AgentRole.PLANNER)
+            self.assertEqual(record['reasonCode'], 'SEMANTIC_RESPONSE_INVALID')
+            self.assertEqual(record['result']['fieldReviews'], {})
+            missing = [item for item in public['semanticReview']['issues'] if item['reasonCode'] == 'FIELD_REVIEW_MISSING']
+            self.assertTrue(missing)
+            self.assertEqual(len(providers[AgentRole.PLANNER].requests), 2)
+            self.assertFalse(providers[AgentRole.DEVELOPER].requests)
+
+    async def test_engine_schema_failure_keeps_binding_mismatch_specific(self):
+        f = self.fixture()
+        providers = f.providers()
+        def stale(request):
+            data = supported_review(request)
+            data['candidateSha256'] = '0' * 64
+            return text_response(json_text(data))
+        providers[AgentRole.PLANNER].review_decider = stale
+        async with f.running_platform(providers=providers) as (client, _):
+            run_id = await self.submit(f, client)
+            _, record, public = await self.assert_technical_failure(f, run_id, AgentRole.PLANNER)
+            self.assertEqual(record['reasonCode'], 'SEMANTIC_REVIEW_BINDING_INVALID')
+            self.assertEqual(public['semanticReview']['category'], 'BINDING')
+
+    async def test_incomplete_response_is_technical_even_with_valid_meaning_hold_body(self):
+        for verdict in ('SUPPORTED', 'UNSUPPORTED', 'UNVERIFIED'):
+            with self.subTest(verdict=verdict):
+                f = self.fixture()
+                providers = f.providers()
+                def incomplete(request):
+                    data = supported_review(request)
+                    row = next(iter(data['fieldReviews'].values()))
+                    row['status'] = verdict
+                    if verdict != 'SUPPORTED':
+                        row['evidence'] = []
+                        row['reasonCode'] = 'UNAPPROVED_SCOPE' if verdict == 'UNSUPPORTED' else 'INSUFFICIENT_EVIDENCE'
+                    return text_response(json_text(data), status='incomplete')
+                providers[AgentRole.PLANNER].review_decider = incomplete
+                async with f.running_platform(providers=providers) as (client, _):
+                    run_id = await self.submit(f, client)
+                    _, record, public = await self.assert_technical_failure(f, run_id, AgentRole.PLANNER)
+                    self.assertEqual(record['reasonCode'], 'SEMANTIC_RESPONSE_INVALID')
+                    self.assertEqual(public['semanticReview']['category'], 'FORMAT')
+                    self.assertTrue(any(item['reasonCode'] == 'LLM_RESPONSE_INCOMPLETE'
+                                        for item in record['validation']['issues']))
+                    budget = f.platform.budgets.resolve(f.repository.get_run_configuration(run_id))
+                    self.assertEqual((budget.model_calls, budget.total_tokens), (2, 30))
+                    self.assertFalse(providers[AgentRole.DEVELOPER].requests)
+
+    async def test_single_technical_failure_keeps_identity_context_and_call_count(self):
+        f = self.fixture(single=True)
+        provider = f.provider()
+        def invalid(request):
+            data = supported_review(request)
+            next(iter(data['fieldReviews'].values()))['evidence'] = []
+            return text_response(json_text(data))
+        provider.review_decider = invalid
+        async with f.running(provider=provider) as (client, _):
+            f.f.platform = f.platform
+            run_id = await self.submit(f.f, client)
+            step, record, _ = await self.assert_technical_failure(f.f, run_id, AgentRole.PLANNER, single=True)
+            self.assertEqual(record['binding']['actor'], 'SINGLE_AGENT')
+            self.assertEqual(record['binding']['phase'], 'PLANNING')
+            self.assertEqual(record['binding']['agentContextId'], step.agent_context_id)
+            self.assertEqual(len(provider.requests), 2)
+            self.assertTrue(all(not request.tools for request in provider.requests))
 
     async def test_confirmation_answer_requires_fresh_review_and_cannot_approve_baseline(self):
         f = self.fixture()
@@ -324,7 +500,7 @@ class ProductSemanticReviewTests(unittest.IsolatedAsyncioTestCase):
             budget = f.f.platform.budgets.resolve(f.f.repository.get_run_configuration(run_id))
             self.assertEqual(budget.model_calls, len(provider.requests))
             self.assertEqual(len({item.agent_context_id for item in f.f.repository.list_steps(run_id)}), 1)
-            self.assertTrue(all(not request.tools for request in provider.requests if request.output.name == 'product_semantic_review_v1'))
+            self.assertTrue(all(not request.tools for request in provider.requests if request.output.name == 'product_semantic_review_v5'))
 
     async def test_shared_call_cap_stops_review_without_publishing_or_reset(self):
         f = self.fixture()

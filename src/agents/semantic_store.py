@@ -26,13 +26,24 @@ class SemanticReviewStore:
             db.execute("CREATE TRIGGER IF NOT EXISTS semantic_review_no_update BEFORE UPDATE ON agent_semantic_reviews BEGIN SELECT RAISE(ABORT,'IMMUTABLE_SEMANTIC_REVIEW'); END")
             db.execute("CREATE TRIGGER IF NOT EXISTS semantic_review_no_delete BEFORE DELETE ON agent_semantic_reviews BEGIN SELECT RAISE(ABORT,'IMMUTABLE_SEMANTIC_REVIEW'); END")
 
-    def append(self, *, binding, candidate, result, status, reason, resume_policy, model_sequences=()):
+    def append(self, *, binding, candidate, result, status, reason, resume_policy, model_sequences=(), validation=None,
+               wire_result=None, evidence_catalog=None):
         try:
             review_id = str(uuid4())
             payload = {'schemaVersion': 1, 'reviewId': review_id, 'binding': binding,
                 'candidate': candidate, 'result': result, 'status': status, 'reasonCode': reason,
                 'resumePolicy': resume_policy, 'isRequirementApproval': False, 'isProductSuccess': False}
             payload['modelCallSequences'] = list(model_sequences)
+            if validation is not None:
+                payload['schemaVersion'] = 2
+                payload['validation'] = validation
+            if evidence_catalog is not None:
+                from orchestrator.domain.json_fingerprint import json_fingerprint
+                if binding.get('evidenceCatalogSha256') != json_fingerprint(evidence_catalog):
+                    raise ValueError()
+                payload['schemaVersion'] = 3
+                payload['wireResult'] = wire_result
+                payload['evidenceCatalog'] = evidence_catalog
             raw = json_text(payload)
             with closing(sqlite3.connect(self.path, timeout=10)) as db, db:
                 db.execute('''INSERT INTO agent_semantic_reviews
