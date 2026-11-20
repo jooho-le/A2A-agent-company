@@ -98,7 +98,9 @@ def test_selection_preserves_failed_paused_and_aborted_costs_and_denominators(tm
     group = result['summary']['MULTI_AGENT']
     assert group['recordedRuns'] == group['plannedRuns'] == 1
     assert group['costUsd'] == group['knownCostUsd'] == '7.5'
-    assert group['evaluation']['qualifiedRuns'] == 0 and group['evaluation']['qualifiedRate'] == 0
+    assert group['evaluation']['qualifiedRuns'] == 0 and group['evaluation']['qualifiedRate'] is None
+    assert group['evaluation']['eligibleRunsMissingGrade'] == 1
+    assert 'FINAL_CODE_NOT_GRADED' in result['readiness']['blockers']
     assert folder.name in result['unscoredRuns']
     assert next(row for row in result['runs'] if row['runId'] == folder.name)['workflowStatus'] == status
 
@@ -162,6 +164,26 @@ def test_cli_selection_and_distinct_parity_reports_keep_outputs_separate(tmp_pat
     report = json.loads((out / 'comparison.json').read_text())
     assert report['readiness']['status'] == 'PASS' and report['toolParity']['source'] == proof.name
     assert 'loopPolicy = IN_LOOP_AND_FINAL' in (out / 'comparison.md').read_text()
+
+
+@pytest.mark.parametrize('digest,reason', [('a' * 64, 'COMPARISON_CONDITIONS_NOT_VERIFIED'),
+                                           (None, 'REQUEST_TEXT_NOT_VERIFIED')])
+def test_different_or_unrecorded_requests_cannot_be_official_comparisons(tmp_path, digest, reason):
+    folders = matrix(tmp_path)
+    selected = [folder for (version, _), folder in folders.items() if version == POLICIES[0]]
+    proof = tmp_path / 'parity.json'
+    parity(proof, 'architecture', selected)
+    path = selected[0] / 'bundle.json'
+    data = json.loads(path.read_text())
+    if digest is None:
+        data['run'].pop('requestTextSha256')
+    else:
+        data['run']['requestTextSha256'] = digest
+    path.write_text(json.dumps(data))
+    result = compare(tmp_path, dict.fromkeys(ARCHITECTURES, 1), 'architecture',
+                     loop_policy=POLICIES[0], parity_file=proof)
+    assert reason in result['readiness']['blockers']
+    assert result['readiness']['status'] == 'UNVERIFIED'
 
 
 @pytest.mark.parametrize('axis,selection', [
