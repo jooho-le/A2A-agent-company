@@ -74,9 +74,11 @@ def test_missing_and_invalid_receipts_are_unverified_and_parent_is_preserved():
 
 
 def test_runner_collects_same_execution_only_when_explicitly_enabled():
+    observations = rows() + [dict(caseId='signup', itemId='response_status', kind='precondition',
+                                  actual=422, status='PASS', reason=None, handlerEntry='NOT_ENTERED')]
     class Fixture(unittest.TestCase):
         def test_signup(self):
-            self.detail_recorder = SimpleNamespace(rows=[{**r, 'expected': {'operator': 'eq', 'value': 'DO_NOT_FORWARD'}} for r in rows()])
+            self.detail_recorder = SimpleNamespace(rows=[{**r, 'expected': {'operator': 'eq', 'value': 'DO_NOT_FORWARD'}} for r in observations])
             with self.subTest(item='user_delta'): self.fail('user_delta')
     for enabled in (False, True):
         with TemporaryDirectory() as directory:
@@ -85,7 +87,10 @@ def test_runner_collects_same_execution_only_when_explicitly_enabled():
                 report, code = unit_runner.run_tests(Path(directory), Path(directory), capture_observations=enabled)
         assert code == 1 and report['failed'] == 1
         assert ('observations' in report['tests'][0]) == enabled
-        if enabled: assert report['tests'][0]['observations'] == rows()
+        if enabled:
+            assert report['tests'][0]['observations'] == observations
+            case = parse_unit_report(json.dumps(report), code).tests[0]
+            assert case_feedback(case)['observations'][-1]['handlerEntry'] == 'NOT_ENTERED'
         assert 'DO_NOT_FORWARD' not in json.dumps(report)
 
 
@@ -194,6 +199,9 @@ class LoopFeedbackServicesTests(unittest.IsolatedAsyncioTestCase):
                      for identity, requirement in zip(ids, requirements)]
             def ready(request):
                 data = f.draft(request); data['testCases'] = cases
+                # docs/live-api/10: with generated tests the pre-run rationale is the fixed pending marker.
+                for row in data['requirementReviews']:
+                    row['rationale'] = 'HOST_TESTS_PENDING'
                 return text_response(json.dumps(data))
             # A real bounded test write, not a Source read, prepares QA_TESTS.
             from agents.llm.contracts import ToolCall
@@ -202,7 +210,11 @@ class LoopFeedbackServicesTests(unittest.IsolatedAsyncioTestCase):
                 'workspaceId': str(f.run.workspace_id), 'path': 'outputs/security/tests/test_feedback.py', 'content': '# inert fixture\n'}))), ready)
         f.services_factory = lambda execution: service_class(f.repository, f.registry, f.artifacts,
             mcp_configuration=f.mcp_configuration, client_factory=f.peer_client, protected_cases=protected)
+        from signup_receipt_fixture import generated_signup_evidence
         scan_result = f.docker.start_result
+        observed = rows()
+        if role == AgentRole.SECURITY:
+            observed[0].update(kind='precondition', itemId='response_status', actual=422, handlerEntry='NOT_ENTERED')
         def select_result(container):
             command = container['Config']['Cmd']
             if any('_security_runner.py' in item for item in command):
@@ -210,7 +222,8 @@ class LoopFeedbackServicesTests(unittest.IsolatedAsyncioTestCase):
                 return
             is_protected = 'tests/protected' in command
             cases = [{'testId': identity, 'outcome': 'FAIL' if is_protected and i == 0 else 'PASS',
-                      **({'observations': rows() if i == 0 else [rows()[0]]} if is_protected else {})}
+                      **({'observations': observed if i == 0 else [rows()[0]]} if is_protected
+                         else generated_signup_evidence(role.value, i + 1))}
                      for i, identity in enumerate(ids)]
             value = {'format': 'unittest-v1', 'total': len(cases), 'passed': len(cases)-int(is_protected),
                      'failed': int(is_protected), 'skipped': 0, 'tests': cases}
@@ -224,6 +237,8 @@ class LoopFeedbackServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(feedback), len(requirements))
         self.assertEqual([r['status'] for r in feedback[0]['observations']], ['PASS', 'FAIL', 'NOT_RUN', 'UNVERIFIED'])
         self.assertEqual(feedback[0]['observations'][1]['actual'], 0)
+        if role == AgentRole.SECURITY:
+            self.assertEqual(feedback[0]['observations'][0]['handlerEntry'], 'NOT_ENTERED')
         self.assertEqual(feedback[0]['codeVersion'], f.source.code_version)
         self.assertEqual(feedback[0]['sourceArtifactId'], str(f.source.artifact_id))
         self.assertTrue(feedback[0]['evidenceRefs'])

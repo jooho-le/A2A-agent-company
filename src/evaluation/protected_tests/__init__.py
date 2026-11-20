@@ -29,6 +29,7 @@ import io  # 주석을 뺄 때 글자를 줄 단위로 읽기
 import json  # suite.json 읽기, 지문 계산용 canonical JSON 만들기
 import re  # 선택자·패턴·요구사항 이름 모양 검사(정규식)
 import tokenize  # 파이썬 주석 위치 찾기(코드는 그대로 두고 주석만 뺌)
+from functools import lru_cache
 from pathlib import Path  # 파일 경로 다루기
 from typing import Mapping, Optional  # 자료형 이름표(실행에는 영향 없음)
 
@@ -181,6 +182,7 @@ def without_comments(source: str) -> str:
     return ''.join(kept)
 
 
+@lru_cache(maxsize=32)
 def compact_source(source):
     # Keep original spellings so Python 3.10 and 3.13 ship identical bytes.
     # ast.unparse changes tuple/f-string formatting between Python versions.
@@ -251,7 +253,31 @@ def compact_source(source):
         for start, end in reversed(spans):
             lines[number] = lines[number][:start] + lines[number][end:]
     packed = ''.join(lines)
+    # The Host embeds source in JSON. Simple single-quoted literals need no JSON escapes.
+    lines = packed.splitlines(keepends=True)
+    for token in reversed(tokens_for(packed)):
+        if token.type == tokenize.STRING and re.fullmatch(r'"[A-Za-z0-9_ ./:-]+"', token.string):
+            row, start = token.start
+            end = token.end[1]
+            line = lines[row - 1]
+            lines[row - 1] = line[:start] + "'" + token.string[1:-1] + "'" + line[end:]
+    packed = ''.join(lines)
     try:
+        packed_tree = ast.parse(packed)
+        # Consecutive simple statements in the same suite can share a physical
+        # line in the JSON transport. Preserve the readable on-disk source.
+        for node in ast.walk(packed_tree):
+            for _, block in ast.iter_fields(node):
+                if not isinstance(block, list):
+                    continue
+                for left, right in zip(block, block[1:]):
+                    if (isinstance(left, ast.stmt) and isinstance(right, ast.stmt)
+                            and type(left) in (ast.Assign, ast.Expr, ast.Import, ast.ImportFrom)
+                            and type(right) in (ast.Assign, ast.Expr, ast.Return)
+                            and left.end_lineno + 1 == right.lineno and left.col_offset == right.col_offset):
+                        lines[left.end_lineno - 1] = lines[left.end_lineno - 1].rstrip('\r\n') + ';'
+                        lines[right.lineno - 1] = lines[right.lineno - 1].lstrip(' ')
+        packed = ''.join(lines)
         if ast.dump(ast.parse(packed)) == ast.dump(tree):
             return packed
     except (SyntaxError, ValueError):
