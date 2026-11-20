@@ -22,6 +22,7 @@ from orchestrator.domain.developer_artifacts import BuildReportArtifact, ChangeR
 from orchestrator.domain.issues import IssueRecord
 from orchestrator.domain.models import AgentContext, WorkflowRun, WorkflowStep
 from orchestrator.domain.planning_artifacts import RequirementArtifact
+from orchestrator.domain.retry_policy import requires_human_review
 from orchestrator.domain.run_configuration import RunConfigurationArtifact
 from orchestrator.domain.snapshot_handoff import CodeSnapshotArtifact
 from orchestrator.domain.states import A2ATaskState, AgentRole, WorkflowStatus, WorkflowStepStatus
@@ -100,11 +101,15 @@ def _previous_inputs(metadata, previous_source, previous_artifacts, fix_issues, 
                 or issue.fixed_by is not AgentRole.DEVELOPER
                 or issue.fix_workflow_step_id != metadata.workflow_step_id
                 or issue.previous_code_version != fix_attempt or issue.new_code_version != fix_attempt + 1
-                or issue.consecutive_repeat_count >= 2):
+                or requires_human_review(issue.repeats_for_stop)):
             raise ValueError
         expected_report = {AgentRole.DEVELOPER: "BUILD_REPORT", AgentRole.QA: "QA_REPORT",
                            AgentRole.SECURITY: "SECURITY_REPORT"}.get(issue.reporter)
-        if (expected_report not in by_type or issue.report_artifact_id != by_type[expected_report].artifact_id):
+        if issue.protected_receipt is not None:
+            # This Host evidence survives a validator stopping before it had an A2A artifact.
+            if expected_report in by_type or not by_type["BUILD_REPORT"].passed:
+                raise ValueError
+        elif expected_report not in by_type or issue.report_artifact_id != by_type[expected_report].artifact_id:
             raise ValueError
         sanitize_content(issue.model_dump(mode="json"), reject_secrets=True)
 
