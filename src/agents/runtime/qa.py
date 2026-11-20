@@ -15,22 +15,32 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from agents.api.validation import parse_workflow_metadata
+from agents.runtime.file_access import build_file_access, constrain_workspace_file_tools
+from agents.runtime.test_guidance import unit_test_targets
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
+from agents.llm.corrections import case_expectation_check
+from agents.roles.contract_explain import qa_issues
+from agents.roles.expected_results import with_expected_results
 from agents.llm.engine import LLMEngine
 from agents.roles.prompts import prepare_role_prompt
 from agents.roles.qa_contract import QAContractError, build_qa_output_contract, validate_qa_decision
 from agents.runtime.requirement_scope import (
-    RequirementScopeError, build_requirement_scope, validate_generated_case_expectations,
+    signup_observation_plan,
+    RequirementScopeError, assigned_acceptance_criteria, build_requirement_scope, generated_case_expectation_issues,
+    validate_generated_case_expectations,
 )
 from agents.runtime.developer import _host_factory
 from agents.runtime.planner import _message_data, _same_json, _TERMINAL
 from agents.runtime.qa_context import QAContextError, QAExecutionContext
 from agents.runtime.qa_services import QARuntimeServices, QAServicesError
+from agents.runtime.test_fix import TestFixRequired, same_cases
+from mcp_tools.tools.files import _run_file_operation
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
 from agents.platform.telemetry import bind_runtime_telemetry
 from agents.semantic_review import (SEMANTIC_PROTECTED_FIELDS, SemanticReviewRequired, publish_semantic_hold)
+from agents.runtime.semantic_revision import review_with_revision, revision_basis
 
 
 class QAExecutorConfigurationError(ValueError):
@@ -44,12 +54,13 @@ class _QAInputError(ValueError):
 
 
 _PROTECTED = frozenset({
+    "publicObservationPlan",
     "request", "snapshot", "workspaceId", "scenario", "runConfiguration", "plan", "sourceArtifact",
     "outputContract", "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds",
     "projectArtifactIds", "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion",
     "fixRequest", "testSelectors", "testTargets", "qaRequirements", "userRequest", "protectedCases",
     "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest", "sourceAccess",
-    "requirementAuthority", "requirementScope", "clarifications",
+    "requirementAuthority", "requirementScope", "clarifications", "fileAccess", "plannerValidation", "llmValidation",
 })
 
 
@@ -85,8 +96,10 @@ def _prepare_input(context, execution):
         scope = build_requirement_scope(execution.configuration, execution.requirement_artifact, metadata, AgentRole.QA)
         assigned = {str(item.requirement_id) for item in scope.requirements}
         return {**expected, "clarifications": answers,
+            "fileAccess": build_file_access(execution.configuration.scenario_contract, AgentRole.QA),
             "requirementAuthority": scope.authority.to_prompt_json(),
             "requirementScope": scope.to_prompt_json(),
+            "publicObservationPlan": signup_observation_plan(execution.configuration.scenario_contract, scope),
             "workspaceId": str(execution.configuration.workspace_id),
             "userRequest": redact_data(execution.request_text),
             "qaRequirements": [item for item in execution.scenario.planner_contract()["requirements"]
@@ -97,11 +110,11 @@ def _prepare_input(context, execution):
                 "Use the Host testTargets paths and selectors. Unit tests use Python unittest; "
                 "browser tests use the bounded browser-suite-v1 JSON format, not arbitrary scripts. "
                 "Return READY case bindings covering every assigned QA requirement and every case in each "
-                "selected suite, using the exact runner test IDs. Do not submit PASS/FAIL, report IDs, "
+                "configured generated suite in testTargets; every target is mandatory. Use exact runner test IDs. Do not submit PASS/FAIL, report IDs, "
                 "hashes, execution manifests, measured counts or fabricated tool evidence. "
                 "The Host executes selected tests and all configured protected tests and assembles the "
                 "measured report. Questions do not authorize changing the frozen Source or policies."
-                " Each generated case expectedResult must copy one exact acceptanceCriteria string from its "
+                " Cover every acceptanceCriteria sentence across the submitted cases. Each generated case expectedResult must copy one exact acceptanceCriteria string from its "
                 "assigned requirementScope requirement. Do not paraphrase, invent or weaken the expectation. "
                 "Planner/Developer claims and passing self-tests are not independent evidence."
             )}
@@ -121,13 +134,10 @@ def _test_targets(services):
     unit = services.configuration.unit_test_configuration
     browser = services.configuration.browser_test_configuration
     if unit is not None:
-        targets.extend({"toolName": "run_unit_tests", "selector": scope.name,
-                        "directory": "outputs/qa/" + scope.source_directory,
-                        "pattern": scope.pattern, "format": "python-unittest"}
-                       for scope in unit.scopes if scope.kind == "QA_TESTS")
+        targets.extend(unit_test_targets(unit, "qa"))
     if browser is not None:
         targets.extend({"toolName": "run_browser_tests", "selector": suite.name,
-                        "path": "outputs/qa/" + suite.suite_path, "format": "browser-suite-v1",
+                        "path": "outputs/qa/" + suite.suite_path, "format": "browser-suite-v1", "required": True,
                         "example": {"format": "browser-suite-v1", "tests": [{
                             "testId": "signup.visible", "steps": [{"action": "goto", "path": "/"},
                             {"action": "assert_visible", "selector": "#signup"}]}]},
@@ -166,8 +176,10 @@ class QAAgentExecutor(AgentExecutor):
         return TaskUpdater(queue, context.task_id, context.context_id)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None):
+    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None):
         data = {"code": code}
+        if llm_validation is not None:
+            data["llmValidation"] = llm_validation
         if questions is not None:
             data["questions"] = list(questions)
         await updater.update_status(state, metadata=metadata, message=updater.new_agent_message(
@@ -221,31 +233,88 @@ class QAAgentExecutor(AgentExecutor):
                 tracked = services.tracked(client, execution)
                 if telemetry is not None:
                     tracked.set_event_sink(telemetry.tool_event)
+                await services.run_protected(execution, tracked)
                 tools = tuple(tool for tool in tracked.list_tools()
                               if tool.name in {"read_project_file", "write_test_file", "read_test_report"})
                 if {tool.name for tool in tools} != {"read_project_file", "write_test_file", "read_test_report"}:
                     raise QAServicesError()
+                tools = constrain_workspace_file_tools(tools, AgentRole.QA)
                 engine = LLMEngine(role=AgentRole.QA, provider=self._provider, tools=tools, tool_executor=tracked)
-                result = await engine.run(prompt=prepare_role_prompt(
-                    AgentRole.QA, task_input=task_input, metadata=execution.metadata),
-                    model=execution.model,
-                    output=build_qa_output_contract(execution.metadata.requirement_ids, services.selectors),
-                    budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
-                    usage_sink=usage_sink, call_started_sink=call_started_sink,
-                    output_observed_sink=telemetry.model_output if telemetry is not None else None,
-                    input_observed_sink=telemetry.model_input if telemetry is not None else None)
+                text_engine = LLMEngine(role=AgentRole.QA, provider=self._provider)
+
+                async def run_model(model_input, *, text_only=False, output_override=None):
+                    # One closure so the in-step test fix (docs/live-api/05 4절) reuses the same contract.
+                    # text_only: the semantic rewrite (05 15절) runs without any tool, so no file can change.
+                    if output_override is not None:
+                        # docs/live-api/05 25절 V4: the semantic rewrite returns only held texts (patch schema), tool-less.
+                        return await text_engine.run(prompt=prepare_role_prompt(
+                            AgentRole.QA, task_input=model_input, metadata=execution.metadata),
+                            model=execution.model, output=output_override, budget=execution.budget,
+                            workspace_id=str(execution.configuration.workspace_id),
+                            usage_sink=usage_sink, call_started_sink=call_started_sink,
+                            output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                            validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
+                            recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
+                            input_observed_sink=telemetry.model_input if telemetry is not None else None)
+                    return await (text_engine if text_only else engine).run(prompt=prepare_role_prompt(
+                        AgentRole.QA, task_input=model_input, metadata=execution.metadata),
+                        model=execution.model,
+                        output=with_expected_results(build_qa_output_contract(execution.metadata.requirement_ids,
+                            services.selectors), "cases", assigned_acceptance_criteria(execution.configuration,
+                            execution.metadata, AgentRole.QA) if execution.budget.limits.max_output_corrections else ()),
+                        budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
+                        output_refresh=services.refresh_output, close_invalid_qa_draft=not text_only,
+                        usage_sink=usage_sink, call_started_sink=call_started_sink,
+                        output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                        validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
+                        recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
+                        input_observed_sink=telemetry.model_input if telemetry is not None else None,
+                        output_check=case_expectation_check(lambda data: validate_qa_decision(
+                            data, execution.metadata.requirement_ids, services.selectors),
+                            lambda data: generated_case_expectation_issues(data, field="cases",
+                                configuration=execution.configuration, metadata=execution.metadata, role=AgentRole.QA),
+                            explain=lambda data: qa_issues(data, execution.metadata.requirement_ids, services.selectors),
+                            extra_checks=(("GENERATED_TESTS_INVALID", services.generated_test_issues),)))
+                result = await run_model(task_input)
                 decision = validate_qa_decision(result.data, execution.metadata.requirement_ids, services.selectors)
                 if decision.kind == "READY":
                     validate_generated_case_expectations(decision.cases, configuration=execution.configuration,
                         metadata=execution.metadata, role=AgentRole.QA)
                 if decision.kind == "READY" and self._semantic_reviewer is not None:
-                    await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
-                        role=AgentRole.QA, result=result, telemetry=telemetry,
-                        usage_sink=usage_sink, call_started_sink=call_started_sink)
+                    # docs/live-api/05 14·15절: one tool-less rewrite of the held texts only, then the same review.
+                    def still_ready(revised):
+                        try:
+                            return validate_qa_decision(revised.data, execution.metadata.requirement_ids,
+                                                        services.selectors).kind == "READY"
+                        except Exception:
+                            return False
+                    result = await review_with_revision(
+                        lambda candidate: self._semantic_reviewer.check(context=context, execution=execution,
+                            candidate=candidate.data, role=AgentRole.QA, result=candidate, telemetry=telemetry,
+                            usage_sink=usage_sink, call_started_sink=call_started_sink),
+                        lambda model_input, output: run_model(model_input, output_override=output), still_ready,
+                        task_input, result,
+                        allowed=bool(execution.budget.limits.max_output_corrections),
+                        basis=revision_basis(execution, AgentRole.QA))
+                    decision = validate_qa_decision(result.data, execution.metadata.requirement_ids, services.selectors)
+                    validate_generated_case_expectations(decision.cases, configuration=execution.configuration,
+                        metadata=execution.metadata, role=AgentRole.QA)
                 execution.budget.check()
                 if decision.kind == "READY":
-                    artifacts = await services.finalize(execution, decision, tracked,
-                        task_id=context.task_id, context_id=context.context_id)
+                    available = await _run_file_operation(services.test_fix_available, execution)
+                    try:
+                        artifacts = await services.finalize(execution, decision, tracked,
+                            task_id=context.task_id, context_id=context.context_id, test_fix_available=available)
+                    except TestFixRequired as needed:
+                        # docs/live-api/05 4절: one in-step fix of the model's own tests on the same
+                        # Snapshot; the declared cases must not change.
+                        result = await run_model(needed.task_input(task_input, result.data))
+                        fixed = validate_qa_decision(result.data, execution.metadata.requirement_ids, services.selectors)
+                        if fixed.kind != "READY" or not same_cases(decision.cases, fixed.cases):
+                            raise QAServicesError("QA_TEST_FIX_INVALID")
+                        execution.budget.check()
+                        artifacts = await services.finalize(execution, fixed, tracked,
+                            task_id=context.task_id, context_id=context.context_id)
             # Finish producer/stdio teardown before an interrupted Task can resume.
             execution.budget.check()
         except asyncio.CancelledError:
@@ -253,7 +322,7 @@ class QAAgentExecutor(AgentExecutor):
         except LLMRuntimeError as error:
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
-            await self._status(updater, metadata, state, error.code.value)
+            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation())
             return
         except (QAContractError, QAServicesError, RequirementScopeError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)

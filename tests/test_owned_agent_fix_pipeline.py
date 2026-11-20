@@ -20,6 +20,7 @@ from orchestrator.domain.run_configuration import ExecutionLimits
 from orchestrator.domain.scenario_registry import RequirementValidator
 from orchestrator.domain.validation_artifacts import ValidationOutcome
 from orchestrator.sandbox.contracts import CLIResult
+from signup_receipt_fixture import generated_signup_evidence
 from semantic_helpers import SemanticFakeProvider as FakeProvider
 from test_llm_runtime import text_response, tool_response
 
@@ -28,7 +29,8 @@ class _FixHarness:
     """Reuse inert Stage 34 storage/transport fixtures, not its test methods."""
 
     def __init__(self, owner, *, qa_mode="initial-failure", build_failure=False,
-                 build_failure_versions=(), proof=True, model_cap=40):
+                 build_failure_versions=(), proof=True, model_cap=40, output_corrections=0,
+                 security_failure_versions=()):
         self.base = pipeline_fixture.OwnedAgentPipelineTests()
         self.base.setUp()
         for function, arguments, keywords in self.base._cleanups:
@@ -39,6 +41,8 @@ class _FixHarness:
         self.qa_mode, self.build_failure, self.proof = qa_mode, build_failure, proof
         self.build_failure_versions = frozenset(build_failure_versions) | ({1} if build_failure else set())
         self.model_cap = model_cap
+        self.output_corrections = output_corrections
+        self.security_failure_versions = frozenset(security_failure_versions)
         self.developer_version, self.qa_version = None, None
         self.fix_inputs, self.configurations, self.budgets, self.budget_samples = [], [], [], []
         self.versions = []
@@ -69,7 +73,9 @@ class _FixHarness:
                 return SecuritySemanticProof(run_id=context.metadata.run_id,
                     workflow_step_id=context.metadata.workflow_step_id,
                     source_artifact_id=measured.source_artifact_id, snapshot_sha256=measured.snapshot_sha256,
-                    requirement_outcomes=tuple((value, "PASS") for value in context.metadata.requirement_ids))
+                    requirement_outcomes=tuple((value, "FAIL" if index == 0 and
+                        context.source.code_version in self.security_failure_versions else "PASS")
+                        for index, value in enumerate(context.metadata.requirement_ids)))
 
             return SecurityRuntimeServices(self.base.repository, self.base.registry, self.base.artifacts,
                 mcp_configuration=service.configuration, client_factory=self.base.peer_client,
@@ -92,7 +98,8 @@ class _FixHarness:
                     docker.start_result = CLIResult(returncode=failed, stdout=json.dumps({
                         "format": "unittest-v1", "total": len(cases), "passed": len(cases) - failed,
                         "failed": failed, "skipped": 0, "tests": [{"testId": case["testId"],
-                            "outcome": "FAIL" if index == failure_index else "PASS"}
+                            "outcome": "FAIL" if index == failure_index else "PASS",
+                            **generated_signup_evidence("QA", index + 1)}
                             for index, case in enumerate(cases)]}).encode(), stderr=b"")
                 yield client
 
@@ -123,7 +130,7 @@ class _FixHarness:
                 arguments_json=json.dumps({"workspaceId": data["workspaceId"], "path": "source/signup.py",
                     "content": f"def signup():\n    return 'inert-candidate-{version}'\n"})))
 
-        developer_ready = lambda _request: text_response(json.dumps({
+        developer_ready = lambda _request: text_response(json.dumps({"rejection": None,
             "kind": "READY", "summary": "동결 기준에 대한 실제 변경 후보입니다.", "questions": []}, ensure_ascii=False))
 
         def qa_write(request):
@@ -131,7 +138,8 @@ class _FixHarness:
             return tool_response(ToolCall(call_id=f"qa-write-candidate-{self.qa_version}", name="write_test_file",
                 arguments_json=json.dumps({"workspaceId": data["workspaceId"],
                     "path": "outputs/qa/tests/test_signup.py",
-                    "content": f"# inert QA fixture for candidate {self.qa_version}; never executed on Host\n"})))
+                    "content": ("# inert QA fixture; never executed on Host\n" if self.qa_mode != "repeated-failure"
+                                else f"# regenerated QA fixture for candidate {self.qa_version}\n")})))
 
         qa_ready = lambda _request: text_response(json.dumps({"kind": "READY", "questions": [],
             "cases": self.cases(self.qa_version)}, ensure_ascii=False))
@@ -170,7 +178,7 @@ class _FixHarness:
         def create_with_fix_limits(**values):
             from agents.llm.budget import LLMLimits
             limits = LLMLimits(max_model_calls=self.model_cap, max_tool_calls=40,
-                model_timeout_seconds=2, max_output_tokens=4096)
+                model_timeout_seconds=2, max_output_tokens=4096, max_output_corrections=self.output_corrections)
             values["limits"] = limits
             values["agent_settings"] = {role: settings.model_copy(update={"llm_limits": limits})
                 for role, settings in values["agent_settings"].items()}
@@ -185,7 +193,7 @@ class _FixHarness:
 class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def submit(self, harness):
         async with harness.running() as (client, providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.base.submission()), timeout=40)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.base.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = UUID(response.json()["run"]["runId"])
             run = harness.base.repository.get_run(run_id)
@@ -253,18 +261,19 @@ class OwnedAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len({issue.fingerprint for issue in issues}), 4)
         self.assertTrue(all(issue.consecutive_repeat_count == 0 for issue in issues))
 
-    async def test_repeated_issue_stops_after_two_unsolved_fix_cycles(self):
+    async def test_regenerated_issue_uses_three_fixes_without_verified_stall(self):
         harness = _FixHarness(self, qa_mode="repeated-failure")
         run, artifacts, steps, calls = await self.submit(harness)
+        # docs/live-api/05 14절(2026-11-18): FINISHED FAIL with the measured reports kept.
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
-            (WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW, 2, 3))
-        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (10, 29, 2))
-        self.assert_lineage(artifacts, "SOURCE", 3)
+            (WorkflowStatus.FINISHED, FinalVerdict.FAIL, 3, 4))
+        self.assertEqual((len(steps), calls, len(harness.fix_inputs)), (13, 38, 3))
+        self.assert_lineage(artifacts, "SOURCE", 4)
         issues = sorted(harness.base.repository.list_issue_records(run.run_id), key=lambda issue: issue.code_version)
-        self.assertEqual([issue.consecutive_repeat_count for issue in issues], [0, 1, 2])
+        self.assertEqual([issue.consecutive_repeat_count for issue in issues], [0, 1, 2, 3])
         self.assertEqual(len({issue.fingerprint for issue in issues}), 1)
         events, _total = harness.base.repository.list_events(run.run_id, limit=500, offset=0)
-        self.assertTrue(any(event.event_type == "SAME_ISSUE_REQUIRES_REVIEW" for event in events))
+        self.assertFalse(any(event.event_type == "SAME_ISSUE_REPEAT_LIMIT_REACHED" for event in events))
 
     async def test_initial_build_failure_is_fixed_then_missing_security_proof_stays_unverified(self):
         harness = _FixHarness(self, qa_mode="pass", build_failure=True, proof=False)

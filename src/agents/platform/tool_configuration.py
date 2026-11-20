@@ -103,20 +103,20 @@ class OwnedToolConfiguration:
                 self._build_json, self._unit_json, self._browser_json, self._security_json)), canonical=True)
             build, unit, browser, security = (
                 decode_build_configuration(self._build_json), decode_unit_configuration(self._unit_json),
-                decode_browser_configuration(self._browser_json), decode_security_configuration(self._security_json),
+                self.browser_configuration, decode_security_configuration(self._security_json),
             )
             for image, endpoint, limits in (
                 (build.profile.image_reference, build.docker_endpoint, build.profile.limits),
-                *((item.image_reference, item.docker_endpoint, item.limits) for item in (unit, browser, security)),
+                *((item.image_reference, item.docker_endpoint, item.limits) for item in (unit, browser, security) if item is not None),
             ):
                 if (image is None or image != self.image_reference or endpoint != self.docker_endpoint
                         or self.max_call_seconds < limits.timeout_seconds + 2 * limits.control_timeout_seconds + 1):
                     raise ToolConfigurationError()
-            if (unit.python_executable != browser.python_executable
+            if (browser is not None and unit.python_executable != browser.python_executable
                     or unit.python_executable != security.python_executable
                     or not any(item.kind == "SNAPSHOT" for item in unit.scopes)
                     or not any(item.kind == "QA_TESTS" for item in unit.scopes)
-                    or not any(item.kind == "QA_TESTS" for item in browser.suites)
+                    or browser is not None and not any(item.kind == "QA_TESTS" for item in browser.suites)
                     or len({item.scanner_version for item in security.profiles}) != 1):
                 raise ToolConfigurationError()
             sanitize_content({"hardwareProfile": self.hardware_profile}, reject_secrets=True)
@@ -127,7 +127,7 @@ class OwnedToolConfiguration:
                 ("_browser_json", encode_browser_configuration, browser),
                 ("_security_json", encode_security_configuration, security),
             ):
-                object.__setattr__(self, name, encoder(configuration))
+                object.__setattr__(self, name, "null" if configuration is None else encoder(configuration))
         except Exception:
             raise ToolConfigurationError() from None
 
@@ -156,7 +156,7 @@ class OwnedToolConfiguration:
 
     @property
     def browser_configuration(self):
-        return decode_browser_configuration(self._browser_json)
+        return None if parse_json(self._browser_json) is None else decode_browser_configuration(self._browser_json)
 
     @property
     def security_configuration(self):
@@ -170,7 +170,7 @@ def _limits(value):
 
 def _explicit_fields(build, unit, browser, security, *, canonical=False):
     common = {"image_reference", "docker_endpoint"} if canonical else set()
-    for child in (build, unit, browser, security):
+    for child in (build, unit, security) + (() if browser is None else (browser,)):
         if type(child) is not dict or not canonical and {"image_reference", "docker_endpoint"} & set(child):
             raise ToolConfigurationError()
     build_fields = {"profile", "docker_endpoint"} if canonical else {"profile"}
@@ -184,10 +184,9 @@ def _explicit_fields(build, unit, browser, security, *, canonical=False):
     _limits(profile["limits"])
     for child, required in (
         (unit, {"scopes", "python_executable", "limits"}),
-        (browser, {"suites", "service_argv", "playwright_version", "python_executable", "base_url",
-                   "ready_path", "startup_timeout_seconds", "action_timeout_ms", "limits"}),
         (security, {"profiles", "python_executable", "limits"}),
-    ):
+    ) + (() if browser is None else ((browser, {"suites", "service_argv", "playwright_version", "python_executable", "base_url",
+                                               "ready_path", "startup_timeout_seconds", "action_timeout_ms", "limits"}),)):
         if set(child) != required | common:
             raise ToolConfigurationError()
         _limits(child["limits"])
@@ -204,7 +203,7 @@ def decode_tool_configuration(text):
         _explicit_fields(build, unit, browser, security)
         profile = build["profile"]
         build = {"profile": {**profile, "image_reference": image}, "docker_endpoint": endpoint}
-        unit, browser, security = ({**child, "image_reference": image, "docker_endpoint": endpoint}
+        unit, browser, security = (None if child is None else {**child, "image_reference": image, "docker_endpoint": endpoint}
                                    for child in (unit, browser, security))
         return OwnedToolConfiguration(
             image_reference=image, dependency_lock_file=data["dependencyLockFile"],
@@ -212,7 +211,7 @@ def decode_tool_configuration(text):
             docker_endpoint=endpoint, max_call_seconds=data["maxCallSeconds"],
             _build_json=encode_build_configuration(decode_build_configuration(_json(build))),
             _unit_json=encode_unit_configuration(decode_unit_configuration(_json(unit))),
-            _browser_json=encode_browser_configuration(decode_browser_configuration(_json(browser))),
+            _browser_json="null" if browser is None else encode_browser_configuration(decode_browser_configuration(_json(browser))),
             _security_json=encode_security_configuration(decode_security_configuration(_json(security))),
         )
     except Exception:

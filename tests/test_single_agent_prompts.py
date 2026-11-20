@@ -8,12 +8,12 @@ from uuid import uuid4
 
 from a2a.helpers import new_data_part
 from a2a.server.context import ServerCallContext
-from a2a.types import Message, Role, TaskState
+from a2a.types import Artifact, Message, Role, TaskState
 
 from agents.api.sqlite_task_store import AgentTaskStoreError, SQLiteAgentTaskStore
 from agents.core.identity import SingleAgentIdentity
 from agents.single.contracts import SingleContractError, SinglePhase, build_single_draft_contract
-from agents.single.prompts import SinglePromptError, build_single_system_prompt, prepare_single_prompt
+from agents.single.prompts import SinglePromptError, SinglePromptLimitError, build_single_system_prompt, prepare_single_prompt
 from orchestrator.a2a.requests import A2AWorkflowMetadata, build_send_message_request
 from orchestrator.domain.scenario_registry import SCN_001_ID, RequirementValidator, get_scenario
 
@@ -51,7 +51,7 @@ class SingleDraftContractTests(unittest.TestCase):
     def test_implementation_and_fix_are_drafts_without_verdict_authority(self):
         for phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING):
             contract = build_single_draft_contract(phase, scenario=self.scenario)
-            self.assertEqual(contract.validate({"kind": "READY", "summary": "파일 수정 제안", "questions": []}).kind, "READY")
+            self.assertEqual(contract.validate({"rejection": None, "kind": "READY", "summary": "파일 수정 제안", "questions": []}).kind, "READY")
             with self.assertRaises(SingleContractError):
                 contract.validate({"kind": "READY", "summary": "완료", "questions": [], "verdict": "SUCCESS"})
 
@@ -163,6 +163,48 @@ class SingleConversationTests(unittest.IsolatedAsyncioTestCase):
                 await self.prepare(**kwargs)
         await self.prepare()
         self.assertEqual(len(await self.store.revisions(self.first.id)), 1)
+
+    async def test_large_audit_report_is_compact_and_protected_answers_do_not_reenter_fix(self):
+        marker = "PRIVATE_PRACTICE_EXPECTATION"
+        stored = await self.store.get(self.first.id, self.call_context)
+        task = stored.task
+        task.status.state = TaskState.TASK_STATE_COMPLETED
+        report = {"tests": [{"outcome": "FAIL", "expectedResult": marker, "actualResult": marker,
+                             "toolEvidence": {"summary": "x" * 550_000}}]}
+        task.artifacts.extend(Artifact(
+            artifact_id=str(uuid4()), name="qa-report.json",
+            parts=[new_data_part(report, media_type="application/json")]) for _ in range(2))
+        await self.store.save(task, event=None, prev=stored.task, prev_version=stored.version, context=self.call_context)
+
+        validation = A2AWorkflowMetadata(run_id=self.metadata.run_id, scenario_id=SCN_001_ID,
+                                         workflow_step_id=uuid4(), attempt=0, code_version=1)
+        validation_task = await self.store.claim_message(build_send_message_request(
+            {"request": marker, "snapshot": {}}, validation, context_id=self.first.context_id), self.call_context)
+        previous = await self.store.get(validation_task.task.id, self.call_context)
+        previous.task.status.state = TaskState.TASK_STATE_COMPLETED
+        await self.store.save(previous.task, event=None, prev=previous.task, prev_version=previous.version,
+                              context=self.call_context)
+        metadata = A2AWorkflowMetadata(run_id=self.metadata.run_id, scenario_id=SCN_001_ID,
+                                      workflow_step_id=uuid4(), attempt=0, code_version=2)
+        await self.store.claim_message(build_send_message_request(
+            {"fixRequest": {"expectedResult": marker}}, metadata, context_id=self.first.context_id), self.call_context)
+        prompt = await self.prepare(
+            metadata=metadata, contract=build_single_draft_contract(SinglePhase.FIXING, scenario=self.scenario),
+            task_input={"fixRequest": {"actual": "FAIL", "expectedResult": marker}})
+        model = json.loads(prompt.input_json)
+        self.assertNotIn(marker, prompt.input_json)
+        self.assertEqual(model["taskInput"]["fixRequest"], {"actual": "FAIL"})
+        self.assertEqual([a["outcomes"] for a in model["history"][0]["artifacts"]], [{"FAIL": 1}, {"FAIL": 1}])
+        self.assertLess(len(prompt.input_json.encode()), 64_000)
+        self.assertIn(marker, str((await self.store.get(self.first.id, self.call_context)).task.artifacts[0]))
+
+    async def test_only_valid_projected_size_overflow_gets_a_budget_stop(self):
+        with self.assertRaises(SinglePromptLimitError):
+            await self.prepare(task_input={"request": "large" * 10_000}, max_bytes=32_768)
+        for data in ({"v": float("nan")}, {"v": object()}):
+            with self.assertRaises(SinglePromptError) as caught:
+                await self.prepare(task_input=data)
+            self.assertNotIsInstance(caught.exception, SinglePromptLimitError)
 
     async def test_history_task_limit_and_scenario_contract_binding(self):
         await self.complete_first()

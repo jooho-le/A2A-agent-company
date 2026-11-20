@@ -93,6 +93,19 @@ def test_prompt_body_is_not_in_hash_observation(exported):
     expected = {'sequence', 'metadataSha256', 'taskInputSha256', 'initialInputSha256',
                 'systemSha256', 'inputItemsSha256', 'requestedModel'}
     for row in rows:
-        assert set(row['detail']) == expected
+        # 2026-11-18(docs/live-api/08): a forced-write request also records which tool it requires.
+        # Only a tool name, never prompt text.
+        # 2026-11-18(Codex 점검): 실제로 보낸 도구 정의·응답 스키마의 해시도 남긴다. 해시만, 본문은 없다.
+        fingerprints = {'toolsSha256', 'outputSchemaSha256'}
+        # Host follow-up feedback (closed keys, hashes only) is recorded apart from the original input.
+        assert expected <= set(row['detail']) <= expected | {'requiredTool', 'hostFollowUpSha256'} | fingerprints
+        follow_ups = row['detail'].get('hostFollowUpSha256')
+        assert follow_ups is None or (set(follow_ups) <= {'testRunFeedback', 'semanticReviewFeedback'}
+                                      and all(len(v) == 64 for v in follow_ups.values()))
+        required = row['detail'].get('requiredTool')
+        assert required is None or (isinstance(required, str) and required.replace('_', '').replace('-', '').isalnum())
+        for key in fingerprints & set(row['detail']):
+            value = row['detail'][key]
+            assert value is None or (isinstance(value, str) and len(value) == 64)
         for key in expected - {'sequence', 'requestedModel'}:
             assert len(row['detail'][key]) == 64

@@ -25,13 +25,14 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from signup_link import Service, Unverified, new_email, new_password
+from signup_security_checks import fail_next_insert, require_insert_failure  # 0.7.3에서 Service에서 옮김
 saved_env = os.environ.get('DATABASE_URL')
 saved_out = sys.stdout
 registered = []
 original_listen = event.listen
 def tracked_listen(target, name, callback, *args, **kwargs):
     original_listen(target, name, callback, *args, **kwargs)
-    if target is Engine and name == 'before_cursor_execute' and callback.__module__ == 'signup_link':
+    if target is Engine and name == 'before_cursor_execute' and callback.__module__ in ('signup_link', 'signup_security_checks'):
         registered.append((target, name, callback))
 event.listen = tracked_listen
 def assert_clean():
@@ -75,7 +76,7 @@ try:
             pass
         else:
             raise AssertionError('observer wrote into the application DB')
-    service.fail_next_insert()
+    fail_next_insert(service)
     other = create_engine('sqlite:///:memory:')
     try:
         with other.begin() as connection:
@@ -84,7 +85,7 @@ try:
     finally:
         other.dispose()
     assert service.signup(new_email(), new_password()) == 503
-    service.require_insert_failure()
+    require_insert_failure(service)
     assert service.count() == 0
     assert service.signup(new_email(), new_password()) == 201
     assert service.count() == 1
@@ -100,9 +101,9 @@ def test_unapplied_fault_is_unverified_and_pending_fault_cleanup_is_complete():
     assert run_native('''
 service = Service().open()
 try:
-    service.fail_next_insert()
+    fail_next_insert(service)
     try:
-        service.require_insert_failure()
+        require_insert_failure(service)
     except Unverified as error:
         assert error.code == 'DATABASE_ERROR_NOT_INJECTED'
     else:

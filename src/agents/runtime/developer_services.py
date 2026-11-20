@@ -27,7 +27,10 @@ from mcp_tools.tools.build_store import BuildOutputStore
 from mcp_tools.tools.files import _run_file_operation
 from orchestrator.artifacts.git_snapshot import GitSnapshotBuilder
 from orchestrator.artifacts.service import ArtifactStore
-from orchestrator.domain.developer_artifacts import BuildReportArtifact, ChangeReportArtifact
+from orchestrator.sandbox.scn001_start_contract import scn001_build_diagnostics
+from orchestrator.sandbox.materialization import _archive_entries
+from orchestrator.domain.developer_artifacts import BuildReportArtifact, ChangeReportArtifact, ReadyRecheck, ReadyReview
+from orchestrator.domain.repair_progress import selected_checks
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
 from orchestrator.domain.states import AgentRole, A2ATaskState, WorkflowStatus, WorkflowStepStatus
 from orchestrator.domain.tool_evidence import ToolExecutionOutcome
@@ -136,6 +139,12 @@ class DeveloperRuntimeServices:
             self._workspaces.bind, binding.workspace_id, run_id=binding.run_id, role=AgentRole.DEVELOPER))
         checkpoint = GitDeveloperCheckpoint(workspace, baseline_commit_hash=self._baseline,
                                             repository_id=self._repository_id, lock_path=self._lock_path,
+                                            library_environment={
+                                                'containerImageDigest': environment.container_image_digest,
+                                                'dependencyLockHash': environment.dependency_lock_hash},
+                                            runtime_repair=any(issue.category in {
+                                                'BUILD_CODE_FAILURE', 'QA_ASSERTION_FAILURE', 'SECURITY_REQUIREMENT_FAILURE'
+                                            } for issue in execution.fix_issues),
                                             limits=self._artifacts._git_limits,
                                             parent_commit_hash=(None if execution.previous_source is None
                                                                 else execution.previous_source.commit_hash))
@@ -170,6 +179,9 @@ class DeveloperRuntimeServices:
                     or parent.archive != frozen.content):
                 raise DeveloperServicesError()
         execution.budget.check()
+        from agents.runtime.repair_baseline import restore_baseline
+        await _run_file_operation(restore_baseline, self, execution, checkpoint)
+        execution.budget.check()
         return checkpoint
 
     def tracked(self, client, execution):
@@ -180,7 +192,8 @@ class DeveloperRuntimeServices:
     async def finalize(self, execution, checkpoint, decision, tracked, *, task_id, context_id):
         execution.budget.check()
         candidate = await _run_file_operation(partial(
-            checkpoint.checkpoint, deadline_monotonic=execution.budget.deadline_monotonic))
+            checkpoint.checkpoint, deadline_monotonic=execution.budget.deadline_monotonic,
+            reported_path_edits=decision.reported_path_edits))
         if (candidate.repository_id != self._repository_id or candidate.lock_path != self._lock_path
                 or candidate.baseline_commit_hash != self._baseline
                 or candidate.parent_commit_hash != (self._baseline if execution.previous_source is None
@@ -212,8 +225,16 @@ class DeveloperRuntimeServices:
                     or receipt.execution_manifest != source.execution_manifest()
                     or receipt.execution_profile != self._effective_profile):
                 raise ValueError
-            return await _run_file_operation(self._assemble, execution, source, candidate.changes,
-                                             decision.summary, receipt, evidence, task_id, context_id)
+            fix = (checkpoint.repair_baseline['fixRequest'] if checkpoint.repair_baseline is not None
+                   else execution.initial_payload.get('fixRequest', {}))
+            rechecks = tuple(ReadyRecheck(
+                issue_id=issue['issueId'], prior_report_id=row['reportArtifactId'],
+                prior_protected_receipt_id=row.get('protectedReceiptId'), role=row['role'],
+                requirement_id=row['requirementId'], test_id=row['testId'],
+                unresolved_cases=sorted({o['caseId'] for o in row['observations'] if o['status'] != 'PASS'}))
+                for issue in fix.get('issues', []) for row in selected_checks(issue, fix.get('validationFeedback', [])))
+            return await _run_file_operation(self._assemble, execution, source, candidate, rechecks,
+                                             decision, receipt, evidence, task_id, context_id)
         except asyncio.CancelledError:
             raise
         except DeveloperServicesError:
@@ -230,7 +251,7 @@ class DeveloperRuntimeServices:
             workflow_step_id=execution.metadata.workflow_step_id, commit_hash=candidate.commit_hash,
             repository_id=self._repository_id, lock_path=self._lock_path)
 
-    def _assemble(self, execution, staged, changes, summary, receipt, evidence, task_id, context_id):
+    def _assemble(self, execution, staged, candidate, rechecks, decision, receipt, evidence, task_id, context_id):
         try:
             a2a_ids = tuple(str(uuid4()) for _ in range(3))
             source = type(staged).model_validate({**staged.model_dump(),
@@ -250,16 +271,28 @@ class DeveloperRuntimeServices:
             common = dict(run_id=source.run_id,
                           workflow_step_id=source.workflow_step_id, a2a_task_id=task_id,
                           requirement_ids=source.requirement_ids, code_version=source.code_version)
-            change = ChangeReportArtifact(artifact_id=uuid4(), a2a_artifact_id=a2a_ids[1],
-                                           summary=summary, changes=changes, **lineage("CHANGE_REPORT"), **common)
+            source_files = None
+            if receipt.exit_code != 0:
+                frozen = self._artifacts.bind(source.run_id, role=AgentRole.DEVELOPER).read(source.artifact_id)
+                source_files = {path: content for path, content, _mode in _archive_entries(frozen.content)}
             build = BuildReportArtifact(artifact_id=uuid4(), a2a_artifact_id=a2a_ids[2],
                 source_artifact_id=source.artifact_id, exit_code=receipt.exit_code,
                 duration_ms=receipt.duration_ms, execution_manifest_id=receipt.execution_manifest_id,
                 execution_manifest=receipt.execution_manifest, stdout_ref=receipt.stdout_ref,
                 stderr_ref=receipt.stderr_ref,
+                diagnostics=scn001_build_diagnostics(argv=receipt.execution_profile.argv,
+                    exit_code=receipt.exit_code, stdout=receipt.stdout, source_files=source_files),
                 execution_outcome=ToolExecutionOutcome.PASS if receipt.exit_code == 0 else ToolExecutionOutcome.FAIL,
                 failure_kind=None if receipt.exit_code == 0 else "PRODUCT", tool_evidence=evidence,
                 **lineage("BUILD_REPORT"), **common)
+            review = ReadyReview(working_base_commit=candidate.working_base_commit, edits=candidate.edits, rechecks=rechecks,
+                                 reported_path_edits=candidate.reported_path_edits,
+                                 source_artifact_id=source.artifact_id, build_report_id=build.artifact_id,
+                                 build_outcome="PASS" if build.passed else "FAIL",
+                                 validation_status="PENDING_QA_SECURITY" if build.passed else "BLOCKED_BY_BUILD")
+            change = ChangeReportArtifact(artifact_id=uuid4(), a2a_artifact_id=a2a_ids[1],
+                                          summary=decision.summary, changes=candidate.changes, ready_review=review,
+                                          **lineage("CHANGE_REPORT"), **common)
             schemas, registry = _schemas()
             names = ("source-snapshot.json", "change-report.json", "build-report.json")
             schema_names = ("developer_source_snapshot.schema.json", "developer_change_report.schema.json",

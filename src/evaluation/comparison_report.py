@@ -60,7 +60,9 @@ def render_comparison(result):
         ('사람 보조 재개로 분리된 Run 수', ('quarantinedAssistedRuns',)),
         ('자동 구간 독립 채점 Run 수', ('evaluation', 'evaluatedRuns')),
         ('내부 SUCCESS 비율', ('successRate',)), ('내부 판정 가능 비율', ('verifiedRate',)),
+        ('최종 코드 미채점 Run 수', ('evaluation', 'eligibleRunsMissingGrade')),
         ('독립 제품 시험 통과 비율(STAB-01)', ('evaluation', 'qualifiedRate')),
+        ('계획 전체에서 확인된 제품 통과 비율 하한', ('evaluation', 'qualifiedRateLowerBound')),
         ('자동 완료율(STAB-06)', ('autoCompletion', 'rate')),
         ('자동 완료 미확인·기록 없음 Run 수', ('autoCompletion',), lambda item: None if not item
          else item.get('unverified', 0) + item.get('notRecorded', 0)),
@@ -138,6 +140,8 @@ def render_comparison(result):
     lines += _pair_section(result.get('pairComparison'), cell)
     for blocker in (result.get('readiness') or {}).get('blockers', []):
         lines.append(f'- 공식 비교 보류: {cell(blocker)}')
+    if 'FINAL_CODE_NOT_GRADED' in (result.get('readiness') or {}).get('blockers', []):
+        lines.append('- 최종 코드 미채점. 독립 제품 통과율은 보류하며 수집된 실행 시간·비용과 확인된 통과 하한을 표시한다.')
     if validity:
         lines += ['', '## 조건 불일치·주의']
         for entry in validity.get('violations', []) + validity.get('warnings', []):

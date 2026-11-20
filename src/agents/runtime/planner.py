@@ -18,11 +18,13 @@ from google.protobuf.json_format import MessageToDict
 
 from agents.api.validation import parse_workflow_metadata
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text, parse_json
+from agents.llm.corrections import contract_check
 from agents.llm.engine import LLMEngine
 from agents.roles.planner_contract import (
     PlannerContractError, build_planner_output_contract, validate_planner_decision,
 )
 from agents.roles.prompts import prepare_role_prompt
+from agents.runtime.requirement_scope import signup_observation_plan
 from agents.runtime.planner_context import PlannerContextError, PlannerExecutionContext
 from mcp_tools.runtime import _finish_handler
 from orchestrator.core.security import redact_data
@@ -30,6 +32,7 @@ from orchestrator.domain.requirement_authority import freeze_requirement_authori
 from orchestrator.domain.states import AgentRole
 from agents.platform.telemetry import bind_runtime_telemetry
 from agents.semantic_review import (SEMANTIC_PROTECTED_FIELDS, SemanticReviewRequired, publish_semantic_hold)
+from agents.runtime.semantic_revision import review_with_revision, revision_basis
 
 
 class PlannerExecutorConfigurationError(ValueError):
@@ -48,10 +51,11 @@ _TERMINAL = frozenset({
 })
 _INITIAL_FIELDS = frozenset({"request", "workspaceId", "runConfiguration", "scenarioContract"})
 _PROTECTED_FIELDS = _INITIAL_FIELDS - {"request"} | frozenset({
+    "publicObservationPlan",
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds",
     "projectArtifactId", "projectArtifactIds", "artifactVersion", "model", "limits", "configuration",
     "codeVersion", "fixRequest", "fixAttempt", "fix_attempt", "startingCommitHash", "parentCommitHash",
-    "requirementAuthority",
+    "requirementAuthority", "fileAccess", "plannerValidation", "llmValidation",
 })
 
 
@@ -172,9 +176,10 @@ def _prepare_input(context, execution):
         return {
             **expected, "clarifications": clarifications,
             "requirementAuthority": freeze_requirement_authority(execution.configuration).to_prompt_json(),
+            "publicObservationPlan": signup_observation_plan(execution.configuration.scenario_contract),
             "modelOutputPurpose": (
                 "Return only the selected planner_decision_v2 draft. The Host preserves all "
-                "requirements and assembles requirements.json. PLAN requires a covering "
+                "requirements and assembles requirements.json. Include each assigned publicObservationPlan condition in its implementation and validation tasks. PLAN requires a covering "
                 "acyclic implementationPlan and no questions; INPUT_REQUIRED requires "
                 "questions and no tasks; REJECTED has neither. Always supply "
                 "unapprovedAssumptions: use [] when none exist. An inferred additional "
@@ -234,8 +239,12 @@ class PlannerAgentExecutor(AgentExecutor):
         return result
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None, unapproved_assumptions=()):
+    async def _status(updater, metadata, state, code, *, questions=None, unapproved_assumptions=(), planner_validation=None, llm_validation=None):
         data = {"code": code}
+        if llm_validation is not None:
+            data["llmValidation"] = llm_validation
+        if planner_validation is not None:
+            data["plannerValidation"] = planner_validation
         if questions is not None:
             data["questions"] = list(questions)
         if unapproved_assumptions:
@@ -274,25 +283,45 @@ class PlannerAgentExecutor(AgentExecutor):
             return
 
         await updater.update_status(TaskState.TASK_STATE_WORKING, metadata=metadata)
+        telemetry = None
         try:
             if self._semantic_reviewer is not None:
                 await self._semantic_reviewer.check_resume(context, execution)
             scenario = execution.scenario
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.PLANNER, context, execution, self._usage_sink)
-            result = await self._engine.run(
-                prompt=prepare_role_prompt(AgentRole.PLANNER, task_input=task_input, metadata=execution.metadata),
-                model=execution.model, output=build_planner_output_contract(scenario),
-                budget=execution.budget, usage_sink=usage_sink, call_started_sink=call_started_sink,
-                output_observed_sink=telemetry.model_output if telemetry is not None else None,
+            async def run_model(model_input, output_override=None):
+                # output_override: the semantic rewrite's patch schema (docs/live-api/05 25절 V4), no role check.
+                return await self._engine.run(
+                    prompt=prepare_role_prompt(AgentRole.PLANNER, task_input=model_input, metadata=execution.metadata),
+                    model=execution.model, output=output_override or build_planner_output_contract(scenario),
+                    budget=execution.budget, usage_sink=usage_sink, call_started_sink=call_started_sink,
+                    output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                    validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
+                    recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
                     input_observed_sink=telemetry.model_input if telemetry is not None else None,
-                workspace_id=str(execution.configuration.workspace_id),
-            )
+                    workspace_id=str(execution.configuration.workspace_id),
+                    output_check=None if output_override is not None else contract_check(
+                        lambda data: validate_planner_decision(data, scenario)),
+                )
+            result = await run_model(task_input)
             decision = validate_planner_decision(result.data, scenario)
             if decision.kind == "PLAN" and self._semantic_reviewer is not None:
-                await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
-                    role=AgentRole.PLANNER, result=result, telemetry=telemetry,
-                    usage_sink=usage_sink, call_started_sink=call_started_sink)
+                # docs/live-api/05 14·15절: one rewrite of the held texts only (the Planner engine has no
+                # tools), then the same review.
+                def stays_plan(revised):
+                    try:
+                        return validate_planner_decision(revised.data, scenario).kind == "PLAN"
+                    except Exception:
+                        return False
+                result = await review_with_revision(
+                    lambda candidate: self._semantic_reviewer.check(context=context, execution=execution,
+                        candidate=candidate.data, role=AgentRole.PLANNER, result=candidate, telemetry=telemetry,
+                        usage_sink=usage_sink, call_started_sink=call_started_sink),
+                    lambda model_input, output: run_model(model_input, output), stays_plan, task_input, result,
+                    allowed=bool(execution.budget.limits.max_output_corrections),
+                        basis=revision_basis(execution, AgentRole.PLANNER))
+                decision = validate_planner_decision(result.data, scenario)
             execution.budget.check()
         except asyncio.CancelledError:
             # SDK worker termination precedes its cancel()/shutdown store update.
@@ -302,13 +331,15 @@ class PlannerAgentExecutor(AgentExecutor):
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else
                      TaskState.TASK_STATE_FAILED)
-            await self._status(updater, metadata, state, error.code.value)
+            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation())
             return
         except SemanticReviewRequired as held:
             await publish_semantic_hold(updater, metadata, held)
             return
-        except PlannerContractError:
-            await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, "PLANNER_OUTPUT_INVALID")
+        except PlannerContractError as error:
+            recorded = telemetry.planner_validation(error.validation) if telemetry is not None else False
+            await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, "PLANNER_OUTPUT_INVALID",
+                planner_validation={**error.validation.public(), "traceRecorded": recorded})
             return
         except Exception:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, "PLANNER_EXECUTION_FAILED")

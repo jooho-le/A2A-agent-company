@@ -91,9 +91,15 @@ def plan(key, data):
         add('db_error', 'injected', kind=PRE)
         cases = ['success', 'invalid_email', 'short_password', 'duplicate']
         cases += ['malformed_' + kind for kind in data['malformed']] + ['db_error']
+        for case in cases:
+            # 0.7.3: 받은 응답의 상태 코드(노출 경로 안내용 준비 조건, 합격 기준 아님)
+            add(case, 'response_status', [100, 599], 'range', PRE)
         for case in cases + ['application_logs']:
             add(case, 'password_exposed', False)
             add(case, 'hash_exposed', False)
+        # 0.7.3: 위 로그 노출 중 처리하지 못한 예외의 traceback에도 있는 것(로그 노출의 일부라 FAIL 조건이 늘지 않음)
+        add('application_logs', 'password_in_crash', False)
+        add('application_logs', 'hash_in_crash', False)
     else:
         raise ValueError('DETAIL_CHECK_UNKNOWN')
     return rows

@@ -23,7 +23,10 @@
     "toolTimeoutSeconds": 120,
     "runtimeBudgetMs": 3600000,
     "maxFixAttempts": 3,
-    "maxToolRetries": 2
+    "maxToolRetries": 2,
+    "outputCorrections": 2,
+    "questionReminders": 1,
+    "providerRetries": 1
   },
   "plannedRuns": {
     "SINGLE_AGENT": 1,
@@ -34,10 +37,13 @@
   "warmupState": "FRESH_WORKSPACE_COLD_START",
   "hardwareProfile": "MacBookPro18,1-Apple-M1-Pro-10cpu-16gib/docker-29.1.3-linux/aarch64-10cpu-7.7gib/darwin",
   "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "requestTextSha256": "5ee84acfbeb0259dd4f773cc3b7bd751f5c71270aa6d7953282a18d8cb921f94",
+  "requireCostMeasurement": true,
+  "requireTotalTokenLimit": true,
   "hostConfigurations": {
     "SINGLE_AGENT": {
       "api": "http://127.0.0.1:8010",
-      "runtime": "../../configs/single-runtime.local.json",
+      "runtime": "../../configs/experiment/single-runtime.local.json",
       "tools": "../../configs/experiment/ver1/owned-tools.local.json",
       "source": "../../configs/owned-source.local.json",
       "protectedCases": "../../configs/experiment/ver1/owned-protected-cases.local.json",
@@ -45,7 +51,7 @@
     },
     "MULTI_AGENT": {
       "api": "http://127.0.0.1:8000",
-      "runtime": "../../configs/owned-runtime.local.json",
+      "runtime": "../../configs/experiment/owned-runtime.local.json",
       "tools": "../../configs/experiment/ver1/owned-tools.local.json",
       "source": "../../configs/owned-source.local.json",
       "protectedCases": "../../configs/experiment/ver1/owned-protected-cases.local.json",

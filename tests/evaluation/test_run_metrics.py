@@ -70,6 +70,7 @@ def bundle(run_id=None, *, verdict='SUCCESS', status='FINISHED', fixes=1, cost='
     events += [event(run_id, 'VERDICT_CREATED', 30), event(run_id, 'RUN_FINISHED', 31)]
     return {
         'run': {'runId': run_id, 'scenarioId': uid(5), 'workspaceId': uid(6), 'status': status, 'verdict': verdict,
+                'requestTextSha256': '5ee84acfbeb0259dd4f773cc3b7bd751f5c71270aa6d7953282a18d8cb921f94',
                 'codeVersion': 1 + fixes, 'fixAttempt': fixes, 'terminationReason': None,
                 'createdAt': '2026-10-14T10:00:00+09:00', 'updatedAt': '2026-10-14T10:00:31+09:00'},
         'events': events, 'eventsTotal': len(events),
@@ -300,8 +301,9 @@ def test_summary_rejects_evaluation_of_unknown_run_or_other_architecture():
 def entries(**single_override):
     """비교 시험용 입력: Multi Run 1개와 Single Run 1개. single_override로 Single의 설정만 다르게 만들 수 있다."""
     return [
-        {'architecture': 'MULTI_AGENT', 'configuration': configuration(uid(1)), 'evaluation': evaluation_report(uid(1))},
-        {'architecture': 'SINGLE_AGENT',
+        {'architecture': 'MULTI_AGENT', 'configuration': configuration(uid(1)), 'evaluation': evaluation_report(uid(1)),
+         'requestTextSha256': 'a' * 64},
+        {'architecture': 'SINGLE_AGENT', 'requestTextSha256': 'a' * 64,
          'configuration': configuration(uid(2), 'SINGLE_AGENT', **single_override),
          'evaluation': evaluation_report(uid(2), 'SINGLE_AGENT')},
     ]
@@ -825,7 +827,7 @@ def test_work_observed_again_after_interrupt_reopens_the_step():
 def policy_entry(run_id, policy, pair, *, suite='f' * 64, **override):
     """Ver1·Ver2 비교 입력 한 개. Ver1은 보호 테스트 참조가 있고 Ver2는 없다(override로 일부 설정만 바꿀 수 있다)."""
     settings = {'protectedTestSuiteRef': 'suite-1' if policy == 'IN_LOOP_AND_FINAL' else None, **override}
-    return {'architecture': 'MULTI_AGENT', 'loopPolicy': policy, 'pairId': pair,
+    return {'architecture': 'MULTI_AGENT', 'loopPolicy': policy, 'pairId': pair, 'requestTextSha256': 'a' * 64,
             'configuration': configuration(run_id, **settings), 'evaluation': evaluation_report(run_id, suite=suite)}
 
 
@@ -1147,5 +1149,6 @@ def test_time_to_the_common_quality_standard_counts_only_final_pass():
     summary = experiment_summary(runs, {'MULTI_AGENT': 3}, reports)['MULTI_AGENT']
     assert summary['successVerdictMs']['n'] == 2
     evaluation = summary['evaluation']
-    assert evaluation['qualifiedRuns'] == 1 and evaluation['qualifiedRate'] == 1 / 3
+    assert evaluation['qualifiedRuns'] == 1 and evaluation['qualifiedRate'] is None
+    assert evaluation['qualifiedRateLowerBound'] == 1 / 3
     assert evaluation['qualifiedVerdictMs'] == {'n': 1, 'median': 30000, 'min': 30000, 'max': 30000}

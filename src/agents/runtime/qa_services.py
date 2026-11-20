@@ -5,7 +5,7 @@ and the exact frozen Source. Missing receipts never become test results.
 """
 
 import asyncio
-from functools import partial
+import json
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -22,9 +22,15 @@ from agents.roles.qa_contract import QACaseBinding, QADecision, validate_qa_deci
 from agents.runtime.qa_test_store import QATestInputStore, _plain
 from agents.runtime.qa_context import validation_cycle, verify_report_predecessor
 from agents.runtime.requirement_scope import validate_generated_case_expectations
+from agents.runtime.test_fix import TestFixRequired, technical_reasons
+from agents.runtime.generated_revalidation import run_previous_scopes
+from mcp_tools.tools.generated_recheck import completed_count as completed_generated_rechecks
+from agents.runtime.protected_scopes import (
+    claim_protected_scope, commit_protected_scope, completed_protected_scopes, load_protected_receipt,
+)
 from agents.runtime.evaluation_policy_store import EvaluationPolicyStore, qa_policy_sha256
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration, open_mcp_client
-from mcp_tools.execution_runtime import TrackedMCPExecutor
+from mcp_tools.execution_runtime import TrackedMCPError, TrackedMCPExecutor
 from mcp_tools.execution_store import ToolExecutionStore
 from mcp_tools.runtime import MCPExecutionContext
 from mcp_tools.tools.browser import BrowserTestTools
@@ -34,11 +40,12 @@ from mcp_tools.tools.snapshots import SnapshotReader
 from mcp_tools.tools.unit import UnitTestTools
 from mcp_tools.tools.unit_store import UnitTestOutputStore
 from orchestrator.artifacts.service import ArtifactStore
+from orchestrator.domain import test_not_run
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
 from orchestrator.domain.states import AgentRole, A2ATaskState, WorkflowStatus, WorkflowStepStatus
 from orchestrator.domain.tool_evidence import ToolExecutionOutcome
 from orchestrator.domain.validation_artifacts import QAReportArtifact, QATestResult, ValidationOutcome
-from orchestrator.domain.validation_feedback import case_feedback
+from orchestrator.domain.validation_feedback import case_feedback, measured_test_version
 from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
 from orchestrator.sandbox.runtime import SandboxRuntime
 from orchestrator.workspaces.registry import WorkspaceRegistry
@@ -48,7 +55,7 @@ class QAServicesError(ValueError):
     def __init__(self, code="QA_SERVICES_INVALID"):
         self.code = code if code in {
             "QA_SERVICES_INVALID", "QA_TEST_INPUT_INVALID", "QA_TEST_EVIDENCE_INVALID",
-            "QA_REPORT_BINDING_INVALID", "QA_ARTIFACT_INVALID",
+            "QA_REPORT_BINDING_INVALID", "QA_ARTIFACT_INVALID", "QA_TEST_FIX_INVALID",
         } else "QA_SERVICES_INVALID"
         super().__init__(self.code)
 
@@ -72,11 +79,33 @@ def _case_json(case):
             "requirementId": str(case.requirement_id), "title": case.title, "expectedResult": case.expected_result}
 
 
+def _unobserved_concurrency(contract, cases, results, selectors):
+    """Evaluate generated cases independently of protected siblings and their syntax."""
+    if contract.get('scenarioKey') != 'SCN-001':
+        return set()
+    requirements = {r['requirementId'] for r in contract['requirements'] if r['key'] == 'REQ-003'}
+    passed = set()
+    for case in cases:
+        if str(case.requirement_id) not in requirements or case.selector not in selectors.get(case.tool_name, ()):
+            continue
+        key = (case.tool_name, case.selector)
+        if key not in results:
+            continue
+        observed = next((r for r in results[key][0].report.tests if r.test_id == case.test_id), None)
+        if observed is None or observed.outcome != 'PASS':
+            continue
+        facts = json.loads(getattr(observed, 'signup_checks_json', None) or '{}')
+        if 'concurrentCanonicalSignup' in facts:
+            return set()
+        passed.add((*key, case.test_id))
+    return passed
+
+
 class QARuntimeServices:
     """Explicit one-Run capability; construction performs no I/O.
 
     Protected selector bindings are trusted Host policy. They are never shown
-    as model-selectable scopes and are always executed after a READY draft.
+    as model-selectable scopes. The Host journals their receipts before the draft.
     client_factory is a trusted transport seam, not a model callback.
     """
 
@@ -145,6 +174,38 @@ class QARuntimeServices:
     @property
     def selectors(self):
         return dict(self._selectors)
+
+    def refresh_output(self, output):
+        from agents.runtime.qa_catalog import refresh_qa_output
+        binding = self.configuration.binding
+        workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.QA)
+        unit = self.configuration.unit_test_configuration
+        scopes = [(s.name, s.pattern) for s in (() if unit is None else unit.scopes) if s.kind == 'QA_TESTS']
+        return refresh_qa_output(output, Path(workspace.record.root_path) / 'outputs' / 'qa' / 'tests',
+            scopes, snapshot_sha256=self.configuration.frozen_source.snapshot_sha256,
+            unit_only=set(self.selectors) == {'run_unit_tests'})
+
+    def generated_test_issues(self, data):
+        """Read-only pre-READY check of the files ``finalize`` will collect (handoff P5, points 4·6).
+
+        Names a missing generated test file or a test the runner would report but
+        the draft did not declare; never imports or runs the files.
+        """
+        from agents.runtime.generated_tests_precheck import inspect_generated_tests
+        binding = self.configuration.binding
+        workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.QA)
+        unit = self.configuration.unit_test_configuration
+        patterns = {scope.name: scope.pattern for scope in (() if unit is None else unit.scopes)
+                    if getattr(scope, "kind", None) == "QA_TESTS"}
+        scopes = [(name, patterns[name]) for name in self._selectors.get("run_unit_tests", ()) if name in patterns]
+        rows = [row for row in (data.get("cases") or []) if isinstance(row, dict)
+                and row.get("toolName") == "run_unit_tests"] if isinstance(data, dict) else []
+        source = Path(workspace.record.root_path) / "source"
+        from orchestrator.domain import SCN_001_ID
+        run = self._repository.get_run(binding.run_id)
+        return inspect_generated_tests(Path(workspace.record.root_path) / "outputs" / "qa" / "tests",
+                                       scopes, rows, "cases", source_root=source if source.is_dir() else None,
+                                       host_app_fixture=run is not None and run.scenario_id == SCN_001_ID)
 
     async def prepare(self, execution):
         execution.budget.check()
@@ -254,14 +315,40 @@ class QARuntimeServices:
             captured=captured, inputs=inventory)
         return capture, profile, policy, host
 
-    async def finalize(self, execution, decision, tracked, *, task_id, context_id):
+    def test_fix_available(self, execution) -> bool:
+        """An early protected measurement does not consume the generated-test repair."""
+        step = execution.metadata.workflow_step_id
+        calls = self._tools.count_step_executions(self.configuration.binding, step, ("run_unit_tests", "run_browser_tests"))
+        protected = completed_protected_scopes(self._repository, run_id=execution.metadata.run_id,
+                                              workflow_step_id=step, source_artifact_id=execution.source.artifact_id)
+        return calls == len(protected) + completed_generated_rechecks(self._repository, step)
+
+    async def run_protected(self, execution, tracked):
+        """Measure Host-approved scopes once before any generated draft, without exposing results to the model."""
+        scopes = tuple((tool, name) for tool, names in self._protected.items() for name in names)
+        if scopes:
+            self._check_tracked(tracked, execution)
+            await self._measure_scopes(execution, tracked, scopes)
+
+        async def measure(selector):
+            self._check_tracked(tracked, execution)
+            key = ('run_unit_tests', selector)
+            results, _not_run = await self._measure_scopes(execution, tracked, (key,))
+            return results.get(key)
+
+        await run_previous_scopes(self, execution, tracked, self._selectors.get('run_unit_tests', ()), measure)
+
+    def _check_tracked(self, tracked, execution):
+        if (type(tracked) is not TrackedMCPExecutor or tracked._client.configuration != self.configuration
+                or tracked._store._repository is not self._repository
+                or tracked._step_id != execution.metadata.workflow_step_id):
+            raise QAServicesError("QA_REPORT_BINDING_INVALID")
+
+    async def finalize(self, execution, decision, tracked, *, task_id, context_id, test_fix_available=False):
         execution.budget.check()
         try:
-            if (type(decision) is not QADecision or decision.kind != "READY"
-                    or type(tracked) is not TrackedMCPExecutor
-                    or tracked._client.configuration != self.configuration
-                    or tracked._store._repository is not self._repository
-                    or tracked._step_id != execution.metadata.workflow_step_id):
+            self._check_tracked(tracked, execution)
+            if type(decision) is not QADecision or decision.kind != "READY":
                 raise ValueError
             # The public constructor alone does not establish coverage or
             # authorize a selector: repeat the closed local Draft validation.
@@ -277,13 +364,41 @@ class QARuntimeServices:
             if not pairs <= wanted | {(tool, selector) for tool, names in self._protected.items() for selector in names}:
                 raise ValueError
             ordered = tuple((tool, selector) for tool in ("run_unit_tests", "run_browser_tests")
-                for selector in (*self._selectors.get(tool, ()), *self._protected.get(tool, ())))
+                for selector in (*self._protected.get(tool, ()), *self._selectors.get(tool, ())))
         except Exception:
             raise QAServicesError("QA_REPORT_BINDING_INVALID") from None
-        measured_results = {}
+        measured_results, not_run = await self._measure_scopes(execution, tracked, ordered)
+        execution.budget.check()
+        incomplete = _unobserved_concurrency(execution.configuration.scenario_contract, cases,
+                                              measured_results, self._selectors)
+        if test_fix_available:
+            # Generated tests that could not run get one in-step fix before any report exists.
+            generated = [(tool, selector) for tool, selector in ordered if selector in self._selectors.get(tool, ())]
+            reasons = technical_reasons([key for key in not_run if key in generated], [
+                actual for key in generated if key in measured_results for actual in measured_results[key][0].report.tests])
+            # Bound browser-only cases cannot use the unit runner observation during a same-case rewrite.
+            if any(tool == 'run_unit_tests' for tool, _selector, _test in incomplete):
+                reasons.add('CONCURRENT_SIGNUPS_NOT_OBSERVED')
+            if reasons:
+                raise TestFixRequired(reasons, [selector for _tool, selector in generated])
+        return await _run_file_operation(self._assemble, execution, cases, measured_results, task_id, context_id,
+                                         not_run, incomplete)
+
+    async def _measure_scopes(self, execution, tracked, ordered):
+        measured_results, not_run = {}, {}
         for tool, selector in ordered:
             execution.budget.check()
             try:
+                protected = selector in self._protected.get(tool, ())
+                if protected:
+                    await _run_file_operation(self._verify, execution)
+                    saved = await _run_file_operation(claim_protected_scope, self._repository,
+                        self.configuration.binding, execution.metadata.workflow_step_id, execution.source.artifact_id,
+                        tool, selector)
+                    if saved is not None:
+                        measured_results[(tool, selector)] = await _run_file_operation(load_protected_receipt,
+                            self._repository, self.configuration.binding, execution, saved)
+                        continue
                 capture, profile, policy, host = await _run_file_operation(self._capture, execution, tool, selector)
             except asyncio.CancelledError:
                 raise
@@ -294,8 +409,22 @@ class QARuntimeServices:
                          "snapshotId": str(execution.source.artifact_id),
                          "testScope" if tool == "run_unit_tests" else "testSuite": selector}
             tool_sequence, timeout = execution.budget.reserve_tracked_tool_call()
-            measured = await asyncio.wait_for(tracked.invoke(tool, arguments,
-                deadline_monotonic=execution.budget.deadline_monotonic), timeout)
+            try:
+                measured = await asyncio.wait_for(tracked.invoke(tool, arguments,
+                    deadline_monotonic=execution.budget.deadline_monotonic), timeout)
+            except TrackedMCPError as error:
+                # docs/live-api/05 3절: a generated scope whose runner could not
+                # run leaves its declared cases not-run with the Host's attempt
+                # evidence; independent scopes go on. A protected scope, any other
+                # failure class, or evidence that does not reconcile still stops.
+                if (selector in self._protected.get(tool, ()) or error.error_kind != "TEST_RUNNER_ERROR"
+                        or error.logical_call_id is None):
+                    raise
+                execution.budget.account_tool_call(tool_sequence)
+                execution.budget.check()
+                not_run[(tool, selector)] = await _run_file_operation(
+                    self._not_run_evidence, execution, tool, selector, error.logical_call_id)
+                continue
             execution.budget.account_tool_call(tool_sequence)
             execution.budget.check()
             try:
@@ -325,42 +454,85 @@ class QARuntimeServices:
                                                             or _plain(receipt.host_configuration) != host))):
                     raise ValueError
                 await _run_file_operation(self._inputs.bind_receipt, self.configuration.binding, capture.capture_id, receipt)
+                if protected:
+                    await _run_file_operation(commit_protected_scope, self._repository,
+                        execution.metadata.workflow_step_id, selector, record, receipt)
                 measured_results[(tool, selector)] = (receipt, evidence)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 raise QAServicesError("QA_TEST_EVIDENCE_INVALID") from None
-        execution.budget.check()
-        return await _run_file_operation(self._assemble, execution, cases, measured_results, task_id, context_id)
+        return measured_results, not_run
 
-    def _assemble(self, execution, cases, measured, task_id, context_id):
+    def _not_run_evidence(self, execution, tool, selector, logical_call_id):
+        """Host evidence that a generated scope was attempted and could not run."""
+        try:
+            record = self._tools.get(self.configuration.binding, logical_call_id)
+            evidence = record.to_tool_evidence()
+            if (record.workflow_step_id != execution.metadata.workflow_step_id
+                    or record.role is not AgentRole.QA or record.tool_name != tool
+                    or record.source_artifact_id != execution.source.artifact_id
+                    or record.execution_manifest != execution.source.execution_manifest()
+                    or record.selector_sha256 != sha256(selector.encode()).hexdigest()
+                    or evidence.outcome is ToolExecutionOutcome.PASS):
+                raise ValueError
+            return evidence
+        except Exception:
+            raise QAServicesError("QA_TEST_EVIDENCE_INVALID") from None
+
+    def _assemble(self, execution, cases, measured, task_id, context_id, not_run=None, incomplete=()):
+        not_run = not_run or {}
         results, consumed = [], set()
         for (tool, selector), (receipt, _evidence) in measured.items():
             bound = {case.test_id: case for case in cases if case.tool_name == tool and case.selector == selector}
             for actual in receipt.report.tests:
-                if actual.test_id not in bound:
+                if actual.test_id not in bound and not test_not_run.is_fixture_row(actual.test_id):
                     # Never guess a Requirement from names or discard a
                     # failing, skipped, or passing unbound execution case.
                     raise QAServicesError("QA_REPORT_BINDING_INVALID")
         try:
             for binding in cases:
-                receipt, evidence = measured[(binding.tool_name, binding.selector)]
-                actual = next((case for case in receipt.report.tests if case.test_id == binding.test_id), None)
                 key = (binding.tool_name, binding.selector, binding.test_id)
                 if key in consumed:
                     raise ValueError
                 consumed.add(key)
-                code = "PLANNED_CASE_NOT_REPORTED" if actual is None else "RUNNER_REPORTED_SKIP" if actual.outcome == "SKIP" else "MEASURED_" + actual.outcome
+                if (binding.tool_name, binding.selector) in not_run:
+                    # Declared but its scope could not run: kept, not PASS, with attempt evidence.
+                    evidence = not_run[(binding.tool_name, binding.selector)]
+                    results.append(QATestResult(
+                        test_id=f"{binding.tool_name}:{binding.selector}:{binding.test_id}",
+                        requirement_id=binding.requirement_id, outcome=ValidationOutcome.UNVERIFIED,
+                        title=binding.title, expected_result=binding.expected_result,
+                        actual_result=test_not_run.SCOPE_FAILED,
+                        details=json_text({'code': test_not_run.SCOPE_FAILED, 'evidenceRefs': [evidence.evidence_ref]}),
+                        normalized_location=binding.test_id, tool_evidence=evidence, execution_evidence=(evidence,)))
+                    continue
+                receipt, evidence = measured[(binding.tool_name, binding.selector)]
+                actual = next((case for case in receipt.report.tests if case.test_id == binding.test_id), None)
+                reason = test_not_run.runner_reason(actual)
+                code = ("PLANNED_CASE_NOT_REPORTED" if actual is None else reason if reason is not None
+                        else "RUNNER_REPORTED_SKIP" if actual.outcome == "SKIP" else "MEASURED_" + actual.outcome)
                 verified = actual is not None and actual.outcome in {"PASS", "FAIL"}
                 outcome = ValidationOutcome(actual.outcome) if verified else ValidationOutcome.UNVERIFIED
+                facts = json.loads(getattr(actual, 'signup_checks_json', None) or '{}')
+                if facts.get('concurrentCanonicalSignup') is False:
+                    verified, outcome, code = True, ValidationOutcome.FAIL, 'MEASURED_CONCURRENT_SIGNUP_FAILURE'
                 detail = code
                 if actual is not None and hasattr(actual, 'observations_json'):
-                    detail = json_text({'code': code, 'evidenceRefs': [evidence.evidence_ref], **case_feedback(actual)})
+                    detail = json_text({'code': code, 'evidenceRefs': [evidence.evidence_ref],
+                                        **measured_test_version(receipt), **case_feedback(actual)})
+                if key in incomplete:
+                    verified, outcome, code = False, ValidationOutcome.UNVERIFIED, 'CONCURRENT_SIGNUPS_NOT_OBSERVED'
+                    detail = json_text({'code': code, 'runnerOutcome': actual.outcome,
+                                        'sourceAssertionScope': 'CONCURRENT_SIGNUPS_NOT_OBSERVED',
+                                        'evidenceRefs': [evidence.evidence_ref], **measured_test_version(receipt)})
                 results.append(QATestResult(
                     test_id=f"{binding.tool_name}:{binding.selector}:{binding.test_id}",
                     requirement_id=binding.requirement_id, outcome=outcome, title=binding.title,
                     expected_result=binding.expected_result, actual_result=code, details=detail,
-                    normalized_location=binding.test_id, tool_evidence=evidence if verified else None))
+                    normalized_location=binding.test_id,
+                    tool_evidence=evidence if verified or reason in test_not_run.TECHNICAL else None,
+                    execution_evidence=(evidence,)))
             if not results or {result.requirement_id for result in results} != set(execution.metadata.requirement_ids):
                 raise ValueError
             self._verify(execution)

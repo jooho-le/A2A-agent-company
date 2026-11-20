@@ -98,6 +98,36 @@ class SecurityRunnerTests(unittest.TestCase):
         self.manager_type.assert_not_called()
         self.assertNotIn("bandit.core.manager", sys.modules)
 
+    def test_optional_formatters_are_not_loaded_and_detectors_use_original_loader(self):
+        original = Mock(return_value='detectors')
+        module = SimpleNamespace(ExtensionManager=original)
+        with security_runner._without_formatters(module):
+            formatters = module.ExtensionManager(namespace='bandit.formatters')
+            self.assertEqual(list(formatters), [])
+            self.assertEqual(formatters.names(), [])
+            original.assert_not_called()
+            self.assertEqual(module.ExtensionManager(namespace='bandit.plugins'), 'detectors')
+            self.assertEqual(module.ExtensionManager('bandit.blacklists'), 'detectors')
+        self.assertIs(module.ExtensionManager, original)
+        self.assertEqual(original.call_count, 2)
+
+    def test_formatter_guard_restores_original_loader_after_exception(self):
+        original = Mock(side_effect=ImportError('fixture detector unavailable'))
+        module = SimpleNamespace(ExtensionManager=original)
+        with self.assertRaises(ImportError):
+            with security_runner._without_formatters(module):
+                module.ExtensionManager(namespace='bandit.plugins')
+        self.assertIs(module.ExtensionManager, original)
+
+    def test_selected_detector_missing_still_rejects_after_loader_error(self):
+        def loader():
+            logging.getLogger('stevedore.extension').error('fixture selected detector unavailable')
+            self.registry.plugins_by_id.pop('B102')
+            return self.configuration, self.manager_type, self.registry
+        with self.assertLogs('stevedore.extension', level='ERROR'):
+            self.error(self.scan(bandit_loader=loader))
+        self.manager_type.assert_not_called()
+
     def test_zero_findings_is_receipt_not_pass_verdict(self):
         data, code = self.scan()
         report = parse_security_report(json.dumps(data), code)

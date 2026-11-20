@@ -130,6 +130,7 @@ class MCPDispatcherTests(unittest.IsolatedAsyncioTestCase):
         values = {
             "read_project_file": self.arguments(),
             "write_source_file": self.arguments(content="# source\n"),
+            "edit_source_file": self.arguments(oldText="# source", newText="# updated", expectedSha256="a" * 64),
             "write_test_file": self.arguments(path="outputs/qa/test_signup.py", content="# test\n"),
             "apply_patch": {"workspaceId": str(self.run.workspace_id), "patch": "--- a/app.py\n+++ b/app.py\n", "baseSnapshotSha256": "a" * 64},
             "run_build": {"workspaceId": str(self.run.workspace_id), "snapshotId": str(uuid4())},

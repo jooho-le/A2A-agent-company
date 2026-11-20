@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import signal
 import stat
 import sys
 import tempfile
@@ -47,9 +48,14 @@ elif mode == "sleep":
 elif mode == "descendant-pipe":
     # The original CLI exits, but its child retains stdout/stderr handles.
     # Process-only termination would not close these pipes.
+    leader = os.getpid()
     child = os.fork()
     if child == 0:
-        time.sleep(30)
+        while os.getppid() == leader:
+            time.sleep(.001)
+        os.write(1, b"descendant-ready\n")
+        time.sleep(5)
+        Path(args[1]).touch()  # A surviving child closed the pipes by exiting normally.
         os._exit(0)
     os._exit(0)
 else:
@@ -222,11 +228,59 @@ class DockerCLITests(unittest.IsolatedAsyncioTestCase):
             os.kill(processes[0].pid, 0)
 
     async def test_descendant_open_pipe_is_killed_on_timeout(self):
-        started = time.monotonic()
-        with self.assertRaises(SandboxError) as caught:
-            await self.run_cli(("descendant-pipe",), timeout=0.08)
-        self.assertEqual(caught.exception.code, SandboxErrorCode.TIMEOUT)
-        self.assertLess(time.monotonic() - started, 2.0)
+        await self.assert_descendant_cleanup(ignore_signals=0, expected=SandboxErrorCode.TIMEOUT)
+
+    async def test_descendant_surviving_first_signal_is_killed_during_cleanup(self):
+        await self.assert_descendant_cleanup(ignore_signals=1, expected=SandboxErrorCode.TIMEOUT)
+
+    async def test_unclosed_descendant_pipe_exhausts_cleanup_and_reports_failure(self):
+        await self.assert_descendant_cleanup(ignore_signals=2, expected=SandboxErrorCode.CLEANUP)
+
+    async def assert_descendant_cleanup(self, *, ignore_signals, expected):
+        natural_exit = Path(self.temporary.name) / "descendant-exited-normally"
+        spawn = asyncio.create_subprocess_exec
+        observed = []
+        signal_group = os.killpg
+        signals = []
+
+        def deliver(pgid, sig):
+            signals.append((pgid, sig))
+            if len(signals) > ignore_signals:
+                signal_group(pgid, sig)
+
+        async def wait_for_descendant(*args, **kwargs):
+            process = await spawn(*args, **kwargs)
+            observed.append((process, await process.stdout.readline()))
+            return process
+
+        # Even when the deadline expires during startup, cleanup acquires the
+        # handle only after the leader exited and its child owns the open pipes.
+        try:
+            with (
+                patch("orchestrator.sandbox.docker_cli.asyncio.create_subprocess_exec", wait_for_descendant),
+                patch("orchestrator.sandbox.docker_cli.os.killpg", deliver),
+                self.assertRaises(SandboxError) as caught,
+            ):
+                await self.run_cli(("descendant-pipe", str(natural_exit)), timeout=0.08)
+            self.assertEqual(caught.exception.code, expected)
+            [(process, ready)] = observed
+            self.assertEqual(ready, b"descendant-ready\n")
+            self.assertEqual(process.returncode, 0)
+            self.assertIn(len(signals), (1, 2) if ignore_signals == 0 else (2,))
+            self.assertEqual(set(signals), {(process.pid, signal.SIGKILL)})
+            self.assertTrue(process.stdout.at_eof() and process.stderr.at_eof())
+            self.assertFalse(natural_exit.exists())
+        finally:
+            # In the deliberate failure case the live fixture is still ours.
+            if observed and len(signals) <= ignore_signals and not natural_exit.exists():
+                signal_group(observed[0][0].pid, signal.SIGKILL)
+
+    def test_reaped_leader_with_reused_pid_is_not_signalled(self):
+        from orchestrator.sandbox.docker_cli import _kill_group
+        from types import SimpleNamespace
+        with patch('os.getpgid', return_value=100), patch('os.killpg') as send:
+            self.assertFalse(_kill_group(SimpleNamespace(pid=100, returncode=0)))
+        send.assert_not_called()
 
     async def test_cancellation_waits_for_kill_and_reap(self):
         processes = []

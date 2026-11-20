@@ -1,4 +1,5 @@
 import asyncio
+from hashlib import sha256
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -125,6 +126,10 @@ class RunsAPITests(unittest.TestCase):
 
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(status_response.json()["scenarioId"], created["run"]["scenarioId"])
+        request_digest = sha256(b"Add tests").hexdigest()
+        self.assertEqual(created["run"]["requestTextSha256"], request_digest)
+        self.assertEqual(status_response.json()["requestTextSha256"], request_digest)
+        self.assertNotIn("requestText", status_response.json())
         self.assertEqual(steps_response.json()["steps"][0]["workflowStepId"], created["firstStep"]["workflowStepId"])
         self.assertEqual(events_response.json()["total"], 3)
         self.assertEqual(events_response.json()["events"][0]["eventType"], "WORKFLOW_STEP_CREATED")

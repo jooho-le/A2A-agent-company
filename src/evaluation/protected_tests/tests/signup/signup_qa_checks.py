@@ -2,12 +2,38 @@
 # 서로 다른 입력·순서로 부른다. 잘못된 입력은 4xx로 거부해야 하고, 5xx는 처리하지 못한 서버 오류로 본다.
 # 거부된 요청은 사용자 표를 바꾸지 않아야 한다(새 계정도, 기존 계정의 값 변경도 없음). 행 비교는 assertTrue로 해서
 # 실패 메시지에 저장값(해시)이 실리지 않게 한다.
+import threading
+
 import signup_link as link
+
+
+def read_user_rows(service):
+    # 사용자 표의 모든 행·모든 칸 값(정렬). 거부된 요청이 기존 계정을 바꾸지 않았는지 비교하는 데 쓴다.
+    from sqlalchemy import inspect as sa_inspect
+    if not service._has_user_table():
+        return []
+    try:
+        mapper = sa_inspect(service.User)
+        with service.Session() as db:
+            found = [tuple(repr(getattr(row, attribute.key)) for attribute in mapper.column_attrs)
+                     for row in db.query(service.User).all()]
+    except Exception:
+        raise link.Unverified("TEST_DATABASE_READ_FAILED") from None
+    return sorted(found)
+
+
+def observe_status(test, case, measurement, *, required=True):
+    def observed():
+        code, origin = measurement() if callable(measurement) else measurement
+        if 500 <= code <= 599:
+            test.detail_recorder.index[case, 'http_status']['statusOrigin'] = origin
+        return code
+    return test.observe(case, 'http_status', observed, required=required)
 
 
 def _signup_first(test, service):
     # 정상 가입이 먼저 되어야 거부 검사가 의미 있다(모든 요청을 거부하는 서비스가 거저 통과하지 않게).
-    if not test.observe('precondition', 'http_status', lambda: service.signup(link.new_email(), link.new_password()), required=False):
+    if not observe_status(test, 'precondition', lambda: service.measured_signup(link.new_email(), link.new_password()), required=False):
         raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
 
 
@@ -21,77 +47,88 @@ def valid_signup(test, data):
             case = f'valid_email_{index + 1}'
             with test.case(email_case=index):
                 email, before = link.new_email(template), service.count()
-                status = service.signup(email, link.new_password(data["length"]))
-                test.observe(case, 'http_status', status)
-                if service.count_canonical(email) == 0 and not service.used_database:
+                status = service.measured_signup(email, link.new_password(data["length"]))
+                # 0.7.1: observe는 응답이 기대 범위(2xx)일 때 True다. 성공 응답일 때만 DB 사용 여부를 본다
+                # (처리하지 못한 예외의 500은 send가 used_database를 남기지 않고, http_status가 이미 FAIL이다).
+                if observe_status(test, case, status) and service.count_canonical(email) == 0 \
+                        and not service.used_database:
                     raise link.Unverified("DATABASE_URL_NOT_USED")
                 test.observe(case, 'user_delta', lambda: service.count() - before)
                 test.observe(case, 'account_count', lambda: service.count_canonical(email))
     test.check(body)
 
 
+def _check_rejection(test, service, case, email, password, *, check_count=True):
+    rows = read_user_rows(service)
+    before = service.count() if check_count else None
+    observe_status(test, case, service.measured_signup(email, password))
+    if check_count:
+        test.observe(case, 'user_delta', lambda: service.count() - before)
+    test.observe(case, 'rows_unchanged', lambda: read_user_rows(service) == rows)
+
+
 def invalid_email(test, data):
     test.prepare("QA-SIGNUP-002", data)
-    # QA-SIGNUP-002: 형식 오류 이메일 → 4xx 거부, 사용자 생성 없음
     def body(service):
         _signup_first(test, service)
         for index, email in enumerate(data["invalid"]):
-            case = f'invalid_email_{index + 1}'
             with test.case(email_case=index):
-                before, rows = service.count(), service.rows()
-                status = service.signup(email, link.new_password())
-                test.observe(case, 'http_status', status)
-                test.observe(case, 'user_delta', lambda: service.count() - before)
-                test.observe(case, 'rows_unchanged', lambda: service.rows() == rows)
+                _check_rejection(test, service, f'invalid_email_{index + 1}', email, link.new_password())
     test.check(body)
 
 
 def duplicate_email(test, data):
     test.prepare("QA-SIGNUP-003", data)
-    # QA-SIGNUP-003: 대소문자·공백만 다른 이메일 재가입 → 4xx 거부, 사용자 1명 유지, 기존 계정(비밀번호 해시 등) 그대로
     def body(service):
         email = link.new_email(data["template"])
-        if not test.observe('precondition', 'http_status', lambda: service.signup(email, link.new_password()), required=False):
+        if not observe_status(test, 'precondition', lambda: service.measured_signup(email, link.new_password()), required=False):
             raise link.Unverified("PRECONDITION_SIGNUP_FAILED")
         for form in data["forms"]:
-            case = "variant_" + form
             with test.case(variant=form):
-                rows = service.rows()
-                status = service.signup(link.variant(email, form), link.new_password())
-                test.observe(case, 'http_status', status)
-                test.observe(case, 'rows_unchanged', lambda: service.rows() == rows)
+                _check_rejection(test, service, 'variant_' + form, link.variant(email, form), link.new_password(), check_count=False)
         test.observe('final', 'account_count', lambda: service.count_canonical(email))
     test.check(body)
 
 
 def password_length(test, data):
     test.prepare("QA-SIGNUP-004", data)
-    # QA-SIGNUP-004: 7자 이하는 거부, 8자 이상은 가입. 계약은 길이만 정하므로 문자 구성(소문자만·숫자만)이 달라도
-    # 8자 이상이면 가입돼야 한다(kinds: (구성, 길이) 목록, 승인되지 않은 복잡성 조건을 찾음).
     def body(service):
-        for length in data["reject"]:
-            case = f"reject_length_{length}"
+        for length in data['reject']:
             with test.case(length=length):
-                before, rows = service.count(), service.rows()
-                status = service.signup(link.new_email(), link.new_password(length))
-                test.observe(case, 'http_status', status)
-                test.observe(case, 'user_delta', lambda: service.count() - before)
-                test.observe(case, 'rows_unchanged', lambda: service.rows() == rows)
-        for length in data["accept"]:
-            case = f"accept_length_{length}"
-            with test.case(length=length):
+                _check_rejection(test, service, f'reject_length_{length}', link.new_email(), link.new_password(length))
+        for kind, length in [('accept', n) for n in data['accept']] + list(data['kinds']):
+            case = f'{kind}_length_{length}'
+            with test.case(length=length, kind=kind):
                 before = service.count()
-                status = service.signup(link.new_email(), link.new_password(length))
-                test.observe(case, 'http_status', status)
-                test.observe(case, 'user_delta', lambda: service.count() - before)
-        for kind, length in data["kinds"]:
-            case = f"{kind}_length_{length}"
-            with test.case(kind=kind, length=length):
-                before = service.count()
-                status = service.signup(link.new_email(), link.new_password(length, kind))
-                test.observe(case, 'http_status', status)
+                observe_status(test, case, service.measured_signup(link.new_email(), link.new_password(length, 'mixed' if kind == 'accept' else kind)))
                 test.observe(case, 'user_delta', lambda: service.count() - before)
     test.check(body)
+
+
+def concurrent_signups(service, email, password, workers=5):
+    # 같은 이메일 가입을 스레드 여러 개로 동시에 보낸다. 실행 자체가 안 되면 Unverified다.
+    # 모든 요청을 같은 client로 보내 같은 lifespan 상태·같은 이벤트 루프에서 처리되게 한다(실제 서버 한 대와 같음).
+    barrier = threading.Barrier(workers)
+    statuses, unverified = [None] * workers, []
+
+    # 스레드마다 barrier에서 함께 출발해 요청한다.
+    def run(index):
+        barrier.wait(timeout=30)
+        try:
+            statuses[index] = service.signup(email, password)
+        except link.Unverified as error:
+            unverified.append(error.code)
+
+    threads = [threading.Thread(target=run, args=(index,), daemon=True) for index in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+    if unverified:
+        raise link.Unverified(unverified[0])
+    if any(thread.is_alive() for thread in threads) or None in statuses:
+        raise link.Unverified("CONCURRENCY_HARNESS_ERROR")
+    return statuses
 
 
 def concurrent_signup(test, data):
@@ -102,7 +139,7 @@ def concurrent_signup(test, data):
             case = f"attempt_{attempt + 1}"
             with test.case(attempt=attempt):
                 email = link.new_email(data["template"])
-                statuses = service.concurrent_signups(email, link.new_password(), workers=data["workers"])
+                statuses = concurrent_signups(service, email, link.new_password(), workers=data["workers"])
                 created = service.count_canonical(email)
                 successes = sum(1 for status in statuses if status in link.SUCCESS)
                 # 아무도 생성되지 않았을 때: 5xx 응답은 관찰한 서버 오류라 FAIL(아래 검사)이다. 모두 4xx면
@@ -134,14 +171,12 @@ def response_matches_result(test, data):
                 address = link.variant(address, step[2]) if kind == "duplicate" else address
                 password = link.new_password(7 if kind == "short" else 12)
             with test.case(step=index, request=kind):
-                before, rows = service.count(), service.rows()
-                status = service.signup(address, password)
+                before, rows = service.count(), read_user_rows(service)
+                status = service.measured_signup(address, password)
                 created = service.count() - before
-                test.observe(case, 'response_matches_db', (status in link.SUCCESS) == (created == 1))
-                if kind == "new":
-                    test.observe(case, 'http_status', status)
-                else:
-                    test.observe(case, 'http_status', status)
+                test.observe(case, 'response_matches_db', (status[0] in link.SUCCESS) == (created == 1))
+                observe_status(test, case, status)
+                if kind != "new":
                     test.observe(case, 'user_delta', created)
-                    test.observe(case, 'rows_unchanged', lambda: service.rows() == rows)
+                    test.observe(case, 'rows_unchanged', lambda: read_user_rows(service) == rows)
     test.check(body)

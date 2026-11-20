@@ -116,6 +116,29 @@ class BoundRuntimeTelemetry:
     def semantic_review(self, record):
         self.store.append_semantic_review(self._event('AGENT_SEMANTIC_REVIEWED'), record, self.model)
 
+    def planner_validation(self, report):
+        """Diagnostic persistence failure must not erase the original rejection."""
+        try:
+            self.store.append_planner_validation(self._event('PLANNER_OUTPUT_REJECTED'), report, self.model)
+            return True
+        except Exception:
+            return False  # The durable A2A failure still carries the safe report.
+
+    def llm_validation(self, report):
+        try:
+            from agents.llm.validation import LLMPolicyReport
+            kind = 'LLM_POLICY_REJECTED' if type(report) is LLMPolicyReport else 'LLM_SCHEMA_REJECTED'
+            self.store.append_llm_validation(self._event(kind), report, self.model)
+            return True
+        except Exception:
+            return False  # Do not erase the original error or its A2A details.
+
+    def llm_recovery(self, route):
+        from agents.llm.recovery import CallRoute
+        event_type = 'LLM_CALL_ROUTED' if type(route) is CallRoute else 'LLM_RECOVERY_DECIDED'
+        # Required accounting: a failed receipt must stop a new regeneration.
+        self.store.append_llm_recovery(self._event(event_type), route, self.model)
+
     def tool_event(self, event_type, record, attempt, duration_ms):
         try:
             if (type(record) is not ToolCallRecord

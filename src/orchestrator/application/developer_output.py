@@ -69,7 +69,7 @@ _PAYLOAD_FIELDS_BY_MODEL = {
 }
 _OPTIONAL_FIELDS_BY_MODEL = {
     CodeSnapshotArtifact: set(),
-    ChangeReportArtifact: {"artifactUri"},
+    ChangeReportArtifact: {"artifactUri", "readyReview"},
     BuildReportArtifact: {"artifactUri", "executionOutcome", "failureKind", "toolEvidence", "diagnostics"},
 }
 
@@ -146,6 +146,14 @@ def parse_developer_output(
             raise ValueError("Build Report references a different Source Artifact")
         if build_report.execution_manifest != source.execution_manifest():
             raise ValueError("Build Report Manifest differs from the Source Snapshot")
+        review = change_report.ready_review
+        if review is not None and (
+            review.source_artifact_id != source.artifact_id or review.build_report_id != build_report.artifact_id
+            or any(r.requirement_id not in expected_requirements for r in review.rechecks)
+            or review.build_outcome != build_report.execution_outcome.value
+            or review.validation_status != ("PENDING_QA_SECURITY" if build_report.passed else "BLOCKED_BY_BUILD")
+        ):
+            raise ValueError("READY observations do not match the submitted Source and Build Report")
         return ValidatedDeveloperOutput(
             source=source,
             change_report=change_report,

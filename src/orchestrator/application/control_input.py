@@ -17,7 +17,7 @@ _PROTECTED = frozenset({
     "request", "configuration", "fixAttempt", "fix_attempt", "fixIssues", "fix_issues",
     "previousSource", "previous_source", "previousArtifacts", "previous_artifacts",
     "startingCommitHash", "parentCommitHash", "scannerProfiles", "securityRequirements",
-    "sourcePaths", "measuredSecurity",
+    "sourcePaths", "measuredSecurity", "fileAccess", "plannerValidation", "llmValidation",
 })
 
 

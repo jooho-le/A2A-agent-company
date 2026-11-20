@@ -70,6 +70,7 @@ def test_tools_document_is_accepted_by_dev_and_yields_ver1_ver2(tmp_path):
     path.write_text(json.dumps(tools), encoding='utf-8')
     configuration = load_tool_configuration(path)
     assert configuration.max_call_seconds == env.MAX_CALL_SECONDS
+    assert configuration.browser_configuration is None  # SCN-001 has no UI acceptance criteria
     documents = experiment_configure(tools, contract=get_scenario(SCN_001_ID).planner_contract(), base=tmp_path)
     for version in ('ver1', 'ver2'):
         written = tmp_path / version / 'owned-tools.local.json'
@@ -80,6 +81,7 @@ def test_tools_document_is_accepted_by_dev_and_yields_ver1_ver2(tmp_path):
                      if scope['kind'] == 'PROTECTED']
         assert len(protected) == (2 if version == 'ver1' else 0)
         assert loaded.baseline.container_image_digest == IMAGE
+        assert loaded.browser_configuration is None
 
 
 def test_plan_environment_fields_match_what_preflight_and_submission_compare():

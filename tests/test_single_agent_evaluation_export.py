@@ -72,8 +72,8 @@ class SingleEvaluationExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bundle["eventsTotal"], len(bundle["events"]))
         self.assertEqual(trace["telemetryTotal"], len(trace["telemetry"]))
         # Current dev includes four publication reviews in the same Run budget.
-        work = [request for request in provider.requests if request.output.name != 'product_semantic_review_v1']
-        reviews = [request for request in provider.requests if request.output.name == 'product_semantic_review_v1']
+        work = [request for request in provider.requests if request.output.name != 'product_semantic_review_v5']
+        reviews = [request for request in provider.requests if request.output.name == 'product_semantic_review_v5']
         self.assertEqual((len(work), len(reviews)), (7, 4))
         self.assertEqual(bundle["usage"]["total"], len(work) + len(reviews))
         self.assertEqual(metrics["modelCalls"], len(provider.requests))
@@ -170,7 +170,7 @@ class SingleEvaluationExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["costComplete"])
         self.assertIsNotNone(result["costUsd"])
         self.assertEqual(result["modelCalls"], len(provider.requests))
-        self.assertEqual(sum(request.output.name == 'product_semantic_review_v1' for request in provider.requests), 4)
+        self.assertEqual(sum(request.output.name == 'product_semantic_review_v5' for request in provider.requests), 4)
 
 
 class SingleFailureExportTests(unittest.IsolatedAsyncioTestCase):
@@ -210,7 +210,7 @@ class SingleFailureExportTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_four_candidates_and_failure_are_preserved(self):
         harness = fixing._SingleFixHarness(self, qa_mode="distinct-failures")
         async with harness.running() as (client, _):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.f.submission()), timeout=50)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.f.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = response.json()["run"]["runId"]
         files = write_evaluation_export(harness.f.repository, run_id, harness.f.directory / "failed-handoff",

@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from agents.llm.development_rejection import RejectionReason
 from agents.roles.developer_contract import (
     MAX_DEVELOPER_JSON_BYTES, MAX_DEVELOPER_QUESTIONS,
     MAX_DEVELOPER_QUESTION_LENGTH, MAX_DEVELOPER_SUMMARY_LENGTH,
@@ -14,7 +15,9 @@ from agents.roles.developer_contract import (
 
 
 def decision(**changes):
-    values = {"kind": "READY", "summary": "할당된 회원가입 기능을 구현했습니다.", "questions": []}
+    values = {"kind": "READY", "summary": "할당된 회원가입 기능을 구현했습니다.", "questions": [], "rejection": None}
+    if changes.get("kind") == "REJECTED":
+        values["rejection"] = {"reasonCode": "UNKNOWN", "explanation": "Unconfirmed blocker", "requirementIds": []}
     values.update(changes)
     return values
 
@@ -41,7 +44,7 @@ class DeveloperContractTests(unittest.TestCase):
         self.assertEqual(contract.name, "developer_decision")
         contract.schema.require_openai_strict()
         schema = contract.schema.to_dict()
-        self.assertEqual(set(schema["properties"]), {"kind", "summary", "questions"})
+        self.assertEqual(set(schema["properties"]), {"kind", "summary", "questions", "rejection"})
         self.assertEqual(set(schema["required"]), set(schema["properties"]))
         self.assertFalse(schema["additionalProperties"])
         self.assertEqual(schema["properties"]["kind"]["enum"], ["READY", "INPUT_REQUIRED", "REJECTED"])
@@ -63,7 +66,7 @@ class DeveloperContractTests(unittest.TestCase):
         self.assertEqual(result.summary, "")
         self.assertEqual(result.questions, ("어떤 API 경로를 사용할까요?",))
 
-    def test_rejected_has_neither_summary_nor_model_reason(self):
+    def test_rejected_has_separate_bounded_reason_and_empty_work_summary(self):
         result = self.validate(decision(kind="REJECTED", summary=""))
         self.assertEqual((result.kind, result.summary, result.questions), ("REJECTED", "", ()))
         self.reject(decision(kind="REJECTED", summary="", reason="private explanation"))
@@ -236,7 +239,7 @@ class DeveloperContractTests(unittest.TestCase):
     def test_direct_constructor_accepts_only_consistent_branches(self):
         self.assertEqual(DeveloperDecision(kind="READY", summary="summary", questions=()).kind, "READY")
         self.assertEqual(DeveloperDecision(kind="INPUT_REQUIRED", summary="", questions=("question",)).kind, "INPUT_REQUIRED")
-        self.assertEqual(DeveloperDecision(kind="REJECTED", summary="", questions=()).kind, "REJECTED")
+        self.assertEqual(DeveloperDecision(kind="REJECTED", summary="", questions=(), rejection=RejectionReason.model_validate(decision(kind="REJECTED")["rejection"])).kind, "REJECTED")
 
     def test_builder_returns_independent_schema_copies(self):
         first = build_developer_output_contract().schema.to_dict()

@@ -6,6 +6,15 @@ from pathlib import Path
 import stat
 
 
+def stored_boundary_reports(repository, run_id):
+    """Read saved automatic boundaries, never reconstruct from a resumed Run."""
+    with repository._connection() as connection:
+        if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='host_boundary_reports'").fetchone():
+            return []
+        return [json.loads(row[0]) for row in connection.execute(
+            'SELECT report FROM host_boundary_reports WHERE run_id=? ORDER BY rowid', (str(run_id),))]
+
+
 def collect_package_records(root, files, bundle):
     """Read two fixed filenames from an explicitly supplied trusted Host directory."""
     root = Path(root)

@@ -5,6 +5,7 @@ test_dev_compatibility.py가 고정 기록 대신 "지금 dev가 실제로 남�
 dev 시험 도구는 tests/ 폴더의 최상위 모듈로 서로를 불러오므로 그 폴더를 경로에 넣는다.
 """
 import asyncio
+from contextlib import contextmanager
 import io
 import json
 from pathlib import Path
@@ -13,15 +14,27 @@ import unittest
 from uuid import UUID
 
 TESTS = str(Path(__file__).resolve().parents[1])
-if TESTS not in sys.path:
-    sys.path.insert(0, TESTS)
 
-from agents.llm.contracts import LLMErrorCode, LLMRuntimeError  # noqa: E402
-from agents.platform.evaluation_export import write_evaluation_export  # noqa: E402
-from orchestrator.domain import AgentRole  # noqa: E402
-import test_owned_agent_fix_pipeline as fix_fixture  # noqa: E402
-import test_owned_agent_pipeline as multi_fixture  # noqa: E402
-from test_product_semantic_review import held_review  # noqa: E402
+
+@contextmanager
+def dev_test_imports():
+    added = TESTS not in sys.path
+    if added:
+        sys.path.insert(0, TESTS)
+    try:
+        yield
+    finally:
+        if added:
+            sys.path.remove(TESTS)
+
+
+with dev_test_imports():
+    from agents.llm.contracts import LLMErrorCode, LLMRuntimeError
+    from agents.platform.evaluation_export import write_evaluation_export
+    from orchestrator.domain import AgentRole
+    import test_owned_agent_fix_pipeline as fix_fixture
+    import test_owned_agent_pipeline as multi_fixture
+    from test_product_semantic_review import held_review
 
 ROLES = ('PLANNER', 'DEVELOPER', 'QA', 'SECURITY')
 
@@ -37,6 +50,8 @@ class FixSuccess(_Exports, fix_fixture.OwnedAgentFixPipelineTests):
     async def runTest(self):
         harness = fix_fixture._FixHarness(self)
         run, _artifacts, _steps, _calls = await self.submit(harness)
+        self.assertEqual((run.status.value, run.verdict.value if run.verdict else None, run.fix_attempt),
+                         ('FINISHED', 'SUCCESS', 1), 'The exported fixture must include an actual successful repair.')
         write_evaluation_export(harness.base.repository, run.run_id, self.out / 'fix-success',
                                 stores=self.stores(harness.base.directory))
 
@@ -84,6 +99,7 @@ def make_exports(out: Path) -> dict:
         case.out = out
         suite.addTest(case())
     stream = io.StringIO()
-    result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
+    with dev_test_imports():
+        result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
     problems = [f'{test}: {text[-800:]}' for test, text in result.errors + result.failures]
     return {'ok': result.wasSuccessful(), 'log': json.dumps(problems, ensure_ascii=False)}

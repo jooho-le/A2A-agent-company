@@ -7,6 +7,7 @@ import sys
 
 from .agent_eval import agent_tables, render_markdown, run_contract
 from .axis_scorecard import build_scorecard, render_scorecard
+from .conflicts import conflict_analysis, render as render_conflicts, summary as conflict_summary
 from .experiment import ExperimentError, _check_automatic_boundary, _checked_metrics, _write, record_run, score_export
 from .final_evaluation import DockerRunner
 from .outcomes import CLOSED_STATUSES, PAUSED_STATUSES, has_resumed, run_outcome
@@ -89,7 +90,7 @@ def _status_fields(record):
 
 
 def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), additional_outputs=None,
-           planner_review=None, process_evidence=None):
+           planner_review=None, process_evidence=None, conflict_review=None):
     export, run = load_handoff(folder)
     run_status = export['bundle']['run']['status']
     # 입력 대기(WAITING_INPUT)도 측정 실험에서는 답하지 않으므로 자동 구간이 닫힌 끝 상태로 받는다(최신 dev의 Planner
@@ -100,6 +101,8 @@ def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), addi
     contract = run_contract(export)
     # 다른 Run·계약이나 손상된 평가표 입력은 컨테이너를 띄우기 전에 거부한다.
     tables = agent_tables(export, contract, planner_review=planner_review)
+    # Classify only explicitly reviewed reproductions, never the hidden final grade.
+    conflicts = conflict_analysis(export['bundle'], export['trace'], review=conflict_review)
     automatic_outputs = export.get('automaticOutputEvidence')
     if automatic_outputs is not None:
         if additional_outputs is not None:
@@ -121,6 +124,10 @@ def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), addi
     process = process_metrics(run['runId'], process_evidence)
 
     def supplement(target, report=None):
+        _write(target / 'conflict_analysis.json', conflicts, False)
+        _write(target / 'conflict_analysis.md', render_conflicts(conflicts), False)
+        if conflict_review is not None:
+            _write(target / 'conflict_review.json', conflict_review, False)
         if planner_review is not None:
             reviewed = agent_tables(export, contract, report, planner_review=planner_review)
             # 이 ingest 호출이 방금 만든 표만 검토 결과로 갱신한다(기존 Run 덮어쓰기는 상위 경로에서 거부).
@@ -144,7 +151,7 @@ def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), addi
                                score=None if output is None else output.get('score'),
                                trace=None if output is None else output.get('trace'),
                                timing=optional('timing_metrics.json'), regression=optional('regression.json'),
-                               process=process, tables=tables)
+                               process=process, tables=tables, conflicts=conflict_summary(conflicts))
         _write(target / 'axis_scorecard.json', data, False)
         _write(target / 'axis_scorecard.md', render_scorecard(data), False)
 
@@ -172,6 +179,11 @@ def ingest(folder, *, results, runner, exam, pair_id=None, known_values=(), addi
             _write(target / 'assisted_diagnostics.json', {
                 'scope': 'FULL_RUN_INCLUDING_ASSISTED_CONTINUATION', 'metrics': metrics,
                 'automaticBoundary': {'status': 'UNVERIFIED', 'reason': 'AUTOMATIC_BOUNDARY_NOT_CAPTURED'}}, False)
+            # Assisted continuation cannot be presented as the automatic experiment.
+            _write(target / 'assisted_conflict_analysis.json', {
+                **conflicts, 'scope': 'FULL_RUN_INCLUDING_ASSISTED_CONTINUATION'}, False)
+            if conflict_review is not None:
+                _write(target / 'assisted_conflict_review.json', conflict_review, False)
             _write(target / 'outcome.json', record, False)
             _write(target / 'evaluation_status.json', {**status, 'automaticSegmentClosed': True,
                 'status': 'QUARANTINED_ASSISTED', 'reason': 'AUTOMATIC_BOUNDARY_NOT_CAPTURED',
@@ -226,6 +238,8 @@ def main(argv=None):
     parser.add_argument('--pair-id')
     parser.add_argument('--planner-review', type=Path)
     parser.add_argument('--process-evidence', type=Path)
+    parser.add_argument('--conflict-review', type=Path,
+                        help='Optional operator-reviewed reproduction evidence; never runs a reproduction')
     parser.add_argument('--secrets-file', type=Path)
     parser.add_argument('--output-root', type=Path)
     parser.add_argument('--output-manifest', type=Path)
@@ -242,7 +256,8 @@ def main(argv=None):
         folder = ingest(args.export, results=args.results, runner=DockerRunner(args.image), exam=args.exam,
                         pair_id=args.pair_id, known_values=known, additional_outputs=extra,
                         planner_review=json.loads(args.planner_review.read_text(encoding='utf-8')) if args.planner_review else None,
-                        process_evidence=json.loads(args.process_evidence.read_text(encoding='utf-8')) if args.process_evidence else None)
+                        process_evidence=json.loads(args.process_evidence.read_text(encoding='utf-8')) if args.process_evidence else None,
+                        conflict_review=json.loads(args.conflict_review.read_text(encoding='utf-8')) if args.conflict_review else None)
         print(f'results: {folder}')
     except ExperimentError as error:
         sys.stderr.write(error.code + '\n')

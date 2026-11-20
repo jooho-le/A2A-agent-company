@@ -72,3 +72,18 @@ def test_browser_timeout_with_confirmed_cleanup_keeps_timeout_reason(tmp_path, m
     assert {row['reason'] for row in result['checks'] if row['check'].startswith('hostBrowser.')} == {
         'HOST_BROWSER_CHECK_TIMEOUT'}
     assert len([args for args in calls if args[1:4] == ['container', 'rm', '-f']]) == 1
+
+
+def test_explicitly_absent_browser_is_not_reported_as_browser_execution(tmp_path, monkeypatch):
+    data = plan(tmp_path)
+    for value in data['hostConfigurations'].values():
+        path = Path(value['tools'])
+        tools = json.loads(path.read_text())
+        tools['browser'] = None
+        path.write_text(json.dumps(tools))
+    calls = fake_docker(monkeypatch)
+    result = preflight.check_preparation(data, docker='fixture-docker')
+    browsers = [row for row in result['checks'] if row['check'].startswith('hostBrowser.')]
+    assert len(browsers) == 2
+    assert all(row['check'].endswith('.notConfigured') and row['status'] == 'PASS' for row in browsers)
+    assert not [args for args in calls if args[1:3] == ['container', 'create']]

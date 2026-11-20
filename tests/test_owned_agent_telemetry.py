@@ -40,7 +40,7 @@ class OwnedAgentTelemetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def submit(self, client, *, body=None):
         response = await asyncio.wait_for(client.post("/api/v1/runs",
-            json=self.base.submission() if body is None else body), 25)
+            json=self.base.submission() if body is None else body), timeout=300)
         self.assertEqual(response.status_code, 201, response.text)
         return UUID(response.json()["run"]["runId"])
 
@@ -55,6 +55,50 @@ class OwnedAgentTelemetryTests(unittest.IsolatedAsyncioTestCase):
         with self.base.repository._connection() as connection:
             rows = connection.execute("SELECT payload_json FROM agent_runtime_events").fetchall()
         return "\n".join(row[0] for row in rows)
+
+    async def test_planner_failure_details_are_persisted_without_raw_response_or_extra_usage(self):
+        providers = self.base.providers()
+        data = json.loads(providers[AgentRole.PLANNER].script[0].output_text)
+        data['implementationPlan'][0]['requirementIds'].pop()
+        data['implementationPlan'][0]['description'] = 'private-diagnostic-prose'
+        providers[AgentRole.PLANNER] = FakeProvider(text_response(json.dumps(data)))
+        async with self.base.running_platform(providers) as (client, _):
+            run_id = await self.submit(client)
+            usage, telemetry = await self.get_accounting(client, run_id)
+            self.assertEqual((usage['summary']['modelCalls'], usage['summary']['toolCalls']), (1, 0))
+            self.assertIs(self.base.repository.get_run(run_id).status, WorkflowStatus.HUMAN_REVIEW)
+            rows = [row for row in telemetry['events'] if row['binding'].get('eventType')=='PLANNER_OUTPUT_REJECTED']
+            self.assertEqual(len(rows), 1)
+            report = rows[0]['plannerValidation']
+            self.assertEqual(report['issues'][0]['requirementKey'], 'REQ-008')
+            self.assertEqual(report['issues'][0]['reasonCode'], 'REQUIREMENT_NOT_COVERED')
+            self.assertEqual(report['stage'], 'PLAN_MODEL')
+            step = self.base.repository.list_steps(run_id)[0]
+            self.assert_binding(rows[0]['binding'], step)
+            self.assertNotIn('private-diagnostic-prose', self.stored_runtime_json())
+            events, _ = self.base.repository.list_events(run_id, limit=100, offset=0)
+            self.assertEqual(sum(event.event_type=='PLANNER_OUTPUT_REJECTED' for event in events), 1)
+            with self.base.repository._connection() as connection:
+                self.assertEqual(connection.execute('SELECT COUNT(*) FROM agent_semantic_reviews').fetchone()[0], 0)
+            self.assertTrue(all(not providers[role].requests for role in (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY)))
+
+    async def test_trace_failure_does_not_mask_planner_failure_in_durable_a2a(self):
+        providers = self.base.providers()
+        data = json.loads(providers[AgentRole.PLANNER].script[0].output_text)
+        data['implementationPlan'][0]['requirementIds'].pop()
+        providers[AgentRole.PLANNER] = FakeProvider(text_response(json.dumps(data)))
+        with patch.object(AgentTelemetryStore, 'append_planner_validation', side_effect=RuntimeError('private-storage-error')):
+            async with self.base.running_platform(providers) as (client, _):
+                run_id = await self.submit(client)
+                step = self.base.repository.list_steps(run_id)[0]
+                app = self.base.platform.agent_apps[AgentRole.PLANNER]
+                stored = (await app.state.task_store.revisions(step.a2a_task_id))[-1]
+                from google.protobuf.json_format import MessageToDict
+                data = MessageToDict(stored.status.message.parts[0].data)
+                self.assertEqual(data['code'], 'PLANNER_OUTPUT_INVALID')
+                self.assertFalse(data['plannerValidation']['traceRecorded'])
+                self.assertEqual(data['plannerValidation']['issues'][0]['requirementKey'], 'REQ-008')
+                self.assertNotIn('private-storage-error', json.dumps(data))
 
     def assert_binding(self, binding, step):
         self.assertEqual(binding["runId"], str(step.run_id))

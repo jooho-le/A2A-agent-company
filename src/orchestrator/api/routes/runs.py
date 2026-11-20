@@ -244,6 +244,14 @@ def get_package_production(run_id: UUID, repository: Repository):
         raise HTTPException(status_code=503, detail="PACKAGE_STATUS_UNAVAILABLE") from None
 
 
+@router.get("/{run_id}/boundary-reports")
+def get_boundary_reports(run_id: UUID, repository: Repository):
+    """Saved held/input-waiting records, separate from final result packages."""
+    _get_run_or_404(repository, run_id)
+    from agents.platform.package_records import stored_boundary_reports
+    return {'runId': str(run_id), 'reports': stored_boundary_reports(repository, run_id)}
+
+
 @router.get("/{run_id}/telemetry")
 def get_run_telemetry(run_id: UUID, request: Request, repository: Repository,
                       limit: int = Query(default=100, ge=1, le=500),

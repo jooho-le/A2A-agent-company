@@ -12,15 +12,21 @@ from pydantic import SecretStr
 
 from agents.llm.contracts import (
     LLMErrorCode, LLMRequest, LLMResponse, LLMRuntimeError, StructuredOutput,
-    OPENAI_RESPONSES_GLOBAL_TEXT, REPORTED_SERVICE_TIERS,
+    OPENAI_RESPONSES_GLOBAL_TEXT, REPORTED_SERVICE_TIERS, INCOMPLETE_REASONS,
     TokenUsage, ToolCall, json_text, parse_json,
 )
+from agents.llm.tool_wire import strict_tool_schema, STRICT_TOOL_ARGUMENTS
 from orchestrator.domain.run_configuration import ModelConfiguration
 
 
 _GLOBAL_ENDPOINT = "https://api.openai.com/v1/responses"
 _ENDPOINT = _GLOBAL_ENDPOINT
 _FUNCTION_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+# Rate limit and server-side failures carry no model output. They are marked
+# transient for the engine's bounded retry (llmLimits.max_provider_retries).
+_TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
+# Connection never established: nothing was sent, so nothing was generated or billed.
+_NOT_SENT_USAGE = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
 
 
 def _nonblank(value: object) -> bool:
@@ -146,19 +152,32 @@ class OpenAIResponsesProvider:
                 tools.append({
                     "type": "function", "name": tool.name,
                     "description": tool.description,
-                    "parameters": tool.input_schema.to_dict(),
-                    # Optional project Tool arguments must stay optional.
-                    # The engine enforces their unchanged schemas locally.
-                    "strict": False,
+                    "parameters": strict_tool_schema(tool.input_schema).to_dict(),
+                    # Required nullable wire fields encode omitted optional
+                    # project arguments; MCP's original schema remains unchanged.
+                    "strict": True,
                 })
+            if request.required_tool is not None and request.required_tool not in names:
+                raise ValueError("Required tool is not offered")
+            alternatives = tuple(request.required_tool_alternatives)
+            if alternatives and (request.required_tool is None or not set(alternatives) <= set(names)):
+                raise ValueError("Required tool alternatives are not offered")
+            # One of several tools: the widely supported "required" choice (any offered tool); the
+            # engine then refuses any call outside required_tool + alternatives as no progress.
+            choice = ("required" if alternatives else {"type": "function", "name": request.required_tool}
+                      ) if request.required_tool is not None else None
             return {
+                **({"tool_choice": choice} if choice is not None else {}),
                 "model": request.model.model_revision or request.model.model_id,
                 "instructions": request.system_prompt,
                 "input": items,
                 "temperature": request.model.temperature,
                 "max_output_tokens": request.max_output_tokens,
                 "tools": tools,
-                "parallel_tool_calls": False,
+                # Allow independent reads in one model response. LLMEngine
+                # validates the whole batch first, then executes calls in order;
+                # this flag does not introduce concurrent file writes.
+                "parallel_tool_calls": bool(tools) and request.required_tool is None,
                 "text": {"format": {
                     "type": "json_schema", "name": request.output.name,
                     "strict": True, "schema": request.output.schema.to_dict(),
@@ -177,8 +196,14 @@ class OpenAIResponsesProvider:
                 headers={"Authorization": "Bearer " + self._api_key.get_secret_value()},
                 timeout=request.timeout_seconds,
             )
+        except (httpx.ConnectTimeout, httpx.PoolTimeout):
+            # The request never reached the provider: no response, no generation,
+            # so the usage is known to be zero (not an assumed zero).
+            raise LLMRuntimeError(LLMErrorCode.TIMEOUT, transient=True, usage=_NOT_SENT_USAGE) from None
         except httpx.TimeoutException:
             raise LLMRuntimeError(LLMErrorCode.TIMEOUT) from None
+        except httpx.ConnectError:
+            raise LLMRuntimeError(LLMErrorCode.PROVIDER, transient=True, usage=_NOT_SENT_USAGE) from None
         except Exception:
             raise LLMRuntimeError(LLMErrorCode.PROVIDER) from None
         if response.status_code in (401, 403):
@@ -186,7 +211,7 @@ class OpenAIResponsesProvider:
         if not 200 <= response.status_code < 300:
             # Includes redirects, rate limits and unsupported model options.
             # No automatic retry and no response-body exception messages.
-            raise LLMRuntimeError(LLMErrorCode.PROVIDER)
+            raise LLMRuntimeError(LLMErrorCode.PROVIDER, transient=response.status_code in _TRANSIENT_STATUS)
         usage = None
         try:
             payload = parse_json(response.text)
@@ -296,8 +321,14 @@ class OpenAIResponsesProvider:
             else:
                 # Built-in tools are not permissioned project MCP tools.
                 raise ValueError("Unsupported output item")
+        incomplete_reason = None
+        details = payload.get('incomplete_details')
+        if status == 'incomplete' and details is not None:
+            reason = details.get('reason') if isinstance(details, dict) else None
+            incomplete_reason = reason if reason in INCOMPLETE_REASONS else 'other'
         return LLMResponse(
             status=status, model_id=reported_model,
+            incomplete_reason=incomplete_reason,
             usage=usage,
             output_text="".join(texts) if texts else None,
             tool_calls=tuple(calls), output_items_json=json_text(items),
@@ -305,4 +336,5 @@ class OpenAIResponsesProvider:
             reported_service_tier=payload.get("service_tier") if (
                 type(payload.get("service_tier")) is str and payload["service_tier"] in REPORTED_SERVICE_TIERS) else None,
             billing_context=billing_context,
+            tool_arguments_format=STRICT_TOOL_ARGUMENTS,
         )

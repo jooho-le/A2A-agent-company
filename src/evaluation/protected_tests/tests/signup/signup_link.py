@@ -85,14 +85,6 @@ def new_email(template="user{h}@example.com"):
     return _input("email", {"template": template}, lambda: template.format(h=secrets.token_hex(6)))
 
 
-def new_emails(*templates):
-    # 같은 무작위 값({h})을 넣은 이메일 여러 개. 점·+태그만 다른 주소 짝을 만들 때 쓴다.
-    def produce():
-        h = secrets.token_hex(6)
-        return [template.format(h=h) for template in templates]
-    return _input("emails", {"templates": list(templates)}, produce)
-
-
 def variant(email, form):
     # 같은 canonical 이메일의 변형(대소문자·앞뒤 공백). 시험지마다 다른 변형을 고른다.
     local, domain = email.split("@")
@@ -348,7 +340,13 @@ class Service:
         # 이메일·비밀번호로 가입 요청을 보내고 응답 코드를 돌려준다.
         return self.send(signup_body(email, password), client)
 
+    def measured_signup(self, email, password):
+        return self.measured_send(signup_body(email, password))
+
     def send(self, body, client=None):
+        return self.measured_send(body, client)[0]
+
+    def measured_send(self, body, client=None):
         # 가입 요청(본문은 JSON 값). 앱이 처리하지 못한 예외는 실제 서버처럼 500으로 보고 traceback을 서버 로그에 남긴다.
         # Include fixed/invalid/malformed JSON too; a seed cannot describe these
         # requests or prove that the same values actually reached the service.
@@ -360,8 +358,9 @@ class Service:
         except Exception as error:
             if isinstance(error, Unverified):
                 raise
+            # 0.7.1: 예외 요청은 500이라 used_database를 읽지 않는다(QA 검사는 성공 응답에만 쓴다).
             self.server_log.append("".join(traceback.format_exception(type(error), error, error.__traceback__)))
-            return 500
+            return 500, 'ESCAPED_EXCEPTION'
         headers = "\n".join(k + ": " + v for k, v in response.headers.items())
         self.responses.append(response.text + "\n" + headers)
         if response.status_code in (404, 405):
@@ -374,7 +373,7 @@ class Service:
             elsewhere = self._database_events[False] > before[False] and not self.used_database
         if response.status_code in SUCCESS and elsewhere:
             raise Unverified("DATABASE_URL_NOT_USED")
-        return response.status_code
+        return response.status_code, 'HTTP_RESPONSE'
 
     def _same_database(self, engine):
         if engine.url.get_backend_name() != "sqlite" or not engine.url.database:
@@ -414,146 +413,9 @@ class Service:
         # 그 이메일과 canonical 값(앞뒤 공백 제거·소문자)이 같은 사용자 수
         return sum(1 for value in self.emails() if isinstance(value, str) and canonical(value) == canonical(email))
 
-    def rows(self):
-        # 사용자 표의 모든 행·모든 칸 값(정렬). 거부된 요청이 기존 계정을 바꾸지 않았는지 비교하는 데 쓴다.
-        from sqlalchemy import inspect as sa_inspect
-        if not self._has_user_table():
-            return []
-        try:
-            mapper = sa_inspect(self.User)
-            with self.Session() as db:
-                found = [tuple(repr(getattr(row, attribute.key)) for attribute in mapper.column_attrs)
-                         for row in db.query(self.User).all()]
-        except Exception:
-            raise Unverified("TEST_DATABASE_READ_FAILED") from None
-        return sorted(found)
-
-    def stored_hash(self, email):
-        # 그 이메일 사용자의 저장 해시. 정확히 1명이 아니면 Unverified.
-        try:
-            with self.Session() as db:
-                rows = db.query(getattr(self.User, EMAIL_FIELD), getattr(self.User, HASH_FIELD)).all()
-        except Exception:
-            raise Unverified("TEST_DATABASE_READ_FAILED") from None
-        found = [stored for address, stored in rows
-                 if isinstance(address, str) and canonical(address) == canonical(email)]
-        if len(found) != 1:
-            raise Unverified("STORED_USER_NOT_FOUND")
-        return found[0]
-
-    def stored_email(self, email):
-        # 그 canonical 이메일로 저장된 이메일 값 그대로. 정확히 1명이 아니면 Unverified.
-        found = [value for value in self.emails() if isinstance(value, str) and canonical(value) == canonical(email)]
-        if len(found) != 1:
-            raise Unverified("STORED_USER_NOT_FOUND")
-        return found[0]
-
-    def fail_next_insert(self):
-        # 다음 INSERT 한 번을 SQLite가 실제로 거부하게 한다(권한 함수 set_authorizer). DB 단계에서 난 오류라
-        # SQLAlchemy 버전과 상관없이 SQL·값을 담은 DB 오류로 감싸진다. 그다음 실행에서 권한 함수를 풀어 준다.
-        import sqlite3
-        from sqlalchemy import event
-        from sqlalchemy.engine import Engine
-        armed, denied = [True], []
-        self._insert_failure = armed
-
-        def deny(action, *args):
-            return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_INSERT else sqlite3.SQLITE_OK
-
-        def release():
-            while denied:
-                denied.pop().set_authorizer(None)
-
-        def fail(conn, cursor, statement, parameters, context, many):
-            if conn.engine in self._owned_engines or not self._same_database(conn.engine):
-                return
-            release()
-            if armed[0] and statement.lstrip().upper().startswith("INSERT"):
-                armed[0] = False
-                raw = conn.connection
-                raw = getattr(raw, "dbapi_connection", None) or getattr(raw, "connection", raw)
-                raw.set_authorizer(deny)
-                denied.append(raw)
-        event.listen(Engine, "before_cursor_execute", fail)
-
-        def cleanup():
-            try:
-                release()
-            finally:
-                event.remove(Engine, "before_cursor_execute", fail)
-
-        self._undo.append(cleanup)
-
-    def require_insert_failure(self):
-        if self._insert_failure[0]:
-            raise Unverified("DATABASE_ERROR_NOT_INJECTED")
-
-    def db_rejects_duplicate(self, email):
-        # 저장된 사용자 행을 복사해 DB에 직접 한 번 더 넣는다(앱의 사전 검사를 거치지 않음).
-        # 이메일 칸 UNIQUE로 거부되면 True, 들어가면 False. 다른 이유로 실패하거나 UNIQUE 대상이 이메일 칸 하나가
-        # 아니면 Unverified.
-        from sqlalchemy import create_engine, inspect as sa_inspect
-        from sqlalchemy.exc import IntegrityError
-        from sqlalchemy.orm import sessionmaker
-        # 이 검사는 UNIQUE 제약을 직접 확인하므로 관찰 세션과 별개의 쓰기 세션만 잠깐 연다.
-        engine = create_engine(self._database_url, connect_args={"check_same_thread": False})
-        self._owned_engines.add(engine)
-        try:
-            mapper = sa_inspect(self.User)
-            column = mapper.column_attrs[EMAIL_FIELD].columns[0]
-            with sessionmaker(bind=engine, autoflush=False)() as db:
-                rows = [row for row in db.query(self.User).all()
-                        if isinstance(getattr(row, EMAIL_FIELD), str) and canonical(getattr(row, EMAIL_FIELD)) == canonical(email)]
-                if len(rows) != 1:
-                    raise Unverified("STORED_USER_NOT_FOUND")
-                copy = mapper.class_manager.new_instance()
-                for attribute in mapper.column_attrs:
-                    if not attribute.columns[0].primary_key:
-                        setattr(copy, attribute.key, getattr(rows[0], attribute.key))
-                db.add(copy)
-                try:
-                    db.commit()
-                except IntegrityError as error:
-                    if str(error.orig).strip() == "UNIQUE constraint failed: " + column.table.name + "." + column.name:
-                        return True
-                    raise Unverified("UNIQUE_CONSTRAINT_UNCLEAR") from None
-                return False
-        except Unverified:
-            raise
-        except Exception:
-            raise Unverified("TEST_DATABASE_WRITE_FAILED") from None
-        finally:
-            engine.dispose()
-            self._owned_engines.discard(engine)
-
     def log_text(self):
         # 서버 로그와 stdout·stderr 출력을 합친 글(노출 검사용)
         return "\n".join(self.server_log) + "\n" + self._stdout.getvalue() + "\n" + self._stderr.getvalue()
-
-    def concurrent_signups(self, email, password, workers=5):
-        # 같은 이메일 가입을 스레드 여러 개로 동시에 보낸다. 실행 자체가 안 되면 Unverified다.
-        # 모든 요청을 같은 client로 보내 같은 lifespan 상태·같은 이벤트 루프에서 처리되게 한다(실제 서버 한 대와 같음).
-        barrier = threading.Barrier(workers)
-        statuses, unverified = [None] * workers, []
-
-        # 스레드마다 barrier에서 함께 출발해 요청한다.
-        def run(index):
-            barrier.wait(timeout=30)
-            try:
-                statuses[index] = self.signup(email, password)
-            except Unverified as error:
-                unverified.append(error.code)
-
-        threads = [threading.Thread(target=run, args=(index,), daemon=True) for index in range(workers)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=120)
-        if unverified:
-            raise Unverified(unverified[0])
-        if any(thread.is_alive() for thread in threads) or None in statuses:
-            raise Unverified("CONCURRENCY_HARNESS_ERROR")
-        return statuses
 
 
 class SignupCheck(unittest.TestCase):

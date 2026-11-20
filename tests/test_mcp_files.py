@@ -11,6 +11,8 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from agents.runtime.file_access import build_file_access
+
 from mcp_tools.client import MCPChildConfiguration, MCPClientError, child_parameters, open_mcp_client
 from mcp_tools.core.policy import ROLE_TOOL_NAMES
 from mcp_tools.runtime import MCPBinding, MCPDispatcher, MCPExecutionContext, MCPToolExecutionError
@@ -118,6 +120,19 @@ class FileToolTests(unittest.IsolatedAsyncioTestCase):
             path="source/new/nested/main.py", content="raise RuntimeError('must not execute')\n"))
         self.assertIsNone(result.error_code)
         self.assertEqual(target.read_text(), "raise RuntimeError('must not execute')\n")
+
+    async def test_host_mapping_reads_real_file_without_relaxing_path_denials(self):
+        (self.root / "source/main.py").write_bytes(self.original)
+        guide = build_file_access(SCENARIO_REGISTRY[SCN_001_ID].planner_contract(), AgentRole.DEVELOPER)
+        path = next(row["toolPath"] for row in guide["startingFilePaths"] if row["repositoryPath"] == "main.py")
+        result = await self.dispatcher().call_tool("read_project_file", self.arguments(path=path))
+        self.assertIsNone(result.error_code)
+        self.assertEqual(result.data["content"].encode(), self.original)
+        for bad in ("main.py", "/source/main.py", "source/../main.py", "source/.env", "source/"):
+            with self.subTest(path=bad):
+                denied = await self.dispatcher().call_tool("read_project_file", self.arguments(path=bad))
+                self.assertEqual(denied.error_code, "PATH_DENIED")
+                self.assertIsNone(denied.data)
 
     async def test_missing_file_and_binary_file_are_execution_errors(self):
         dispatcher = self.dispatcher()

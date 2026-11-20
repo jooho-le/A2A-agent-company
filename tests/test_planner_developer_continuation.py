@@ -283,8 +283,15 @@ class DeveloperFixContinuationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.budget.model_calls - calls, 4)
         self.assertEqual([item.attempt for item in self.context_calls], [0, 1, 2])
         envelope = json.loads(json.loads(provider.requests[2].input_items_json)[0]["content"])
-        self.assertEqual(envelope["taskInput"]["fixRequest"], self.payload()["fixRequest"])
-        self.assertEqual(envelope["taskInput"]["runConfiguration"], self.configuration.to_artifact_json())
+        # docs/live-api/26: 모델 입력은 같은 관측값을 한 번만 싣는 축약본이다(원래 A2A 요청은 그대로).
+        from agents.runtime.developer_input import compact_fix_input
+        self.assertEqual(envelope["taskInput"]["fixRequest"], compact_fix_input(self.payload())["fixRequest"])
+        # 같은 시작 규격의 이중 직렬화만 해시로 합친다(docs/live-api/26). 나머지 실행 설정은 원본과 같다.
+        expected = dict(self.configuration.to_artifact_json())
+        frozen = expected.pop("frozenScenarioContractJson")
+        from hashlib import sha256
+        self.assertEqual(envelope["taskInput"]["runConfiguration"],
+                         {**expected, "frozenScenarioContractSha256": sha256(frozen.encode()).hexdigest()})
 
     async def test_fix_source_write_then_input_preserves_uncommitted_progress_without_replay(self):
         await self.prepare_fix()

@@ -428,6 +428,17 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     'lazy_bootstrap': [('database.py', 'def get_db():\n',
                         'import threading\n_SCHEMA_LOCK = threading.Lock()\n\n'
                         'def get_db():\n    with _SCHEMA_LOCK:\n        Base.metadata.create_all(engine)\n')],
+    # 이메일 칸 자체가 기본 키인 정상 앱(실제 Run 42f131fe v1 모델과 같은 모양, 2026-11-17). 기본 키도 DB의 중복 금지
+    # 제약이다. 0.7.1 이하 평가기는 행을 복사할 때 기본 키 칸을 빼서 이메일 없는 행을 넣었고, 그래서 판단 불가(미검증)였다.
+    'email_primary_key': [('models.py', '    id = Column(Integer, primary_key=True, autoincrement=True)\n'
+                           '    email = Column(String, nullable=False, unique=True, index=True)\n',
+                           '    email = Column(String, primary_key=True, unique=True, index=True, nullable=False)\n'),
+                          ('routers/auth.py', 'select(User.id)', 'select(User.email)')],
+    # unique=True 없이 기본 키만 둔 경우도 같다.
+    'email_primary_key_only': [('models.py', '    id = Column(Integer, primary_key=True, autoincrement=True)\n'
+                                '    email = Column(String, nullable=False, unique=True, index=True)\n',
+                                '    email = Column(String, primary_key=True)\n'),
+                               ('routers/auth.py', 'select(User.id)', 'select(User.email)')],
     'app_missing': [('main.py', 'app.include_router(auth_router)\n', 'app.include_router(auth_router)\napplication = app\n'),
                     ('main.py', '    return JSONResponse(status_code=422, content={"detail": errors})\n',
                      '    return JSONResponse(status_code=422, content={"detail": errors})\n\n\ndel app\n')],

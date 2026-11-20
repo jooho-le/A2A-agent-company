@@ -451,9 +451,18 @@ def _score_into(folder, export, run, archive, expected, *, runner, exam, contrac
                                   'codeVersion': expected.code_version}, False)
     if bundle is not None:
         _write(folder / 'bundle.json', bundle, False)
+    # 버전별 QA·Security 칸은 같은 Snapshot에 연결된 실제 보고서(trace.json)에서, 결과 패키지 저장 여부는 handoff에서 해시까지
+    # 확인한 package-completion에서 읽는다(Codex 점검 2026-11-19 #5). 내보내기가 없으면 예전처럼 사건만으로 적는다.
+    run_trace = (agent_export or {}).get('trace') or (trace_documents if (trace_documents or {}).get('artifacts') else None)
+    pipeline = None
+    if agent_export is not None:
+        completion = agent_export.get('packageCompletion')
+        pipeline = {'runId': run_id, 'packageSaved': bool(
+            agent_export.get('packageFilesVerified') is True and isinstance(completion, dict)
+            and completion.get('runId') == run_id and completion.get('codeVersion') == expected.code_version)}
     summary = render_summary(output['report'], scenario_contract=contract, run_bundle=bundle, trace=output['trace'],
                              runner=output['runner'], regression=regression, reference_report=output['referenceReport'],
-                             supplementary=output['supplementary'])
+                             supplementary=output['supplementary'], run_trace=run_trace, pipeline=pipeline)
     summary += ('\n- 최초 통과 Snapshot 산출 시간(TIME-05): '
                 + (str(timing['firstPassingSnapshotMs']) + 'ms' if timing['firstPassingSnapshotMs'] is not None
                    else str(timing['reason'])) + '\n')
@@ -587,7 +596,8 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
             pairs[metrics['runId']] = str(meta['pairId'])
         entries.append({'architecture': metrics['architecture'], 'loopPolicy': metrics['loopPolicy'],
                         'pairId': meta.get('pairId'), 'configuration': bundle['configuration'],
-                        'evaluation': report, 'priceBook': metrics.get('priceBook')})
+                        'evaluation': report, 'priceBook': metrics.get('priceBook'),
+                        'requestTextSha256': metrics.get('requestTextSha256')})
         # Run마다 한 줄: 실행 결과(verdict·상태)와 채점 여부를 따로 적어 "시작 후 실패·실행 완료 미채점·채점 미검증"을 구분한다.
         rows.append({'runId': metrics['runId'], 'loopPolicy': metrics['loopPolicy'], 'frozenLoopPolicy': frozen,
                      'pairId': meta.get('pairId'), 'workflowStatus': metrics['workflowStatus'],
@@ -707,11 +717,16 @@ def compare(results: Path, planned: Optional[Mapping[str, int]] = None, group_by
         blockers.append('PARITY_REPORT_FOR_OTHER_COMPARISON')
     if quarantined:
         blockers.append('ASSISTED_CONTINUATION_REQUIRES_SEPARATE_EXPERIMENT')
+    if any(item.get('requestTextSha256') is None for item in runs):
+        blockers.append('REQUEST_TEXT_NOT_VERIFIED')
     if any(group['unrecordedRuns'] for group in summary.values()):
         blockers.append('PLANNED_SLOT_RESULTS_NOT_COLLECTED')
+    execution_ready = {'status': 'PASS' if not blockers else 'UNVERIFIED', 'blockers': list(blockers)}
+    if any(group['evaluation']['eligibleRunsMissingGrade'] for group in summary.values()):
+        blockers.append('FINAL_CODE_NOT_GRADED')
     return {'exam': exams.pop() if exams else None, 'groupBy': group_by, 'plannedRuns': planned, 'selection': selection,
             'readiness': {'status': 'PASS' if not blockers else 'UNVERIFIED', 'blockers': blockers},
-            'plannedRunsKnown': planned_known,
+            'executionReadiness': execution_ready, 'plannedRunsKnown': planned_known,
             'validity': validity, 'runs': rows, 'unscoredRuns': sorted(unscored),
             'quarantinedAssistedRuns': sorted(quarantined),
             'executionSlots': slots, 'executionJournalSources': journal_sources,

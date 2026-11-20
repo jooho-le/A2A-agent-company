@@ -8,14 +8,17 @@ from typing import Callable
 from agents.core.identity import SinglePhase
 from agents.llm.contracts import StructuredOutput
 from agents.roles.developer_contract import build_developer_output_contract, validate_developer_decision
-from agents.roles.planner_contract import build_planner_output_contract, validate_planner_decision
+from agents.roles.planner_contract import PlannerContractError, build_planner_output_contract, validate_planner_decision
 from agents.roles.qa_contract import build_qa_output_contract, validate_qa_decision
 from agents.roles.security_contract import build_security_output_contract, validate_security_decision
 from orchestrator.domain.scenario_registry import RequirementValidator, ScenarioDefinition
 
 
 class SingleContractError(ValueError):
-    def __init__(self):
+    def __init__(self, planner_validation=None, *, output_invalid=False):
+        self.output_invalid = output_invalid
+        self.planner_validation = planner_validation
+        self.trace_recorded = False
         super().__init__("SINGLE_AGENT_DRAFT_INVALID")
 
 
@@ -27,11 +30,15 @@ class SingleDraftContract:
     _validate: Callable = field(repr=False, compare=False)
 
     def validate(self, data: dict):
+        report = None
         try:
             self.output.schema.validate(data)
             return self._validate(data)
+        except PlannerContractError as error:
+            report = error.validation
         except Exception:
-            raise SingleContractError() from None
+            pass
+        raise SingleContractError(report, output_invalid=True) from None
 
 
 def scenario_contract_sha256(scenario: ScenarioDefinition) -> str:
@@ -43,6 +50,7 @@ def build_single_draft_contract(
     phase: SinglePhase, *, scenario: ScenarioDefinition,
     selectors: dict[str, tuple[str, ...]] | None = None,
     finding_ids: tuple[str, ...] = (), source_paths: tuple[str, ...] = (),
+    repair_paths: tuple[str, ...] = (),
     security_test_selectors: dict[str, tuple[str, ...]] | None = None,
 ) -> SingleDraftContract:
     """Use the existing bounded decision validators, without running Agents.
@@ -59,8 +67,8 @@ def build_single_draft_contract(
             output = build_planner_output_contract(scenario)
             validate = lambda data: validate_planner_decision(data, scenario)
         elif phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING):
-            output = build_developer_output_contract()
-            validate = validate_developer_decision
+            output = build_developer_output_contract(repair_paths)
+            validate = lambda data: validate_developer_decision(data, repair_paths)
         elif phase is SinglePhase.QA:
             ids = scenario.requirement_ids_for(RequirementValidator.QA)
             scopes = {tool: tuple(names) for tool, names in (selectors or {}).items()}

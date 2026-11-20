@@ -1,28 +1,36 @@
 """Stable Single system instructions plus bounded, owned persisted context."""
 
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import sys
 
 from a2a.server.context import ServerCallContext
-from google.protobuf.json_format import MessageToDict
 
-from agents.api.sqlite_task_store import SQLiteAgentTaskStore
+from agents.api.sqlite_task_store import AgentContextLimitError, SQLiteAgentTaskStore
 from agents.core.identity import SingleAgentIdentity
-from agents.llm.contracts import json_text, parse_json
+from agents.llm.contracts import json_text
 from agents.roles.prompts import COMMON_RULES
 from agents.single.contracts import SingleDraftContract, SinglePhase, scenario_contract_sha256
 from orchestrator.a2a.requests import A2AWorkflowMetadata
 from orchestrator.core.security import redact_data
 from orchestrator.domain.scenario_registry import ScenarioDefinition
+from orchestrator.domain.validation_feedback import without_expectations
 
 
-SINGLE_PROMPT_VERSION = "3"
+SINGLE_PROMPT_VERSION = "4"
 MAX_SINGLE_PROMPT_BYTES = 1_048_576
 
 
 class SinglePromptError(ValueError):
+    code = "SINGLE_AGENT_PROMPT_INVALID"
+
     def __init__(self):
-        super().__init__("SINGLE_AGENT_PROMPT_INVALID")
+        super().__init__(self.code)
+
+
+class SinglePromptLimitError(SinglePromptError):
+    code = "SINGLE_AGENT_CONTEXT_LIMIT"
 
 
 def build_single_system_prompt() -> str:
@@ -54,6 +62,62 @@ class PreparedSinglePrompt:
     identity: SingleAgentIdentity = SingleAgentIdentity.SINGLE_AGENT
 
 
+def _history_entry(task, metadata, task_input):
+    """Remember admitted work without replaying past Host handoffs or test answers."""
+    current = task["metadata"] == metadata
+    status = task["status"]
+    entry = {"taskId": task["id"], "metadata": task["metadata"], "state": status["state"], "artifacts": []}
+    if current:
+        return entry  # The validated current Task (including clarifications) is already in taskInput.
+    messages = []
+    seen_request = False
+    current_request = task_input.get("userRequest", task_input.get("request"))
+    for message in task.get("history", []):
+        if message.get("role") != "ROLE_USER":
+            continue
+        for part in message.get("parts", []):
+            data = part.get("data")
+            if not isinstance(data, dict):
+                continue
+            if seen_request:
+                # Continuations are user responses. Retain them, without copying the initial Host handoff.
+                messages.append({"clarification": without_expectations(data)})
+            elif (task["metadata"].get("codeVersion") is None and "snapshot" not in data
+                  and isinstance(data.get("request"), str) and data["request"] != current_request):
+                messages.append({"request": data["request"]})
+        seen_request = True
+    if messages:
+        entry["messages"] = messages
+    for part in status.get("message", {}).get("parts", []):
+        data = part.get("data")
+        if isinstance(data, dict) and data.get("kind") == "PLAN" and isinstance(data.get("summary"), str):
+            entry["planSummary"] = data["summary"]
+    plan_input = task_input.get("plan")
+    current_plan = plan_input.get("implementationPlan") if isinstance(plan_input, dict) else None
+    for artifact in task.get("artifacts", []):
+        name = artifact.get("name")
+        ref = {"name": name, "artifactId": artifact.get("artifactId")}
+        for part in artifact.get("parts", []):
+            data = part.get("data")
+            if not isinstance(data, dict):
+                continue
+            if name == "requirements.json":
+                plan = data.get("implementationPlan")
+                if plan and plan != current_plan:
+                    ref["implementationPlan"] = plan
+            elif name == "change-report.json":
+                ref["changedFiles"] = [row["path"] for row in data.get("fileChanges", []) if "path" in row]
+            elif name == "build-report.json":
+                if "executionOutcome" in data:
+                    ref["outcome"] = data["executionOutcome"]
+            elif name in {"qa-report.json", "security-report.json"}:
+                rows = data.get("tests", []) if name == "qa-report.json" else data.get("requirementResults", [])
+                ref["outcomes"] = dict(Counter(row["outcome"] for row in rows
+                                               if row.get("outcome") in ("PASS", "FAIL", "UNVERIFIED")))
+        entry["artifacts"].append(ref)
+    return redact_data(entry)
+
+
 async def prepare_single_prompt(
     store: SQLiteAgentTaskStore, *, context_id: str, metadata: A2AWorkflowMetadata,
     scenario: ScenarioDefinition, draft_contract: SingleDraftContract,
@@ -64,7 +128,7 @@ async def prepare_single_prompt(
 
     Host supplies the protected scenario, phase contract and current Task
     metadata. Request/source/history remains JSON data, never system text.
-    No history truncation, replay, Task mutation or budget reset occurs here.
+    Every Task stays represented. Audit originals, context identity and budget are unchanged.
     """
     try:
         if (not isinstance(store, SQLiteAgentTaskStore)
@@ -79,24 +143,25 @@ async def prepare_single_prompt(
             raise SinglePromptError()
         if metadata.requirement_ids is not None and not set(metadata.requirement_ids) <= set(scenario.requirement_ids):
             raise SinglePromptError()
-        tasks = await store.context_tasks(context_id, metadata, call_context, max_bytes=max_bytes)
-        if not any(MessageToDict(task.metadata) == metadata.to_a2a_json() for task in tasks):
-            raise SinglePromptError()
-        # Bounded native JSON copying rejects unsupported types/nonfinite data.
-        data = parse_json(json_text(dict(task_input), max_bytes=max_bytes), max_bytes=max_bytes)
-        history = [{"taskId": task.id, "contextId": task.context_id,
-                    "metadata": MessageToDict(task.metadata),
-                    "messages": [MessageToDict(message) for message in task.history],
-                    "status": MessageToDict(task.status),
-                    "artifacts": [MessageToDict(artifact) for artifact in task.artifacts]}
-                   for task in tasks]
+        wire_metadata = metadata.to_a2a_json()
+        data = redact_data(dict(task_input))
+        if draft_contract.phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING):
+            data = without_expectations(data)
+        history = await store.project_single_context(
+            context_id, metadata, call_context, max_bytes=max_bytes,
+            project=lambda task: _history_entry(task, wire_metadata, data))
         payload = {"trusted": {"identity": "SINGLE_AGENT", "phase": draft_contract.phase.value,
-                               "metadata": metadata.to_a2a_json(), "scenarioContract": scenario.planner_contract()},
-                   "contextId": context_id, "history": history, "taskInput": redact_data(data)}
+                               "metadata": wire_metadata, "scenarioContract": scenario.planner_contract()},
+                   "contextId": context_id, "history": list(history), "taskInput": data}
         system = build_single_system_prompt()
-        input_json = json_text(payload, max_bytes=max_bytes)
+        # Measure only valid native JSON, so malformed/untrusted values never become a budget stop.
+        input_json = json_text(payload, max_bytes=sys.maxsize)
         if len(system.encode("utf-8")) + len(input_json.encode("utf-8")) > max_bytes:
-            raise SinglePromptError()
+            raise SinglePromptLimitError()
         return PreparedSinglePrompt(draft_contract.phase, draft_contract, system, input_json, context_id)
+    except AgentContextLimitError:
+        raise SinglePromptLimitError() from None
+    except SinglePromptLimitError:
+        raise
     except Exception:
         raise SinglePromptError() from None
