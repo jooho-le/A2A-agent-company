@@ -475,7 +475,9 @@ class SQLiteWorkflowRepositoryTests(unittest.TestCase):
         self.assertEqual(len(issues), 3)
         self.assertEqual(len({issue.fingerprint for issue in issues}), 1)
         self.assertEqual([issue.revalidation_result for issue in issues], ["FAIL", "FAIL", None])
-        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        # docs/live-api/05 14절(2026-11-18): 같은 발견이 반복되면 측정 결과로 끝난다. 이 합성 발견에는
+        # 스캔 영수증(evidenceRef)이 없어 FAIL을 만들지 않고 UNVERIFIED로 남긴다.
+        self.assertEqual((run.status, run.verdict.value), (WorkflowStatus.FINISHED, "UNVERIFIED"))
 
     def test_build_fix_resolution_is_recorded_before_qa_from_actual_build_evidence(self) -> None:
         from tests.test_dispatch import FakePlannerClient

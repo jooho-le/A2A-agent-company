@@ -84,8 +84,10 @@ class WorkflowContractRegressionTests(unittest.IsolatedAsyncioTestCase):
         findings = [self.finding(f"FIND-{index}") for index in range(2)]
         _, run = await self.pipeline(fixtures.FakePlannerClient(
             "TASK_STATE_COMPLETED", security_findings=findings))
+        # docs/live-api/05 14절(2026-11-18): 같은 결함이 반복되면 사람 검토가 아니라 측정 결과로 끝난다.
+        # 이 합성 발견에는 스캔 영수증(evidenceRef)이 없어 측정 FAIL을 만들지 않고 UNVERIFIED로 남긴다.
         self.assertEqual((run.status, run.verdict, run.fix_attempt),
-                         (WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW, 2))
+                         (WorkflowStatus.FINISHED, FinalVerdict.UNVERIFIED, 2))
         issues = self.repository.list_issue_records(run.run_id)
         self.assertEqual(len(issues), 6)  # Distinct Finding records are retained.
         for version, count in ((1, 0), (2, 1), (3, 2)):

@@ -1095,20 +1095,26 @@ class SQLiteWorkflowRepository:
 
             stored_issues = list(_store_detected_issues(connection, run, issues))
 
-            if any(requires_human_review(item.consecutive_repeat_count) for item in stored_issues):
+            if any(requires_human_review(item.repeats_for_stop) for item in stored_issues):
+                # docs/live-api/05 14절(석민 결정 2026-11-18, 주호 확인 필요): the same Issue that
+                # survived two fixes is an unresolved product defect, not a pending human
+                # judgment. Close with the current candidate and its measured reports kept:
+                # FAIL when a measured FAIL with Tool evidence exists, else UNVERIFIED.
+                measured = _current_measured_failure(connection, run)
                 final_run = transition_run(
-                    run, WorkflowStatus.HUMAN_REVIEW, verdict=FinalVerdict.HUMAN_REVIEW
+                    run, WorkflowStatus.FINISHED,
+                    verdict=FinalVerdict.FAIL if measured else FinalVerdict.UNVERIFIED,
                 )
                 _insert_event(
                     connection,
                     TraceEvent(
                         run_id=run_id,
-                        event_type="SAME_ISSUE_REQUIRES_REVIEW",
+                        event_type="SAME_ISSUE_REPEAT_LIMIT_REACHED",
                         actor="Orchestrator",
                         attempt=run.fix_attempt,
                         issue_id=next(
                             item.issue_id for item in stored_issues
-                            if requires_human_review(item.consecutive_repeat_count)
+                            if requires_human_review(item.repeats_for_stop)
                         ),
                         code_version=run.code_version,
                         workflow_state=final_run.status,
@@ -1266,8 +1272,15 @@ class SQLiteWorkflowRepository:
         decision_status: WorkflowStatus,
         verdict: FinalVerdict | None,
         detected_issues: Sequence[IssueRecord] = (),
+        policy_excluded_requirement_ids: Sequence[UUID] = (),
     ) -> WorkflowRun:
-        """Atomically append both validated reports and the derived Run Verdict."""
+        """Atomically append both validated reports and the derived Run Verdict.
+
+        ``policy_excluded_requirement_ids``: Requirements whose generated-test
+        results the Ver1 conflict-priority policy left out of fix requests. They
+        are unresolved conflicts, not confirmed test defects, and get their own
+        Trace event (docs/live-api/05 section 5).
+        """
         artifacts: tuple[ProjectArtifact, ...] = (qa_report, security_report)
         if qa_report.run_id != run_id or security_report.run_id != run_id:
             raise ValueError("Validation Artifacts must belong to the current Run")
@@ -1377,6 +1390,20 @@ class SQLiteWorkflowRepository:
                     )
                 )
 
+            issue_rechecks = _issue_rechecks(connection, run, qa_report, security_report)
+            unresolved = [identity for identity, result in issue_rechecks.items() if result != 'PASS']
+            if unresolved and verdict == FinalVerdict.SUCCESS:
+                verdict = (FinalVerdict.FAIL if any(issue_rechecks[i] == 'FAIL' for i in unresolved)
+                           else FinalVerdict.UNVERIFIED)
+                for issue_id in unresolved:
+                    record, = connection.execute('SELECT payload_json FROM issue_records WHERE issue_id=? AND run_id=?',
+                                                 (str(issue_id), str(run_id))).fetchone()
+                    origin = 'PROTECTED' if _load_model(IssueRecord, record).protected_receipt else 'GENERATED'
+                    _insert_event(connection, TraceEvent(run_id=run_id, event_type=origin + '_RECHECK_UNRESOLVED',
+                        issue_id=issue_id, actor='Orchestrator', attempt=run.fix_attempt,
+                        output_artifact_ids=[qa_report.artifact_id, security_report.artifact_id],
+                        code_version=run.code_version, snapshot_sha256=qa_report.execution_manifest.snapshot_sha256,
+                        workflow_state=decision_status))
             final_run = transition_run(run, decision_status, verdict=verdict)
             developer_step = next(
                 (
@@ -1426,7 +1453,7 @@ class SQLiteWorkflowRepository:
                     snapshot_sha256=report.execution_manifest.snapshot_sha256,
                     workflow_state=final_run.status,
                 ))
-            _record_revalidation_results(connection, run, qa_report, security_report)
+            _record_revalidation_results(connection, run, qa_report, security_report, issue_rechecks)
             _insert_event(
                 connection,
                 TraceEvent(
@@ -1441,6 +1468,16 @@ class SQLiteWorkflowRepository:
                     workflow_state=final_run.status,
                 ),
             )
+            excluded = list(dict.fromkeys(policy_excluded_requirement_ids))
+            if excluded:
+                _insert_event(connection, TraceEvent(
+                    run_id=run_id, event_type="VALIDATION_CONFLICT_POLICY_EXCLUDED", actor="Orchestrator",
+                    attempt=run.fix_attempt, requirement_ids=excluded,
+                    output_artifact_ids=[qa_report.artifact_id, security_report.artifact_id],
+                    code_version=qa_report.code_version,
+                    snapshot_sha256=qa_report.execution_manifest.snapshot_sha256,
+                    workflow_state=final_run.status,
+                ))
             connection.execute(
                 "UPDATE workflow_runs SET status = ?, updated_at = ?, payload_json = ? "
                 "WHERE run_id = ?",
@@ -1453,6 +1490,149 @@ class SQLiteWorkflowRepository:
             )
             _record_terminal_events(connection, final_run)
         return final_run
+
+    def finish_development_no_progress(self, run_id: UUID, step_id: UUID, task_id: str) -> bool:
+        """Close a Host-proven no-progress stop, never trust an Agent's failure code alone.
+
+        Preserve the last registered candidate and its measured failure. The
+        attempted next version is not a Snapshot. Missing/mismatched Host proof
+        falls back to the existing review path. Safe to observe more than once.
+        """
+        from orchestrator.domain.tool_evidence import ToolExecutionOutcome
+        with self._transaction() as connection:
+            row = connection.execute("SELECT payload_json FROM workflow_runs WHERE run_id=?", (str(run_id),)).fetchone()
+            step_row = connection.execute("SELECT payload_json FROM workflow_steps WHERE workflow_step_id=? AND run_id=?",
+                                          (str(step_id), str(run_id))).fetchone()
+            if row is None or step_row is None:
+                return False
+            run, step = _load_model(WorkflowRun, row[0]), _load_model(WorkflowStep, step_row[0])
+            if (step.agent_role != AgentRole.DEVELOPER or step.status != WorkflowStepStatus.FAILED
+                    or step.a2a_task_state != A2ATaskState.FAILED or step.a2a_task_id != task_id):
+                return False
+            prior_stop = connection.execute("SELECT payload_json FROM trace_events WHERE run_id=? "
+                "AND event_type IN ('DEVELOPMENT_NO_PROGRESS_EXHAUSTED','DEVELOPMENT_CORRECTIONS_EXHAUSTED','DEVELOPMENT_REJECTION_EXHAUSTED')",
+                (str(run_id),)).fetchone()
+            if run.status in (WorkflowStatus.FINISHED, WorkflowStatus.ABORTED):
+                return bool(prior_stop and json.loads(prior_stop[0]).get('workflowStepId') == str(step_id))
+            if run.status not in (WorkflowStatus.FIXING, WorkflowStatus.IMPLEMENTING):
+                return False
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_runtime_events'").fetchone():
+                return False
+            proofs = connection.execute("SELECT r.payload_json FROM agent_runtime_events r JOIN trace_events t "
+                "ON t.event_id=r.trace_event_id AND t.run_id=r.run_id "
+                "WHERE r.run_id=? AND r.workflow_step_id=? AND t.event_type='LLM_RECOVERY_DECIDED' ORDER BY r.sequence DESC",
+                (str(run_id), str(step_id))).fetchall()
+            proven = None
+            snapshot_proof_binding = None
+            use_protected_failure_evidence = False
+            for proof in proofs:
+                payload = json.loads(proof[0])
+                binding, detail = payload.get('binding', {}), payload.get('detail', {})
+                recovery = detail.get('recovery', {})
+                if not (binding.get('a2aTaskId') == task_id and binding.get('agentContextId') == step.agent_context_id
+                        and binding.get('actor') in ('DEVELOPER', 'SINGLE_AGENT')
+                        and binding.get('attempt') == step.attempt and binding.get('codeVersion') == step.code_version
+                        and detail.get('purpose') == 'LLM_RECOVERY' and recovery.get('kind') == 'DECISION'
+                        and recovery.get('reason') in ('DISABLED', 'REPEATED', 'LIMIT_REACHED')):
+                    continue
+                if (recovery.get('code') == 'DEVELOPER_REJECTION_RECOVERABLE'
+                        and recovery.get('category') == 'MODEL_EXECUTION' and recovery.get('action') == 'STOP'):
+                    from agents.llm.development_rejection import RejectionAssessment, assess_rejection
+                    try:
+                        assessment = RejectionAssessment.model_validate(recovery.get('developmentRejection'))
+                        from agents.runtime.development_failure import bound_failure
+                        failure = (bound_failure(connection, step)
+                                   if assessment.proposal.reason_code == 'NO_CHANGE_REQUIRED' else None)
+                        expected = assess_rejection(assessment.proposal.public(), assigned_ids=step.requirement_ids,
+                                                    source_changed=assessment.source_changed, failure_evidence=failure)
+                        if assessment != expected or assessment.classification == 'HUMAN_REVIEW':
+                            continue
+                    except ValueError:
+                        continue
+                    proven = 'DEVELOPMENT_REJECTION_EXHAUSTED'
+                    snapshot_proof_binding = binding
+                    break
+                if recovery.get('code') == 'READY_WITHOUT_CHANGES' and recovery.get('action') == 'STOP':
+                    proven = 'DEVELOPMENT_NO_PROGRESS_EXHAUSTED'
+                    break
+                if (recovery.get('code') == 'READY_LIBRARY_TYPE_MISMATCH'
+                        and recovery.get('category') == 'MODEL_EXECUTION' and recovery.get('action') == 'STOP'):
+                    # A rejected draft cannot supply a verdict. Retain only the measured parent.
+                    use_protected_failure_evidence = True
+                    snapshot_proof_binding = binding
+                    proven = 'DEVELOPMENT_CORRECTIONS_EXHAUSTED'
+                    break
+                # docs/live-api/05 14절: a Developer format mistake the bounded corrections could not
+                # fix closes the same way. Questions, permission/policy rejections and unknown Tool
+                # outcomes are not in this closed set and keep the review path.
+                if (recovery.get('code') in DEVELOPER_FORMAT_STOP_CODES and recovery.get('category') == 'MODEL_FORMAT'
+                        and recovery.get('action') in ('STOP', 'RETURN_TO_VALIDATOR')):
+                    if recovery.get('code') == 'READY_RUNTIME_REPAIR_REQUIRED':
+                        paths = recovery.get('unlinkedRepairPaths')
+                        if (run.status != WorkflowStatus.FIXING or recovery.get('action') != 'STOP'
+                                or not isinstance(paths, list) or 'NORMAL_REQUEST_RUNTIME_FAILURE' not in paths):
+                            continue
+                        use_protected_failure_evidence = True
+                        snapshot_proof_binding = binding
+                    proven = 'DEVELOPMENT_CORRECTIONS_EXHAUSTED'
+                    break
+            if proven is None:
+                return False
+            model_by_type = {'SOURCE': CodeSnapshotArtifact, 'CHANGE_REPORT': ChangeReportArtifact,
+                             'BUILD_REPORT': BuildReportArtifact, 'QA_REPORT': QAReportArtifact,
+                             'SECURITY_REPORT': SecurityReportArtifact, 'REQUIREMENT': RequirementArtifact}
+            artifacts = [_load_model(model_by_type[row[0]], row[1]) for row in connection.execute(
+                "SELECT artifact_type,payload_json FROM project_artifacts WHERE run_id=?", (str(run_id),))]
+            source = next((a for a in artifacts if isinstance(a, CodeSnapshotArtifact)
+                           and a.code_version == run.code_version), None)
+            evidence_ids = []
+            if run.status == WorkflowStatus.IMPLEMENTING:
+                if run.code_version is not None or source is not None or step.code_version != 1:
+                    return False
+                final = transition_run(run, WorkflowStatus.ABORTED, termination_reason=proven)
+            else:
+                if (source is None or source.artifact_id not in step.input_artifact_ids
+                        or step.code_version != source.code_version + 1):
+                    return False
+                if (snapshot_proof_binding is not None
+                        and snapshot_proof_binding.get('snapshotSha256') != source.snapshot_sha256):
+                    return False
+                evidence_ids.append(source.artifact_id)
+                # Only previously registered, same-Snapshot Tool evidence can support FAIL.
+                if not set(step.input_artifact_ids).issubset({a.artifact_id for a in artifacts}):
+                    return False
+                reports = [a for a in artifacts if a.artifact_id in step.input_artifact_ids
+                           and isinstance(a, (BuildReportArtifact, QAReportArtifact, SecurityReportArtifact))]
+                if (not any(isinstance(a, BuildReportArtifact) for a in reports)
+                        or any(a.code_version != source.code_version
+                               or a.execution_manifest != source.execution_manifest() for a in reports)):
+                    return False
+                measured_failure = use_protected_failure_evidence and _current_protected_failure(connection, run)
+                for report in reports:
+                    evidence_ids.append(report.artifact_id)
+                    if isinstance(report, BuildReportArtifact):
+                        measured_failure |= (report.execution_outcome == ToolExecutionOutcome.FAIL
+                            and report.failure_kind == 'PRODUCT' and report.tool_evidence is not None)
+                    elif isinstance(report, QAReportArtifact):
+                        measured_failure |= any(t.outcome.value == 'FAIL' and t.tool_evidence is not None for t in report.tests)
+                    else:
+                        measured_failure |= any(t.outcome.value == 'FAIL' and t.tool_evidence is not None
+                                                for t in report.requirement_results)
+                final = transition_run(run, WorkflowStatus.FINISHED,
+                    verdict=FinalVerdict.FAIL if measured_failure else FinalVerdict.UNVERIFIED)
+            connection.execute("UPDATE workflow_runs SET status=?,updated_at=?,payload_json=? WHERE run_id=?",
+                (final.status.value, final.updated_at.isoformat(), _json_model(final), str(run_id)))
+            _insert_event(connection, TraceEvent(run_id=run_id, workflow_step_id=step_id,
+                a2a_task_id=task_id, agent_context_id=step.agent_context_id,
+                event_type=proven, actor='Orchestrator', attempt=run.fix_attempt,
+                requirement_ids=step.requirement_ids, input_artifact_ids=step.input_artifact_ids,
+                output_artifact_ids=evidence_ids, code_version=run.code_version,
+                snapshot_sha256=None if source is None else source.snapshot_sha256, workflow_state=final.status))
+            _record_terminal_events(connection, final)
+            if final.status == WorkflowStatus.ABORTED:
+                _insert_event(connection, TraceEvent(run_id=run_id, event_type='RUN_ABORTED', actor='Orchestrator',
+                    attempt=run.fix_attempt, workflow_state=final.status))
+            return True
 
     def get_run(self, run_id: UUID) -> WorkflowRun | None:
         with self._connection() as connection:
@@ -2020,8 +2200,37 @@ _TERMINAL_TASK_STATES = frozenset({
 })
 
 
+def _measured_issue_progress(connection, previous, issue, source, report_json):
+    from orchestrator.domain.repair_progress import issue_progress, legacy_practice_versions
+    from orchestrator.domain.run_configuration import RunConfigurationArtifact
+
+    if previous.source_artifact_id != source.previous_artifact_id:
+        return 'NOT_COMPARABLE'
+    def fetch(artifact_id, kind):
+        return connection.execute(
+            "SELECT payload_json FROM project_artifacts WHERE run_id=? AND artifact_id=? AND artifact_type=?",
+            (str(source.run_id), str(artifact_id), kind)).fetchone()
+    kind, model = ('QA_REPORT', QAReportArtifact) if issue.reporter == AgentRole.QA else ('SECURITY_REPORT', SecurityReportArtifact)
+    parent = fetch(previous.source_artifact_id, 'SOURCE')
+    if previous.protected_receipt or issue.protected_receipt:
+        from orchestrator.domain.repair_progress import protected_issue_progress
+        return (protected_issue_progress(previous, issue, _load_model(CodeSnapshotArtifact, parent[0]), source)
+                if parent else 'NOT_COMPARABLE')
+    report = fetch(previous.report_artifact_id, kind)
+    if not parent or not report:
+        return 'NOT_COMPARABLE'
+    config = connection.execute("SELECT payload_json FROM run_configurations WHERE run_id=?", (str(source.run_id),)).fetchone()
+    legacy = legacy_practice_versions(_load_model(RunConfigurationArtifact, config[0])) if config else {}
+    try:
+        return issue_progress(previous, issue, _load_model(CodeSnapshotArtifact, parent[0]), source,
+                              _load_model(model, report[0]), _load_model(model, report_json), legacy)
+    except ValueError:
+        # A historical report without usable detail cannot justify resetting the stop counter.
+        return 'NOT_COMPARABLE'
+
+
 def _store_detected_issues(
-    connection: sqlite3.Connection, run: WorkflowRun, issues: Sequence[IssueRecord],
+    connection: sqlite3.Connection, run: WorkflowRun, issues: Sequence[IssueRecord], *, independent_issues=frozenset(),
 ) -> tuple[IssueRecord, ...]:
     stored_issues = []
     for issue in issues:
@@ -2046,6 +2255,10 @@ def _store_detected_issues(
         if not set(issue.requirement_ids).issubset(set(source.requirement_ids)):
             raise ValueError("Issue references a Requirement outside the Plan")
         report_step_id = source.workflow_step_id
+        if issue.protected_receipt is not None:
+            if issue.issue_id not in independent_issues:
+                raise ValueError("Protected issue requires an authenticated Host measurement")
+            report_step_id = issue.protected_receipt.workflow_step_id
         if issue.report_artifact_id is not None:
             report_row = connection.execute(
                 "SELECT artifact_type,payload_json FROM project_artifacts WHERE run_id=? AND artifact_id=?",
@@ -2068,15 +2281,26 @@ def _store_detected_issues(
         # A report may contain distinct Findings with the same fingerprint.
         # Only the immediately previous candidate advances the repeat count;
         # another Issue in this candidate must neither reset nor increment it.
-        previous = connection.execute(
-            "SELECT MAX(consecutive_repeat_count) FROM issue_records "
-            "WHERE run_id=? AND fingerprint=? AND code_version=?",
+        prior_issues = [_load_model(IssueRecord, entry[0]) for entry in connection.execute(
+            "SELECT payload_json FROM issue_records WHERE run_id=? AND fingerprint=? AND code_version=?",
             (str(run.run_id), issue.fingerprint, issue.code_version - 1),
-        ).fetchone()[0]
-        repeats = previous + 1 if previous is not None else 0
+        )]
+        repeats = 1 + max((item.consecutive_repeat_count for item in prior_issues), default=-1)
+        stop_count = 1 + max((item.repeats_for_stop for item in prior_issues), default=-1)
+        progress = None
+        if prior_issues and issue.category in ('QA_ASSERTION_FAILURE', 'SECURITY_REQUIREMENT_FAILURE'):
+            progress = 'NOT_COMPARABLE'
+            if len(prior_issues) == 1 and (issue.report_artifact_id or issue.protected_receipt):
+                progress = _measured_issue_progress(connection, prior_issues[0], issue, source,
+                                                    report_row[1] if issue.report_artifact_id else None)
+            # Only comparable observations can establish consecutive stalled fixes.
+            # A new trial has the same global code-fix limit, including when evidence changed.
+            if progress in ('PARTIAL_IMPROVEMENT', 'NOT_COMPARABLE'):
+                stop_count = 0
         stored = IssueRecord.model_validate({
             **_sanitize_storage_value(issue.model_dump(mode="json")),
-            "consecutive_repeat_count": repeats,
+            "consecutive_repeat_count": repeats, "measured_progress": progress,
+            "stop_repeat_count": stop_count if stop_count != repeats or progress is not None else None,
         })
         connection.execute(
             "INSERT INTO issue_records(issue_id,run_id,fingerprint,code_version,consecutive_repeat_count,created_at,payload_json) "
@@ -2179,7 +2403,67 @@ def _security_finding_revalidation(connection, issue, security_report) -> str:
     return "PASS"
 
 
-def _record_revalidation_results(connection, run, qa_report, security_report) -> None:
+def _issue_rechecks(connection, run, qa_report, security_report):
+    from orchestrator.domain.repair_progress import generated_issue_recheck
+    if not run.fix_attempt:
+        return {}
+    results = {}
+    reports = {}
+    current_source = None
+
+    def candidate():
+        nonlocal current_source
+        if current_source is None:
+            for value, in connection.execute(
+                    "SELECT payload_json FROM project_artifacts WHERE run_id=? AND artifact_type='SOURCE'",
+                    (str(run.run_id),)):
+                source = _load_model(CodeSnapshotArtifact, value)
+                if source.code_version == run.code_version:
+                    current_source = source
+                    break
+        return current_source
+
+    for row in connection.execute("SELECT payload_json FROM issue_records WHERE run_id=? AND code_version < ?",
+                                  (str(run.run_id), run.code_version)):
+        issue = _load_model(IssueRecord, row[0])
+        if issue.category not in ('QA_ASSERTION_FAILURE', 'SECURITY_REQUIREMENT_FAILURE'):
+            continue
+        progress = connection.execute("SELECT payload_json FROM issue_events WHERE issue_id=? "
+                "AND event_type='REVALIDATION_FINISHED' ORDER BY sequence DESC LIMIT 1", (str(issue.issue_id),)).fetchone()
+        if progress and json.loads(progress[0]).get('revalidation_result') == 'PASS':
+            continue
+        if issue.protected_receipt is not None:
+            # A passing requirement summary, or a generated case for the same requirement,
+            # cannot settle the earlier protected case. Its own receipt may exist even
+            # when the new validator again failed to publish a project report.
+            from orchestrator.infrastructure.protected_recheck import current_protected_observation
+            source = candidate()
+            current_row = current_protected_observation(connection, issue, source) if source else None
+            results[issue.issue_id] = current_row['outcome'] if current_row else 'UNVERIFIED'
+            continue
+        report_id = issue.report_artifact_id
+        if report_id not in reports:
+            stored = connection.execute("SELECT payload_json FROM project_artifacts WHERE run_id=? AND artifact_id=?",
+                                        (str(run.run_id), str(report_id))).fetchone()
+            cls = QAReportArtifact if issue.reporter is AgentRole.QA else SecurityReportArtifact
+            reports[report_id] = _load_model(cls, stored[0]) if stored else None
+        from mcp_tools.tools.generated_recheck import measured_row
+        source = candidate()
+        current = qa_report if issue.reporter is AgentRole.QA else security_report
+        if not source or current and current.execution_manifest != source.execution_manifest():
+            current = None
+        outcome = generated_issue_recheck(
+            issue, reports[report_id], current,
+            replayed=lambda row: measured_row(connection, issue, source, row) if source else None)
+        if outcome is not None:
+            results[issue.issue_id] = outcome
+    return results
+
+
+def _record_revalidation_results(connection, run, qa_report, security_report, issue_rechecks=None) -> None:
+    if issue_rechecks is None:
+        issue_rechecks = _issue_rechecks(connection, run, qa_report, security_report)
+
     def proven_outcome(result, report, allowed_tools) -> str:
         evidence = result.tool_evidence
         if (
@@ -2193,10 +2477,20 @@ def _record_revalidation_results(connection, run, qa_report, security_report) ->
         # Tool PASS proves the check executed, not that its assertions passed.
         return result.outcome.value
 
-    for issue in _fixed_issues_for_candidate(connection, run, qa_report.code_version):
+    direct = {issue.issue_id: issue for issue in _fixed_issues_for_candidate(connection, run, run.code_version)}
+    for identity in issue_rechecks.keys() - direct.keys():
+        raw = connection.execute('SELECT payload_json FROM issue_records WHERE run_id=? AND issue_id=?',
+                                 (str(run.run_id), str(identity))).fetchone()
+        direct[identity] = _load_model(IssueRecord, raw[0])
+    for issue in direct.values():
         if issue.reporter == AgentRole.DEVELOPER:
             continue  # Already evaluated by the candidate's own Build transaction.
-        if issue.reporter == AgentRole.QA:
+        if issue.issue_id in issue_rechecks:
+            outcome = issue_rechecks[issue.issue_id]
+        elif (issue.reporter == AgentRole.QA and qa_report is None
+                or issue.reporter == AgentRole.SECURITY and security_report is None):
+            outcome = "UNVERIFIED"
+        elif issue.reporter == AgentRole.QA:
             matching = [proven_outcome(test, qa_report, {"run_unit_tests", "run_browser_tests"})
                         for test in qa_report.tests
                         if test.requirement_id in issue.requirement_ids
@@ -2237,6 +2531,56 @@ def _insert_artifact(connection, artifact, workflow_state) -> None:
         requirement_ids=list(artifact.requirement_ids), output_artifact_ids=[artifact.artifact_id],
         code_version=getattr(artifact, "code_version", None), workflow_state=workflow_state,
     ))
+
+
+# Recorded in the Host policy (docs/live-api/05 14절).
+REPEATED_ISSUE_POLICY = 'SAME_ISSUE_CONSECUTIVE_COMPARABLE_STALLS_V3'
+DEVELOPMENT_STOP_POLICY = 'BOUNDED_DEVELOPMENT_STOP_KEEPS_LAST_MEASURED_CANDIDATE_V4'
+# Developer format codes whose exhausted correction closes with the last candidate (05 14절).
+DEVELOPER_FORMAT_STOP_CODES = frozenset({'OUTPUT_CONTRACT_INVALID', 'MODEL_OUTPUT_INVALID', 'TOOL_ARGUMENTS_INVALID',
+                                         'START_CONTRACT_PRECHECK_FAILED', 'OUTPUT_LIMIT_REACHED',
+                                         'READY_RUNTIME_REPAIR_REQUIRED'})
+
+
+def _current_protected_failure(connection, run) -> bool:
+    # Only the protected-stop transaction can introduce a receipt-backed issue. Scope to the
+    # current source: a previous candidate's observation cannot decide the retained version.
+    return connection.execute("SELECT 1 FROM issue_records i JOIN project_artifacts s "
+            "ON s.artifact_id=json_extract(i.payload_json,'$.source_artifact_id') AND s.run_id=i.run_id "
+            "AND s.artifact_type='SOURCE' AND json_extract(s.payload_json,'$.code_version')=i.code_version "
+            "WHERE i.run_id=? AND i.code_version=? AND json_type(i.payload_json,'$.protected_receipt')='object' LIMIT 1",
+            (str(run.run_id), run.code_version)).fetchone() is not None
+
+
+def _current_measured_failure(connection, run) -> bool:
+    """True for a current, authenticated report failure or an independent protected receipt."""
+    if _current_protected_failure(connection, run):
+        return True
+    from orchestrator.domain.tool_evidence import ToolExecutionOutcome
+    models = {'BUILD_REPORT': BuildReportArtifact, 'QA_REPORT': QAReportArtifact,
+              'SECURITY_REPORT': SecurityReportArtifact}
+    for kind, raw in connection.execute(
+            "SELECT artifact_type,payload_json FROM project_artifacts WHERE run_id=? "
+            "AND artifact_type IN ('BUILD_REPORT','QA_REPORT','SECURITY_REPORT')", (str(run.run_id),)):
+        report = _load_model(models[kind], raw)
+        if report.code_version != run.code_version:
+            continue
+        if kind == 'BUILD_REPORT':
+            if (report.execution_outcome == ToolExecutionOutcome.FAIL and report.failure_kind == 'PRODUCT'
+                    and report.tool_evidence is not None):
+                return True
+            continue
+        items = report.tests if kind == 'QA_REPORT' else report.requirement_results
+        if any(item.outcome.value == 'FAIL' and item.tool_evidence is not None for item in items):
+            return True
+        # A confirmed HIGH/CRITICAL scanner finding with its scan receipt (evidence_ref) is a measured
+        # failure, like decide_verdict's confirmed_blocker (2026-11-18). Without the receipt it stays
+        # uncertain: a FAIL is never invented from an unevidenced claim.
+        if kind == 'SECURITY_REPORT' and any(
+                finding.disposition.value == 'CONFIRMED' and finding.severity.value in ('HIGH', 'CRITICAL')
+                and finding.evidence_ref is not None for finding in report.findings):
+            return True
+    return False
 
 
 def _record_terminal_events(connection, run) -> None:

@@ -141,7 +141,8 @@ class IssueRevalidationEvidenceTests(unittest.IsolatedAsyncioTestCase):
         for role in (AgentRole.QA, AgentRole.SECURITY):
             with self.subTest(role=role):
                 run = await self.run_pipeline(_RequirementRevalidationClient(role, after_fix="FAIL"))
-                self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+                # docs/live-api/05 14절(2026-11-18): 반복된 실제 실패는 측정 FAIL로 끝난다.
+                self.assertEqual((run.status, run.verdict), (WorkflowStatus.FINISHED, FinalVerdict.FAIL))
                 self.assertEqual({issue.revalidation_result for issue in self.original_issues(run, role)}, {"FAIL"})
 
     async def test_suspected_and_unverified_findings_are_not_resolved(self):
@@ -159,7 +160,9 @@ class IssueRevalidationEvidenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_actual_confirmed_finding_recurrence_remains_fail(self):
         run = await self.run_pipeline(_FindingRevalidationClient("CONFIRMED"))
-        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        # docs/live-api/05 14절(2026-11-18): 반복되면 측정 결과로 끝난다. 이 합성 발견에는 스캔 영수증
+        # (evidenceRef)이 없어 Run 판정은 UNVERIFIED다. 결함 재검증 결과는 아래처럼 FAIL로 남는다.
+        self.assertEqual((run.status, run.verdict), (WorkflowStatus.FINISHED, FinalVerdict.UNVERIFIED))
         self.assertEqual({issue.revalidation_result for issue in self.original_issues(run, AgentRole.SECURITY)}, {"FAIL"})
 
     async def test_finding_without_scan_proof_is_not_resolved_or_confirmed(self):

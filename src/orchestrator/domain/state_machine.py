@@ -48,8 +48,10 @@ ALLOWED_TRANSITIONS: Mapping[WorkflowStatus, frozenset[WorkflowStatus]] = (
                     WorkflowStatus.HUMAN_REVIEW,
                 }
             ),
+            # FINISHED: a repeated same Issue closes with the measured FAIL kept
+            # (docs/live-api/05 14절, 석민 결정 2026-11-18; 주호 확인 필요).
             WorkflowStatus.FIX_REQUIRED: frozenset(
-                {WorkflowStatus.FIXING, WorkflowStatus.HUMAN_REVIEW}
+                {WorkflowStatus.FIXING, WorkflowStatus.HUMAN_REVIEW, WorkflowStatus.FINISHED}
             ),
             WorkflowStatus.FIXING: frozenset(
                 {
