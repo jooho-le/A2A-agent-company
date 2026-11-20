@@ -56,6 +56,26 @@ class SourceCredentialsTests(unittest.TestCase):
             sanitize_content({"content": f'api_key="{_SYNTHETIC_SECRET}"'}, source_fields=("content",))
         self.assertEqual(caught.exception.code, LLMErrorCode.TOOL_POLICY)
 
+    def test_rejection_reports_only_closed_rule_and_original_line(self):
+        with self.assertRaises(SourceCredentialError) as caught:
+            validate_source_text('import secrets\npassword = "' + _SYNTHETIC_SECRET + '"\n')
+        self.assertEqual(caught.exception.rule, 'CREDENTIAL_ASSIGNMENT')
+        self.assertEqual(caught.exception.line, 2)
+        self.assertNotIn(_SYNTHETIC_SECRET, repr(caught.exception))
+        with self.assertRaises(LLMRuntimeError) as policy:
+            sanitize_content({'content': 'password = "' + _SYNTHETIC_SECRET + '"'},
+                             source_fields=('content',), sequence=1, tool_name='write_test_file')
+        report=policy.exception.public_validation()
+        self.assertEqual(report['sourceRule'], 'CREDENTIAL_ASSIGNMENT')
+        self.assertEqual(report['sourceLine'], 1)
+        self.assertNotIn(_SYNTHETIC_SECRET, str(report))
+
+    def test_decoded_source_location_is_not_fabricated(self):
+        with self.assertRaises(SourceCredentialError) as caught:
+            validate_source_text(r'api\u005fkey = "SYNTHETIC_ESCAPED_SECRET"')
+        self.assertEqual(caught.exception.rule, 'CREDENTIAL_ASSIGNMENT')
+        self.assertIsNone(caught.exception.line)
+
     def test_typed_and_mapping_credential_literals_reject(self):
         for source in (
             'api_key: str = "SYNTHETIC_TYPED_SECRET"',
@@ -80,6 +100,20 @@ class SourceCredentialsTests(unittest.TestCase):
         for index, value in enumerate(values):
             with self.subTest(value_index=index):
                 self.assert_denied(validate_source_text, value)
+
+    def test_public_hash_algorithm_marker_is_not_a_password_hash(self):
+        for marker in ('$argon2id$', '$argon2i$', '$argon2d$', '$2b$12$'):
+            source = 'assert stored.startswith(' + repr(marker) + ')\n'
+            validate_source_text(source)
+            self.assertEqual(sanitize_content({'content': source}, source_fields=('content',))['content'], source)
+
+    def test_hash_payload_and_split_hash_remain_denied(self):
+        for source in (
+            'value = "$argon2id$" + "v=19$m=1,t=1,p=1$synthetic$synthetic"',
+            'value = "$2b$12$" + "' + 'A' * 53 + '"',
+            'value = "$argon2id$synthetic"',
+        ):
+            self.assert_denied(validate_source_text, source)
 
     def test_common_escaped_and_compatibility_forms_reject(self):
         for source in (

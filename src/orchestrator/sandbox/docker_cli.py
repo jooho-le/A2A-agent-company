@@ -27,6 +27,8 @@ _MAX_ARGUMENTS = 256
 _MAX_ARGUMENT_BYTES = 8192
 _MAX_ARGUMENTS_BYTES = 131072
 _MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+_GROUP_RETRY_SECONDS = 0.1
+_CLEANUP_SECONDS = 1.0
 
 
 def _safe_text(value: object, *, maximum: int) -> bool:
@@ -56,21 +58,36 @@ async def _read_bounded(stream: asyncio.StreamReader, maximum: int) -> bytes:
             raise SandboxError(SandboxErrorCode.OUTPUT_LIMIT)
 
 
-def _kill_group(process: asyncio.subprocess.Process) -> None:
+def _kill_group(process: asyncio.subprocess.Process) -> bool:
+    if process.returncode is not None:
+        # A group can outlive its reaped leader. If its numeric PID is already
+        # occupied again, we cannot establish that this is still our group.
+        try:
+            os.getpgid(process.pid)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            return False
+        else:
+            return False
     try:
         # start_new_session below makes this the group created by this call,
         # including descendants that keep stdout/stderr pipes open.
         os.killpg(process.pid, signal.SIGKILL)
+        return True
     except (ProcessLookupError, PermissionError):
         if process.returncode is None:
             try:
                 process.kill()
             except ProcessLookupError:
                 pass
+        return False
 
 
 async def _reap(process: asyncio.subprocess.Process, tasks: list[asyncio.Task]) -> None:
-    _kill_group(process)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _CLEANUP_SECONDS
+    signalled = _kill_group(process)
     for task in tasks:
         if not task.done():
             task.cancel()
@@ -82,7 +99,27 @@ async def _reap(process: asyncio.subprocess.Process, tasks: list[asyncio.Task]) 
     async def discard(stream):
         while await stream.read(65536):
             pass
-    await asyncio.gather(discard(process.stdout), discard(process.stderr), process.wait())
+    drained = asyncio.gather(discard(process.stdout), discard(process.stderr), process.wait(), return_exceptions=True)
+    try:
+        done, _ = await asyncio.wait((drained,), timeout=_GROUP_RETRY_SECONDS)
+        if not done:
+            # A concurrent fork can leave an inherited pipe open after the
+            # first signal. Never revisit a group already known to be absent.
+            if signalled:
+                _kill_group(process)
+            done, _ = await asyncio.wait((drained,), timeout=max(0, deadline - loop.time()))
+        if not done or any(isinstance(value, BaseException) for value in drained.result()):
+            raise SandboxError(SandboxErrorCode.CLEANUP)
+    except BaseException:
+        # asyncio.Process exposes no public pipe close method. Close only our
+        # two subprocess read transports. The child watcher still owns waitpid.
+        for fd in (1, 2):
+            pipe = process._transport.get_pipe_transport(fd)
+            if pipe is not None:
+                pipe.close()
+        drained.cancel()
+        await asyncio.gather(drained, return_exceptions=True)
+        raise
 
 
 async def _finish_cleanup(process: asyncio.subprocess.Process, tasks: list[asyncio.Task]) -> None:
@@ -97,6 +134,8 @@ async def _finish_cleanup(process: asyncio.subprocess.Process, tasks: list[async
             break
     try:
         cleanup.result()
+    except SandboxError:
+        raise
     except (OSError, RuntimeError):
         raise SandboxError(SandboxErrorCode.EXECUTION) from None
 

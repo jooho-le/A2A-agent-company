@@ -103,9 +103,12 @@ class UnitRunnerTests(unittest.TestCase):
                 raise RuntimeError("fixture class setup")
             def test_never(self):
                 raise AssertionError("should not run")
+        # 2026-11-18(docs/live-api/05 3절): 준비 단계에서 막힌 시험도 사유와 함께 미실행 줄로 남긴다.
         report, code = self.execute([Fixture("test_never")])
-        self.assertEqual((code, report["total"], report["failed"]), (1, 1, 1))
+        self.assertEqual((code, report["total"], report["failed"], report["skipped"]), (1, 2, 1, 1))
         self.assertTrue(report["tests"][0]["testId"].startswith("setUpClass ("))
+        self.assertIn("[origin=", report["tests"][0]["details"])
+        self.assertEqual((report["tests"][1]["outcome"], report["tests"][1]["details"]), ("SKIP", "NOT_RUN_SETUP_FAILED"))
 
     def test_class_skip_is_one_synthetic_skip(self):
         class Fixture(unittest.TestCase):
@@ -114,8 +117,10 @@ class UnitRunnerTests(unittest.TestCase):
                 raise unittest.SkipTest("fixture class skip")
             def test_never(self):
                 pass
+        # 2026-11-18(docs/live-api/05 3절): 준비 단계에서 막힌 시험도 사유와 함께 미실행 줄로 남긴다.
         report, code = self.execute([Fixture("test_never")])
-        self.assertEqual((code, report["total"], report["skipped"]), (0, 1, 1))
+        self.assertEqual((code, report["total"], report["skipped"]), (0, 2, 2))
+        self.assertEqual(report["tests"][1]["details"], "NOT_RUN_FIXTURE_SKIPPED")
 
     def test_module_setup_error_accounts_for_unstarted_module_cases(self):
         name = "mcp_trusted_tool_fixture_module_error"
@@ -131,8 +136,10 @@ class UnitRunnerTests(unittest.TestCase):
         Fixture.__module__ = name
         with patch.dict(sys.modules, {name: module}):
             report, code = self.execute([Fixture("test_a"), Fixture("test_b")])
-        self.assertEqual((code, report["total"], report["failed"]), (1, 1, 1))
+        # 2026-11-18(docs/live-api/05 3절): 준비 단계에서 막힌 시험도 사유와 함께 미실행 줄로 남긴다.
+        self.assertEqual((code, report["total"], report["failed"], report["skipped"]), (1, 3, 1, 2))
         self.assertEqual(report["tests"][0]["testId"], f"setUpModule ({name})")
+        self.assertEqual({row["details"] for row in report["tests"][1:]}, {"NOT_RUN_SETUP_FAILED"})
 
     def test_module_setup_skip_is_synthetic_skip(self):
         name = "mcp_trusted_tool_fixture_module_skip"
@@ -146,7 +153,8 @@ class UnitRunnerTests(unittest.TestCase):
         Fixture.__module__ = name
         with patch.dict(sys.modules, {name: module}):
             report, code = self.execute([Fixture("test_a")])
-        self.assertEqual((code, report["total"], report["skipped"]), (0, 1, 1))
+        # 2026-11-18(docs/live-api/05 3절): 준비 단계에서 막힌 시험도 사유와 함께 미실행 줄로 남긴다.
+        self.assertEqual((code, report["total"], report["skipped"]), (0, 2, 2))
 
     def test_tear_down_class_error_is_additional_failed_case(self):
         class Fixture(unittest.TestCase):
@@ -249,8 +257,34 @@ class UnitRunnerTests(unittest.TestCase):
                 pass
             def test_b(self):
                 pass
+        # 2026-11-18(docs/live-api/05 3절): 준비 단계에서 막힌 시험도 사유와 함께 미실행 줄로 남긴다.
         report, code = self.execute([Fixture("test_a"), Fixture("test_b")])
-        self.assertEqual((code, report["total"], report["failed"]), (1, 1, 1))
+        self.assertEqual((code, report["total"], report["failed"], report["skipped"]), (1, 3, 1, 2))
+
+    def test_async_test_in_plain_testcase_is_not_run_not_pass(self):
+        # 2026-11-18(docs/live-api/05 3절, Codex 문제 1): 본문이 실행되지 않은 async 시험은 PASS가 아니다.
+        import asyncio
+
+        class Plain(unittest.TestCase):
+            async def test_never_awaited(self):
+                raise AssertionError("body ran")
+
+        class Proper(unittest.IsolatedAsyncioTestCase):
+            async def test_awaited(self):
+                await asyncio.sleep(0)
+        report, code = self.execute([Plain("test_never_awaited"), Proper("test_awaited")])
+        rows = {row["testId"].rsplit(".", 1)[-1]: row for row in report["tests"]}
+        self.assertEqual((code, report["passed"], report["skipped"]), (0, 1, 1))
+        self.assertEqual((rows["test_never_awaited"]["outcome"], rows["test_never_awaited"]["details"]),
+                         ("SKIP", "NOT_RUN_ASYNC_NOT_AWAITED"))
+        self.assertEqual(rows["test_awaited"]["outcome"], "PASS")
+
+    def test_error_origin_is_recorded_as_evidence(self):
+        class Fixture(unittest.TestCase):
+            def test_assert(self):
+                self.assertEqual(1, 2)
+        report, _code = self.execute([Fixture("test_assert")])
+        self.assertRegex(report["tests"][0]["details"], r"\[origin=(TEST|PRODUCT|LIBRARY)\]$")
 
     def test_direct_fd_prints_discarded_in_trusted_harness_context(self):
         # Own fixed benign script, never Source or Tool-selected command.

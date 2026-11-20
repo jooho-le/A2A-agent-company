@@ -108,12 +108,43 @@ def _inventory(source_root, path_validator):
     return dict(sorted(rows.items()))
 
 
+@contextmanager
+def _without_formatters(extension_module):
+    """The isolated AST runner never imports optional report formatters."""
+    original = extension_module.ExtensionManager
+
+    class EmptyFormatters:
+        def __iter__(self):
+            return iter(())
+
+        def names(self):
+            return []
+
+    def selected_extensions(*args, **kwargs):
+        namespace = kwargs.get('namespace', args[0] if args else None)
+        if namespace == 'bandit.formatters':
+            return EmptyFormatters()
+        return original(*args, **kwargs)
+
+    extension_module.ExtensionManager = selected_extensions
+    try:
+        yield
+    finally:
+        extension_module.ExtensionManager = original
+
+
 def _load_bandit():
     # Explicit runtime-only approved dependency imports. Never prepend Source
     # or use Bandit's CLI project/config discovery and external formatters.
-    from bandit.core.config import BanditConfig
-    from bandit.core.manager import BanditManager
-    from bandit.core.extension_loader import MANAGER
+    from stevedore import extension
+    # Bandit imports its global registry on first import, including optional
+    # SARIF formatters whose extra dependencies need not exist in this image.
+    # Skip only the unused formatter namespace; detector/blacklist loading and
+    # all engine error checks remain unchanged. This runs in the scan process.
+    with _without_formatters(extension):
+        from bandit.core.config import BanditConfig
+        from bandit.core.manager import BanditManager
+        from bandit.core.extension_loader import MANAGER
     return BanditConfig, BanditManager, MANAGER
 
 

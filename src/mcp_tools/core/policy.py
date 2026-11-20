@@ -31,7 +31,7 @@ ORCHESTRATOR_TOOL_ROLES = MappingProxyType({
 ROLE_TOOL_NAMES = MappingProxyType({
     AgentRole.PLANNER: (),
     AgentRole.DEVELOPER: (
-        "read_project_file", "write_source_file", "apply_patch", "run_build",
+        "read_project_file", "write_source_file", "edit_source_file", "apply_patch", "run_build",
         "run_unit_tests",
     ),
     AgentRole.QA: (

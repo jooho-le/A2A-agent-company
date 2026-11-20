@@ -5,13 +5,23 @@ The Host must not use this module to execute Agent-generated Source locally.
 """
 
 import argparse
-from contextlib import contextmanager
+import ast
+from contextlib import contextmanager, ExitStack, closing, redirect_stderr, redirect_stdout
+import hashlib
+import importlib
+import inspect
 import io
+import logging
 import json
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import secrets
+import string
 import sys
+import tempfile
+import textwrap
+from types import ModuleType
 import unittest  # Import stdlib before inserting any untrusted Source path.
 
 
@@ -19,6 +29,519 @@ MAX_CASES = 1000
 MAX_OUTPUT_BYTES = 1024 * 1024
 MAX_ID_BYTES = 512
 MAX_DETAILS_BYTES = 4096
+TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V1"
+TEST_DATA_MODULE = "_host_test_data"
+TEST_DATA_EXPORTS = ("new_password",)
+MAX_TEST_PASSWORD_LENGTH = 4096
+APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V5'
+APP_FIXTURE_MODULE = '_host_app_test'
+APP_FIXTURE_EXPORTS = ('AppTestCase',)
+
+
+class _CaptureBytes(io.BytesIO):
+    truncated = False
+
+    def write(self, data):
+        remaining = MAX_OUTPUT_BYTES - self.tell()
+        self.truncated |= len(data) > remaining
+        super().write(data[:remaining])
+        return len(data)
+
+
+class _BoundedOutput:
+    def __init__(self):
+        self.buffer = _CaptureBytes()
+
+    def write(self, value):
+        self.buffer.write(value.encode('utf-8', errors='replace'))
+        return len(value)
+
+    def text(self):
+        return self.buffer.getvalue().decode('utf-8', errors='replace')
+
+    def flush(self):
+        pass
+
+
+def _contains_password(payload, password):
+    if isinstance(payload, dict):
+        return any(_contains_password(value, password) for value in payload.values())
+    if isinstance(payload, list):
+        return any(_contains_password(value, password) for value in payload)
+    return type(payload) is str and payload == password
+
+
+class _RequestObservation:
+    """Value-free metadata for a single TestClient request, alongside its ordinary verdict."""
+    def __init__(self):
+        self.started = False
+        self.escaped = None
+        self.parts = None
+
+    def annotate(self, row, contains=None):
+        if contains is None:
+            if self.escaped and row['status'] == 'UNVERIFIED':
+                row['diagnostic'] = self.escaped
+        elif row['status'] == 'FAIL':
+            locations = self.locations(contains)
+            if locations:
+                row['diagnostic'] = {'locations': locations}
+
+    def locations(self, contains):
+        if self.parts is None:
+            return []
+        body, headers = self.parts
+        locations = []
+        if contains(headers):
+            locations.append('HEADERS')
+        if not contains(body):
+            return locations
+        try:
+            todo = [(json.loads(body), 'BODY', 0)]
+        except (ValueError, RecursionError):
+            todo = []
+        for _ in range(512):
+            if not todo or len(locations) >= 4:
+                break
+            value, path, depth = todo.pop()
+            if isinstance(value, str) and contains(value):
+                if path not in locations:
+                    locations.append(path)
+            elif depth < 8 and isinstance(value, (list, dict)):
+                children = []
+                if isinstance(value, list):
+                    children = [(child, path + '[' + str(i) + ']', depth+1) for i, child in enumerate(value[:32])]
+                else:
+                    for key, child in value.items():
+                        # Arbitrary keys can be supplied by users; export only public field names.
+                        segment = key if key in ('detail','input','body','email','password','password_hash','message') else '*'
+                        children.append((child, path + '.' + segment, depth+1))
+                        if len(children) == 32:
+                            break
+                todo.extend(reversed(children))
+        if not any(p.startswith('BODY') for p in locations):
+            locations.append('BODY')
+        return locations
+
+
+def _escaped_exception(error, source, started):
+    allowed = {'sqlalchemy.exc': {'OperationalError','IntegrityError','DBAPIError','DatabaseError',
+                                  'StatementError','DataError','SQLAlchemyError','ProgrammingError'},
+               'sqlite3': {'OperationalError','IntegrityError','DatabaseError'},
+               'builtins': {'RuntimeError','ValueError','TypeError','Exception','KeyError'},
+               'fastapi.exceptions': {'RequestValidationError','HTTPException'},
+               'starlette.exceptions': {'HTTPException'}}
+    cls = type(error)
+    name = cls.__module__ + '.' + cls.__name__ if cls.__name__ in allowed.get(cls.__module__, ()) else 'OTHER'
+    data = {'escapedToClient': True, 'responseStarted': started, 'exceptionType': name}
+    tb = error.__traceback__
+    frame = None
+    while tb is not None:
+        filename = tb.tb_frame.f_code.co_filename
+        try:
+            path = Path(filename).resolve()
+            if path.suffix == '.py' and path.is_relative_to(source) and 1 <= tb.tb_lineno <= 1_000_000:
+                frame = path, tb.tb_lineno
+        except (ValueError, OSError, RuntimeError):
+            pass
+        tb = tb.tb_next
+    if frame:
+        path, line = frame
+        try:
+            if path.is_file() and path.stat().st_size <= 128000:
+                data['appFrame'] = {'sourceSha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'line': line}
+        except OSError:
+            pass
+    # A recognized argument diagnostic may name a builtin type. Do not stringify
+    # a product exception or forward its argument names, values, or error text.
+    if 'appFrame' in data and type(error) is TypeError and len(error.args) == 1:
+        message = error.args[0]
+        if type(message) is str and len(message) <= 192:
+            match = re.fullmatch(
+                r"'[a-zA-Z_][a-zA-Z_0-9]{0,63}' must be (?:a|an) [a-zA-Z_][a-zA-Z_0-9]{0,63} "
+                r"\(got (str|bytes|bool|int|float|list|tuple|dict|set|NoneType)\)\.?", message)
+            if match:
+                data['observedCause'] = {'code': 'ARGUMENT_TYPE_MISMATCH', 'actualType': match[1]}
+    return data
+
+
+@contextmanager
+def _observe_request(client, source):
+    from unittest.mock import patch
+    observation = _RequestObservation()
+    transport = client._transport
+    original_app, original_send = transport.app, client.send
+
+    async def app(scope, receive, send):
+        async def forward(message):
+            await send(message)
+            if message.get('type') == 'http.response.start':
+                observation.started = True
+        return await original_app(scope, receive, forward)
+
+    def observe_send(*args, **kwargs):
+        try:
+            response = original_send(*args, **kwargs)
+        except Exception as error:
+            observation.escaped = _escaped_exception(error, source, observation.started)
+            raise
+        if response.is_stream_consumed:
+            # A streamed or undecodable response can still be a valid app response.
+            try:
+                body = response.content[:MAX_OUTPUT_BYTES].decode('utf-8', errors='replace')
+                headers = '\n'.join(key + ': ' + val for key, val in response.headers.items())
+                observation.parts = (body, headers[:MAX_OUTPUT_BYTES])
+            except (RuntimeError, ValueError, LookupError):
+                pass
+        return response
+
+    with patch.object(transport, 'app', app), patch.object(client, 'send', observe_send):
+        yield observation
+
+
+@contextmanager
+def _app_test_api(source_root, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None):
+    """Public SCN-001 lifecycle only. No schema creation, overrides or grading answers.
+
+    The runner is mounted read-only. Application imports and these fixtures run
+    only in the same disposable container as generated tests, never on the Host.
+    """
+    source = Path(source_root).resolve()
+
+    def local_modules():
+        found = {}
+        for name, module in tuple(sys.modules.items()):
+            filename = getattr(module, '__file__', None)
+            if filename and Path(filename).resolve().is_relative_to(source):
+                found[name] = module
+        return found
+
+    from weakref import WeakKeyDictionary
+    salt_samples = WeakKeyDictionary()
+
+    class AppTestCase(unittest.TestCase):
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            # Setup belongs to the Host. Custom preparation belongs in a test
+            # body, after the app is started; ordinary unittest remains available.
+            if any(name in cls.__dict__ for name in ('setUp', 'tearDown', 'setUpClass',
+                    'tearDownClass', '_callSetUp', '_callTearDown', 'run')):
+                raise ValueError('HOST_APP_LIFECYCLE_OVERRIDE')
+
+        def setUp(self):
+            if any(name in sys.modules for name in ('main', 'database', 'models')):
+                raise ValueError('HOST_APP_IMPORT_BEFORE_FIXTURE')
+            resources = ExitStack()
+            self.addCleanup(resources.close)  # also runs when startup raises
+            folder = resources.enter_context(tempfile.TemporaryDirectory(prefix='host-app-'))
+            previous = os.environ.get('DATABASE_URL')
+            os.environ['DATABASE_URL'] = 'sqlite:///' + str(Path(folder) / 'case.db')
+            def restore_environment():
+                if previous is None:
+                    os.environ.pop('DATABASE_URL', None)
+                else:
+                    os.environ['DATABASE_URL'] = previous
+            resources.callback(restore_environment)
+            before = local_modules()
+            def unload_application():
+                for name, module in local_modules().items():
+                    if name not in before:
+                        engine = getattr(module, 'engine', None)
+                        if engine is not None and callable(getattr(engine, 'dispose', None)):
+                            engine.dispose()
+                        sys.modules.pop(name, None)
+                importlib.invalidate_caches()
+            resources.callback(unload_application)
+            # Import after DATABASE_URL is fixed, so the application's own
+            # database.get_db and lifespan use the same isolated database.
+            main = importlib.import_module('main')
+            database = importlib.import_module('database')
+            models = importlib.import_module('models')
+            from fastapi.testclient import TestClient
+            from sqlalchemy.orm import Session
+            self.app = main.app
+            self.client = resources.enter_context(TestClient(self.app, raise_server_exceptions=False))
+            dependency = database.get_db()
+            if inspect.isgenerator(dependency):
+                resources.enter_context(closing(dependency))
+                self.db = next(dependency)
+            else:
+                self.db = resources.enter_context(dependency) if isinstance(dependency, Session) else dependency
+            if not isinstance(self.db, Session):
+                raise ValueError('HOST_APP_DATABASE_SESSION_REQUIRED')
+            self.User = models.User
+            url = self.db.get_bind(mapper=self.User).url
+            if (url.get_backend_name() != 'sqlite'
+                    or Path(url.database).resolve() != (Path(folder) / 'case.db').resolve()):
+                raise ValueError('HOST_APP_DATABASE_URL_IGNORED')
+
+        def concurrent_signup_statuses(self, first, second):
+            """Release two test-authored HTTP requests together. Preserve both real status codes."""
+            from concurrent.futures import ThreadPoolExecutor
+            from threading import Barrier
+
+            start = Barrier(2, timeout=5)
+            def send(payload):
+                start.wait()
+                return self.client.post('/api/auth/signup', json=payload, follow_redirects=False).status_code
+
+            addresses = [p.get('email') for p in (first, second) if isinstance(p, dict)]
+            canonical = (addresses[0].strip().lower() if len(addresses) == 2 and
+                         all(isinstance(a, str) for a in addresses) and
+                         addresses[0].strip().lower() == addresses[1].strip().lower() else None)
+            valid_pair = (canonical and issued_passwords is not None
+                          and all(isinstance(p.get('password'), str) and len(p['password']) >= 8
+                                  and p['password'] in issued_passwords for p in (first, second)))
+            before = self._signup_email_state(canonical) if signup_checks is not None and valid_pair else None
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                responses = [pool.submit(send, payload) for payload in (first, second)]
+                statuses = tuple(response.result() for response in responses)
+            if before and before['exactEmailRows'] == 0:
+                after = self._signup_email_state(canonical)
+                added = after['totalRows'] - before['totalRows']
+                created = sum(200 <= status < 300 for status in statuses)
+                if (created == 1 and added == 1 and after['exactEmailRows'] == 1
+                        and any(400 <= status < 500 for status in statuses)):
+                    signup_checks.setdefault(self, {}).setdefault('concurrentCanonicalSignup', True)
+                elif created or added or after['exactEmailRows']:
+                    # A success without its committed canonical row, or a write after two rejections, is an observed violation.
+                    signup_checks.setdefault(self, {})['concurrentCanonicalSignup'] = False
+            return statuses
+
+        def signup_email_state(self, canonical_email):
+            """Read committed counts and deployed SQLite keys. Never select passwords or create schema."""
+            result = self._signup_email_state(canonical_email)
+            if (signup_checks is not None and canonical_email == canonical_email.strip().lower()
+                    and result['exactEmailRows'] == 1 and result['hasDirectEmailUniqueKey']):
+                signup_checks.setdefault(self, {})['canonicalEmailUniqueKey'] = True
+            return result
+
+        def _signup_email_state(self, canonical_email):
+            from sqlalchemy import func, inspect as sa_inspect, select
+
+            if not isinstance(canonical_email, str) or not canonical_email:
+                raise ValueError('SUPPLY_EXPECTED_CANONICAL_EMAIL')
+            column = sa_inspect(self.User).column_attrs['email'].columns[0]
+            table = column.table
+            with self.db.get_bind(mapper=self.User).connect() as connection:
+                inspector = sa_inspect(connection)
+                coordinates = {'table_name': table.name, 'schema': table.schema}
+                pk = inspector.get_pk_constraint(**coordinates)
+                unique = inspector.get_unique_constraints(**coordinates)
+                indexes = inspector.get_indexes(**coordinates)
+                key = [column.name]
+                direct_key = (pk.get('constrained_columns') == key
+                              or any(item.get('column_names') == key for item in unique)
+                              or any(item.get('unique') and item.get('column_names') == key
+                                     and item.get('dialect_options', {}).get('sqlite_where') is None
+                                     for item in indexes))
+                # One statement and a binary comparison even for a NOCASE column.
+                count = select(func.count(), func.count().filter(column.collate('BINARY') == canonical_email)).select_from(table)
+                total, exact = connection.execute(count).one()
+            return {'totalRows': total, 'exactEmailRows': exact, 'hasDirectEmailUniqueKey': direct_key}
+
+        def signup_hash_parameters(self, canonical_email, *, password):
+            """Observe one committed credential. Return only non-secret metadata for test assertions."""
+            from argon2 import PasswordHasher, extract_parameters
+            from argon2.exceptions import InvalidHashError, VerificationError
+            from sqlalchemy import select
+
+            if (signup_checks is None or issued_passwords is None or password not in issued_passwords
+                    or not isinstance(canonical_email, str) or not canonical_email):
+                raise ValueError('SUPPLY_SYNTHETIC_SIGNUP_ACCOUNT')
+            query = select(self.User.password_hash).where(self.User.email == canonical_email)
+            with self.db.get_bind(mapper=self.User).connect() as connection:
+                encoded = connection.execute(query).scalar_one_or_none()
+            if encoded is None:
+                self.skipTest('COMMITTED_CREDENTIAL_UNAVAILABLE')
+            facts = {'argon2id': False, 'verified': False, 'memoryKiB': 0, 'iterations': 0, 'parallelism': 0}
+            if isinstance(encoded, str):
+                try:
+                    params = extract_parameters(encoded)
+                    facts.update(argon2id=params.type.name == 'ID', memoryKiB=params.memory_cost,
+                                 iterations=params.time_cost, parallelism=params.parallelism)
+                    facts['verified'] = PasswordHasher().verify(encoded, password)
+                except (InvalidHashError, VerificationError, ValueError, TypeError):
+                    pass
+            # All observed credentials in this case must meet the public policy. Never export the hashes.
+            marks = signup_checks.setdefault(self, {})
+            prior = marks.get('storedHashParameters', facts)
+            observed = {key: min(value, prior[key]) for key, value in facts.items()}
+            if 'distinctSalts' in prior:
+                observed['distinctSalts'] = prior['distinctSalts']
+            if facts['verified']:
+                salt = encoded.split('$')[-2]
+                samples = salt_samples.setdefault(self, {})
+                other_salts = [value for account, value in samples.items() if account != canonical_email]
+                if other_salts:
+                    observed['distinctSalts'] = observed.get('distinctSalts', True) and salt not in other_salts
+                if len(samples) < 32 or canonical_email in samples:
+                    samples[canonical_email] = salt
+            marks['storedHashParameters'] = observed
+            return {**facts, **({'distinctSalts': observed['distinctSalts']} if 'distinctSalts' in observed else {})}
+
+        def check_signup_output(self, payload, *, password):
+            """Measure the output of a test-authored signup request. Never export payload or output."""
+            if exposure_checks is None:
+                raise ValueError('GENERATED_SECURITY_OBSERVATION_UNAVAILABLE')
+            if (type(password) is not str or len(password) < 8 or
+                    not _contains_password(payload, password) or issued_passwords is None or password not in issued_passwords
+                    or isinstance(payload, dict) and 'password' in payload and payload['password'] != password):
+                raise ValueError('SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST')
+            import fastapi.routing as routing
+            from sqlalchemy import event
+            from sqlalchemy.exc import IntegrityError
+            engine = self.db.get_bind(mapper=self.User)
+            known_hashes = set()
+            def before_insert(_mapper, _connection, user):
+                value = getattr(user, 'password_hash', None)
+                if isinstance(value, str) and value and len(known_hashes) < 32:
+                    known_hashes.add(value)
+            storage_error = entered = matched = False
+            original_endpoint = routing.run_endpoint_function
+            async def observe_entry(*args, **kwargs):
+                nonlocal entered
+                entered = True
+                return await original_endpoint(*args, **kwargs)
+
+            transport = self.client._transport
+            original_app = transport.app
+            async def observe_route(scope, receive, send):
+                nonlocal matched
+                try:
+                    return await original_app(scope, receive, send)
+                finally:
+                    matched = scope.get('route') is not None and callable(scope.get('endpoint'))
+            def on_error(context):
+                nonlocal storage_error
+                if not isinstance(context.sqlalchemy_exception, IntegrityError):
+                    storage_error = True
+
+            # Keep only bounded text in memory, match after the request, then discard it.
+            # Forward no production data to the Host, assertions or model.
+            stream = _BoundedOutput()
+            formatted = logging.StreamHandler.format
+            def observe_format(handler, record):
+                result = formatted(handler, record)
+                stream.write(result)
+                return result
+            from unittest.mock import patch
+            with ExitStack() as resources:
+                event.listen(self.User, 'before_insert', before_insert)
+                resources.callback(event.remove, self.User, 'before_insert', before_insert)
+                event.listen(engine, 'handle_error', on_error)
+                resources.callback(event.remove, engine, 'handle_error', on_error)
+                resources.enter_context(patch.object(logging.StreamHandler, 'format', observe_format))
+                resources.enter_context(redirect_stdout(stream))
+                resources.enter_context(redirect_stderr(stream))
+                # A synthetic 500 produced by TestClient for a propagated exception is not an app response.
+                resources.enter_context(patch.object(transport, 'raise_server_exceptions', True))
+                resources.enter_context(patch.object(transport, 'app', observe_route))
+                resources.enter_context(patch.object(routing, 'run_endpoint_function', observe_entry))
+                observation = resources.enter_context(_observe_request(self.client, source))
+                try:
+                    response = self.client.post('/api/auth/signup', json=payload, follow_redirects=False)
+                except Exception:
+                    response = None
+            status_class = response.status_code // 100 if response is not None else None
+            channel = None
+            if matched and entered and status_class == 2:
+                channel = 'SUCCESS_RESPONSE'
+            elif matched and not entered and status_class == 4:
+                channel = 'REJECTION_RESPONSE'
+            if storage_error and entered and status_class in (None, 5):
+                channel = 'STORAGE_ERROR_RESPONSE'
+            marks = exposure_checks.setdefault(self, {})
+            def contains(content):
+                # Match the actual supplied value (including JSON escapes) and the public encoded hash format.
+                tokens = (password, json.dumps(password, ensure_ascii=True)[1:-1],
+                          json.dumps(password, ensure_ascii=False)[1:-1])
+                return any(token in content for token in (*tokens, *known_hashes)) or bool(re.search(
+                    r'\$argon2(?:id|i|d)\$(?:v=\d+\$)?m=\d+,t=\d+,p=\d+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+', content))
+            def record(name, content, truncated=False):
+                leaked = contains(content)
+                state = 'EXPOSED' if leaked else 'INCOMPLETE' if truncated else 'CHECKED'
+                ranks = {'CHECKED': 0, 'INCOMPLETE': 1, 'EXPOSED': 2}
+                if name not in marks or ranks[state] > ranks[marks[name]]:
+                    marks[name] = state
+                return leaked
+            content = response.content if response is not None else b''
+            headers = b'\n'.join(key + b': ' + value for key, value in response.headers.raw) if response is not None else b''
+            content = headers + b'\n' + content
+            body = content[:MAX_OUTPUT_BYTES].decode('utf-8', errors='replace')
+            exposed = record(channel or 'OTHER_RESPONSE', body, response is None or len(content) > MAX_OUTPUT_BYTES)
+            # A request log capture includes Python stream output and formatted stream-handler records.
+            exposed_logs = record('STORAGE_ERROR_REQUEST_LOGS' if channel == 'STORAGE_ERROR_RESPONSE'
+                                  else 'REQUEST_LOGS', stream.text(), stream.buffer.truncated)
+            if diagnostics is not None:
+                detail = observation.escaped
+                if exposed and observation.parts:
+                    locations = observation.locations(contains)
+                    detail = {'locations': locations} if locations else None
+                if detail:
+                    bucket = diagnostics.setdefault(self, {}).setdefault(channel or 'OTHER_RESPONSE', [])
+                    if detail not in bucket and len(bucket) < 4:
+                        bucket.append(detail)
+            if exposed or exposed_logs:
+                self.fail('REQUEST_OUTPUT_EXPOSURE')
+            if response is None:
+                self.skipTest('REQUEST_RESPONSE_UNAVAILABLE')
+            return response
+
+    module = ModuleType(APP_FIXTURE_MODULE)
+    module.__all__ = list(APP_FIXTURE_EXPORTS)
+    module.AppTestCase = AppTestCase
+    module.observe_request = lambda client: _observe_request(client, source)
+    previous = sys.modules.get(APP_FIXTURE_MODULE)
+    sys.modules[APP_FIXTURE_MODULE] = module
+    try:
+        yield
+    finally:
+        if previous is None:
+            sys.modules.pop(APP_FIXTURE_MODULE, None)
+        else:
+            sys.modules[APP_FIXTURE_MODULE] = previous
+
+
+def _new_test_password(length=12, kind="ascii"):
+    """Fresh synthetic data only: no supplied literal, env, file or network input.
+
+    Length and character family describe data, not whether the product should
+    accept it. Empty, short and long cases use the very same runtime factory.
+    """
+    alphabets = {"ascii": string.ascii_letters + string.digits,
+                 "unicode": "가나다라마éñΩλ", "digits": string.digits, "spaces": " "}
+    if (type(length) is not int or not 0 <= length <= MAX_TEST_PASSWORD_LENGTH
+            or type(kind) is not str or kind not in alphabets):
+        raise ValueError("TEST_DATA_ARGUMENT_INVALID")
+    return "".join(secrets.choice(alphabets[kind]) for _ in range(length))
+
+
+@contextmanager
+def _test_data_api(issued_passwords=None):
+    # Preload before untrusted source/tests join sys.path: an accidentally
+    # same-named product/test file cannot shadow the Host-owned factory.
+    # As with unittest itself, this is not isolation from malicious Python
+    # deliberately mutating sys.modules inside its disposable container.
+    missing = object()
+    previous = sys.modules.get(TEST_DATA_MODULE, missing)
+    module = ModuleType(TEST_DATA_MODULE)
+    module.__all__ = list(TEST_DATA_EXPORTS)
+    def new_password(length=12, kind='ascii'):
+        value = _new_test_password(length, kind)
+        if issued_passwords is not None and len(value) >= 8:
+            issued_passwords.add(value)
+        return value
+    module.new_password = new_password
+    sys.modules[TEST_DATA_MODULE] = module
+    try:
+        yield
+    finally:
+        if previous is missing:
+            sys.modules.pop(TEST_DATA_MODULE, None)
+        else:
+            sys.modules[TEST_DATA_MODULE] = previous
+
 _SAFE_PATTERN = re.compile(r"[A-Za-z0-9_*?\[\].-]{1,128}\.py\Z")
 _SECRET_NAMES = frozenset({
     ".git", ".ssh", ".aws", ".codex", ".agents", ".gnupg", ".kube",
@@ -89,20 +612,75 @@ def _bounded(value, limit):
     return value.encode("utf-8", errors="replace")[:limit].decode("utf-8", errors="ignore")
 
 
+def _status_used_as_container(test, err):
+    """Prove the failing assertIn directly followed unpacking the Host helper's two integers."""
+    if err[0] is not TypeError:
+        return False
+    fixture = getattr(sys.modules.get(APP_FIXTURE_MODULE), 'AppTestCase', None)
+    if fixture is None or not isinstance(test, fixture):
+        return False
+    try:
+        if inspect.getattr_static(test, 'concurrent_signup_statuses') is not fixture.concurrent_signup_statuses:
+            return False
+        method = inspect.getattr_static(type(test), test._testMethodName)
+        frame = err[2]
+        while frame and frame.tb_frame.f_code is not method.__code__:
+            frame = frame.tb_next
+        target = frame.tb_next if frame else None
+        if (not target or target.tb_next or target.tb_frame.f_code is not unittest.TestCase.assertIn.__code__
+                or type(target.tb_frame.f_locals.get('container')) is not int):
+            return False
+        lines, first = inspect.getsourcelines(method)
+        body = ast.parse(textwrap.dedent(''.join(lines))).body[0].body
+        line = frame.tb_lineno - first + 1
+        # Deliberately recognize only adjacent top-level statements. Other causes of a TypeError,
+        # including a product returning the wrong type, retain their ordinary measured outcome.
+        for assignment, assertion in zip(body, body[1:]):
+            if not isinstance(assertion, ast.Expr) or not assertion.lineno <= line <= assertion.end_lineno:
+                continue
+            if not isinstance(assignment, ast.Assign) or len(assignment.targets) != 1:
+                return False
+            unpack = assignment.targets[0]
+            if not isinstance(unpack, (ast.Tuple, ast.List)) or len(unpack.elts) != 2:
+                return False
+            call, check = assignment.value, assertion.value
+            def self_call(node, name):
+                return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == name
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id == 'self')
+            return (self_call(call, 'concurrent_signup_statuses') and self_call(check, 'assertIn')
+                    and len(check.args) == 2 and isinstance(check.args[0], (ast.Constant, ast.Name))
+                    and isinstance(check.args[1], ast.Name) and not check.keywords
+                    and all(isinstance(var, ast.Name) for var in unpack.elts)
+                    and check.args[1].id in {var.id for var in unpack.elts})
+    except (AttributeError, OSError, TypeError, IndexError, ValueError, SyntaxError, RecursionError):
+        return False
+    return False
+
+
 class _Result(unittest.TestResult):
     """Aggregate failed subtests into their parent, count class callbacks too."""
 
-    def __init__(self, expected, capture_observations=False):
+    def __init__(self, expected, capture_observations=False, roots=(), exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None):
         super().__init__()
+        self.diagnostics = diagnostics
         self.expected = expected
         self.seen = set()
         self.blocked = set()
+        # Tests whose body never ran: an ``async def`` test in a plain TestCase
+        # returns an un-awaited coroutine and unittest reports success.
+        self.unawaited = set()
+        # (label, resolved root) pairs telling where an error was raised. A
+        # location is evidence for later classification, never a verdict.
+        self.roots = tuple(roots)
         self.rows = {}
         self.active = {}
         self.started = 0
         self.finished = 0
         self.invalid = False
         self.capture_observations = capture_observations
+        self.signup_checks = signup_checks
+        self.exposure_checks = exposure_checks
+        self.issued_passwords = issued_passwords
 
     def _id(self, test):
         test_id = test.id()
@@ -116,6 +694,8 @@ class _Result(unittest.TestResult):
 
     def startTest(self, test):
         super().startTest(test)
+        if self.issued_passwords is not None:
+            self.issued_passwords.clear()
         test_id = self._id(test)
         if test_id in self.rows or id(test) in self.active or len(self.rows) >= MAX_CASES:
             raise _HarnessError()
@@ -125,6 +705,9 @@ class _Result(unittest.TestResult):
         self.active[id(test)] = test_id
         self.seen.add(test_id)
         self.started += 1
+        method = getattr(test, getattr(test, "_testMethodName", ""), None)
+        if inspect.iscoroutinefunction(method) and not isinstance(test, unittest.IsolatedAsyncioTestCase):
+            self.unawaited.add(test_id)
 
     def stopTest(self, test):
         test_id = self.active.pop(id(test), None)
@@ -143,16 +726,43 @@ class _Result(unittest.TestResult):
                             and all(type(v) is int and 0 <= v <= 999 for v in value)):
                         raise ValueError()
                     item = {k: row[k] for k in ('caseId', 'itemId', 'kind', 'actual', 'status', 'reason')}
+                    if 'statusOrigin' in row:
+                        origin = row['statusOrigin']
+                        if (item['itemId'] != 'http_status' or item['kind'] not in ('assertion', 'precondition')
+                                or item['status'] not in ('PASS', 'FAIL') or type(value) is not int
+                                or not 500 <= value <= 599 or origin not in ('HTTP_RESPONSE', 'ESCAPED_EXCEPTION')
+                                or (origin == 'ESCAPED_EXCEPTION' and value != 500)):
+                            raise ValueError()
+                        item['statusOrigin'] = origin
+                    if 'handlerEntry' in row:
+                        if (item['kind'] != 'precondition' or item['itemId'] != 'response_status'
+                                or row['handlerEntry'] not in ('ENTERED', 'NOT_ENTERED', 'UNKNOWN')):
+                            raise ValueError()
+                        item['handlerEntry'] = row['handlerEntry']
                     if any(type(item[k]) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', item[k])
                            for k in ('caseId', 'itemId', 'kind', 'status')):
                         raise ValueError()
                     if item['reason'] is not None and (type(item['reason']) is not str
                             or not re.fullmatch(r'[A-Z_]{1,64}', item['reason'])):
                         raise ValueError()
+                    if 'diagnostic' in row:
+                        item['diagnostic'] = row['diagnostic']
                     projected.append(item)
                 self.rows[test_id]['observations'] = projected
             except Exception:
                 self.rows[test_id]['observationError'] = 'DETAIL_RECORD_INVALID'
+        if self.signup_checks is not None:
+            facts = self.signup_checks.pop(test, None)
+            if facts and test_id in self.rows:
+                self.rows[test_id]['signupChecks'] = facts
+        if self.exposure_checks is not None:
+            marks = self.exposure_checks.pop(test, {})
+            if marks and test_id in self.rows:
+                self.rows[test_id]["outputChecks"] = marks
+        if self.diagnostics is not None:
+            diagnostic = self.diagnostics.pop(test, None)
+            if diagnostic and test_id in self.rows:
+                self.rows[test_id]['outputDiagnostics'] = diagnostic
         self.finished += 1
         super().stopTest(test)
 
@@ -177,22 +787,81 @@ class _Result(unittest.TestResult):
             if details is not None:
                 row["details"] = _bounded(details, MAX_DETAILS_BYTES)
 
-    @staticmethod
-    def _error(err):
-        return _bounded(err[0].__name__ + ": " + str(err[1]), MAX_DETAILS_BYTES)
+    def _origin(self, traceback):
+        """TEST, PRODUCT or LIBRARY: the deepest traceback frame inside a known root."""
+        origin, depth = "LIBRARY", 0
+        while traceback is not None and depth < 256:
+            try:
+                filename = str(Path(traceback.tb_frame.f_code.co_filename).resolve())
+            except (OSError, ValueError, RuntimeError):
+                filename = ""
+            # The most specific root wins (a snapshot's tests/ sits inside its Source).
+            matched = [(len(root), label) for label, root in self.roots if filename.startswith(root + os.sep)]
+            if matched:
+                origin = max(matched)[1]
+            traceback, depth = traceback.tb_next, depth + 1
+        return origin
+
+    def _error(self, err):
+        return _bounded(err[0].__name__ + ": " + str(err[1]) + " [origin=" + self._origin(err[2]) + "]",
+                        MAX_DETAILS_BYTES)
+
+    def _setup_error(self, test, err):
+        """Record failure before the body, without deciding whether the product caused it.
+
+        Use unittest's actual setup frame, not exception text or a function named
+        setUp in product code. Keep the preparation failure as a separate row,
+        as for class/module fixtures, and the declared case as explicitly not run.
+        """
+        test_id = self.active.get(id(test))
+        if test_id is None:
+            return False
+        setup_codes = {unittest.TestCase._callSetUp.__code__,
+                       unittest.IsolatedAsyncioTestCase._callSetUp.__code__}
+        other_phase_codes = {getattr(case, name).__code__
+                             for case in (unittest.TestCase, unittest.IsolatedAsyncioTestCase)
+                             for name in ('_callTestMethod', '_callTearDown', '_callCleanup')}
+        traceback, depth = err[2], 0
+        while traceback is not None and depth < 256:
+            frame = traceback.tb_frame
+            if frame.f_code in other_phase_codes and frame.f_locals.get('self') is test:
+                return False  # A body/cleanup may explicitly call a setup helper.
+            if frame.f_code in setup_codes and frame.f_locals.get('self') is test:
+                fixture_id = 'setUp (' + test_id + ')'
+                if (fixture_id in self.rows or len(self.rows) >= MAX_CASES
+                        or len(fixture_id.encode('utf-8')) > MAX_ID_BYTES):
+                    raise _HarnessError()
+                self.rows[fixture_id] = {
+                    'testId': fixture_id, 'outcome': 'FAIL',
+                    'details': _bounded('[phase=SETUP] ' + self._error(err), MAX_DETAILS_BYTES),
+                }
+                self._outcome(test, 'SKIP', 'NOT_RUN_SETUP_FAILED')
+                return True
+            traceback, depth = traceback.tb_next, depth + 1
+        return False
 
     def addSuccess(self, test):
-        self._outcome(test, "PASS")
+        if self.active.get(id(test)) in self.unawaited:
+            self._outcome(test, "SKIP", "NOT_RUN_ASYNC_NOT_AWAITED")
+        else:
+            self._outcome(test, "PASS")
 
     def addFailure(self, test, err):
-        self._outcome(test, "FAIL", self._error(err))
+        if not self._setup_error(test, err):
+            self._outcome(test, "FAIL", self._error(err))
 
     def addError(self, test, err):
-        self._outcome(test, "FAIL", self._error(err))
+        if not self.capture_observations and _status_used_as_container(test, err):
+            self._outcome(test, 'SKIP', 'NOT_RUN_HELPER_ASSERTION')
+        elif not self._setup_error(test, err):
+            self._outcome(test, "FAIL", self._error(err))
 
     def addSkip(self, test, reason):
         parent = getattr(test, "test_case", None)
-        self._outcome(parent if parent is not None else test, "SKIP", str(reason))
+        # A test-authored skip cannot claim that the trusted runner verified a helper misuse.
+        details = str(reason)
+        self._outcome(parent if parent is not None else test, "SKIP",
+                      'test skipped' if details == 'NOT_RUN_HELPER_ASSERTION' else details)
 
     def addExpectedFailure(self, test, err):
         self._outcome(test, "SKIP", "expected failure")
@@ -208,6 +877,16 @@ class _Result(unittest.TestResult):
         if (self.invalid or self.active or self.started != self.finished or not self.rows
                 or self.seen | self.blocked != set(self.expected)):
             raise _HarnessError()
+        # A class/module fixture failure blocked these tests: keep every one as
+        # an explicit not-run row next to the fixture row, never drop it.
+        for test_id in sorted(self.blocked - self.seen):
+            if test_id in self.rows or len(self.rows) >= MAX_CASES:
+                raise _HarnessError()
+            class_name, module_name = self.expected[test_id]
+            fixtures = (self.rows.get("setUpClass (" + class_name + ")"), self.rows.get("setUpModule (" + module_name + ")"))
+            failed = any(row is not None and row["outcome"] == "FAIL" for row in fixtures)
+            self.rows[test_id] = {"testId": test_id, "outcome": "SKIP",
+                                  "details": "NOT_RUN_SETUP_FAILED" if failed else "NOT_RUN_FIXTURE_SKIPPED"}
         rows = list(self.rows.values())
         counts = {name: sum(row["outcome"] == outcome for row in rows)
                   for name, outcome in (("passed", "PASS"), ("failed", "FAIL"), ("skipped", "SKIP"))}
@@ -241,7 +920,18 @@ def _expected_cases(suite):
     return expected
 
 
-def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False):
+def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, capture_output_checks=False):
+    # The implementation lives in the immutable runner input, already covered
+    # by input receipts and QA/Security policy hashes. Never amend test source.
+    checks = {} if capture_output_checks else None
+    issued = set() if capture_output_checks else None
+    diagnostics = {} if capture_output_checks else None
+    signup_checks = {} if capture_output_checks else None
+    with _test_data_api(issued), _app_test_api(source_root, checks, issued, diagnostics, signup_checks):
+        return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks)
+
+
+def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None):
     """Run explicit trusted-fixture tests or, in the Container, mounted tests.
 
     Return (report, exit_code), where report is None and exit is 2 for empty,
@@ -265,7 +955,8 @@ def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observatio
         suite = loader.discover(str(root), pattern=pattern, top_level_dir=str(root))
         if loader.errors or not 1 <= suite.countTestCases() <= MAX_CASES or budget[1]:
             raise _HarnessError()
-        result = _Result(_expected_cases(suite), capture_observations)
+        result = _Result(_expected_cases(suite), capture_observations,
+                         roots=(("TEST", str(root.resolve())), ("PRODUCT", str(source.resolve()))), exposure_checks=exposure_checks, issued_passwords=issued_passwords, diagnostics=diagnostics, signup_checks=signup_checks)
         suite.run(result)
         if loader.errors or result.shouldStop or budget[1] or result.testsRun != result.started:
             raise _HarnessError()
@@ -306,6 +997,7 @@ def _discard_file_descriptors():
 def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--kind", choices=("SNAPSHOT", "QA_TESTS", "PROTECTED"), required=True)
+    parser.add_argument("--security-output-checks", "--qa-output-checks", dest="security_output_checks", action="store_true")
     parser.add_argument("--directory", required=True)
     parser.add_argument("--pattern", required=True)
     try:
@@ -315,7 +1007,7 @@ def main(argv=None):
         test_root = Path("/snapshot" if options.kind == "SNAPSHOT" else "/inputs") / options.directory
         with _discard_file_descriptors():
             report, exit_code = run_tests(test_root, Path("/snapshot"), options.pattern,
-                                          capture_observations=options.kind == 'PROTECTED')
+                                          capture_observations=options.kind == 'PROTECTED', capture_output_checks=options.kind == 'QA_TESTS' and options.security_output_checks)
     except BaseException:
         report, exit_code = None, 2
     payload = report if report is not None else {"error": "TEST_RUNNER_ERROR"}

@@ -259,19 +259,29 @@ def _contract(name, description, input_fields, output_fields, **options):
 
 _CONTRACTS = (
     _contract(
-        "read_project_file", "Read an allowed file in the assigned Workspace or frozen Snapshot.",
+        "read_project_file", "Read one allowed file by workspace-relative path, e.g. source/main.py, not main.py or source/. "
+        "Use Host fileAccess mappings. QA/Security source/ reads use the bound frozen Snapshot; no directory listing.",
         {"path": _PATH},
         {"path": _PATH, "content": _TEXT, "sha256": _HASH, "sizeBytes": _COUNT},
         source_output_fields=("content",),
     ),
     _contract(
-        "write_source_file", "Write Developer Source; optionally compare the existing SHA-256 first.",
+        "write_source_file", "Write Developer Source at a workspace-relative file path under source/, e.g. source/main.py. "
+        "Use Host fileAccess mappings; optionally compare the existing SHA-256 first.",
         {"path": _PATH, "content": _TEXT, "expectedSha256": _HASH},
         {"path": _PATH, "sha256": _HASH, "sizeBytes": _COUNT, "changed": {"type": "boolean"}},
         input_required=("workspaceId", "path", "content"), source_argument_fields=("content",),
     ),
     _contract(
-        "write_test_file", "Write only the assigned QA Test area, never Product Source.",
+        "edit_source_file", "Replace one exact unique fragment in an existing Developer source file. Read it first; expectedSha256 is mandatory. Prefer this for repairs so unrelated code is preserved.",
+        {"path": _PATH, "oldText": _TEXT, "newText": _TEXT, "expectedSha256": _HASH},
+        {"path": _PATH, "sha256": _HASH, "sizeBytes": _COUNT, "changed": {"type": "boolean"}},
+        source_argument_fields=("oldText", "newText"),
+    ),
+    _contract(
+        "write_test_file", "Write a test file using Host testTargets: outputs/qa/tests/ for QA or "
+        "outputs/security/tests/ for Security. Paths are workspace-relative. Never write Product Source. "
+        "For Python unittest passwords, use testTargets.testData (Host runtime factory); do not embed literals.",
         {"path": _PATH, "content": _TEXT},
         {"path": _PATH, "sha256": _HASH, "changed": {"type": "boolean"}},
         source_argument_fields=("content",),

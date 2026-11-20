@@ -22,6 +22,8 @@ HASH = "b" * 64
 INPUTS = {
     "read_project_file": {"workspaceId": WORKSPACE, "path": "src/main.py"},
     "write_source_file": {"workspaceId": WORKSPACE, "path": "src/main.py", "content": "print('hello')\n"},
+    "edit_source_file": {"workspaceId": WORKSPACE, "path": "src/main.py", "oldText": "hello", "newText": "hi",
+                         "expectedSha256": HASH},
     "write_test_file": {"workspaceId": WORKSPACE, "path": "qa/test_signup.py", "content": "assert 1 == 1\n"},
     "apply_patch": {"workspaceId": WORKSPACE, "patch": "--- a/src/main.py\n+++ b/src/main.py\n", "baseSnapshotSha256": HASH},
     "run_build": {"workspaceId": WORKSPACE, "snapshotId": SNAPSHOT},
@@ -35,6 +37,7 @@ INPUTS = {
 OUTPUTS = {
     "read_project_file": {"path": "src/main.py", "content": "print('hello')\n", "sha256": HASH, "sizeBytes": 15},
     "write_source_file": {"path": "src/main.py", "sha256": HASH, "sizeBytes": 15, "changed": True},
+    "edit_source_file": {"path": "src/main.py", "sha256": HASH, "sizeBytes": 12, "changed": True},
     "write_test_file": {"path": "qa/test_signup.py", "sha256": HASH, "changed": True},
     "apply_patch": {"changedFiles": ["src/main.py"], "newHashes": {"src/main.py": HASH}},
     "run_build": {"exitCode": 0, "durationMs": 12, "executionManifestId": MANIFEST},
@@ -57,7 +60,7 @@ class MCPCatalogTests(unittest.TestCase):
 
     def test_exact_ten_definition_tools(self):
         self.assertEqual(set(TOOL_CONTRACTS), set(INPUTS))
-        self.assertEqual(len(TOOL_CONTRACTS), 10)
+        self.assertEqual(len(TOOL_CONTRACTS), 11)  # edit_source_file(docs/live-api/23·25) 추가
 
     def test_role_policy_names_have_catalog_contracts(self):
         self.assertEqual(ROLE_TOOL_NAMES[AgentRole.PLANNER], ())
@@ -149,7 +152,8 @@ class MCPCatalogTests(unittest.TestCase):
             self.assert_schema_error(contract.validate_input, {"workspaceId": WORKSPACE, "path": path})
 
     def test_source_input_preservation_annotations_are_exact(self):
-        expected = {"write_source_file": ("content",), "write_test_file": ("content",), "apply_patch": ("patch",)}
+        expected = {"write_source_file": ("content",), "edit_source_file": ("oldText", "newText"),
+                    "write_test_file": ("content",), "apply_patch": ("patch",)}
         for contract in TOOL_CONTRACTS.values():
             self.assertEqual(contract.source_argument_fields, expected.get(contract.name, ()))
             self.assertEqual(contract.source_output_fields, ("content",) if contract.name == "read_project_file" else ())

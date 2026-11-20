@@ -374,12 +374,18 @@ class UnitTestOutputStore:
                     or type(result.container_id) is not str or re.fullmatch(r"[0-9a-f]{64}", result.container_id) is None
                     or type(result.duration_ms) is not int or not 0 <= result.duration_ms <= 2**63 - 1):
                 raise UnitTestStoreError("UNIT_TEST_RESULT_INVALID")
-            if profile.argv[1:] != ("-I", "-B", "/inputs/_unit_runner.py", "--kind", scope.kind,
-                                    "--directory", scope.source_directory, "--pattern", scope.pattern):
+            base_args = ("-I", "-B", "/inputs/_unit_runner.py", "--kind", scope.kind,
+                         "--directory", scope.source_directory, "--pattern", scope.pattern)
+            output_flag = '--security-output-checks' if binding.role is AgentRole.SECURITY else '--qa-output-checks'
+            output_enabled = (binding.role in (AgentRole.QA, AgentRole.SECURITY) and scope.kind == 'QA_TESTS'
+                              and profile.argv[1:] == (*base_args, output_flag))
+            if profile.argv[1:] != base_args and not output_enabled:
                 raise UnitTestStoreError("UNIT_TEST_RESULT_INVALID")
             parsed = parse_unit_report(result.stdout, result.exit_code)
             if scope.kind != 'PROTECTED' and any(
                     case.observations_json is not None or case.observation_error is not None for case in parsed.tests):
+                raise UnitTestStoreError('UNIT_TEST_RESULT_INVALID')
+            if not output_enabled and any(case.output_checks or case.signup_checks_json for case in parsed.tests):
                 raise UnitTestStoreError('UNIT_TEST_RESULT_INVALID')
             if report != parsed:
                 raise UnitTestStoreError("UNIT_TEST_RESULT_INVALID")
@@ -468,6 +474,10 @@ class UnitTestOutputStore:
                      str(step.workflow_step_id), str(source.artifact_id), raw, digest,
                      sqlite3.Binary(report_bytes), sqlite3.Binary(stdout), sqlite3.Binary(stderr)),
                 )
+                if scope.kind == 'QA_TESTS' and any(case.outcome == 'FAIL' or case.signup_checks_json
+                                                    or 'EXPOSED' in dict(case.output_checks).values() for case in report.tests):
+                    from mcp_tools.tools.generated_recheck import store_failed_files
+                    store_failed_files(connection, manifest_id, inputs)
                 row = connection.execute("SELECT * FROM unit_test_execution_records WHERE execution_manifest_id=?", (str(manifest_id),)).fetchone()
                 return self._decode(connection, row)
         except UnitTestStoreError:
