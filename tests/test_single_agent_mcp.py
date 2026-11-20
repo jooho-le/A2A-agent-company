@@ -49,7 +49,9 @@ class SingleMCPPolicyTests(unittest.TestCase):
     def test_single_capabilities_equal_multi_union_and_phase_maps_are_immutable(self):
         union = set().union(*map(set, ROLE_TOOL_NAMES.values()))
         self.assertEqual(set(SINGLE_TOOL_NAMES), union)
-        self.assertEqual(len(SINGLE_TOOL_NAMES), 10)
+        self.assertEqual(len(SINGLE_TOOL_NAMES), 11)
+        self.assertIn("edit_source_file", SINGLE_PHASE_TOOL_ROLES[SinglePhase.FIXING])
+        self.assertNotIn("edit_source_file", SINGLE_PHASE_TOOL_ROLES[SinglePhase.QA])
         self.assertEqual(set().union(*(set(mapping) for mapping in SINGLE_PHASE_TOOL_ROLES.values())), union)
         with self.assertRaises(TypeError):
             SINGLE_PHASE_TOOL_ROLES[SinglePhase.QA]["write_source_file"] = AgentRole.DEVELOPER

@@ -18,21 +18,35 @@ from agents.api.sqlite_task_store import SQLiteAgentTaskStore
 from agents.api.validation import parse_workflow_metadata
 from agents.core.identity import SingleAgentIdentity, SinglePhase
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, ToolCall, ToolContext, parse_json
+from agents.llm.development_rejection import rejection_check
+from agents.llm.corrections import case_expectation_check, contract_check, development_check
+from agents.roles.expected_results import with_expected_results
+from agents.runtime.start_precheck import start_precheck_for
 from agents.llm.engine import LLMEngine
+from agents.runtime.file_access import build_file_access, constrain_frozen_read_tools, constrain_workspace_file_tools
+from agents.runtime.test_guidance import unit_test_targets
+from agents.runtime.test_fix import TestFixRequired, same_cases
+from agents.runtime.qa_services import QAServicesError
+from agents.runtime.security_services import SecurityServicesError
+from mcp_tools.tools.files import _run_file_operation
 from agents.runtime.planner import _host_factory, _TERMINAL, _prepare_input as planner_input
 from agents.runtime.developer import _prepare_input as developer_input
 from agents.runtime.qa import _prepare_input as qa_input, _test_targets
-from agents.runtime.security import _prepare_input as security_input
+from agents.runtime.security import _prepare_input as security_input, _TEST_INSTRUCTIONS as security_test_instructions
 from agents.runtime.planner_context import SQLitePlannerContextLoader
 from agents.runtime.developer_context import SQLiteDeveloperContextLoader
 from agents.runtime.qa_context import SQLiteQAContextLoader
 from agents.runtime.security_context import SQLiteSecurityContextLoader
-from agents.runtime.requirement_scope import RequirementScopeError, validate_generated_case_expectations
-from agents.single.contracts import build_single_draft_contract
+from agents.runtime.requirement_scope import (
+    RequirementScopeError, assigned_acceptance_criteria, generated_case_expectation_issues,
+    validate_generated_case_expectations,
+)
+from agents.single.contracts import SingleContractError, build_single_draft_contract
 from agents.single.mcp import open_single_model_client
-from agents.single.prompts import prepare_single_prompt
+from agents.single.prompts import SinglePromptLimitError, prepare_single_prompt
 from agents.platform.telemetry import bind_runtime_telemetry
 from agents.semantic_review import SemanticReviewRequired, publish_semantic_hold
+from agents.runtime.semantic_revision import review_with_revision, revision_basis
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.domain.states import AgentRole
 
@@ -111,8 +125,14 @@ class SingleAgentExecutor(AgentExecutor):
         return step.agent_role, self._loaders[step.agent_role](context)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, questions=None, unapproved_assumptions=()):
+    async def _status(updater, metadata, state, code, questions=None, unapproved_assumptions=(), planner_validation=None, llm_validation=None, development_rejection=None):
         data = {"code": code}
+        if development_rejection is not None:
+            data["developmentRejection"] = development_rejection
+        if llm_validation is not None:
+            data["llmValidation"] = llm_validation
+        if planner_validation is not None:
+            data["plannerValidation"] = planner_validation
         if questions is not None:
             data["questions"] = list(questions)
         if unapproved_assumptions:
@@ -121,7 +141,13 @@ class SingleAgentExecutor(AgentExecutor):
         await updater.update_status(state, metadata=metadata,
             message=updater.new_agent_message(parts=[new_data_part(data, media_type="application/json")]))
 
-    async def _model(self, context, execution, task_input, phase, contract, *, tools=(), executor=None, telemetry=None):
+    async def _model(self, context, execution, task_input, phase, contract, *, tools=(), executor=None, telemetry=None,
+                     precheck=None, source_progress_check=None, expectations=None, explain=None, extra_checks=(),
+                     output_refresh=None, text_only=False, failure_evidence=None, path_check=None, priority_check=None,
+                     library_type_check=None, correction_candidates=None):
+        # text_only: the semantic rewrite (docs/live-api/05 15절) — no tool, no forced edit, no catalog stop.
+        if text_only and (tools or executor is not None or source_progress_check is not None):
+            raise SingleExecutionError()
         prompt = await prepare_single_prompt(self._store, context_id=context.context_id,
             metadata=execution.metadata, scenario=execution.scenario, draft_contract=contract,
             task_input=task_input, call_context=context.call_context,
@@ -133,8 +159,31 @@ class SingleAgentExecutor(AgentExecutor):
             usage_sink=telemetry.usage if telemetry is not None else self._usage_sink,
             call_started_sink=telemetry.model_started if telemetry is not None else None,
             output_observed_sink=telemetry.model_output if telemetry is not None else None,
-                    input_observed_sink=telemetry.model_input if telemetry is not None else None)
-        return contract.validate(result.data), result, prompt
+            validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
+            recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
+            input_observed_sink=telemetry.model_input if telemetry is not None else None,
+            development_rejection_check=(rejection_check(execution.metadata.requirement_ids, failure_evidence=failure_evidence, validate=contract.validate)
+                if not text_only and phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING) else None),
+            source_progress_check=source_progress_check,
+            source_write_precheck=precheck if not text_only and phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING) else None,
+            output_refresh=output_refresh,
+            correction_candidates=correction_candidates,
+            close_invalid_qa_draft=not text_only and (
+                phase is SinglePhase.QA or (phase is SinglePhase.SECURITY and output_refresh is not None)),
+            output_check=(contract_check(contract.validate) if text_only and phase in (
+                              SinglePhase.IMPLEMENTING, SinglePhase.FIXING)
+                          else development_check(contract.validate, precheck=precheck, path_check=path_check,
+                                                 priority_check=priority_check, library_type_check=library_type_check)
+                          if phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING)
+                          else case_expectation_check(contract.validate, expectations, explain=explain,
+                                                      extra_checks=extra_checks)))
+        try:
+            decision = contract.validate(result.data)
+        except SingleContractError as error:
+            if error.planner_validation is not None and telemetry is not None:
+                error.trace_recorded = telemetry.planner_validation(error.planner_validation)
+            raise
+        return decision, result, prompt
 
     async def _review(self, context, role, execution, phase, decision, result, telemetry, prompt):
         if self._semantic_reviewer is not None and decision.kind in {'PLAN', 'READY'}:
@@ -142,6 +191,52 @@ class SingleAgentExecutor(AgentExecutor):
                 role=role, actor=SingleAgentIdentity.SINGLE_AGENT, phase=phase, result=result,
                 telemetry=telemetry, usage_sink=telemetry.usage if telemetry is not None else self._usage_sink,
                 call_started_sink=telemetry.model_started if telemetry is not None else None, single_prompt=prompt)
+
+    async def _reviewed(self, context, role, execution, phase, telemetry, task_input, contract, first,
+                        expectations=None):
+        """docs/live-api/05 14·15절: same rule as Multi — one tool-less rewrite of the held texts only."""
+        decision, result, prompt = first
+        if self._semantic_reviewer is None or decision.kind not in {'PLAN', 'READY'}:
+            return first
+        latest = {id(result): first}
+
+        async def check(candidate):
+            d, r, p = latest[id(candidate)]
+            await self._review(context, role, execution, phase, d, r, telemetry, p)
+
+        async def rerun_text(model_input, output):
+            # docs/live-api/05 25절 V4: tool-less, patch schema only; the Host applies the held texts.
+            # The Single prompt binds its draft contract's output; the rewrite uses the same phase and
+            # scenario with only the patch output (the patched answer is validated by `contract` below).
+            from dataclasses import replace as _replace
+            patch_contract = _replace(contract, output=output, _validate=lambda data: data)
+            prompt = await prepare_single_prompt(self._store, context_id=context.context_id,
+                metadata=execution.metadata, scenario=execution.scenario, draft_contract=patch_contract,
+                task_input=model_input, call_context=context.call_context,
+                max_bytes=min(execution.budget.limits.max_json_bytes, 1_048_576))
+            engine = LLMEngine(role=SingleAgentIdentity.SINGLE_AGENT, single_phase=phase, provider=self._provider)
+            return await engine.run(prompt=prompt, model=execution.model, output=output,
+                budget=execution.budget, workspace_id=str(execution.configuration.workspace_id),
+                usage_sink=telemetry.usage if telemetry is not None else self._usage_sink,
+                call_started_sink=telemetry.model_started if telemetry is not None else None,
+                output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
+                recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
+                input_observed_sink=telemetry.model_input if telemetry is not None else None)
+
+        def same_kind(candidate):
+            if id(candidate) not in latest:
+                # The Host-patched answer: validate it with the phase contract and review it in the
+                # first candidate's trusted Single context.
+                try:
+                    latest[id(candidate)] = (contract.validate(candidate.data), candidate, first[2])
+                except Exception:
+                    return False
+            return latest[id(candidate)][0].kind == decision.kind
+        reviewed = await review_with_revision(check, rerun_text, same_kind, task_input, result,
+                                              allowed=bool(execution.budget.limits.max_output_corrections),
+                                              basis=revision_basis(execution, role))
+        return latest[id(reviewed)]
 
     async def _work(self, context, role, execution, task_input):
         if self._semantic_reviewer is not None:
@@ -152,18 +247,31 @@ class SingleAgentExecutor(AgentExecutor):
             SingleAgentIdentity.SINGLE_AGENT, context, execution, self._usage_sink)
         if role is AgentRole.PLANNER:
             contract = build_single_draft_contract(phase, scenario=execution.scenario)
-            decision, result, prompt = await self._model(context, execution, task_input, phase, contract, telemetry=telemetry)
-            await self._review(context, role, execution, phase, decision, result, telemetry, prompt)
+            decision, result, prompt = await self._reviewed(context, role, execution, phase, telemetry, task_input,
+                contract, await self._model(context, execution, task_input, phase, contract, telemetry=telemetry))
             return decision, ()
         services = await _host_factory(self._services[role], execution)
         checkpoint = await services.prepare(execution)
+        from agents.runtime.development_failure import failure_reader
+        read_failure = failure_reader(services, execution) if role is AgentRole.DEVELOPER else None
+        if role is AgentRole.DEVELOPER:
+            from agents.runtime.repair_baseline import with_repair_baseline
+            task_input = with_repair_baseline(task_input, checkpoint)
         async with services.client_factory(services.configuration) as host:
             host_tracked = services.tracked(host, execution)
             if telemetry is not None:
                 host_tracked.set_event_sink(telemetry.tool_event)
-            options, measured = {}, None
+            if role in (AgentRole.QA, AgentRole.SECURITY):
+                await services.run_protected(execution, host_tracked)
+            options, measured, draft_wire = {}, None, None
             if role is AgentRole.DEVELOPER:
-                wanted = {"read_project_file", "write_source_file"}
+                from agents.roles.developer_contract import ready_report_paths
+                options["repair_paths"] = ready_report_paths(task_input)
+                brief = task_input.get('activeRepairFocus', {}).get('brief', {})
+                checkpoint.configure_path_review(options["repair_paths"], execution.configuration.scenario_contract,
+                    brief.get('priorityRepairPaths', ()), brief.get('blockingPrerequisite', {}).get('sourceSites', ()),
+                    brief.get('invalidInputServerError', {}).get('sourceSites', ()))
+                wanted = {"read_project_file", "write_source_file", "edit_source_file"}
             elif role is AgentRole.QA:
                 wanted = {"read_project_file", "write_test_file", "read_test_report"}
                 task_input["testSelectors"] = {name: list(values) for name, values in services.selectors.items()}
@@ -173,43 +281,106 @@ class SingleAgentExecutor(AgentExecutor):
                 measured = await services.scan(execution, host_tracked)
                 wanted = {"read_project_file", "read_security_report"}
                 task_input["measuredSecurity"], task_input["sourcePaths"] = measured.analysis_input, list(measured.source_paths)
+                task_input["fileAccess"] = build_file_access(execution.configuration.scenario_contract,
+                    AgentRole.SECURITY, observed_source_paths=measured.source_paths)
                 options.update(finding_ids=measured.finding_ids, source_paths=measured.source_paths)
                 if services.test_selectors:
+                    from agents.roles.security_draft import SecurityTestDraft, TEST_PLAN_INSTRUCTIONS
+                    draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256)
+                    task_input["sourceReferenceCatalog"] = draft_wire.catalog
                     wanted.add("write_test_file")
                     selectors = {"run_unit_tests": services.test_selectors}
                     options["security_test_selectors"] = selectors
                     task_input["testSelectors"] = {"run_unit_tests": list(services.test_selectors)}
-                    task_input["testTargets"] = [{"toolName": "run_unit_tests", "selector": scope.name,
-                        "directory": "outputs/security/" + scope.source_directory,
-                        "pattern": scope.pattern, "format": "python-unittest"}
-                        for scope in services.configuration.unit_test_configuration.scopes if scope.kind == "QA_TESTS"]
-                    task_input["runtimeInstructions"] = (
-                        "Write and bind generated Security tests for every assigned requirement using testTargets/testSelectors. "
-                        "Only outputs/security/tests/ may be written. Return testCases in READY; the Host runs every "
-                        "approved scope, including hidden protected cases, and derives outcomes from measured receipts. "
-                        "Static scanner ranks or model proposals cannot establish PASS/FAIL. Do not invent evidence.")
+                    task_input["testTargets"] = unit_test_targets(services.configuration.unit_test_configuration, "security")
+                    task_input["runtimeInstructions"] = security_test_instructions + ' ' + TEST_PLAN_INSTRUCTIONS
             contract = build_single_draft_contract(phase, scenario=execution.scenario, **options)
-            async with open_single_model_client(services.configuration, phase, services.client_factory) as client:
-                tracked = services.tracked(client, execution)
-                if telemetry is not None:
-                    tracked.set_event_sink(telemetry.tool_event)
-                tools = tuple(tool for tool in tracked.list_tools() if tool.name in wanted)
-                if {tool.name for tool in tools} != wanted:
-                    raise SingleExecutionError()
-                decision, result, prompt = await self._model(context, execution, task_input, phase, contract, tools=tools,
-                    executor=_SingleTools(tracked, execution, role, services=services, measured=measured), telemetry=telemetry)
-                if decision.kind == "READY" and role in (AgentRole.QA, AgentRole.SECURITY):
-                    cases = decision.cases if role is AgentRole.QA else decision.test_cases
-                    if role is AgentRole.QA or services.test_selectors:
-                        validate_generated_case_expectations(cases, configuration=execution.configuration,
-                            metadata=execution.metadata, role=role)
-            await self._review(context, role, execution, phase, decision, result, telemetry, prompt)
+            if role in (AgentRole.QA, AgentRole.SECURITY) and execution.budget.limits.max_output_corrections:
+                # Same enum as Multi (docs/live-api P3): the criteria are chosen, never typed.
+                # Measurement settings only, like the other recovery measures; the product
+                # keeps its schema and REQUIREMENT_SCOPE_INVALID path unchanged.
+                contract = replace(contract, output=with_expected_results(
+                    contract.output, "cases" if role is AgentRole.QA else "testCases",
+                    assigned_acceptance_criteria(execution.configuration, execution.metadata, role)))
+            decode = draft_wire.decode if draft_wire is not None else lambda data: data
+            if draft_wire is not None:
+                original_validate = contract.validate
+                contract = replace(contract, output=draft_wire.output(contract.output),
+                    _validate=lambda data: original_validate(decode(data)))
+            async def model_round(model_input):
+                # One closure so the in-step test fix (docs/live-api/05 4절) reuses the same contract.
+                async with open_single_model_client(services.configuration, phase, services.client_factory) as client:
+                    tracked = services.tracked(client, execution)
+                    if telemetry is not None:
+                        tracked.set_event_sink(telemetry.tool_event)
+                    tools = tuple(tool for tool in tracked.list_tools() if tool.name in wanted)
+                    if {tool.name for tool in tools} != wanted:
+                        raise SingleExecutionError()
+                    tools = constrain_workspace_file_tools(tools, role)
+                    if role is AgentRole.SECURITY:
+                        tools = constrain_frozen_read_tools(tools, measured.source_paths,
+                            [receipt.report_ref for _record, receipt, _evidence in measured.scans])
+                    decision, result, prompt = await self._model(context, execution, model_input, phase, contract, tools=tools,
+                        failure_evidence=read_failure,
+                        library_type_check=checkpoint.library_type_issues if role is AgentRole.DEVELOPER else None,
+                        path_check=checkpoint.ready_path_issues if options.get("repair_paths") else None,
+                        correction_candidates=checkpoint.correction_candidates if options.get("repair_paths") else None,
+                        priority_check=checkpoint.pending_priority_paths if options.get("repair_paths") else None,
+                        executor=_SingleTools(tracked, execution, role, services=services, measured=measured), telemetry=telemetry,
+                        source_progress_check=((lambda: checkpoint.source_edit_status(
+                            deadline_monotonic=execution.budget.deadline_monotonic))
+                            if role is AgentRole.DEVELOPER else None),
+                        precheck=(start_precheck_for(checkpoint, execution.configuration.scenario_contract)
+                                  if role is AgentRole.DEVELOPER else None),
+                        # Same rule and condition as validate_generated_case_expectations below.
+                        expectations=((lambda data, role=role: generated_case_expectation_issues(
+                            data, field="cases" if role is AgentRole.QA else "testCases",
+                            configuration=execution.configuration, metadata=execution.metadata, role=role))
+                            if role is AgentRole.QA or role is AgentRole.SECURITY and services.test_selectors else None),
+                        # Same explainers and pre-READY checks as Multi QA/Security (handoff P5).
+                        explain=_contract_explainer(role, execution, services, measured, decode=decode),
+                        output_refresh=services.refresh_output if (role is AgentRole.QA or role is AgentRole.SECURITY
+                                                                   and services.test_selectors) else None,
+                        extra_checks=_pre_ready_checks(role, services, measured, draft_wire=draft_wire))
+                    if decision.kind == "READY" and role in (AgentRole.QA, AgentRole.SECURITY):
+                        cases = decision.cases if role is AgentRole.QA else decision.test_cases
+                        if role is AgentRole.QA or services.test_selectors:
+                            validate_generated_case_expectations(cases, configuration=execution.configuration,
+                                metadata=execution.metadata, role=role)
+                return decision, result, prompt
+
+            decision, result, prompt = await self._reviewed(context, role, execution, phase, telemetry, task_input,
+                contract, await model_round(task_input), expectations=(
+                    (lambda data, role=role: generated_case_expectation_issues(
+                        data, field="cases" if role is AgentRole.QA else "testCases",
+                        configuration=execution.configuration, metadata=execution.metadata, role=role))
+                    if role is AgentRole.QA or role is AgentRole.SECURITY and services.test_selectors else None))
             execution.budget.check()
             artifacts = ()
             if decision.kind == "READY":
                 arguments = (execution, checkpoint, decision, host_tracked) if role is AgentRole.DEVELOPER else (
                     (execution, decision, host_tracked, measured) if role is AgentRole.SECURITY else (execution, decision, host_tracked))
-                artifacts = await services.finalize(*arguments, task_id=context.task_id, context_id=context.context_id)
+                options = {}
+                if role is AgentRole.QA or role is AgentRole.SECURITY and services.test_selectors:
+                    options["test_fix_available"] = await _run_file_operation(services.test_fix_available, execution)
+                try:
+                    artifacts = await services.finalize(*arguments, task_id=context.task_id, context_id=context.context_id,
+                                                        **options)
+                except TestFixRequired as needed:
+                    # docs/live-api/05 4절: same rule as Multi QA/Security.
+                    field = "cases" if role is AgentRole.QA else "test_cases"
+                    previous = getattr(decision, field)
+                    decision, result, prompt = await model_round(needed.task_input(task_input, result.data))
+                    if decision.kind != "READY" or not same_cases(previous, getattr(decision, field, ())):
+                        if role is AgentRole.QA:
+                            raise QAServicesError("QA_TEST_FIX_INVALID")
+                        raise SecurityServicesError("SECURITY_TEST_FIX_INVALID")
+                    if role is AgentRole.SECURITY:
+                        await self._review(context, role, execution, phase, decision, result, telemetry, prompt)
+                    execution.budget.check()
+                    arguments = (execution, decision, host_tracked, measured) if role is AgentRole.SECURITY else (
+                        execution, decision, host_tracked)
+                    artifacts = await services.finalize(*arguments, task_id=context.task_id, context_id=context.context_id)
         execution.budget.check()
         return decision, artifacts
 
@@ -239,13 +410,21 @@ class SingleAgentExecutor(AgentExecutor):
         except LLMRuntimeError as error:
             state = TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else (
                 TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
-            await self._status(updater, context.metadata, state, error.code.value)
+            await self._status(updater, context.metadata, state, error.code.value, llm_validation=error.public_validation(),
+                               development_rejection=error.development_rejection)
             return
         except SemanticReviewRequired as held:
             await publish_semantic_hold(updater, context.metadata, held)
             return
-        except RequirementScopeError as error:
+        except (RequirementScopeError, QAServicesError, SecurityServicesError, SinglePromptLimitError) as error:
             await self._status(updater, context.metadata, TaskState.TASK_STATE_FAILED, error.code)
+            return
+        except SingleContractError as error:
+            report = (None if error.planner_validation is None else
+                      {**error.planner_validation.public(), "traceRecorded": error.trace_recorded})
+            await self._status(updater, context.metadata, TaskState.TASK_STATE_FAILED,
+                f"{role.value}_OUTPUT_INVALID" if error.output_invalid else "SINGLE_AGENT_EXECUTION_FAILED",
+                planner_validation=report)
             return
         except Exception:
             # Private journals preserve uncertain effects; no fabricated PASS or retry.
@@ -253,11 +432,14 @@ class SingleAgentExecutor(AgentExecutor):
             return
         if decision.kind == "INPUT_REQUIRED":
             await self._status(updater, context.metadata, TaskState.TASK_STATE_INPUT_REQUIRED,
-                               "SINGLE_AGENT_INPUT_REQUIRED", decision.questions,
+                               f"{role.value}_INPUT_REQUIRED", decision.questions,
                                decision.unapproved_assumptions if role is AgentRole.PLANNER else ())
             return
         if decision.kind == "REJECTED":
-            await self._status(updater, context.metadata, TaskState.TASK_STATE_REJECTED, "SINGLE_AGENT_OUT_OF_SCOPE")
+            await self._status(updater, context.metadata, TaskState.TASK_STATE_REJECTED,
+                               "DEVELOPER_REJECTED" if role is AgentRole.DEVELOPER else "SINGLE_AGENT_OUT_OF_SCOPE",
+                               development_rejection={"proposal": decision.rejection.public()}
+                               if role is AgentRole.DEVELOPER else None)
             return
         if role is AgentRole.PLANNER:
             await updater.add_artifact([new_data_part(decision.plan.model_dump(mode="json", by_alias=True), media_type="application/json")],
@@ -279,3 +461,27 @@ class SingleAgentExecutor(AgentExecutor):
         metadata = MessageToDict(task.metadata)
         parse_workflow_metadata(metadata)
         await TaskUpdater(event_queue, context.task_id, context.context_id).update_status(TaskState.TASK_STATE_CANCELED, metadata=metadata)
+
+
+def _contract_explainer(role, execution, services, measured, *, decode=lambda data: data):
+    from agents.roles.contract_explain import qa_issues, security_issues
+    from orchestrator.domain.scenario_registry import RequirementValidator
+    if role is AgentRole.QA:
+        ids = execution.scenario.requirement_ids_for(RequirementValidator.QA)
+        return lambda data: qa_issues(data, ids, services.selectors)
+    if role is AgentRole.SECURITY:
+        ids = execution.scenario.requirement_ids_for(RequirementValidator.SECURITY)
+        return lambda data: security_issues(decode(data), ids, measured.finding_ids, measured.source_paths,
+                                            services.test_selectors or None)
+    return None
+
+
+def _pre_ready_checks(role, services, measured, *, draft_wire=None):
+    if role is AgentRole.QA:
+        return (("GENERATED_TESTS_INVALID", services.generated_test_issues),)
+    if role is AgentRole.SECURITY:
+        return (("GENERATED_TESTS_INVALID", services.generated_test_issues),
+                ("CODE_REFERENCE_INVALID", lambda data: (
+                    draft_wire.reference_issues(services, measured, data) if draft_wire is not None
+                    else services.reference_issues(measured, data))))
+    return ()

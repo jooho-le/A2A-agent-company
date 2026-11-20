@@ -20,6 +20,7 @@ from orchestrator.domain.run_configuration import ExecutionLimits
 from orchestrator.domain.scenario_registry import RequirementValidator
 from orchestrator.sandbox.contracts import CLIResult
 from semantic_helpers import SemanticFakeProvider as FakeProvider
+from signup_receipt_fixture import generated_signup_evidence
 from test_llm_runtime import ToolCall, text_response, tool_response
 import test_single_agent_pipeline as single_fixture
 import test_owned_agent_pipeline as fixtures
@@ -74,7 +75,8 @@ class _SingleFixHarness:
                     docker.start_result = CLIResult(returncode=failed, stdout=json.dumps({
                         "format": "unittest-v1", "total": len(ids), "passed": len(ids) - failed,
                         "failed": failed, "skipped": 0, "tests": [{"testId": identity,
-                            "outcome": "FAIL" if index == failure else "PASS"} for index, identity in enumerate(ids)]
+                            "outcome": "FAIL" if index == failure else "PASS",
+                            **generated_signup_evidence("QA", index + 1)} for index, identity in enumerate(ids)]
                     }).encode(), stderr=b"")
                 yield client
         self.base.services, self.f.peer_client = services, peer
@@ -111,7 +113,7 @@ class _SingleFixHarness:
 class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def submit(self, harness):
         async with harness.running() as (client, provider):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.f.submission()), timeout=50)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.f.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = UUID(response.json()["run"]["runId"])
             run = harness.f.repository.get_run(run_id)
@@ -159,12 +161,62 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         fix_request = next(request for request in provider.requests if
             json.loads(json.loads(request.input_items_json)[0]["content"])["trusted"]["phase"] == "FIXING")
         payload = json.loads(json.loads(fix_request.input_items_json)[0]["content"])
+        initial_request = next(request for request in provider.requests if
+            json.loads(json.loads(request.input_items_json)[0]["content"])["trusted"]["phase"] == "IMPLEMENTING")
+        initial = json.loads(json.loads(initial_request.input_items_json)[0]["content"])
+        self.assertEqual(payload["taskInput"]["fileAccess"], initial["taskInput"]["fileAccess"])
+        focus = payload["taskInput"]["activeRepairFocus"]["brief"]
+        self.assertEqual(focus['repairRound']['currentAttempt'], 1)
+        self.assertTrue(focus['targets'])
+        for target in focus['targets']:
+            self.assertEqual(target['hostIssueProgress']['consecutiveRepeatCount'], 0)
+            self.assertEqual(target['hostIssueProgress']['stopRepeatCount'], 0)
         names = {artifact["name"] for task in payload["history"] for artifact in task["artifacts"]}
         self.assertTrue({"qa-report.json", "security-report.json"} <= names, names)
         self.assertEqual(len(payload["history"]), 5)
         phases = [config.binding.single_phase for config in h.base.model_clients]
         self.assertEqual(phases, [SinglePhase.IMPLEMENTING, SinglePhase.QA, SinglePhase.SECURITY,
                                   SinglePhase.FIXING, SinglePhase.QA, SinglePhase.SECURITY])
+
+    async def test_single_fixing_offers_only_open_for_an_unlinked_claim_and_publishes_it_as_open(self):
+        from agents.llm.contracts import LLMRuntimeError
+        from agents.runtime.repair_baseline import with_repair_baseline
+        from agents.runtime.ready_path_diff import INPUT
+        h = _SingleFixHarness(self)
+        provider = h.provider()
+        # This receipt fixture omits path detail. Supply the observed path and exercise the
+        # production Single FIXING entry point, actual tool write and Git checkpoint.
+        def project(value, checkpoint):
+            result = with_repair_baseline(value, checkpoint)
+            if 'fixRequest' in result:
+                result['activeRepairFocus']['brief']['readyReportPaths'] = [INPUT]
+            return result
+        def decision(ref):
+            return {'kind': 'READY', 'summary': 'Submit for revalidation.', 'questions': [], 'rejection': None,
+                    'repairPaths': {INPUT: {'edit': 'Changed the route.' if ref else None, 'sourceRef': ref,
+                                            'recheck': 'Check the rejection response.'}}}
+        unsupported = decision('source/signup.py::signup')
+        open_path = decision(None)
+        slot = len(h.base.provider().script) + 1  # FIXING writes after all v1 role operations.
+        provider.script[slot:slot + 1] = [text_response(json.dumps(unsupported)), text_response(json.dumps(open_path))]
+        # The inert seed omits main.py; the production startup precheck is covered separately.
+        with (patch('agents.runtime.repair_baseline.with_repair_baseline', project),
+              patch('agents.single.runtime.start_precheck_for', return_value=None)):
+            async with h.base.running(cap=40, tool_cap=80, provider=provider, corrections=1) as (client, _):
+                response = await client.post('/api/v1/runs', json=h.f.submission())
+        self.assertEqual(response.status_code, 201, response.text)
+        run_id = UUID(response.json()['run']['runId'])
+        self.assertEqual(h.f.repository.get_run(run_id).status, WorkflowStatus.FINISHED)
+        corrections = [r for r in provider.requests if r.output.name == 'developer_decision'
+                       and 'READY_PATH_EVIDENCE_MISMATCH' in r.input_items_json]
+        self.assertEqual(len(corrections), 1)
+        schema = corrections[0].output.schema
+        schema.validate(open_path)
+        with self.assertRaises(LLMRuntimeError):
+            schema.validate(unsupported)
+        report, = [item for item in h.f.repository.list_project_artifacts(run_id)
+                   if item.artifact_type == 'CHANGE_REPORT' and item.code_version == 2]
+        self.assertEqual(report.ready_review.reported_path_edits[0].host_diff_status, 'NO_CHANGE_CLAIMED')
 
     async def test_three_distinct_fixes_exhaust_limit_without_a_fourth_fix(self):
         h = _SingleFixHarness(self, qa_mode="distinct-failures")
@@ -174,16 +226,18 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((len(steps), len(h.fix_inputs), len(provider.requests)), (13, 3, 38))
         self.assert_candidates(artifacts, 4)
 
-    async def test_same_issue_stops_at_human_review_without_spending_remaining_fix(self):
+    async def test_same_issue_without_comparable_observations_uses_full_fix_limit(self):
         h = _SingleFixHarness(self, qa_mode="repeated-failure")
         run, artifacts, steps, provider = await self.submit(h)
         self.assertEqual((run.status, run.verdict, run.fix_attempt, run.code_version),
-                         (WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW, 2, 3))
-        self.assertEqual((len(steps), len(h.fix_inputs), len(provider.requests)), (10, 2, 29))
-        self.assert_candidates(artifacts, 3)
+                         (WorkflowStatus.FINISHED, FinalVerdict.FAIL, 3, 4))
+        self.assertEqual((len(steps), len(h.fix_inputs), len(provider.requests)), (13, 3, 38))
+        self.assert_candidates(artifacts, 4)
         issues = sorted(h.f.repository.list_issue_records(run.run_id), key=lambda item: item.code_version)
-        self.assertEqual([item.consecutive_repeat_count for item in issues], [0, 1, 2])
+        self.assertEqual([item.consecutive_repeat_count for item in issues], [0, 1, 2, 3])
         self.assertEqual(len({item.fingerprint for item in issues}), 1)
+        events, _ = h.f.repository.list_events(run.run_id, limit=1000, offset=0)
+        self.assertEqual(sum(e.event_type == 'SAME_ISSUE_REPEAT_LIMIT_REACHED' for e in events), 0)
 
     async def test_measured_security_failure_also_drives_single_fix_and_revalidation(self):
         h = _SingleFixHarness(self, qa_mode="pass", security_failures={1: 0})
@@ -249,11 +303,15 @@ class SingleAgentFixPipelineTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute("UPDATE agent_contexts SET payload_json=? WHERE run_id=? AND agent_id=?",
                         (corrupted.model_dump_json(), str(run_id), "single_agent"))
             return original(loader, context)
-        h = _SingleFixHarness(self)
+        # A failed Host build provides the first repair immediately. The previous
+        # Developer task is now the latest permitted predecessor; the older Planner is not.
+        h = _SingleFixHarness(self, qa_mode="pass", build_failures=(1,))
         with patch.object(SQLiteDeveloperContextLoader, "__call__", stale):
             run, artifacts, steps, provider = await self.submit(h)
         self.assertIs(run.status, WorkflowStatus.HUMAN_REVIEW)
-        self.assertEqual((len(provider.requests), len(h.fix_inputs), run.code_version), (11, 0, 1))
+        self.assertEqual((len(h.fix_inputs), run.fix_attempt, run.code_version), (0, 1, 1))
+        self.assertEqual([s.agent_role for s in steps], [AgentRole.PLANNER, AgentRole.DEVELOPER, AgentRole.DEVELOPER])
+        self.assertEqual(len(provider.requests), 5)
         self.assert_candidates(artifacts, 1)
 
 

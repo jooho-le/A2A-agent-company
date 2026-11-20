@@ -42,7 +42,8 @@ from orchestrator.workspaces.registry import WorkspaceRegistry
 def create_single_platform(*, repository, workspace_registry, artifact_store, orchestrator_settings,
     agent_settings, provider, developer_services_factory, qa_services_factory, security_services_factory,
     prepare_workspace, limits, orchestrator_host="127.0.0.1", orchestrator_port=8000,
-    a2a_client_factory=None, usage_sink=None, price_book=None) -> OwnedAgentPlatform:
+    a2a_client_factory=None, usage_sink=None, price_book=None, protected_selectors=frozenset(), protected_cases=(),
+    automatic_stop=False) -> OwnedAgentPlatform:
     """Use one provider and server; role fields are only phase-routing aliases.
 
     All four legacy Orchestrator URL/token fields must explicitly target this
@@ -143,7 +144,9 @@ def create_single_platform(*, repository, workspace_registry, artifact_store, or
         semantic_reviewer=ProductSemanticReviewer(provider, SemanticReviewStore(repository.database_path)))
     client_factory = a2a_client_factory if a2a_client_factory is not None else agent_client_factory(settings, trust_env=False)
     dispatcher = PlannerRunDispatcher(repository, A2AAgentRegistry.from_settings(settings),
-        client_factory=client_factory, before_dispatch=before_dispatch, allow_fix_dispatch=True, single_agent=True)
+        client_factory=client_factory, before_dispatch=before_dispatch, allow_fix_dispatch=True, single_agent=True,
+        protected_selectors=protected_selectors, protected_cases=protected_cases,
+        automatic_stop=automatic_stop)  # docs/live-api/05 22절(실제 Host가 켠다, 주호 확인 필요)
     app = create_orchestrator_app(repository=repository, settings=settings, dispatcher=dispatcher,
                                 submission_validator=validate_submission)
     app.state.workspace_registry, app.state.agent_client_factory = workspace_registry, client_factory

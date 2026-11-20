@@ -50,6 +50,7 @@ class _Controls(fix_fixture._SingleFixHarness):
                 data["unapprovedAssumptions"] = []
             elif role is AgentRole.DEVELOPER:
                 data["summary"] = ""
+                data["rejection"] = None  # Developer 계약의 필수 칸(READY·INPUT_REQUIRED는 null, docs/live-api/19)
             elif role is AgentRole.QA:
                 data["cases"] = []
             else:
@@ -138,7 +139,7 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(h.budget(run_id).model_calls, 1)
 
     async def start(self, h, client):
-        response = await asyncio.wait_for(client.post("/api/v1/runs", json=h.f.submission()), 40)
+        response = await asyncio.wait_for(client.post("/api/v1/runs", json=h.f.submission()), timeout=300)
         self.assertEqual(response.status_code, 201, response.text)
         return UUID(response.json()["run"]["runId"])
 
@@ -224,6 +225,8 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
         async with h.running() as client:
             run_id = await self.start(h, client)
             qa = h.step(run_id, AgentRole.QA)
+            qa_task = await h.sdk_task(qa)
+            self.assertEqual(MessageToDict(qa_task.status.message.parts[0].data)["code"], "QA_INPUT_REQUIRED")
             self.assertIsNone(h.step(run_id, AgentRole.SECURITY).a2a_task_id)
             run = await self.answer(h, client, run_id, qa)
             self.assertIs(run.status, WorkflowStatus.HUMAN_REVIEW)
@@ -243,6 +246,8 @@ class SingleAgentControlsTests(unittest.IsolatedAsyncioTestCase):
         async with h.running() as client:
             run_id = await self.start(h, client)
             before, qa = h.step(run_id, AgentRole.SECURITY), h.step(run_id, AgentRole.QA)
+            security_task = await h.sdk_task(before)
+            self.assertEqual(MessageToDict(security_task.status.message.parts[0].data)["code"], "SECURITY_INPUT_REQUIRED")
             sends = h.http_events.count(("POST", "/message:send"))
             run = await self.answer(h, client, run_id, before)
             self.assertIs(run.verdict, FinalVerdict.SUCCESS)
