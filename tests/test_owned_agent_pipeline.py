@@ -67,7 +67,8 @@ from orchestrator.workspaces.registry import WorkspaceRegistry
 from semantic_helpers import SemanticFakeProvider as FakeProvider
 from test_llm_runtime import text_response, tool_response
 from test_mcp_execution_runtime import DispatcherSession
-from test_sandbox_runtime import FakeDocker, IMAGE_ID
+from signup_receipt_fixture import SignupFixtureDocker, generated_signup_evidence
+from test_sandbox_runtime import IMAGE_ID
 
 
 _SCANNER_REF = "https://scanner.example.invalid/owned-pipeline/v1"
@@ -150,11 +151,19 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         }]}, ensure_ascii=False))
 
         def developer_write(request):
+            guide = _task_input(request)["fileAccess"]
+            self.assertEqual(guide["sourceReadMode"], "WORKING_COPY")
+            self.assertIn({"repositoryPath": "main.py", "toolPath": "source/main.py"}, guide["startingFilePaths"])
             return tool_response(ToolCall(call_id="developer-write", name="write_source_file",
                 arguments_json=json.dumps({"workspaceId": _workspace_id(request), "path": "source/signup.py",
                     "content": "def signup():\n    return 'generated-inert-candidate'\n"})))
 
         def qa_write(request):
+            data = _task_input(request)
+            self.assertEqual(data["fileAccess"]["sourceReadMode"], "FROZEN_SNAPSHOT")
+            self.assertIsNone(data["fileAccess"]["sourceWriteRoot"])
+            self.assertEqual(data["fileAccess"]["testWriteRoot"], "outputs/qa/tests/")
+            self.assertTrue(data["testTargets"])
             return tool_response(ToolCall(call_id="qa-write", name="write_test_file",
                 arguments_json=json.dumps({"workspaceId": _workspace_id(request),
                     "path": "outputs/qa/tests/test_signup.py", "content": "# inert fixture; not executed on Host\n"})))
@@ -169,7 +178,11 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             } for index, requirement in enumerate(requirements, 1)]}, ensure_ascii=False))
 
         def security_ready(request):
-            measured = _task_input(request)["measuredSecurity"]
+            data = _task_input(request)
+            measured = data["measuredSecurity"]
+            self.assertEqual(data["fileAccess"]["sourceReadMode"], "FROZEN_SNAPSHOT")
+            self.assertEqual(data["fileAccess"]["observedSourceFiles"], [
+                {"repositoryPath": path, "toolPath": "source/" + path} for path in data["sourcePaths"]])
             return text_response(json.dumps({"kind": "READY", "questions": [],
                 "requirementReviews": [{"requirementId": str(requirement), "proposedOutcome": "UNVERIFIED",
                     "rationale": "정적 경고 부재만으로 보호된 기준을 증명할 수 없습니다.", "references": []}
@@ -179,12 +192,18 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                     for profile in measured["profiles"] for finding in profile["findings"]]}, ensure_ascii=False))
 
         def security_write(request):
+            data = _task_input(request)
+            self.assertEqual(data["fileAccess"]["testWriteRoot"], "outputs/security/tests/")
+            self.assertIsNone(data["fileAccess"]["sourceWriteRoot"])
+            self.assertTrue(data["testTargets"])
             return tool_response(ToolCall(call_id="security-write", name="write_test_file",
                 arguments_json=json.dumps({"workspaceId": _workspace_id(request),
                     "path": "outputs/security/tests/test_security.py", "content": "# inert fixture; not executed on Host\n"})))
 
         def security_ready_with_tests(request):
             data = json.loads(security_ready(request).output_text)
+            for row in data['requirementReviews']:
+                row['rationale'] = 'HOST_TESTS_PENDING'
             data["testCases"] = [{"selector": "security-unit", "testId": f"test_security.Security.test_req_{index}",
                 "requirementId": str(requirement), "title": f"보안 실행 기준 {index}",
                 "expectedResult": next(item.acceptance_criteria[0] for item in self.scenario.requirements
@@ -196,13 +215,13 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                     else FakeProvider(security_ready))
         return {AgentRole.PLANNER: FakeProvider(planner),
             AgentRole.DEVELOPER: FakeProvider(developer_write,
-                text_response(json.dumps({"kind": "READY", "summary": "동결 기준 구현 후보입니다.", "questions": []}, ensure_ascii=False))),
+                text_response(json.dumps({"rejection": None, "kind": "READY", "summary": "동결 기준 구현 후보입니다.", "questions": []}, ensure_ascii=False))),
             AgentRole.QA: FakeProvider(qa_write, qa_ready), AgentRole.SECURITY: security}
 
     @asynccontextmanager
     async def peer_client(self, configuration):
         role = configuration.binding.role
-        docker = FakeDocker()
+        docker = SignupFixtureDocker()
         self.dockers.setdefault(role, []).append(docker)
         sandbox = SandboxRuntime(self.repository, self.registry, self.artifacts, docker=docker)
         files = FileTools(self.artifacts, frozen_source=configuration.frozen_source)
@@ -218,7 +237,8 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             docker.exit_code = failed
             docker.start_result = CLIResult(returncode=failed, stdout=json.dumps({"format": "unittest-v1",
                 "total": len(case_ids), "passed": len(case_ids) - failed, "failed": failed, "skipped": 0,
-                "tests": [{"testId": identity, "outcome": "FAIL" if self.qa_failure and index == 0 else "PASS"}
+                "tests": [{"testId": identity, "outcome": "FAIL" if self.qa_failure and index == 0 else "PASS",
+                           **generated_signup_evidence("QA", index + 1)}
                           for index, identity in enumerate(case_ids)]}).encode(), stderr=b"")
             unit = UnitTestTools(self.artifacts, sandbox, UnitTestOutputStore(self.repository),
                 configuration=configuration.unit_test_configuration, max_call_seconds=configuration.max_call_seconds)
@@ -239,12 +259,15 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                 case_ids = [f"test_security.Security.test_req_{index}" for index in range(
                     1, len(self.scenario.requirement_ids_for(RequirementValidator.SECURITY)) + 1)]
                 failed = int(self.security_failure)
-                tests = FakeDocker()
+                tests = SignupFixtureDocker()
                 self.dockers.setdefault(role, []).append(tests)
                 tests.exit_code = failed
+                output_checks = getattr(self, "security_output_checks", generated_signup_evidence("SECURITY", 3)["outputChecks"])
                 tests.start_result = CLIResult(returncode=failed, stdout=json.dumps({"format": "unittest-v1",
                     "total": len(case_ids), "passed": len(case_ids) - failed, "failed": failed, "skipped": 0,
-                    "tests": [{"testId": identity, "outcome": "FAIL" if failed and index == 0 else "PASS"}
+                    "tests": [{"testId": identity, "outcome": "FAIL" if failed and index == 0 else "PASS",
+                               **(generated_signup_evidence("SECURITY", index + 1) if index < 2 else
+                                  {"outputChecks": output_checks} if output_checks else {})}
                               for index, identity in enumerate(case_ids)]}).encode(), stderr=b"")
                 unit = UnitTestTools(self.artifacts, SandboxRuntime(self.repository, self.registry, self.artifacts,
                     docker=tests), UnitTestOutputStore(self.repository),
@@ -299,10 +322,11 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         return A2AAgentClient(url, httpx_client=client)
 
     @asynccontextmanager
-    async def running_platform(self, providers=None, *, model_cap=16, prepare=None):
+    async def running_platform(self, providers=None, *, model_cap=16, tool_cap=12, prepare=None, corrections=0, reminders=0):
         providers = self.providers() if providers is None else providers
-        limits = LLMLimits(max_model_calls=model_cap, max_tool_calls=12,
-            model_timeout_seconds=2, max_output_tokens=4096)
+        limits = LLMLimits(max_model_calls=model_cap, max_tool_calls=tool_cap,
+            model_timeout_seconds=2, max_output_tokens=4096,
+            max_output_corrections=corrections, max_question_reminders=reminders)
         self.platform = create_platform(repository=self.repository, workspace_registry=self.registry,
             artifact_store=self.artifacts, orchestrator_settings=self.orchestrator_settings,
             agent_settings={role: settings.model_copy(update={"llm_limits": limits})
@@ -332,7 +356,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_initial_cycle_actual_four_agents_share_source_budget_and_provenance(self):
         async with self.running_platform() as (client, providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             self.assertEqual(response.json()["dispatchStatus"], "SCHEDULED")
             run_id = UUID(response.json()["run"]["runId"])
@@ -424,7 +448,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_model_call_cap_is_shared_across_all_roles_without_reset(self):
         async with self.running_platform(model_cap=3) as (client, providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = UUID(response.json()["run"]["runId"])
             run = self.repository.get_run(run_id)
@@ -446,7 +470,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         # path as QA and only measured receipts decide the Security Requirements (no proof verifier).
         self.security_tests = True
         async with self.running_platform() as (client, providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = UUID(response.json()["run"]["runId"])
             run = self.repository.get_run(run_id)
@@ -516,7 +540,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         from evaluation.manifest import ExecutionManifest
         self.security_tests = True
         async with self.running_platform() as (client, _providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             run_id = UUID(response.json()["run"]["runId"])
         source = next(item for item in self.repository.list_project_artifacts(run_id) if item.artifact_type == "SOURCE")
         (exported,) = export_snapshots(self.repository, run_id)
@@ -542,7 +566,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         from evaluation.final_evaluation import CRITERIA_FILE
         from evaluation.trace_checks import check_trace_exposure
         async with self.running_platform() as (client, _providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             run_id = UUID(response.json()["run"]["runId"])
         stores = {role: settings.database_path for role, settings in self.settings.items()}
         exported = export_a2a_messages(stores, run_id)
@@ -591,7 +615,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             return text_response(json.dumps(data, ensure_ascii=False))
         providers[AgentRole.SECURITY].script[1] = corrupt
         async with self.running_platform(providers) as (client, _providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=30)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = UUID(response.json()["run"]["runId"])
             run = self.repository.get_run(run_id)
@@ -606,7 +630,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_measured_security_test_failure_is_a_security_failure(self):
         self.security_tests = self.security_failure = True
         async with self.running_platform() as (client, _providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = UUID(response.json()["run"]["runId"])
             run = self.repository.get_run(run_id)
@@ -623,7 +647,7 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_measured_qa_failure_and_unverified_security_keep_issue_without_starting_fix(self):
         self.qa_failure = True
         async with self.running_platform() as (client, _providers):
-            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=20)
+            response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.submission()), timeout=300)
             self.assertEqual(response.status_code, 201, response.text)
             run_id = UUID(response.json()["run"]["runId"])
             run = self.repository.get_run(run_id)

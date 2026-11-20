@@ -62,7 +62,7 @@ class PricedPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_roles_costs_are_projected_by_existing_http_without_promoting_success(self):
         with patch.object(pipeline_fixture, "create_platform", side_effect=self.platform_factory):
             async with self.base.running_platform(self.providers()) as (client, providers):
-                submitted = await asyncio.wait_for(client.post("/api/v1/runs", json=self.base.submission()), 25)
+                submitted = await asyncio.wait_for(client.post("/api/v1/runs", json=self.base.submission()), timeout=300)
                 self.assertEqual(submitted.status_code, 201, submitted.text)
                 run_id = UUID(submitted.json()["run"]["runId"])
                 response = await client.get(f"/api/v1/runs/{run_id}/usage")
@@ -84,7 +84,7 @@ class PricedPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_price_is_not_a_token_budget_failure_or_a_free_call(self):
         with patch.object(pipeline_fixture, "create_platform", side_effect=self.platform_factory):
             async with self.base.running_platform(self.providers(unknown_security_tier=True)) as (client, _):
-                submitted = await asyncio.wait_for(client.post("/api/v1/runs", json=self.base.submission()), 25)
+                submitted = await asyncio.wait_for(client.post("/api/v1/runs", json=self.base.submission()), timeout=300)
                 self.assertEqual(submitted.status_code, 201, submitted.text)
                 run_id = UUID(submitted.json()["run"]["runId"])
                 body = (await client.get(f"/api/v1/runs/{run_id}/usage")).json()

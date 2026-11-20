@@ -223,7 +223,7 @@ def create_platform(
     agent_settings, providers, developer_services_factory, qa_services_factory,
     security_services_factory, prepare_workspace, limits,
     orchestrator_host="127.0.0.1", orchestrator_port=8000,
-    a2a_client_factory=None, price_book=None,
+    a2a_client_factory=None, price_book=None, protected_selectors=frozenset(), protected_cases=(), automatic_stop=False,
 ) -> OwnedAgentPlatform:
     """Bind actual executors and official HTTP apps to one shared Run budget.
 
@@ -369,7 +369,8 @@ def create_platform(
     client_factory = a2a_client_factory if a2a_client_factory is not None else agent_client_factory(settings, trust_env=False)
     dispatcher = PlannerRunDispatcher(repository, A2AAgentRegistry.from_settings(settings),
         client_factory=client_factory,
-        before_dispatch=before_dispatch, allow_fix_dispatch=True)
+        before_dispatch=before_dispatch, allow_fix_dispatch=True, protected_selectors=protected_selectors, protected_cases=protected_cases,
+        automatic_stop=automatic_stop)  # docs/live-api/05 22절(실제 Host가 켠다, 주호 확인 필요)
     app = create_orchestrator_app(repository=repository, dispatcher=dispatcher,
         settings=settings, submission_validator=validate_submission)
     app.state.workspace_registry = workspace_registry

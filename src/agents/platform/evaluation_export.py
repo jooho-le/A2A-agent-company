@@ -116,6 +116,11 @@ def collect_evaluation_export(repository, run_id, *, stores, all_versions=True, 
                 except Exception:
                     raise EvaluationExportError('PACKAGE_RECORDS_INVALID_OR_INCOMPLETE') from None
             steps = view.list_steps(parsed)
+            from agents.platform.package_records import stored_boundary_reports
+            boundaries = stored_boundary_reports(view, parsed)
+            if boundaries:
+                files['boundary-reports.json'] = (json.dumps(boundaries, ensure_ascii=False,
+                    allow_nan=False, indent=2) + '\n').encode('utf-8')
             phase = {"PLANNER": "PLANNING", "DEVELOPER": "IMPLEMENTING", "QA": "QA", "SECURITY": "SECURITY"}
             with view._connection() as connection:
                 workspace_roots = tuple(Path(WorkspaceRecord.model_validate_json(row[0]).root_path).resolve()
