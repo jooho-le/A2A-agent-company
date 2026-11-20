@@ -50,9 +50,53 @@ def _requirement_keys(scenario_contract) -> dict:
     return {str(item['requirementId']): item['key'] for item in (scenario_contract or {}).get('requirements', [])}
 
 
-def _flow(run_bundle, keys) -> list:
-    # 코드 버전별 흐름 표의 줄들. 사건 종류만 읽고 자유 글은 읽지 않는다.
+REPORT_ROLES = {'QA_REPORT': 'QA', 'SECURITY_REPORT': 'SECURITY'}
+
+
+def version_reports(run_trace) -> dict:
+    # {코드 버전: {'QA': 칸 글자, 'SECURITY': 칸 글자}}. Run trace(trace.json)의 QA·Security 보고서 중 같은 코드 버전의
+    # Snapshot(SOURCE Artifact)에 연결된 것만 읽는다: 보고서 executionManifest의 projectArtifactId·snapshotSha256이 그 버전
+    # SOURCE의 artifactId·snapshotSha256과 같아야 한다(Codex 점검 2026-11-19 #5: 4e2b1fe8 요약이 실제 QA 11/11 PASS 보고서가
+    # 있는데도 "판정 미확인"으로 적었다). 칸은 "판정 통과 검사 수/전체 검사 수"(예: PASS 11/11, FAIL 1/3)이고 판정은
+    # 하나라도 FAIL이면 FAIL, 모두 PASS면 PASS, 그 밖은 UNVERIFIED다. 보고서가 있지만 Snapshot이 맞지 않으면 숫자를 쓰지
+    # 않는다(다른 코드의 결과를 이 버전 결과로 읽지 않게). 같은 버전 보고서가 여럿이면 연결된 것 중 마지막 것이다.
+    run_id = (run_trace or {}).get('runId')
+    artifacts = [item for item in (run_trace or {}).get('artifacts', []) if isinstance(item, dict)
+                 and item.get('runId') in (None, run_id)]
+    sources = {item.get('codeVersion'): item for item in artifacts if item.get('artifactType') == 'SOURCE'}
+    result, linked_seen = {}, set()
+    for item in artifacts:
+        role, version = REPORT_ROLES.get(item.get('artifactType')), item.get('codeVersion')
+        if role is None or type(version) is not int:
+            continue
+        source = sources.get(version) or {}
+        manifest = item.get('executionManifest') if isinstance(item.get('executionManifest'), dict) else {}
+        linked = (source.get('artifactId') is not None and manifest.get('projectArtifactId') == source['artifactId']
+                  and source.get('snapshotSha256') is not None
+                  and manifest.get('snapshotSha256') == source['snapshotSha256']
+                  and manifest.get('codeVersion') in (None, version))
+        if not linked:
+            if (version, role) not in linked_seen:
+                result.setdefault(version, {})[role] = '보고서 Snapshot 불일치·미확인'
+            continue
+        rows = item.get('tests') if role == 'QA' else item.get('requirementResults')
+        outcomes = [row.get('outcome') for row in rows or () if isinstance(row, dict)]
+        if not outcomes:
+            cell = '보고서에 검사 없음·미확인'
+        else:
+            verdict = ('FAIL' if 'FAIL' in outcomes else 'PASS' if all(value == 'PASS' for value in outcomes)
+                       else 'UNVERIFIED')
+            cell = f"{verdict} {outcomes.count('PASS')}/{len(outcomes)}"
+        result.setdefault(version, {})[role] = cell
+        linked_seen.add((version, role))
+    return result
+
+
+def _flow(run_bundle, keys, reports=None) -> list:
+    # 코드 버전별 흐름 표의 줄들. 사건 종류와 보고서의 검사 결과(outcome)만 읽고 자유 글은 읽지 않는다.
     # 줄마다: 코드 버전 | 빌드 결과 | QA | Security | 그 버전에서 찾은 문제(보고 역할·종류·요구사항) | 다음 단계
+    # reports: version_reports() 결과. 주면 QA·Security 칸을 같은 Snapshot에 연결된 실제 보고서에서 채우고,
+    #          보고서가 정말 없을 때만 "미확인"으로 적는다. 주지 않으면(예전 호출) 사건·Issue만으로 적는다.
     events, issues = run_bundle.get('events', []), run_bundle.get('issues', [])
     # 사건에 나온 코드 버전들(중복 없이, 작은 번호부터)
     versions = sorted({event['codeVersion'] for event in events if isinstance(event.get('codeVersion'), int)})
@@ -64,10 +108,16 @@ def _flow(run_bundle, keys) -> list:
         found = [issue for issue in issues if issue.get('codeVersion') == version]  # 이 버전에서 찾은 Issue
 
         def validation(role):
-            # 역할(QA·SECURITY)의 이 버전 검증 칸. 검증 사건이 없으면 "-", 그 역할이 Issue를 냈으면 FAIL,
+            # 역할(QA·SECURITY)의 이 버전 검증 칸. 연결된 보고서가 있으면 그 판정·통과 수를 쓴다.
+            # 없으면: 검증 사건이 없으면 "-", 그 역할이 Issue를 냈으면 FAIL,
             # 아니면 "검증 종료·판정 미확인"(검증이 끝났다는 사건만으로 PASS라고 추정하지 않는다).
+            if reports is not None and (reports.get(version) or {}).get(role):
+                return reports[version][role]
             if not any(event.get('eventType') == 'VALIDATION_FINISHED' and event.get('actor') == role for event in at):
                 return '-'
+            if reports is not None:
+                # 보고서를 받아 보았는데 이 버전·역할의 보고서가 실제로 없다.
+                return 'FAIL(보고서 없음)' if any(issue.get('reporter') == role for issue in found) else '검증 종료·보고서 없음(미확인)'
             # 종료 사건·Issue 부재만으로는 검증 결과(PASS/UNVERIFIED)를 알 수 없다.
             return 'FAIL' if any(issue.get('reporter') == role for issue in found) else '검증 종료·판정 미확인'
 
@@ -80,10 +130,31 @@ def _flow(run_bundle, keys) -> list:
             event.get('eventType') == 'FIX_REQUESTED' and event.get('codeVersion') == version + 1 for event in events) else \
             ('판정 ' + _cell(run_bundle.get('run', {}).get('verdict'))) if 'VERDICT_CREATED' in kinds else '-'
         rows.append(f'| v{version} | {build} | {validation("QA")} | {validation("SECURITY")} | {_cell(problems)} | {following} |')
+    if reports is not None:
+        rows.append('')
+        rows.append('- QA·Security 칸: 같은 코드 버전 Snapshot에 연결된 에이전트 보고서의 판정과 통과 검사 수/전체 검사 수'
+                    '(보고서에 든 검사 전부). Host 판정·독립 평가와는 다른 값이다.')
     return rows
 
 
-def _check_same_sources(report, metrics, run_bundle, trace, runner, regression=None):
+def _result_layers(report, run_bundle, pipeline) -> str:
+    # 서로 다른 세 결과를 한 줄에 나눠 적는다(Codex 점검 2026-11-19 #5: "완주·패키지 저장 / Host FAIL / 독립 시험 6·7"이
+    # 한 판정으로 섞여 읽히지 않게). ① 파이프라인 완주: Run 끝 상태와 결과 패키지 저장 여부(pipeline이 없으면 미확인),
+    # ② Host(Orchestrator) 판정, ③ 독립 제품 시험: 충족한 요구사항 수/전체, PASS 검사 수/전체.
+    source = report.get('sourceRun') or {}
+    status = ((run_bundle or {}).get('run') or {}).get('status') or source.get('workflowStatus')
+    saved = None if pipeline is None else pipeline.get('packageSaved')
+    package = {True: '결과 패키지 저장됨', False: '결과 패키지 기록 없음'}.get(saved, '결과 패키지 미확인')
+    requirements = report.get('requirements', [])
+    checks = report.get('checks', [])
+    met = sum(1 for item in requirements if item.get('validationVerdict') == 'PASS')
+    passed = sum(1 for item in checks if item.get('status') == 'PASS')
+    verdict = ((run_bundle or {}).get('run') or {}).get('verdict') or source.get('finalVerdict')
+    return (f"- 결과 구분: ① 파이프라인 {_cell(status)}·{package} · ② Host 판정 {_cell(verdict)} · "
+            f"③ 독립 제품 시험 요구사항 {met}/{len(requirements)} 충족, 검사 {passed}/{len(checks)} PASS")
+
+
+def _check_same_sources(report, metrics, run_bundle, trace, runner, regression=None, run_trace=None, pipeline=None):
     # 요약에 함께 넣는 자료의 출처를 평가 보고서와 대조한다. 다르거나 출처가 없으면 ValueError.
     #   run_bundle: Run 번호·최종 코드 버전, metrics: Run 번호(+ 값이 있으면 구조·코드 버전),
     #   trace: Run 번호(final_evaluation 결과의 trace에 들어 있다), runner: 평가 번호(final_evaluation 결과의 runner)
@@ -101,6 +172,10 @@ def _check_same_sources(report, metrics, run_bundle, trace, runner, regression=N
         raise ValueError('Trace results differ from the evaluated Run')
     if runner is not None and runner.get('evaluationId') != report.get('evaluationId'):
         raise ValueError('Runner details belong to another evaluation')
+    if run_trace is not None and run_trace.get('runId') != run_id:
+        raise ValueError('Run trace differs from the evaluated Run')
+    if pipeline is not None and pipeline.get('runId') != run_id:
+        raise ValueError('Pipeline completion differs from the evaluated Run')
     if regression is not None and (regression.get('runId') != run_id
                                    or regression.get('suiteSha256') != (report.get('suite') or {}).get('sha256')
                                    or type(regression.get('finalCodeVersion')) is not int
@@ -146,7 +221,8 @@ def _score_line(score: Mapping) -> str:
 def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = None, metrics: Optional[Mapping] = None,
                    run_bundle: Optional[Mapping] = None, trace: Optional[Mapping] = None,
                    runner: Optional[Mapping] = None, regression: Optional[Mapping] = None,
-                   reference_report: Optional[Mapping] = None, supplementary: Optional[Mapping] = None) -> str:
+                   reference_report: Optional[Mapping] = None, supplementary: Optional[Mapping] = None,
+                   run_trace: Optional[Mapping] = None, pipeline: Optional[Mapping] = None) -> str:
     # 독립 평가 보고서(report)와 선택 자료로 Markdown 요약 글을 만들어 돌려준다.
     # scenario_contract: 요구사항 표시 이름(REQ-001 등)을 쓰기 위한 시나리오 정책
     # metrics          : run_metrics() 결과(시간·수정·비용·협업 시간)
@@ -154,7 +230,9 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
     # regression       : run_metrics.regression_from_reports 결과(버전별 보호 테스트 결과의 PASS → FAIL 수)
     # reference_report : D5 결과의 referenceReport(같은 Run·같은 코드를 순환용 시험지로 참고 채점한 보고서)
     # supplementary    : D5 결과의 supplementary(지나간 줄 기록·정적 판정)
-    _check_same_sources(report, metrics, run_bundle, trace, runner, regression)  # 0) 다른 Run·평가의 자료가 섞이지 않았는지
+    # run_trace        : Run trace(trace.json, runId·artifacts). 주면 흐름 표의 QA·Security 칸을 같은 Snapshot의 실제 보고서로 채운다
+    # pipeline         : {'runId', 'packageSaved'}. 결과 패키지 저장 여부(handoff에서 해시까지 확인한 package-completion)
+    _check_same_sources(report, metrics, run_bundle, trace, runner, regression, run_trace, pipeline)  # 0) 다른 Run·평가의 자료가 섞이지 않았는지
     if reference_report is not None and (
             reference_report.get('sourceRunId') != report.get('sourceRunId')
             or reference_report.get('architecture') != report.get('architecture')
@@ -177,6 +255,7 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
                 f"최종 코드 버전 {_cell(source.get('codeVersion'))}" if source else ''),
              f"- 위 판정에 들어가지 않는 Run 기록 검사: 노출(REQ-006 기록) {_cell((exposure or {}).get('status') or '결과 없음')}, "
              f"추적(REQ-008) {_cell((traceability or {}).get('status') or '결과 없음')}",
+             _result_layers(report, run_bundle, pipeline),
              f"- 최종 시험 점수: {_score_line(score)}",
              _exposure_line(exposure),
              ]
@@ -214,7 +293,8 @@ def render_summary(report: Mapping, *, scenario_contract: Optional[Mapping] = No
                      f" {_cell(check.get('errorCode') or '-')} |")
     # 4) (선택) 코드 버전별 흐름, 실행 지표, Run 기록 검사
     if run_bundle:
-        lines += ['', '## 실패 → 수정 → 재검증 흐름', ''] + _flow(run_bundle, keys)
+        lines += ['', '## 실패 → 수정 → 재검증 흐름', ''] + _flow(
+            run_bundle, keys, None if run_trace is None else version_reports(run_trace))
     if metrics:
         collaboration = metrics.get('collaboration') or {}
         cost = metrics.get('costUsd')  # 전체 비용(모든 호출의 비용을 확인했을 때만 값이 있다)

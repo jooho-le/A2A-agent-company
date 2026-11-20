@@ -1,5 +1,6 @@
 """Host test-input observations must not multiply approved repair cycles."""
 import copy
+from hashlib import sha256
 import io
 import unittest
 from uuid import uuid4
@@ -111,6 +112,13 @@ def test_unchanged_tests_remain_confirmed_zero_with_complete_observation_scope()
     assert repairs['routes']['TEST_CHANGE'] == {'attempted': 0, 'completed': 0}
 
 
+def test_old_disabled_llm_policy_without_call_receipts_cannot_certify_zero_retries():
+    export = repaired_export()
+    result = process_metrics(export['bundle']['run']['runId'], derive_process_evidence(export))
+    assert result['retries']['channels']['A2A'] == 0
+    assert result['retries']['channels']['LLM'] is None
+
+
 def test_second_actual_repair_gets_a_second_round_not_a_capture_sequence_number():
     export = repaired_export()
     run_id = export['bundle']['run']['runId']
@@ -148,6 +156,7 @@ def test_a2a_continuation_attempt_is_not_used_as_a_repair_round():
 
 def test_real_host_export_keeps_repair_and_validation_cycles_separate(tmp_path):
     """Actual SQLite/dispatch/export producer; fake LLM and inert Docker transport."""
+    from evaluation.run_metrics import run_metrics
     from evaluation.workflow import load_handoff
     from tests.evaluation import dev_harness_exports as harness
 
@@ -156,6 +165,9 @@ def test_real_host_export_keeps_repair_and_validation_cycles_separate(tmp_path):
     result = unittest.TextTestRunner(stream=io.StringIO()).run(unittest.TestSuite([case]))
     assert result.wasSuccessful(), result.errors + result.failures
     export, _run = load_handoff(tmp_path / 'fix-success')
+    expected_digest = sha256('보호된 회원가입 요구사항을 구현해줘.'.encode('utf-8')).hexdigest()
+    assert export['bundle']['run']['requestTextSha256'] == expected_digest
+    assert run_metrics(export['bundle'])['requestTextSha256'] == expected_digest
     assert export['bundle']['run']['fixAttempt'] == 1
     assert all(step['attempt'] == 0 for step in export['handoff']['steps'])
     evidence = derive_process_evidence(export)

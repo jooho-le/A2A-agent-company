@@ -251,3 +251,51 @@ def test_reference_and_supplementary_checks_are_listed_apart():
     other = dict(report(exam='practice'), sourceRunId='5b6c1c56-37a7-4c33-9a7a-3a1d1a7e0b99')
     with pytest.raises(ValueError):
         render_summary(report(), scenario_contract=CONTRACT, reference_report=other)
+
+
+def _trace(*reports):
+    """v1·v2 SOURCE와 주어진 보고서로 Run trace를 만든다. 보고서는 (종류, 버전, 결과 목록, Snapshot 연결 여부)."""
+    run_id = RUN['run']['runId']
+    sources = [{'artifactType': 'SOURCE', 'codeVersion': v, 'artifactId': f'src-{v}', 'snapshotSha256': f'{v}' * 64,
+                'runId': run_id} for v in (1, 2)]
+    items = []
+    for kind, version, outcomes, linked in reports:
+        rows = [{'requirementId': 'r', 'outcome': outcome, 'details': SECRET} for outcome in outcomes]
+        manifest = {'codeVersion': version, 'projectArtifactId': f'src-{version}' if linked else 'src-other',
+                    'snapshotSha256': f'{version}' * 64}
+        items.append({'artifactType': kind, 'codeVersion': version, 'runId': run_id, 'executionManifest': manifest,
+                      ('tests' if kind == 'QA_REPORT' else 'requirementResults'): rows})
+    return {'runId': run_id, 'artifacts': sources + items}
+
+
+def test_flow_reads_reports_linked_to_the_same_snapshot():
+    """Codex 점검 2026-11-19 #5: 흐름 표의 QA·Security 칸은 같은 버전 Snapshot에 연결된 실제 보고서의 판정·통과 수다.
+    Snapshot이 다른 보고서는 숫자로 읽지 않고, 보고서가 실제로 없을 때만 "보고서 없음(미확인)"이다. 자유 글은 옮기지 않는다."""
+    trace = _trace(('QA_REPORT', 1, ['PASS', 'FAIL'], True),
+                   ('SECURITY_REPORT', 2, ['PASS', 'PASS'], False),   # 다른 Snapshot의 보고서
+                   ('QA_REPORT', 2, ['PASS', 'PASS', 'PASS'], True),
+                   ('QA_REPORT', 2, ['FAIL'], False))                 # 연결된 보고서 뒤의 불일치 보고서는 덮어쓰지 않는다
+    text = render_summary(report(), scenario_contract=CONTRACT, run_bundle=RUN, run_trace=trace)
+    assert '| v1 | PASS | FAIL 1/2 | 검증 종료·보고서 없음(미확인) | QA QA_ASSERTION_FAILURE(' in text
+    assert '| v2 | PASS | PASS 3/3 | 보고서 Snapshot 불일치·미확인 | - | 판정 SUCCESS |' in text
+    assert '검증 종료·판정 미확인' not in text and SECRET not in text
+
+
+def test_result_layers_separate_completion_host_verdict_and_independent_exam():
+    """파이프라인 완주(패키지 저장), Host 판정, 독립 제품 시험(요구사항·검사 수)을 한 판정으로 섞지 않고 나눠 적는다."""
+    run_id = RUN['run']['runId']
+    saved = render_summary(report(fail_key='SEC-SIGNUP-002'), scenario_contract=CONTRACT, run_bundle=RUN,
+                           pipeline={'runId': run_id, 'packageSaved': True})
+    assert '① 파이프라인 FINISHED·결과 패키지 저장됨 · ② Host 판정 SUCCESS · ③ 독립 제품 시험 요구사항 6/7 충족, 검사 8/9 PASS' in saved
+    missing = render_summary(report(), scenario_contract=CONTRACT, pipeline={'runId': run_id, 'packageSaved': False})
+    assert '결과 패키지 기록 없음' in missing and '요구사항 7/7 충족, 검사 9/9 PASS' in missing
+    assert '결과 패키지 미확인' in render_summary(report(), scenario_contract=CONTRACT)
+
+
+@pytest.mark.parametrize('extra', [{'run_trace': {'runId': OTHER_RUN, 'artifacts': []}}, {'run_trace': {'artifacts': []}},
+                                   {'pipeline': {'runId': OTHER_RUN, 'packageSaved': True}}, {'pipeline': {'packageSaved': True}}],
+                         ids=['trace-run', 'trace-no-id', 'pipeline-run', 'pipeline-no-id'])
+def test_report_and_package_sources_from_another_run_are_refused(extra):
+    """다른 Run(또는 출처 없는) trace·패키지 기록을 섞으면 요약을 만들지 않는다."""
+    with pytest.raises(ValueError):
+        render_summary(report(), scenario_contract=CONTRACT, run_bundle=RUN, **extra)

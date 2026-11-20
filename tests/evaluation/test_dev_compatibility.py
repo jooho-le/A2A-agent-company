@@ -1,8 +1,8 @@
 """지금 dev가 실제로 남기는 Run 기록으로 평가 코드를 확인한다. dev 출력이 바뀌면 고정 기록 시험보다 여기서 먼저 드러난다.
 
 dev 시험 하네스(가짜 LLM·가짜 docker, 생성 코드 실행 없음)로 Run 세 개(수정 1회 뒤 성공, Planner 의미 검토 보류,
-Developer 모델 API 오류)를 만들어 dev evaluation_export로 꺼낸다. 하네스 자체를 만들지 못하면(dev 시험 도구가 바뀜)
-평가 결함이 아니므로 건너뛰되 이유를 남긴다. 평가 코드가 그 기록을 처리하지 못하면 실패다.
+Developer 모델 API 오류)를 만들어 dev evaluation_export로 꺼낸다. 시험 도구를 불러올 수 없는 환경에서는 이유를 남기고
+건너뛴다. 하네스가 지정된 실행 결과를 만들지 못하거나 평가 코드가 그 기록을 처리하지 못하면 실패로 기록한다.
 """
 import json
 import os
@@ -39,8 +39,7 @@ def exports(tmp_path_factory):
         result = harness.make_exports(out)
         restored_sentinel = os.environ.get(sentinel)
         assert restored_sentinel == 'inert-cleanup-probe', 'export helper leaked its cleared environment'
-    if not result['ok']:
-        pytest.skip('dev 시험 하네스로 Run을 만들지 못함: ' + result['log'][:800])
+    assert result['ok'], 'dev 시험 하네스 실행 실패: ' + result['log'][:1200]
     return out
 
 

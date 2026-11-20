@@ -91,7 +91,9 @@ def test_summaries_keep_missing_tokens_unknown_and_count_failed_run_cost():
     second = bundle(uid(2), verdict='FAIL', cost='0.25')
     runs = [run_metrics(first), run_metrics(second)]
     report = real_report(uid(1), 'final')
-    result = experiment_summary(runs, {'MULTI_AGENT': 2}, [report])['MULTI_AGENT']
+    second_report = real_report(uid(2), 'final', failed=('SEC-SIGNUP-005',))
+    result = experiment_summary(runs, {'MULTI_AGENT': 2}, [report, second_report])['MULTI_AGENT']
+    assert experiment_summary(runs, {'MULTI_AGENT': 2}, [report])['MULTI_AGENT']['costPerProductPassUsd'] is None
     assert result['inputTokens'] is None and result['knownInputTokens'] == 80
     assert result['costPerProductPassUsd'] == '0.75'
     assert experiment_summary(runs, {'MULTI_AGENT': 3}, [report])['MULTI_AGENT']['costPerProductPassUsd'] is None

@@ -17,6 +17,7 @@
 #      (QA 10초와 보안 10초가 동시에 돌았다면 전체 시간은 20초가 아니라 10초다.)
 from decimal import Decimal  # 돈 계산용 정확한 소수 도구(0.1+0.2 같은 오차가 없다)
 import json
+import re
 from statistics import median  # 중앙값(가운데 값)을 구하는 도구
 
 from .aggregation import _uuid4
@@ -284,7 +285,7 @@ def run_metrics(bundle: dict, *, architecture: str | None = None) -> dict:
 
     return {
         'runId': run_id, 'scenarioId': run.get('scenarioId'), 'experimentId': settings.get('experimentId'),
-        'architecture': architecture,
+        'architecture': architecture, 'requestTextSha256': run.get('requestTextSha256'),
         # Keep the frozen comparison fields with standalone metrics, so a pair
         # cannot silently compare different models, budgets or environments.
         'comparisonConfiguration': None if configuration is None else {
@@ -405,6 +406,8 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
         known_calls = sum(measured_calls) if measured_calls else None
         calls_complete = len(mine) == planned and len(measured_calls) == len(mine)
         reports = [by_evaluation[item['runId']] for item in mine if item['runId'] in by_evaluation]
+        missing_grades = sum(item.get('codeVersion') is not None and item['runId'] not in by_evaluation
+                             for item in mine)
         # 통과율이 None(측정 못 함)인 보고서는 평균에서 뺀다. 0%로 취급하면 평균이 낮아지기 때문이다.
         requirement_rates = [r['requiredRequirementPassRate'] for r in reports if r['requiredRequirementPassRate'] is not None]
         check_rates = [r['requiredCheckPassRate'] for r in reports if r['requiredCheckPassRate'] is not None]
@@ -454,7 +457,7 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
             'costUsd': format(total_cost, 'f') if cost_complete and total_cost is not None else None,
             'knownCostUsd': format(total_cost, 'f') if total_cost is not None else None,
             'costPerProductPassUsd': (format(total_cost / len(qualified), 'f')
-                                     if qualified and cost_complete and total_cost is not None else None),
+                                     if qualified and not missing_grades and cost_complete and total_cost is not None else None),
             'runsWithUnknownCost': len(assisted) + sum(1 for item in mine if not item['costComplete']),
             # 비용을 계산한 단가표들(다르면 비용 차이에 단가 차이가 섞인다. 토큰·호출 수는 단가와 무관하다).
             'priceBooks': [dict(book) for book in sorted({tuple(sorted(item['priceBook'].items()))
@@ -480,9 +483,11 @@ def experiment_summary(runs, planned_runs: dict, evaluations=(), *, group_by: st
                 # 같은 품질 기준을 만족한 결과에 도달한 시간(10.29 회의록 방안 1의 비교 지표). 기준은 최종 독립 평가 PASS
                 # (채점 시험지의 필수 검사 모두 통과·코드·환경 신분 확인)이고, 공식 비교 전에 고정해 두고 바꾸지 않는다.
                 # 위 successVerdictMs(Orchestrator가 SUCCESS라고 한 Run)와 달리, 최종 평가에서 FAIL·미검증인 Run의 시간은
-                # 넣지 않는다. 비율의 분모는 계획한 전체 Run이다(시작 못 함·채점 못 함·FAIL·미검증 모두 기준 미달로 셈).
+                # 넣지 않는다. 계획 전체가 분모이며 결과를 수집하지 못했거나 최종 코드에 채점이 없으면 확인된 하한만 표시한다.
                 'qualifiedRuns': len(qualified),
-                'qualifiedRate': len(qualified) / planned,
+                'eligibleRunsMissingGrade': missing_grades,
+                'qualifiedRate': None if missing_grades or unrecorded else len(qualified) / planned,
+                'qualifiedRateLowerBound': len(qualified) / planned,
                 'qualifiedVerdictMs': _distribution([item['verdictMs'] for item in qualified if item['verdictMs'] is not None]),
                 'qualifiedRunsWithUnknownTime': sum(1 for item in qualified if item['verdictMs'] is None),
             },
@@ -661,7 +666,8 @@ def architecture_pairs(runs, evaluations=(), pairs=None) -> dict:
             continue
         conditions = comparison_validity([
             {'architecture': item['architecture'], 'configuration': item['comparisonConfiguration'],
-             'evaluation': by_report.get(item['runId']), 'priceBook': item.get('priceBook')}
+             'evaluation': by_report.get(item['runId']), 'priceBook': item.get('priceBook'),
+             'requestTextSha256': item.get('requestTextSha256')}
             for item in members], group_by='architecture')
         if not conditions['valid'] or conditions['violations']:
             excluded.append({'pairId': pair, 'reason': 'CONDITION_MISMATCH',
@@ -916,6 +922,17 @@ def comparison_validity(entries, *, group_by: str = 'architecture') -> dict:
                 architecture: (list(values.values())[0] if len(values) == 1
                                else [values[key] for key in sorted(values)])
                 for architecture, values in sorted(seen.items())}})
+
+    known_requests = [item for item in entries if item.get('requestTextSha256')]
+    distinct('requestTextSha256', lambda row: row['requestTextSha256'], 'INVALID_COMPARISON', known_requests)
+    for item in entries:
+        digest = item.get('requestTextSha256')
+        if digest is None:
+            warnings.append({'field': 'requestTextSha256', 'detail': 'REQUEST_TEXT_NOT_RECORDED',
+                             'runId': item['configuration'].get('runId')})
+        elif not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+            violations.append({'field': 'requestTextSha256', 'severity': 'INVALID_COMPARISON',
+                               'runId': item['configuration'].get('runId')})
 
     def settings(item):
         # Run Configuration 응답 안의 "configuration"(실제 설정 묶음). 없으면 빈 사전.

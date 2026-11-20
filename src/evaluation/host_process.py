@@ -76,12 +76,26 @@ def derive_process_evidence(export):
         pass
     evidence['observationPolicy'] = {'verified': policy_complete, 'scope': 'OWNED_AUTOMATIC_SEGMENT'}
     if policy_complete:
-        for channel in ('A2A', 'LLM'):
+        # Historical LLM=DISABLED receipts predate correction instrumentation
+        # (including the one-shot credential correction). They cannot prove 0.
+        for channel in ('A2A',):
             if policy.get('automaticRetries', {}).get(channel) == 'DISABLED':
                 evidence['completeChannels'].append(channel)
+        from agents.llm.recovery import POLICY
+        if policy.get('automaticRetries', {}).get('LLM') == POLICY:
+            from .recovery_evidence import recovery_assessment
+            recovery = recovery_assessment(bundle, trace)
+            evidence['llmRecovery'] = recovery
+            if recovery['status'] == 'PASS':
+                evidence['completeChannels'].append('LLM')
+                for call in recovery['regenerations']:
+                    add(f"llm-regeneration:{call['sequence']}", 'RETRY', channel='LLM',
+                        operationId=f"engine:{call['operationSequence']}", attempt=call['correctionAttempt'])
         if policy.get('repairRoutes', {}).get('REPLAN') == 'UNSUPPORTED':
             evidence['completeRoutes'].append('REPLAN')
-        evidence['limitations'].append('A2A/LLM 자동 재시도와 재계획은 고정 정책상 비활성/미지원이며, polling·다음 모델 호출은 재시도가 아님.')
+        evidence['limitations'].append('LLM 재생성은 원인·호출 연결 기록이 있는 실제 재호출만 집계한다. '
+                                      '일반 도구 후속 호출·polling·예산 소진으로 실행되지 않은 복구 안내는 재시도가 아니다. '
+                                      '자동 A2A 재전송·재계획은 지원하지 않는다.')
     else:
         evidence['limitations'].append('실행 전 관찰 정책 또는 전체 자동 구간 사건이 없어 A2A/LLM 재시도·재계획의 0건을 확정하지 않음.')
 
@@ -89,7 +103,10 @@ def derive_process_evidence(export):
     gates = {'PROCESS_GATE_REJECTED': 'ORCHESTRATOR_OUTPUT', 'BUILD_FAILED': 'BUILD',
              'BUILD_UNVERIFIED': 'BUILD', 'BUILD_FAILED_FIX_LIMIT_REACHED': 'BUILD',
              'VALIDATION_DECISION_FIX_REQUIRED': 'VALIDATION', 'VALIDATION_DECISION_HUMAN_REVIEW': 'VALIDATION',
-             'SAME_ISSUE_REQUIRES_REVIEW': 'REPAIR', 'FIX_DISPATCH_NOT_CONFIGURED': 'REPAIR'}
+             'SAME_ISSUE_REQUIRES_REVIEW': 'REPAIR', 'SAME_ISSUE_REPEAT_LIMIT_REACHED': 'REPAIR',
+             'FIX_DISPATCH_NOT_CONFIGURED': 'REPAIR',
+             # docs/live-api/05 22절: 모델 행동으로 멈춰 마지막 측정 결과로 끝남(Host 관문의 거부로 센다).
+             'AUTOMATIC_STOP_FINISHED': 'ORCHESTRATOR_OUTPUT'}
     for row in unique:
         kind = row.get('eventType')
         final_rejected = kind == 'VALIDATION_DECISION_FINISHED' and bundle['run'].get('verdict') == 'FAIL'
