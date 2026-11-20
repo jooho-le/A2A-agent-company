@@ -13,10 +13,37 @@ test('첫 과거 조회는 기준점이며 새로 추가된 이벤트만 수집�
   const feed = createRunEventFeed(), rows = [event(1), event(2)]
   const baseline = await feed.pull('a', server(rows))
   assert.equal(baseline.cursor, 2); assert.deepEqual(baseline.entries, [])
+  assert.deepEqual(baseline.historyEntries.map(item => item.event.eventId), ['1', '2'])
   rows.push(event(3))
   const next = await feed.pull('a', server(rows))
   assert.deepEqual(next.entries.map(item => item.event.eventId), ['3'])
   assert.equal(next.cursor, 3)
+  assert.deepEqual(next.historyEntries.map(item => item.event.eventId), ['1', '2', '3'])
+})
+
+test('기존 Run의 여러 페이지 기록은 전부 표시하되 애니메이션은 재생하지 않는다', async () => {
+  const feed = createRunEventFeed(), rows = Array.from({ length: 205 }, (_, i) => event(i)), calls = []
+  const past = await feed.pull('a', server(rows, calls))
+  assert.deepEqual(calls.map(call => call.offset), [0, 100, 200])
+  assert.equal(past.historyEntries.length, 205)
+  assert.deepEqual(past.entries, [])
+  assert.equal(past.revision, 0)
+  rows.push(event(205))
+  const next = await feed.pull('a', server(rows))
+  assert.equal(next.historyEntries.length, 206)
+  assert.deepEqual(next.entries.map(item => item.event.eventId), ['205'])
+})
+
+test('과거 기록의 중간 페이지 실패는 일부 기록을 확정하지 않고 처음부터 복구한다', async () => {
+  const feed = createRunEventFeed(), rows = Array.from({ length: 205 }, (_, i) => event(i)), calls = []
+  await assert.rejects(feed.pull('a', async (runId, options) => {
+    if (options.offset === 100) throw Error('temporary page failure')
+    return server(rows)(runId, options)
+  }))
+  const recovered = await feed.pull('a', server(rows, calls))
+  assert.equal(calls[0].offset, 0)
+  assert.equal(recovered.historyEntries.length, 205)
+  assert.deepEqual(recovered.entries, [])
 })
 test('한 번에 여러 페이지가 도착해도 offset 순서로 전부 읽는다', async () => {
   const feed = createRunEventFeed(), rows = [event(0)], calls = []

@@ -20,7 +20,25 @@ globalThis.fetch = async (url) => {
 }
 const check = (condition, message) => { if (!condition) throw new Error(message) }
 const button = (label, selector = 'button') => [...document.querySelectorAll(selector)].find(item => item.textContent === label)
-async function click(element) { check(element, 'button exists'); await act(async () => element.click()) }
+async function click(element) {
+  check(element, 'button exists')
+  const original = history.go
+  let moved = false, timer, resolvePop
+  const popped = new Promise(resolve => { resolvePop = resolve })
+  const onPop = () => resolvePop()
+  history.go = function (...args) { moved = true; return original.apply(history, args) }
+  window.addEventListener('popstate', onPop, { once: true })
+  try {
+    await act(async () => {
+      element.click()
+      if (moved) await Promise.race([popped, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('History traversal did not finish')), 1500)
+      })])
+    })
+  } finally {
+    clearTimeout(timer); history.go = original; window.removeEventListener('popstate', onPop)
+  }
+}
 async function fill(selector, value) {
   const input = document.querySelector(selector)
   check(input, `input exists: ${selector}`)

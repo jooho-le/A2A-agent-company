@@ -24,18 +24,14 @@ export function createRunEventFeed() {
       return page
     }
     const firstCollection = !state && fromStart && !collectedFromStart.has(runId)
-    if (!state && !firstCollection) {
-      const page = await read(100, 0)
-      // 최초 과거 기록은 재생하지 않습니다. 이후 추가된 행부터 읽습니다.
-      state = { runId, epoch, revision: 0, initialized: true, cursor: page.total, fromCursor: page.total, total: page.total, entries: [], page }
-      return state
-    }
+    const baseline = !state && !firstCollection
     // 신규 Run의 최초 묶음도 페이지 전체 성공 전에는 커서를 확정하지 않습니다.
-    const start = state ?? { runId, epoch, revision: 0, initialized: true, cursor: 0, total: 0, entries: [] }
+    const start = state ?? { runId, epoch, revision: 0, initialized: true, cursor: 0, total: 0, entries: [], historyEntries: [] }
     const additions = [], ids = new Set(seen)
-    let offset = start.cursor, target = null, lastPage
+    let offset = start.cursor, target = null, lastPage, firstPage
     do {
       const page = await read(100, offset)
+      firstPage ??= page
       lastPage = page
       if (target === null) target = page.total
       const rows = page.events.slice(0, Math.max(0, target - offset))
@@ -52,8 +48,12 @@ export function createRunEventFeed() {
     check()
     // 전체 묶음이 성공한 뒤에만 커서를 전진합니다. 실패·취소는 다음 폴링에서 재시도합니다.
     seen = ids
-    state = { ...start, cursor: offset, fromCursor: start.cursor, total: target, revision: start.revision + (additions.length ? 1 : 0),
-      entries: additions.length ? [...start.entries, ...additions] : start.entries, page: lastPage }
+    state = { ...start, cursor: offset, fromCursor: baseline ? offset : start.cursor, total: target,
+      revision: start.revision + (!baseline && additions.length ? 1 : 0),
+      // Stored history is displayed separately from new animation events.
+      entries: baseline ? [] : additions.length ? [...start.entries, ...additions] : start.entries,
+      historyEntries: additions.length ? [...start.historyEntries, ...additions] : start.historyEntries,
+      page: baseline ? firstPage : lastPage }
     if (firstCollection) collectedFromStart.add(runId)
     return state
   }

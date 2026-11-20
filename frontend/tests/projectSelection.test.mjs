@@ -1,12 +1,39 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearProjectSelection, loadSelectedProject, readProjectSelection } from '../src/hooks/projectSelection.js'
+import { clearProjectSelection, loadSelectedProject, readProjectSelection, rememberCreatedRun, rememberProjectRun, resolveProjectRun } from '../src/hooks/projectSelection.js'
 
 const key = 'ai-company.selected-project-id'
 const id = n => `70000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const project = { projectId: id(1), name: '저장된 회원가입 프로젝트', scenarioId: id(2),
   createdAt: '2026-11-13T09:00:00', updatedAt: '2026-11-13T09:00:00',
   runs: [{ hostKey: 'local-multi', runId: id(3), configurationId: 'approved-v1', linkedAt: '2026-11-13T10:00:00' }] }
+
+test('선택한 두 번째 Run을 복원하며 삭제된 Run을 첫 Run으로 대체하지 않는다', async t => {
+  const data = storage(t)
+  data.set('access_token', 'test.' + btoa(JSON.stringify({ sub: '1' })) + '.test')
+  const full = { ...project, runs: [...project.runs, { ...project.runs[0], runId: id(4) }] }
+  t.mock.method(globalThis, 'fetch', async () => Response.json(full))
+  const loaded = await loadSelectedProject(project.projectId)
+  assert.equal(rememberProjectRun(loaded, loaded.runs[1]), true)
+  assert.equal(resolveProjectRun(await loadSelectedProject(readProjectSelection())).runId, id(4))
+  assert.equal(resolveProjectRun(project), null)
+  assert.equal(rememberProjectRun(project, { ...project.runs[0], runId: id(99) }), false)
+  assert.equal(rememberProjectRun(project, { ...project.runs[0], hostKey: 'foreign-host' }), false)
+  clearProjectSelection()
+  assert.equal(data.has('ai-company.selected-project-run'), false)
+  assert.equal(resolveProjectRun(project).runId, id(3)) // Legacy project-only restoration.
+})
+
+test('신규 접수는 이름 조회 전 복원 후보를 기록하고 기존 계정의 후보는 재사용하지 않는다', t => {
+  const data = storage(t)
+  data.set('access_token', 'test.' + btoa(JSON.stringify({ sub: '1' })) + '.test')
+  assert.equal(rememberCreatedRun({ submissionStatus: 'UNKNOWN', projectId: project.projectId, run: { runId: id(4) } }), false)
+  assert.equal(rememberCreatedRun({ submissionStatus: 'CREATED', projectId: project.projectId, run: { runId: id(4) } }), true)
+  const full = { ...project, runs: [...project.runs, { ...project.runs[0], runId: id(4) }] }
+  assert.equal(resolveProjectRun(full).runId, id(4))
+  data.set('access_token', 'test.' + btoa(JSON.stringify({ sub: '2' })) + '.test')
+  assert.equal(resolveProjectRun(full).runId, id(3)) // Old account's explicit Run hint is ignored.
+})
 
 function storage(t) {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
