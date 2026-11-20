@@ -158,6 +158,25 @@ class PlannerAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.context_calls, [])
         self.assertFalse(self.database.exists())
 
+    async def test_failed_plan_records_safe_requirement_gap_in_durable_task(self):
+        draft = self.draft()
+        draft['implementationPlan'][0]['requirementIds'].pop()
+        draft['implementationPlan'][0]['description'] = 'private-plan-prose-must-not-be-logged'
+        task, revisions = await self.run_to(FakeProvider(self.response(draft)), 'TASK_STATE_FAILED')
+        payload = task['status']['message']['parts'][0]['data']
+        self.assertEqual(payload['code'], 'PLANNER_OUTPUT_INVALID')
+        report = payload['plannerValidation']
+        self.assertEqual(report['stage'], 'PLAN_MODEL')
+        self.assertFalse(report['traceRecorded'])  # This fixture has no Host telemetry.
+        self.assertEqual(report['issues'][0]['requirementKey'], 'REQ-008')
+        self.assertEqual(report['issues'][0]['reasonCode'], 'REQUIREMENT_NOT_COVERED')
+        self.assertFalse(task.get('artifacts'))
+        self.assertNotIn('private-plan-prose', json.dumps(revisions))
+        async with self.client_for(self.executor(FakeProvider())) as (_app, client):
+            response = await client.get(f"/tasks/{task['id']}", headers=self.headers())
+            stored = response.json()['status']['message']['parts'][0]['data']
+            self.assertEqual(stored['plannerValidation'], report)
+
     async def test_constructor_refuses_missing_host_capabilities(self):
         for changes in ({"provider": None}, {"context_factory": None}, {"usage_sink": "untrusted-selector"}):
             with self.subTest(changes=changes), self.assertRaises(PlannerExecutorConfigurationError) as error:

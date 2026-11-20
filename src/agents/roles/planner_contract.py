@@ -14,6 +14,7 @@ from agents.llm.contracts import JsonSchema, StructuredOutput, json_text, parse_
 from orchestrator.application.planner_output import PlannerPlan
 from orchestrator.core.security import redact_data
 from orchestrator.domain.scenario_registry import ScenarioDefinition
+from agents.roles.planner_diagnostics import diagnose_planner_failure
 
 
 MAX_PLANNER_TASKS = 128
@@ -25,11 +26,12 @@ _SCHEMA_PATH = Path(__file__).absolute().parents[3] / "schemas" / "project" / "p
 
 
 class PlannerContractError(ValueError):
-    """A safe reason only; no model decision, question or validation exception."""
+    """Stable error plus closed diagnostics; no submitted text or exception body."""
 
     code = "PLANNER_OUTPUT_INVALID"
 
-    def __init__(self):
+    def __init__(self, validation=None):
+        self.validation = validation or diagnose_planner_failure(None, None)
         super().__init__(self.code)
 
 
@@ -155,13 +157,20 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
     must already cross its existing redaction boundary as well.
     """
     invalid = False
+    stage, copied, candidate_json, schema = "CONTRACT_SETUP", None, None, None
+    artifact_error_paths = ()
     try:
         contract = build_planner_output_contract(scenario)
+        schema = contract.schema.to_dict()
         # Round-trip bounded native JSON so returned Plan/list objects do not
         # alias a mutable submitted decision. Duplicate JSON wire keys and
         # nonfinite numbers are rejected by the earlier LLM decoder too.
-        copied = parse_json(json_text(data, max_bytes=MAX_PLANNER_JSON_BYTES), max_bytes=MAX_PLANNER_JSON_BYTES)
+        stage = "JSON"
+        candidate_json = json_text(data, max_bytes=MAX_PLANNER_JSON_BYTES)
+        copied = parse_json(candidate_json, max_bytes=MAX_PLANNER_JSON_BYTES)
+        stage = "MODEL_SCHEMA"
         contract.schema.validate(copied)
+        stage = "TEXT"
         if redact_data(copied) != copied:
             raise PlannerContractError()
         kind = copied["kind"]
@@ -174,11 +183,13 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
             _text(question, 1024)
         for assumption in assumptions:
             _text(assumption, 1024)
+        stage = "DECISION"
         if len(set(assumptions)) != len(assumptions) or assumptions and kind != "INPUT_REQUIRED":
             raise PlannerContractError()
         if kind == "PLAN":
             if not tasks or questions:
                 raise PlannerContractError()
+            stage = "PLAN_MODEL"
             plan = PlannerPlan.model_validate({
                 "schemaVersion": 1,
                 "requirements": [{
@@ -188,11 +199,20 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
                 } for requirement in scenario.requirements],
                 "implementationPlan": tasks,
             })
+            stage = "REQUIREMENTS"
             scenario.validate_planner_requirements(plan.requirements)
             payload = plan.model_dump(mode="json", by_alias=True)
+            stage = "ARTIFACT_SAFETY"
             if redact_data(payload) != payload:
                 raise PlannerContractError()
-            Draft202012Validator(_canonical_schema(), format_checker=FormatChecker()).validate(payload)
+            stage = "ARTIFACT_SCHEMA_LOAD"
+            validator = Draft202012Validator(_canonical_schema(), format_checker=FormatChecker())
+            stage = "ARTIFACT_SCHEMA"
+            errors = list(validator.iter_errors(payload))
+            if errors:
+                artifact_error_paths = tuple(tuple(error.absolute_path) for error in errors)
+                raise PlannerContractError()
+            stage = "DECISION_MODEL"
             result = PlannerDecision(kind=kind, plan=plan, questions=())
         elif kind == "INPUT_REQUIRED":
             if tasks or not questions:
@@ -207,5 +227,7 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
         invalid = True
     if invalid:
         # Outside except: no raw Pydantic/JSONSchema content in __context__.
-        raise PlannerContractError() from None
+        report = diagnose_planner_failure(copied, scenario, stage=stage, schema=schema,
+            candidate_json=candidate_json, artifact_error_paths=artifact_error_paths)
+        raise PlannerContractError(report) from None
     return result
