@@ -18,6 +18,7 @@ from orchestrator.domain import (
     SCN_001_ID,
 )
 from orchestrator.core.security import redact_text
+from orchestrator.domain.submissions import measurement_request_sha256
 from orchestrator.application.control_input import validate_control_input
 
 
@@ -69,6 +70,7 @@ class CancelRunRequest(APIModel):
 
 
 class RunStatusResponse(APIModel):
+    request_text_sha256: str | None = Field(default=None, alias="requestTextSha256", pattern=r"^[0-9a-f]{64}$")
     run_id: UUID4 = Field(alias="runId")
     scenario_id: UUID4 = Field(alias="scenarioId")
     workspace_id: UUID4 = Field(alias="workspaceId")
@@ -83,7 +85,8 @@ class RunStatusResponse(APIModel):
 
     @classmethod
     def from_run(cls, run: WorkflowRun) -> "RunStatusResponse":
-        return cls.model_validate(run.model_dump(exclude={"request_text"}))
+        return cls.model_validate(dict(run.model_dump(exclude={"request_text"}),
+                                       request_text_sha256=measurement_request_sha256(run.request_text)))
 
 
 class WorkflowStepResponse(APIModel):

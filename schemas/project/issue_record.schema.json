@@ -10,6 +10,47 @@
       ],
       "title": "AgentRole",
       "type": "string"
+    },
+    "ProtectedReceipt": {
+      "additionalProperties": false,
+      "description": "Host measurement available before the validator produced an A2A report.",
+      "properties": {
+        "receiptId": {
+          "format": "uuid4",
+          "title": "Receiptid",
+          "type": "string"
+        },
+        "workflowStepId": {
+          "format": "uuid4",
+          "title": "Workflowstepid",
+          "type": "string"
+        },
+        "testId": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Testid",
+          "type": "string"
+        },
+        "testVersion": {
+          "pattern": "^(?:practice|inputs):[0-9a-f]{64}$",
+          "title": "Testversion",
+          "type": "string"
+        },
+        "observationsJson": {
+          "maxLength": 65536,
+          "title": "Observationsjson",
+          "type": "string"
+        }
+      },
+      "required": [
+        "receiptId",
+        "workflowStepId",
+        "testId",
+        "testVersion",
+        "observationsJson"
+      ],
+      "title": "ProtectedReceipt",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -52,6 +93,17 @@
       "default": null,
       "title": "Reportartifactid"
     },
+    "protectedReceipt": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProtectedReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "requirementIds": {
       "items": {
         "format": "uuid4",
@@ -93,6 +145,37 @@
       "minimum": 0,
       "title": "Consecutiverepeatcount",
       "type": "integer"
+    },
+    "stopRepeatCount": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stoprepeatcount"
+    },
+    "measuredProgress": {
+      "anyOf": [
+        {
+          "enum": [
+            "PARTIAL_IMPROVEMENT",
+            "NO_PROGRESS",
+            "CHANGED",
+            "NOT_COMPARABLE"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Measuredprogress"
     },
     "expectedResult": {
       "anyOf": [

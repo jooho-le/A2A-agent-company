@@ -95,6 +95,66 @@ class ValidationArtifactTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             report.artifact_version = 2
 
+    def test_successful_runner_can_prove_a_closed_technical_not_run(self):
+        for reason in ('NOT_RUN_SETUP_FAILED', 'NOT_RUN_ASYNC_NOT_AWAITED'):
+            data = self.make_qa().model_dump(mode='json', by_alias=True)
+            row = data['tests'][0]
+            row.update(outcome='UNVERIFIED', actualResult=reason, details=json.dumps({'code': reason}))
+            report = QAReportArtifact.model_validate(data)
+            self.assertEqual(report.tests[0].tool_evidence.outcome.value, 'PASS')
+            verdict = decide_verdict(report, self.make_security(), fix_attempt=0)
+            self.assertEqual((verdict.target_status, verdict.verdict),
+                             (WorkflowStatus.FINISHED, FinalVerdict.UNVERIFIED))
+            for code, detail in (('RUNNER_REPORTED_SKIP', 'RUNNER_REPORTED_SKIP'),
+                                 ('NOT_RUN_SCOPE_FAILED', 'NOT_RUN_SCOPE_FAILED'),
+                                 (reason, 'WRONG_CODE')):
+                row.update(actualResult=code, details=json.dumps({'code': detail}))
+                with self.assertRaises(ValueError):
+                    QAReportArtifact.model_validate(data)
+
+    def test_security_not_run_requires_reason_and_matching_runner_reference(self):
+        data = self.make_security().model_dump(mode='json', by_alias=True)
+        row = data['requirementResults'][0]
+        evidence = tool_evidence('run_unit_tests', self.manifest.model_dump(mode='json', by_alias=True))
+        case = {'testId': 'run_unit_tests:security-tests:t.T.test_a', 'outcome': 'UNVERIFIED',
+                'notRunReason': 'NOT_RUN_SETUP_FAILED', 'evidenceRefs': [evidence['evidenceRef']]}
+        detail = {'code': 'SECURITY_TESTS_NOT_RUN', 'tests': [case]}
+        row.update(outcome='UNVERIFIED', actualResult='UNVERIFIED', toolEvidence=evidence,
+                   details=json.dumps(detail))
+        report = SecurityReportArtifact.model_validate(data)
+        verdict = decide_verdict(self.make_qa(), report, fix_attempt=0)
+        self.assertEqual((verdict.target_status, verdict.verdict),
+                         (WorkflowStatus.FINISHED, FinalVerdict.UNVERIFIED))
+        for changes in ({'notRunReason': 'RUNNER_REPORTED_SKIP'}, {'notRunReason': []},
+                        {'evidenceRefs': []}, {'outcome': 'FAIL'}):
+            row['details'] = json.dumps({**detail, 'tests': [{**case, **changes}]})
+            with self.assertRaises(ValueError):
+                SecurityReportArtifact.model_validate(data)
+
+    def test_protected_technical_not_run_keeps_human_review(self):
+        data = self.make_qa().model_dump(mode='json', by_alias=True)
+        data['tests'][0].update(testId='run_unit_tests:protected:t.T.test_a', outcome='UNVERIFIED',
+                                actualResult='NOT_RUN_SETUP_FAILED',
+                                details=json.dumps({'code': 'NOT_RUN_SETUP_FAILED'}))
+        report = QAReportArtifact.model_validate(data)
+        verdict = decide_verdict(report, self.make_security(), fix_attempt=0,
+                                 protected_selectors=frozenset({'run_unit_tests:protected'}))
+        self.assertEqual((verdict.target_status, verdict.verdict),
+                         (WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW))
+
+    def test_protected_security_not_run_keeps_human_review(self):
+        data = self.make_security().model_dump(mode='json', by_alias=True)
+        evidence = tool_evidence('run_unit_tests', self.manifest.model_dump(mode='json', by_alias=True))
+        data['requirementResults'][0].update(outcome='UNVERIFIED', toolEvidence=evidence,
+            details=json.dumps({'code': 'SECURITY_TESTS_NOT_RUN', 'tests': [{
+                'testId': 'run_unit_tests:protected:t.T.test_a', 'outcome': 'UNVERIFIED',
+                'notRunReason': 'NOT_RUN_SETUP_FAILED', 'evidenceRefs': [evidence['evidenceRef']]}]}))
+        report = SecurityReportArtifact.model_validate(data)
+        verdict = decide_verdict(self.make_qa(), report, fix_attempt=0,
+                                 protected_selectors=frozenset({'run_unit_tests:protected'}))
+        self.assertEqual((verdict.target_status, verdict.verdict),
+                         (WorkflowStatus.HUMAN_REVIEW, FinalVerdict.HUMAN_REVIEW))
+
     def test_success_requires_an_authoritative_requirement_baseline(self) -> None:
         decision = decide_verdict(
             self.make_qa(),

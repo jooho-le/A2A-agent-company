@@ -119,6 +119,150 @@
       "format": "uri",
       "minLength": 1,
       "pattern": "^(?!file:)[A-Za-z][A-Za-z0-9+.-]+:"
+    },
+    "readyReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workingBaseCommit",
+        "edits",
+        "sourceArtifactId",
+        "buildReportId",
+        "buildOutcome",
+        "validationStatus",
+        "rechecks"
+      ],
+      "properties": {
+        "workingBaseCommit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "edits": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "action"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "enum": [
+                  "ADDED",
+                  "MODIFIED",
+                  "DELETED"
+                ]
+              },
+              "changedFunctions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "sourceArtifactId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "buildReportId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "buildOutcome": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        },
+        "validationStatus": {
+          "enum": [
+            "PENDING_QA_SECURITY",
+            "BLOCKED_BY_BUILD"
+          ]
+        },
+        "reportedPathEdits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "edit", "recheck"],
+            "properties": {
+              "path": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+              "edit": {"type": ["string", "null"], "minLength": 1, "maxLength": 400},
+              "recheck": {"type": "string", "minLength": 1, "maxLength": 400},
+              "sourceRef": {"type": "string", "minLength": 1, "maxLength": 400},
+              "hostDiffStatus": {"enum": ["LINKED_PENDING_TEST", "INDIRECT_PENDING_TEST", "NO_CHANGE_CLAIMED"]}
+            }
+          }
+        },
+        "rechecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "issueId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "priorReportId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "priorProtectedReceiptId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "role": {
+                "enum": [
+                  "QA",
+                  "SECURITY"
+                ]
+              },
+              "requirementId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "testId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "unresolvedCases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true
+              }
+            },
+            "oneOf": [
+              {"required": ["priorReportId"]},
+              {"required": ["priorProtectedReceiptId"]}
+            ],
+            "required": [
+              "issueId",
+              "role",
+              "requirementId",
+              "testId",
+              "unresolvedCases"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
     }
   }
 }
