@@ -274,6 +274,19 @@ def quote_frozen_usage(descriptor: dict, record: UsageRecord) -> CostQuote:
         raise PricingError() from None
 
 
+def has_requested_model_rate(path, model) -> bool:
+    """Check the frozen tariff for the requested model before a measured run."""
+    if path is None or not isinstance(model, dict):
+        return False
+    try:
+        entries = load_price_book(path).descriptor['priceBook']['entries']
+    except PricingError:
+        return False
+    requested = model.get('modelRevision') or model.get('modelId')
+    return any(row['provider'] == model.get('provider') and row['requestedModelId'] == requested
+               and row['serviceTier'] == 'default' for row in entries)
+
+
 def validate_frozen_price_book(descriptor: dict) -> None:
     """Pure closed policy validation, including a zero-call historical Run."""
     try:

@@ -148,7 +148,11 @@ class RunBudgetRegistry:
                     or snapshot.created_at_utc != run.created_at
                     or snapshot.deadline_utc != run.created_at + timedelta(milliseconds=runtime)
                     or snapshot.pending_model_sequences or snapshot.pending_tool_sequences
-                    or not snapshot.usage_complete or snapshot.invalidated):
+                    # Unknown usage restores only when its cap-check upper bound was booked (Codex review
+                    # 2026-11-18); the usage itself stays unknown.
+                    or any(usage is None and sequence not in snapshot.unknown_usage_bounds
+                           for sequence, usage in snapshot.accounted_usage.items())
+                    or snapshot.invalidated):
                 raise RunBudgetError()
             self._telemetry_store.audit_budget(snapshot)
             # Persist the observation so a later restart cannot move UTC backward.
