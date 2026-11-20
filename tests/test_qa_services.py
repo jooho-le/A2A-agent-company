@@ -37,7 +37,8 @@ from orchestrator.sandbox.contracts import CLIResult, SandboxLimits
 from orchestrator.sandbox.runtime import SandboxRuntime
 from test_mcp_execution_runtime import DispatcherSession
 import test_mcp_unit_store as store_fixture
-from test_sandbox_runtime import FakeDocker, IMAGE_ID
+from signup_receipt_fixture import SignupFixtureDocker, generated_signup_evidence
+from test_sandbox_runtime import IMAGE_ID
 
 
 class QAServicesTests(unittest.IsolatedAsyncioTestCase):
@@ -72,7 +73,7 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
         tests.mkdir(parents=True, exist_ok=True)
         self.test_file = tests / "test_signup.py"
         self.test_file.write_text("# inert generated QA fixture; never execute on Host\n", encoding="utf-8")
-        self.docker = FakeDocker()
+        self.docker = SignupFixtureDocker()
         self.sandbox = SandboxRuntime(self.repository, self.registry, self.artifacts, docker=self.docker)
         self.unit_configuration = UnitTestConfiguration(scopes=(self.fixture.scope,),
             limits=SandboxLimits(timeout_seconds=60, control_timeout_seconds=.5), image_reference=IMAGE_ID)
@@ -117,8 +118,9 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
 
     def set_unit_report(self, outcomes=None, *, extra=(), omit=()):
         outcomes = outcomes or {}
-        cases = [{"testId": case.test_id, "outcome": outcomes.get(case.test_id, "PASS")}
-                 for case in self.bindings if case.test_id not in omit]
+        cases = [{"testId": case.test_id, "outcome": outcomes.get(case.test_id, "PASS"),
+                  **generated_signup_evidence("QA", index)}
+                 for index, case in enumerate(self.bindings, 1) if case.test_id not in omit]
         cases.extend(extra)
         failed = sum(case["outcome"] == "FAIL" for case in cases)
         self.docker.exit_code = int(bool(failed))
@@ -235,17 +237,42 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.input_counts(), (1, 2, 0))
 
     async def test_runner_infrastructure_failure_never_fabricates_test_result(self):
+        # 2026-11-18(docs/live-api/05 3절): a generated scope whose runner could not
+        # run no longer ends the step. Every declared case stays, as not-run
+        # (never PASS), with the Host's attempt evidence; nothing is fabricated.
         self.docker.exit_code = 2
         self.docker.start_result = CLIResult(returncode=2, stdout=b'{"error":"TEST_RUNNER_ERROR"}', stderr=b"")
         services = self.services()
         tracked = self.tracked(services)
-        with self.assertRaises(TrackedMCPError):
-            await services.finalize(self.execution, self.decision, tracked, task_id="qa-task", context_id="qa-context")
+        report = self.report(await services.finalize(self.execution, self.decision, tracked,
+                                                     task_id="qa-task", context_id="qa-context"))
         self.assertEqual(self.input_counts(), (1, 2, 0))
         self.assertEqual(len(self.docker.commands("start")), 1)
         record = services._tools.get(self.fixture.binding, tracked.logical_call_ids[-1])
         self.assertEqual(len(record.attempts), 1)
         self.assertIsNone(record.attempts[-1].execution_manifest_id)
+        self.assertEqual(len(report.tests), len(self.bindings))
+        for case in report.tests:
+            self.assertEqual((case.outcome, case.actual_result), (ValidationOutcome.UNVERIFIED, "NOT_RUN_SCOPE_FAILED"))
+            self.assertEqual(case.tool_evidence.execution_id, record.logical_call_id)
+            self.assertNotEqual(case.tool_evidence.outcome.value, "PASS")
+
+    async def test_protected_scope_runner_failure_still_stops(self):
+        protected = UnitTestScope(name="protected-unit", kind="PROTECTED",
+            protected_files={"tests/test_signup.py": "# approved protected criteria\n"},
+            protected_suite_ref=self.fixture.configuration.configuration.protected_test_suite_ref)
+        self.configuration = replace(self.configuration, unit_test_configuration=replace(self.unit_configuration,
+            scopes=(self.fixture.scope, protected)))
+        bindings = tuple(replace(case, selector="protected-unit") for case in self.bindings)
+        services = self.services(protected_cases=bindings)
+        self.docker.exit_code = 2
+        self.docker.start_result = CLIResult(returncode=2, stdout=b'{"error":"TEST_RUNNER_ERROR"}', stderr=b"")
+        with self.assertRaises(TrackedMCPError):
+            await services.run_protected(self.execution, self.tracked(services))
+        self.assertEqual(len(self.docker.commands("start")), 1)
+        with self.assertRaises(QAServicesError):
+            await self.finish(self.services(protected_cases=bindings))
+        self.assertEqual(len(self.docker.commands("start")), 1)  # unresolved claim cannot run again
 
     async def test_changed_inputs_before_tool_cannot_use_captured_test_bytes(self):
         services = self.services()
@@ -320,7 +347,7 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(report.passed)
         self.assertEqual(report.code_version, 1)
 
-    async def test_protected_scope_hidden_and_always_executed_after_ready(self):
+    async def test_protected_scope_hidden_run_at_entry_and_reused_after_restart_and_ready(self):
         protected = UnitTestScope(name="protected-unit", kind="PROTECTED",
             protected_files={"tests/test_signup.py": "# approved protected criteria\n"},
             protected_suite_ref=self.fixture.configuration.configuration.protected_test_suite_ref)
@@ -331,7 +358,19 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
                                    for case in self.bindings)
         services = self.services(protected_cases=protected_bindings)
         self.assertEqual(services.selectors, {"run_unit_tests": ("qa-unit",)})
+        await services.prepare(self.execution)
+        await services.run_protected(self.execution, self.tracked(services))
+        from agents.runtime.protected_scopes import completed_protected_scopes
+        rows = completed_protected_scopes(self.repository, run_id=self.execution.metadata.run_id,
+            workflow_step_id=self.execution.metadata.workflow_step_id, source_artifact_id=self.execution.source.artifact_id)
+        self.assertEqual([row.selector for row in rows], ["protected-unit"])
+        self.assertTrue(services.test_fix_available(self.execution))
+        services = self.services(protected_cases=protected_bindings)
+        await services.run_protected(self.execution, self.tracked(services))
+        self.assertEqual(len(self.docker.commands("start")), 1)
         report = self.report(await self.finish(services))
+        self.assertFalse(services.test_fix_available(self.execution))
+        self.assertEqual(len(self.docker.commands("start")), 2)
         self.assertEqual(len(report.tests), 2 * len(self.bindings))
         self.assertTrue(all(case.expected_result == expected for case in report.tests
                             if case.test_id.startswith("run_unit_tests:protected-unit:")))
@@ -394,8 +433,11 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
             "format": "browser-v1", "suiteName": suite.name, "playwrightVersion": "1.60.0", "browserVersion": "145.0.7632.6",
             "total": len(cases), "passed": len(cases), "failed": 0, "tests": cases}).encode())
         report = self.report(await self.finish())
-        self.assertTrue(report.passed)
-        self.assertEqual({case.tool_evidence.tool_name for case in report.tests}, {"run_browser_tests"})
+        self.assertFalse(report.passed)
+        self.assertEqual([(case.test_id, case.actual_result) for case in report.tests
+                          if case.outcome == ValidationOutcome.UNVERIFIED],
+                         [(report.tests[2].test_id, "CONCURRENT_SIGNUPS_NOT_OBSERVED")])
+        self.assertTrue(all(row.execution_evidence[0].tool_name == "run_browser_tests" for row in report.tests))
         self.assertEqual(self.input_counts(), (1, 5, 1))
 
 

@@ -48,6 +48,7 @@ from orchestrator.sandbox.runtime import SandboxRuntime
 import test_developer_agent as developer_fixture
 from test_llm_runtime import FakeProvider, text_response, tool_response
 from test_mcp_execution_runtime import DispatcherSession
+from signup_receipt_fixture import generated_signup_evidence
 from test_sandbox_runtime import FakeDocker
 
 
@@ -133,7 +134,9 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
     def set_unit_report(self, outcomes=None, *, reported_ids=None):
         ids = self.case_ids if reported_ids is None else reported_ids
         outcomes = ["PASS"] * len(ids) if outcomes is None else outcomes
-        tests = [{"testId": identifier, "outcome": outcome} for identifier, outcome in zip(ids, outcomes)]
+        tests = [{"testId": identifier, "outcome": outcome,
+                  **(generated_signup_evidence("QA", self.case_ids.index(identifier) + 1) if identifier in self.case_ids else {})}
+                 for identifier, outcome in zip(ids, outcomes)]
         self.report = {"format": "unittest-v1", "total": len(tests),
             "passed": outcomes.count("PASS"), "failed": outcomes.count("FAIL"), "skipped": outcomes.count("SKIP"),
             "tests": tests}
@@ -359,22 +362,46 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
         report = self.parse_completed(task)
         self.assertIs(report.tests[0].outcome, ValidationOutcome.FAIL)
         self.assertEqual(report.tests[0].tool_evidence.tool_name, "run_browser_tests")
+        self.assertIs(report.tests[2].outcome, ValidationOutcome.UNVERIFIED)
+        self.assertEqual(report.tests[2].actual_result, "CONCURRENT_SIGNUPS_NOT_OBSERVED")
         self.assertEqual(report.execution_manifest, self.source.execution_manifest())
         self.assertEqual([name for name, _ in self.tool_calls()], ["write_test_file", "run_browser_tests"])
         self.assertEqual(len(self.docker.commands("rm")), 1)
 
     async def test_no_test_file_causes_failed_task_without_fake_infrastructure_report(self):
         task, _ = await self.run_to(FakeProvider(self.draft_response()), "TASK_STATE_FAILED")
-        self.assertEqual(self.status_code(task), "QA_TEST_INPUT_INVALID")
+        # docs/live-api/18: 시험 파일 없는 READY는 교정 소진(Host 코드)으로 끝난다(이전 QA_TEST_INPUT_INVALID).
+        self.assertEqual(self.status_code(task), "LLM_VALIDATION_DRAFT_EXHAUSTED")
         self.assertFalse(task.get("artifacts"))
         self.assertEqual(self.docker.calls, [])
 
     async def test_bad_runner_output_never_publishes_fake_report(self):
+        # 2026-11-18(docs/live-api/05 3·4절): a generated scope whose runner output is unusable
+        # gets one in-step test fix on the same Snapshot; if it still cannot run, every declared
+        # case is published as not-run with the Host's attempt evidence. Never a fabricated PASS.
         self.docker.start_result = CLIResult(returncode=0, stdout=b"not-json", stderr=b"")
-        task, _ = await self.run_to(self.ready_provider(), "TASK_STATE_FAILED")
-        self.assertEqual(self.status_code(task), "QA_TEST_UNVERIFIED")
+        provider = FakeProvider(self.write_response(), self.draft_response(),
+                                self.write_response(call_id="qa-write-fix"), self.draft_response())
+        task, _ = await self.run_to(provider, "TASK_STATE_COMPLETED")
+        report = self.parse_completed(task)
+        self.assertEqual(len(report.tests), len(self.case_ids))
+        self.assertTrue(all((case.outcome.value, case.actual_result) == ("UNVERIFIED", "NOT_RUN_SCOPE_FAILED")
+                            and case.tool_evidence is not None for case in report.tests))
+        self.assertEqual(len(self.docker.commands("start")), 2)
+        feedback = json.loads(json.loads(provider.requests[2].input_items_json)[0]["content"])["taskInput"]["testRunFeedback"]
+        self.assertEqual((feedback["code"], feedback["reasonCodes"]), ("GENERATED_TESTS_NOT_RUN", ["NOT_RUN_SCOPE_FAILED"]))
+
+    async def test_test_fix_cannot_change_declared_cases(self):
+        # The fixed draft must keep every case; a weaker or different set is refused.
+        self.docker.start_result = CLIResult(returncode=0, stdout=b"not-json", stderr=b"")
+        cases = self.cases()[:-1] or self.cases()
+        changed = [dict(case, title=case["title"] + " (changed)") for case in self.cases()]
+        provider = FakeProvider(self.write_response(), self.draft_response(),
+                                self.write_response(call_id="qa-write-fix"), self.draft_response(cases=changed))
+        task, _ = await self.run_to(provider, "TASK_STATE_FAILED")
+        self.assertEqual(self.status_code(task), "QA_TEST_FIX_INVALID")
         self.assertFalse(task.get("artifacts"))
-        self.assertEqual(len(self.docker.commands("start")), 1)
+        del cases
 
     async def test_model_cannot_submit_outcomes_as_truth(self):
         cases = self.cases()
@@ -470,6 +497,22 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
                                                    "agent_context_id": asked["contextId"]})
             self._update_step(self.step)
             await self.send(client, self.wire(payload={"requirementScope": {"requirements": []}},
+                task_id=asked["id"], context_id=asked["contextId"]))
+            task = await self.poll(client, asked["id"], "TASK_STATE_REJECTED")
+        self.assertEqual(self.status_code(task), "QA_INPUT_INVALID")
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(self.docker.calls, [])
+
+    async def test_clarification_cannot_replace_host_file_access(self):
+        provider = FakeProvider(self.draft_response(kind="INPUT_REQUIRED", questions=["추가 설명?"]))
+        async with self.client_for(self.executor(provider)) as (_, client):
+            first = await self.send(client)
+            asked = await self.poll(client, first["id"], "TASK_STATE_INPUT_REQUIRED")
+            self.metadata = self.metadata.model_copy(update={"attempt": 1})
+            self.step = self.step.model_copy(update={"attempt": 1, "a2a_task_id": asked["id"],
+                                                   "agent_context_id": asked["contextId"]})
+            self._update_step(self.step)
+            await self.send(client, self.wire(payload={"fileAccess": {"sourceReadMode": "WORKING_COPY"}},
                 task_id=asked["id"], context_id=asked["contextId"]))
             task = await self.poll(client, asked["id"], "TASK_STATE_REJECTED")
         self.assertEqual(self.status_code(task), "QA_INPUT_INVALID")

@@ -34,10 +34,15 @@ from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text, parse
 from agents.roles.qa_contract import QACaseBinding
 from agents.roles.outputs import validate_completed_role_output
 from agents.runtime.qa_context import validation_cycle, verify_report_predecessor
+from agents.runtime.generated_revalidation import run_previous_scopes
+from mcp_tools.tools.generated_recheck import completed_count as completed_generated_rechecks
+from agents.runtime.protected_scopes import (
+    claim_protected_scope, commit_protected_scope, completed_protected_scopes, load_protected_receipt,
+)
 from agents.runtime.evaluation_policy_store import EvaluationPolicyStore, security_policy_sha256
 from mcp_tools.client import BoundMCPClient, MCPChildConfiguration, open_mcp_client
 from mcp_tools.execution_policy import arguments_sha256
-from mcp_tools.execution_runtime import TrackedMCPExecutor
+from mcp_tools.execution_runtime import TrackedMCPError, TrackedMCPExecutor
 from mcp_tools.execution_store import ToolExecutionStore, _digest
 from mcp_tools.runtime import MCPExecutionContext
 from mcp_tools.tools.files import _run_file_operation
@@ -47,6 +52,10 @@ from mcp_tools.tools.unit import UnitTestTools
 from mcp_tools.tools.unit_store import UnitTestOutputStore
 from mcp_tools.tools.snapshots import SnapshotReader
 from orchestrator.artifacts.service import ArtifactStore
+from agents.runtime.test_fix import TestFixRequired, technical_reasons
+from agents.runtime.security_test_scope import (generated_requirement_coverage, measured_hash_complies,
+                                               protected_evidence_covers, simple_assertion_limits)
+from orchestrator.domain import test_not_run
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
 from orchestrator.domain.states import AgentRole, A2ATaskState, WorkflowStatus, WorkflowStepStatus
 from orchestrator.domain.tool_evidence import ToolExecutionOutcome
@@ -66,7 +75,7 @@ class SecurityServicesError(ValueError):
             "SECURITY_CODE_REFERENCE_INVALID", "SECURITY_REVIEW_INVALID",
             "SECURITY_PROOF_INVALID", "SECURITY_ARTIFACT_INVALID",
             # Measured Security test mode: input, ID binding and run evidence.
-            "SECURITY_TEST_INPUT_INVALID", "SECURITY_TEST_BINDING_INVALID", "SECURITY_TEST_EVIDENCE_INVALID",
+            "SECURITY_TEST_INPUT_INVALID", "SECURITY_TEST_BINDING_INVALID", "SECURITY_TEST_EVIDENCE_INVALID", "SECURITY_TEST_FIX_INVALID",
         } else "SECURITY_SERVICES_INVALID"
         super().__init__(self.code)
 
@@ -249,6 +258,67 @@ class SecurityRuntimeServices:
     def test_selectors(self):
         """Generated Security test scopes offered to the model; empty means the proof path."""
         return self._test_selectors
+
+    def read_paths(self, measured):
+        """Source paths read in this step for this measured Snapshot (Host-observed reads only)."""
+        return frozenset(self._reads.get(getattr(measured, "_token", None), {}))
+
+    def refresh_output(self, output):
+        """Security's generated-test IDs come from the Host catalog, as QA's do (Codex review 2026-11-18 #1)."""
+        from agents.runtime.qa_catalog import SECURITY_ID_POLICY, refresh_qa_output
+        binding = self.configuration.binding
+        workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.SECURITY)
+        unit = self.configuration.unit_test_configuration
+        scopes = [(s.name, s.pattern) for s in (() if unit is None else unit.scopes)
+                  if s.kind == 'QA_TESTS' and s.name in self._test_selectors]
+        return refresh_qa_output(output, Path(workspace.record.root_path) / 'outputs' / 'security' / 'tests',
+            scopes, snapshot_sha256=self.configuration.frozen_source.snapshot_sha256, unit_only=True,
+            field='testCases', policy=SECURITY_ID_POLICY)
+
+    def generated_test_issues(self, data):
+        """Read-only pre-READY check of the generated Security test files (handoff P5, points 4·6)."""
+        from agents.runtime.generated_tests_precheck import inspect_generated_tests
+        if not self._test_selectors:
+            return []
+        binding = self.configuration.binding
+        workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.SECURITY)
+        patterns = {scope.name: scope.pattern for scope in self.configuration.unit_test_configuration.scopes
+                    if getattr(scope, "kind", None) == "QA_TESTS"}
+        scopes = [(name, patterns[name]) for name in self._test_selectors if name in patterns]
+        rows = [row for row in (data.get("testCases") or []) if isinstance(row, dict)] if isinstance(data, dict) else []
+        source = Path(workspace.record.root_path) / "source"
+        from orchestrator.domain import SCN_001_ID
+        run = self._repository.get_run(binding.run_id)
+        return inspect_generated_tests(Path(workspace.record.root_path) / "outputs" / "security" / "tests",
+                                       scopes, rows, "testCases", source_root=source if source.is_dir() else None,
+                                       host_app_fixture=run is not None and run.scenario_id == SCN_001_ID)
+
+    def reference_issues(self, measured, data):
+        """The ``_anchors`` rules that a draft can still fix (handoff P5, point 5).
+
+        A cited file must have been read in this step and the cited lines must
+        exist in it. Run before READY so the model can read the file or fix the
+        range once; ``finalize`` still applies the full anchor proof.
+        """
+        reads = self._reads.get(getattr(measured, "_token", None), {})
+        issues = []
+        for field in ("requirementReviews", "findingReviews"):
+            for index, row in enumerate((data.get(field) or []) if isinstance(data, dict) else []):
+                for number, reference in enumerate((row.get("references") or []) if isinstance(row, dict) else []):
+                    if not isinstance(reference, dict) or reference.get("path") not in measured.source_files:
+                        continue  # unknown paths are the contract's (and its explainer's) business
+                    pointer = f"/{field}/{index}/references/{number}"
+                    if reference["path"] not in reads:
+                        issues.append({"fieldPath": pointer + "/path", "reasonCode": "REFERENCE_FILE_NOT_READ"})
+                        continue
+                    lines = measured.source_files[reference["path"]].decode("utf-8").replace(
+                        "\r\n", "\n").replace("\r", "\n").split("\n")
+                    if lines[-1] == "":
+                        lines.pop()
+                    end = reference.get("endLine")
+                    if type(end) is int and end > len(lines):
+                        issues.append({"fieldPath": pointer + "/endLine", "reasonCode": "REFERENCE_PAST_END_OF_FILE"})
+        return issues[:16]
 
     def _verify(self, execution):
         binding, source = self.configuration.binding, execution.source
@@ -522,7 +592,28 @@ class SecurityRuntimeServices:
                     + "&endLine=" + str(reference.end_line)})
         return tuple(anchors)
 
-    async def finalize(self, execution, decision, tracked, measured, *, task_id, context_id):
+    def test_fix_available(self, execution) -> bool:
+        """An early protected measurement does not consume the generated-test repair."""
+        step = execution.metadata.workflow_step_id
+        calls = self._tools.count_step_executions(self.configuration.binding, step, ("run_unit_tests",))
+        protected = completed_protected_scopes(self._repository, run_id=execution.metadata.run_id,
+                                              workflow_step_id=step, source_artifact_id=execution.source.artifact_id)
+        return calls == len(protected) + completed_generated_rechecks(self._repository, step)
+
+    async def run_protected(self, execution, tracked):
+        """Measure Host-approved scopes once before any generated draft, without exposing results to the model."""
+        if self._protected_selectors:
+            self._tracked(tracked, execution)
+            await self._measure_scopes(execution, tracked, self._protected_selectors)
+
+        async def measure(selector):
+            self._tracked(tracked, execution)
+            results, _not_run, _limits = await self._measure_scopes(execution, tracked, (selector,))
+            return results.get(selector)
+
+        await run_previous_scopes(self, execution, tracked, self._test_selectors, measure)
+
+    async def finalize(self, execution, decision, tracked, measured, *, task_id, context_id, test_fix_available=False):
         from agents.roles.security_contract import SecurityDecision, validate_security_decision
         from agents.runtime.requirement_scope import validate_generated_case_expectations
         execution.budget.check()
@@ -561,7 +652,7 @@ class SecurityRuntimeServices:
             raise SecurityServicesError("SECURITY_REVIEW_INVALID") from None
         tests = None
         if self._test_selectors:
-            tests = await self._run_tests(execution, validated, tracked)
+            tests = await self._run_tests(execution, validated, tracked, test_fix_available)
         proof = None
         if self._verifier is not None:
             try:
@@ -601,18 +692,41 @@ class SecurityRuntimeServices:
             max_call_seconds=self.configuration.max_call_seconds)
         scope, profile = tools._scope_profile(AgentRole.SECURITY, selector)
         _source, captured = tools._prepare(context, scope, execution.source.artifact_id)
-        return self._unit._inputs_payload(captured, scope), profile, self._unit._scope_payload(scope)
+        limits = simple_assertion_limits(captured.files, scope.source_directory) if scope.kind == 'QA_TESTS' else {}
+        return self._unit._inputs_payload(captured, scope), profile, self._unit._scope_payload(scope), limits
 
-    async def _run_tests(self, execution, decision, tracked):
-        """Run every generated and protected Security scope; decide each Requirement from measured cases."""
-        cases = decision.test_cases + self._protected_cases
-        if any(case.selector not in self._test_selectors for case in decision.test_cases):
-            raise SecurityServicesError("SECURITY_TEST_BINDING_INVALID")
-        binding, measured = self.configuration.binding, {}
-        for selector in self._test_selectors + self._protected_selectors:
+    def _not_run_evidence(self, execution, selector, logical_call_id):
+        """Host evidence that a generated Security scope was attempted and could not run."""
+        try:
+            record = self._tools.get(self.configuration.binding, logical_call_id)
+            evidence = record.to_tool_evidence()
+            if (record.workflow_step_id != execution.metadata.workflow_step_id
+                    or record.role is not AgentRole.SECURITY or record.tool_name != "run_unit_tests"
+                    or record.source_artifact_id != execution.source.artifact_id
+                    or record.execution_manifest != execution.source.execution_manifest()
+                    or record.selector_sha256 != sha256(selector.encode()).hexdigest()
+                    or evidence.outcome is ToolExecutionOutcome.PASS):
+                raise ValueError
+            return evidence
+        except Exception:
+            raise SecurityServicesError("SECURITY_TEST_EVIDENCE_INVALID") from None
+
+    async def _measure_scopes(self, execution, tracked, selectors):
+        binding, measured, not_run = self.configuration.binding, {}, {}
+        assertion_limits = {}
+        for selector in selectors:
             execution.budget.check()
             try:
-                inputs, profile, policy = await _run_file_operation(self._capture_tests, execution, selector)
+                protected = selector in self._protected_selectors
+                if protected:
+                    await _run_file_operation(self._verify, execution)
+                    saved = await _run_file_operation(claim_protected_scope, self._repository, binding,
+                        execution.metadata.workflow_step_id, execution.source.artifact_id, 'run_unit_tests', selector)
+                    if saved is not None:
+                        measured[selector] = await _run_file_operation(load_protected_receipt,
+                            self._repository, binding, execution, saved)
+                        continue
+                inputs, profile, policy, limits = await _run_file_operation(self._capture_tests, execution, selector)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -620,8 +734,20 @@ class SecurityRuntimeServices:
             arguments = {"workspaceId": str(execution.configuration.workspace_id),
                          "snapshotId": str(execution.source.artifact_id), "testScope": selector}
             tool_sequence, timeout = execution.budget.reserve_tracked_tool_call()
-            result = await asyncio.wait_for(tracked.invoke("run_unit_tests", arguments,
-                deadline_monotonic=execution.budget.deadline_monotonic), timeout)
+            try:
+                result = await asyncio.wait_for(tracked.invoke("run_unit_tests", arguments,
+                    deadline_monotonic=execution.budget.deadline_monotonic), timeout)
+            except TrackedMCPError as error:
+                # docs/live-api/05 3절: same rule as QA. Only a generated scope's
+                # runner failure is kept as not-run cases; everything else stops.
+                if (selector in self._protected_selectors or error.error_kind != "TEST_RUNNER_ERROR"
+                        or error.logical_call_id is None):
+                    raise
+                execution.budget.account_tool_call(tool_sequence)
+                execution.budget.check()
+                not_run[selector] = await _run_file_operation(
+                    self._not_run_evidence, execution, selector, error.logical_call_id)
+                continue
             execution.budget.account_tool_call(tool_sequence)
             execution.budget.check()
             try:
@@ -646,37 +772,106 @@ class SecurityRuntimeServices:
                         or _plain(receipt.inputs) != _plain(inputs)
                         or self._unit._scope_payload(receipt.scope) != policy):
                     raise ValueError
+                if protected:
+                    await _run_file_operation(commit_protected_scope, self._repository,
+                        execution.metadata.workflow_step_id, selector, record, receipt)
                 measured[selector] = (receipt, evidence)
+                assertion_limits[selector] = limits
             except asyncio.CancelledError:
                 raise
             except Exception:
                 raise SecurityServicesError("SECURITY_TEST_EVIDENCE_INVALID") from None
+        return measured, not_run, assertion_limits
+
+    async def _run_tests(self, execution, decision, tracked, test_fix_available=False):
+        """Run every generated and protected Security scope; decide each Requirement from measured cases."""
+        cases = decision.test_cases + self._protected_cases
+        if any(case.selector not in self._test_selectors for case in decision.test_cases):
+            raise SecurityServicesError("SECURITY_TEST_BINDING_INVALID")
+        measured, not_run, assertion_limits = await self._measure_scopes(
+            execution, tracked, self._protected_selectors + self._test_selectors)
         for selector, (receipt, _evidence) in measured.items():
             bound = {case.test_id for case in cases if case.selector == selector}
-            if any(actual.test_id not in bound for actual in receipt.report.tests):
+            if any(actual.test_id not in bound and not test_not_run.is_fixture_row(actual.test_id)
+                   for actual in receipt.report.tests):
                 # Never guess a Requirement for an unbound executed case.
                 raise SecurityServicesError("SECURITY_TEST_BINDING_INVALID")
-        from orchestrator.domain.validation_feedback import case_feedback
-        rows = {}
+        correction_reasons = technical_reasons(list(not_run), [
+            actual for selector in self._test_selectors if selector in measured
+            for actual in measured[selector][0].report.tests]) if test_fix_available else set()
+        from orchestrator.domain.validation_feedback import case_feedback, measured_test_version
+        rows, technical = {}, set()
+        contract = execution.configuration.scenario_contract
+        requirement_keys = {r['requirementId']: r['key'] for r in contract['requirements']
+                            if contract.get('scenarioKey') == 'SCN-001'}
+        hash_policy = contract.get('securityPolicy', {}).get('passwordHashPolicy')
         for case in cases:
+            identity = f"run_unit_tests:{case.selector}:{case.test_id}"
+            if case.selector in not_run:
+                rows.setdefault(case.requirement_id, []).append(
+                    ("UNVERIFIED", not_run[case.selector], identity, {"notRunReason": test_not_run.SCOPE_FAILED}))
+                technical.add(identity)
+                continue
             receipt, evidence = measured[case.selector]
             actual = next((item for item in receipt.report.tests if item.test_id == case.test_id), None)
             outcome = actual.outcome if actual is not None and actual.outcome in {"PASS", "FAIL"} else "UNVERIFIED"
-            rows.setdefault(case.requirement_id, []).append(
-                (outcome, evidence, f"run_unit_tests:{case.selector}:{case.test_id}", case_feedback(actual)))
+            reason = test_not_run.runner_reason(actual)
+            feedback = {**measured_test_version(receipt), **case_feedback(actual)}
+            if actual is not None and actual.signup_checks_json:
+                facts = json.loads(actual.signup_checks_json)
+                feedback['signupChecks'] = facts
+                key = requirement_keys.get(str(case.requirement_id))
+                if (key == 'REQ-005' and hash_policy and 'storedHashParameters' in facts
+                        and not measured_hash_complies(facts['storedHashParameters'], hash_policy)):
+                    outcome = 'FAIL'
+            limit = assertion_limits.get(case.selector, {}).get(case.test_id)
+            if actual is not None and limit:
+                feedback['sourceAssertionScope'] = limit
+            if actual is not None and actual.output_checks:
+                feedback['outputChecks'] = dict(actual.output_checks)
+                if (actual.outcome == 'SKIP' and actual.details == 'REQUEST_RESPONSE_UNAVAILABLE'
+                        and 'INCOMPLETE' in feedback['outputChecks'].values()):
+                    feedback['unobservedReason'] = 'APP_RESPONSE_NOT_CAPTURED'
+                if 'EXPOSED' in feedback['outputChecks'].values():
+                    outcome = 'FAIL'
+            if reason is not None:
+                feedback = {**feedback, "notRunReason": reason}
+                if reason in test_not_run.TECHNICAL:
+                    technical.add(identity)
+            rows.setdefault(case.requirement_id, []).append((outcome, evidence, identity, feedback))
         decided = {}
         for requirement_id in execution.metadata.requirement_ids:
             items = rows.get(requirement_id, [])
             failed = [item for item in items if item[0] == "FAIL"]
+            unrun = [item for item in items if item[0] != "PASS" and item[2] in technical]
             if failed:
                 value, evidence = "FAIL", failed[0][1]
             elif items and all(item[0] == "PASS" for item in items):
                 value, evidence = "PASS", items[0][1]
+            elif unrun and all(item[0] == "PASS" or item[2] in technical for item in items):
+                # Every non-PASS case is a technical not-run: keep its attempt evidence.
+                value, evidence = test_not_run.SECURITY_TESTS_NOT_RUN, unrun[0][1]
             else:
                 value, evidence = "UNVERIFIED", None
-            decided[requirement_id] = (value, evidence, tuple({"testId": test_id, "outcome": outcome,
-                                                              "evidenceRefs": [_evidence.evidence_ref], **feedback}
-                                                              for outcome, _evidence, test_id, feedback in items))
+            cases_measured = tuple({"testId": test_id, "outcome": outcome,
+                                    "evidenceRefs": [receipt.evidence_ref], **feedback}
+                                   for outcome, receipt, test_id, feedback in items)
+            key = requirement_keys.get(str(requirement_id))
+            generated = [row for row in cases_measured if row['testId'].split(':', 2)[1] in self._test_selectors]
+            coverage, gaps = generated_requirement_coverage(key, generated, hash_policy)
+            protected = [row for row in cases_measured if row['testId'].split(':', 2)[1] not in self._test_selectors]
+            only_missing_observations = generated and all(
+                row['outcome'] == 'PASS' or (row['outcome'] == 'UNVERIFIED'
+                    and row.get('unobservedReason') == 'APP_RESPONSE_NOT_CAPTURED')
+                for row in generated)
+            if gaps and only_missing_observations:
+                correction_reasons.update(gaps)
+                if value in ('PASS', 'UNVERIFIED') and not protected_evidence_covers(key, protected):
+                    value = 'OUTPUT_COVERAGE_INCOMPLETE'
+            decided[requirement_id] = (value, evidence, cases_measured,
+                tuple({str(row[1].execution_id): row[1] for row in items}.values()), coverage, gaps)
+        if test_fix_available and correction_reasons:
+            raise TestFixRequired(correction_reasons, self._test_selectors)
         return decided
 
     def _assemble(self, execution, decision, measured, anchors, proof, task_id, context_id, tests=None):
@@ -725,15 +920,22 @@ class SecurityRuntimeServices:
             for review in decision.requirement_reviews:
                 if tests is not None:
                     # Measured Security test receipts decide the Requirement.
-                    value, test_evidence, cases = tests[review.requirement_id]
+                    value, test_evidence, cases, attempt_evidence, coverage, gaps = tests[review.requirement_id]
                     location = None if not anchors[review.requirement_id] else (
                         anchors[review.requirement_id][0]["path"] + ":" + str(anchors[review.requirement_id][0]["startLine"]))
+                    unrun = value == test_not_run.SECURITY_TESTS_NOT_RUN
+                    coverage_gap = value == 'OUTPUT_COVERAGE_INCOMPLETE'
                     requirements.append(SecurityRequirementResult(requirement_id=review.requirement_id,
-                        outcome=ValidationOutcome(value), details=json_text({
-                            "code": "MEASURED_SECURITY_TESTS" if value != "UNVERIFIED" else "SECURITY_TESTS_UNVERIFIED",
-                            "tests": list(cases), "codeReferences": list(anchors[review.requirement_id])}),
-                        actual_result=value, normalized_location=location,
-                        tool_evidence=test_evidence if value != "UNVERIFIED" else None))
+                        outcome=ValidationOutcome.UNVERIFIED if unrun or coverage_gap else ValidationOutcome(value), details=json_text({
+                            "code": value if unrun else "SECURITY_TESTS_UNVERIFIED" if coverage_gap else "MEASURED_SECURITY_TESTS" if value != "UNVERIFIED"
+                            else "SECURITY_TESTS_UNVERIFIED",
+                            "tests": list(cases), "codeReferences": list(anchors[review.requirement_id]),
+                            **({"generatedOutputCoverage": coverage} if coverage is not None else {}),
+                            **({"generatedEvidenceGaps": gaps} if gaps else {})}),
+                        actual_result="UNVERIFIED" if unrun else value, normalized_location=location,
+                        execution_evidence=attempt_evidence,
+                        # A technical not-run keeps the attempt evidence (docs/live-api/05 3절).
+                        tool_evidence=test_evidence if value != "UNVERIFIED" and not coverage_gap else None))
                     continue
                 value = requirement_values.get(review.requirement_id, "UNVERIFIED")
                 if value in {"PASS", "FAIL"} and (review.proposed_outcome not in {"PASS", "FAIL"} or not anchors[review.requirement_id]):

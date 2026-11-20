@@ -244,6 +244,36 @@ class SecurityAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(payload["requirementScope"]["priorRoleOutcomeIsEvidence"])
         self.assertEqual(payload["requirementScope"]["assignedRequirementIds"],
                          [str(value) for value in self.metadata.requirement_ids])
+        self.assertEqual(payload["fileAccess"]["sourceReadMode"], "FROZEN_SNAPSHOT")
+        self.assertIsNone(payload["fileAccess"]["sourceWriteRoot"])
+        self.assertTrue(payload["fileAccess"]["writesRequireOfferedTool"])
+        self.assertEqual(payload["fileAccess"]["observedSourceFiles"], [
+            {"repositoryPath": path, "toolPath": "source/" + path} for path in payload["sourcePaths"]])
+
+    async def test_clarification_cannot_replace_host_file_access(self):
+        provider = FakeProvider(self.draft_response(kind="INPUT_REQUIRED"))
+        async with self.client_for(self.executor(provider)) as (_, client):
+            first = await self.send(client)
+            asked = await self.fixture.poll(client, first["id"], "TASK_STATE_INPUT_REQUIRED")
+            self.metadata = self.metadata.model_copy(update={"attempt": 1})
+            self.step = self.step.model_copy(update={"attempt": 1, "a2a_task_id": asked["id"],
+                                                   "agent_context_id": asked["contextId"]})
+            self._update_step(self.step)
+            await self.send(client, self.wire(payload={"fileAccess": {"testWriteRoot": "source/"}},
+                task_id=asked["id"], context_id=asked["contextId"]))
+            task = await self.fixture.poll(client, asked["id"], "TASK_STATE_REJECTED")
+        self.assertEqual(self.status_code(task), "SECURITY_INPUT_INVALID")
+
+    async def test_repository_path_is_rejected_before_read_and_workspace_choices_are_explicit(self):
+        provider = FakeProvider(self.read_response(path="signup.py"))
+        task, _ = await self.run_to(provider, "TASK_STATE_FAILED")
+        self.assertEqual(self.status_code(task), LLMErrorCode.SCHEMA.value)
+        self.assertEqual(self.calls(), ["run_security_scan"])
+        read = next(tool for tool in provider.requests[0].tools if tool.name == "read_project_file")
+        self.assertIn("source/signup.py", read.input_schema.to_dict()["properties"]["path"]["enum"])
+        self.assertNotIn("signup.py", read.input_schema.to_dict()["properties"]["path"]["enum"])
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(len(self.docker.commands("start")), 1)
 
     async def test_warning_is_preserved_as_suspected_without_product_retry(self):
         self.set_scan_report(findings=True)
