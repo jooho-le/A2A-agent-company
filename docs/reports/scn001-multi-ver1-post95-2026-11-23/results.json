@@ -1,0 +1,129 @@
+{
+  "date": "2026-11-23",
+  "task": 96,
+  "architecture": "MULTI_AGENT",
+  "loopPolicy": "IN_LOOP_AND_FINAL",
+  "requestedNewRuns": 1,
+  "newRunsSubmitted": 1,
+  "automaticResubmission": false,
+  "runId": "330e2984-f6ed-4bac-aa0d-3cf31bce6783",
+  "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "model": {
+    "provider": "openai",
+    "modelId": "gpt-4.1-mini-2025-04-14",
+    "modelRevision": null,
+    "temperature": 0.0,
+    "seed": null
+  },
+  "hostStatus": "HUMAN_REVIEW",
+  "hostVerdict": null,
+  "registeredCodeVersion": null,
+  "terminalAgentCode": "LLM_SOURCE_REPAIR_EXHAUSTED",
+  "independentEvaluationAvailable": false,
+  "productVerdict": "UNVERIFIED",
+  "requirementSatisfaction": null,
+  "finalChecksPassed": null,
+  "finalChecksFailed": null,
+  "plannedFinalChecks": 9,
+  "accuracy": null,
+  "metrics": {
+    "verdictMs": null,
+    "totalMs": 64807,
+    "firstBuildPassMs": null,
+    "fixAttempts": 0,
+    "modelCalls": 14,
+    "toolCalls": 11,
+    "inputTokens": 219686,
+    "outputTokens": 6655,
+    "totalTokens": 226341,
+    "costUsd": "0.0610056",
+    "costComplete": true
+  },
+  "usageComplete": true,
+  "costComplete": true,
+  "knownCostUsd": "0.0610056",
+  "priceBookId": "scn001-openai-global-text",
+  "priceBookVersion": "2026-11-15",
+  "sourceReviewRegenerations": 2,
+  "sourceReviewDecisions": [
+    {
+      "sequence": 6,
+      "code": "READY_SIGNUP_QUALITY_REVIEW",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    },
+    {
+      "sequence": 9,
+      "code": "READY_SIGNUP_QUALITY_REVIEW",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    },
+    {
+      "sequence": 14,
+      "code": "READY_SIGNUP_QUALITY_REVIEW",
+      "action": "STOP",
+      "reason": "LIMIT_REACHED"
+    }
+  ],
+  "forcedToolTurns": [
+    {
+      "sequence": 7,
+      "requiredTool": "read_project_file"
+    },
+    {
+      "sequence": 8,
+      "requiredTool": "write_source_file"
+    },
+    {
+      "sequence": 10,
+      "requiredTool": "read_project_file"
+    },
+    {
+      "sequence": 11,
+      "requiredTool": "write_source_file"
+    },
+    {
+      "sequence": 12,
+      "requiredTool": "read_project_file"
+    },
+    {
+      "sequence": 13,
+      "requiredTool": "write_source_file"
+    }
+  ],
+  "toolCounts": {
+    "read_project_file": 6,
+    "write_source_file": 3,
+    "edit_source_file": 2
+  },
+  "settledToolAttempts": 11,
+  "unknownToolResults": 0,
+  "toolErrorKinds": {
+    "EDIT_TARGET_MISSING": 1
+  },
+  "remainingStaticWarnings": [
+    {
+      "reasonCode": "DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS",
+      "requirementKey": "REQ-006",
+      "sourcePath": "main.py",
+      "lineNumber": 32,
+      "repairSourcePath": "main.py"
+    }
+  ],
+  "sourceReview": {
+    "HTTPExceptionHandlerPresent": true,
+    "RequestValidationErrorHandlerPresent": false
+  },
+  "startupProbeConfigured": true,
+  "startupProbeExecuted": false,
+  "qaExecuted": false,
+  "securityExecuted": false,
+  "implementationUnchanged": true,
+  "cleanup": {
+    "ownedHostProcessStopped": true,
+    "experimentalPortListeners": 0,
+    "runningDockerContainers": 0
+  },
+  "rawResultDirectory": ".data/experiments/scn001-multi-ver1-post95-20261123",
+  "interpretation": "A static source warning exhausted two corrections before candidate registration. Not an independently measured security finding or product test FAIL; do not convert unavailable grading into 0% quality."
+}
