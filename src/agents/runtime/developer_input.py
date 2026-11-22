@@ -15,8 +15,9 @@ from agents.runtime.repair_call_history import attach_unchanged_measurements
 from agents.runtime.repair_locations import read_locations, diagnostic_sites
 from agents.runtime.normal_request_repair import NORMAL_REQUEST, measured_prerequisite, linkable_sites
 from agents.runtime.repair_input_failures import INVALID_INPUT, measured_invalid_input, attach_input_source_sites
+from agents.runtime.email_normalization import measured_rejections, attach_source_sites as attach_email_sites
 
-POLICY = 'ACTIVE_REPAIR_FOCUS_FIRST_V19'
+POLICY = 'ACTIVE_REPAIR_FOCUS_FIRST_V20'
 # V3 (Codex review 2026-11-19 #1·#3, 4e2b1fe8): the Host's own decision leads the input. The first
 # failing row the model saw was a REQ-005 generated test that the Ver1 policy had excluded, while the
 # only fix target was REQ-006. Every feedback row now carries hostDecision (FIX_TARGET /
@@ -374,14 +375,19 @@ def compact_fix_input(task_input, *, repair_history=None, issue_records=(), sour
     runtime = config.get('configuration') if isinstance(config, dict) else None
     runtime = runtime if isinstance(runtime, dict) else {}
     invalid_input = measured_invalid_input(fix, runtime)
+    email_contract = (config.get('scenarioContract') if isinstance(config, dict) else None) or value.get('scenario') or {}
+    email_rejections = measured_rejections(fix, runtime, email_contract)
     paths = {path for target in brief['targets'] for check in target['checks']
              for path in check.get('observedFailurePaths', {})}
     if invalid_input:
         paths.add(INVALID_INPUT)
-    files = source_files() if source_files is not None and (paths or normal_frames) else None
+    files = source_files() if source_files is not None and (paths or normal_frames or email_rejections) else None
     if invalid_input:
         attach_input_source_sites(invalid_input, files, value['activeRepairFocus'])
         brief['invalidInputServerError'] = invalid_input
+    if email_rejections:
+        brief['emailNormalizationRepair'] = email_rejections
+        attach_email_sites(email_rejections, files or {}, email_contract)
     if blocker:
         brief['blockingPrerequisite'] = blocker
         blocker['sourceSites'] = (linkable_sites(normal_frames, files, environment=runtime.get('environment'))
@@ -446,6 +452,12 @@ def compact_fix_input(task_input, *, repair_history=None, issue_records=(), sour
                 'callers and local callees, including framework defaults when a registration is absent. Trace the '
                 'observed response or log back to its producer and edit that path. A listed call is not evidence it '
                 'ran. An empty list means no recognized syntax. The Host measures the effect on the new Snapshot.'}
+    if email_rejections and email_rejections.get('sourceSites'):
+        inspection = brief.setdefault('sourceInspection', {'byObservedPath': {}, 'firstReadBatch': [],
+            'instruction': email_rejections['instruction']})
+        email_paths = list(dict.fromkeys(site['toolPath'] for site in email_rejections['sourceSites']))
+        inspection['firstReadBatch'] = list(dict.fromkeys(inspection['firstReadBatch'] + email_paths))[:2]
+        inspection['emailNormalizationSites'] = email_rejections['sourceSites']
     if rejected_build is not None:
         value['activeRepairFocus']['brief']['lastRejectedBuild'] = {
             **rejected_build, 'context': 'Last failed candidate. Its line numbers refer to that candidate. '

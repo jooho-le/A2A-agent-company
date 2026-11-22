@@ -9,9 +9,10 @@ from hashlib import sha256
 from pathlib import Path
 
 from agents.runtime.output_safety_precheck import inspect_output_safety
+from agents.runtime import email_normalization
 from orchestrator.core.security import redact_text
 
-POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V3'
+POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V4'
 MAX_FILES, MAX_BYTES, MAX_TOTAL_BYTES, MAX_NODES = 64, 128_000, 1_048_576, 50_000
 
 
@@ -135,31 +136,6 @@ def _response_values(call):
     return values
 
 
-def _email_key(node):
-    if isinstance(node, ast.Name):
-        return ('name', node.id)
-    if isinstance(node, ast.Attribute):
-        return ('attribute', _email_key(node.value), node.attr)
-    return None
-
-
-def _email_chain(node, states):
-    transforms = set()
-    while isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and not node.args:
-        transforms.add(node.func.attr)
-        node = node.func.value
-    if isinstance(node, (ast.Name, ast.Attribute)):
-        return transforms | states.get(_email_key(node), set())
-    return transforms
-
-
-def _email_origin(node, origins):
-    while isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        node = node.func.value
-    return (isinstance(node, ast.Attribute) and node.attr == 'email'
-            or _email_key(node) in origins)
-
-
 def inspect_signup_quality(source_root, contract):
     if (not isinstance(contract, dict) or contract.get('scenarioKey') != 'SCN-001'
             or source_root is None):
@@ -176,6 +152,15 @@ def inspect_signup_quality(source_root, contract):
     modules = _modules(root, entry)
     keys = {r.get('key') for r in contract.get('requirements', ())}
     issues = list(inspect_output_safety(root, contract))
+    if 'REQ-003' in keys:
+        trees = {path.relative_to(root).as_posix(): tree for path, tree in modules.values()}
+        for site in email_normalization.scan(trees, contract):
+            if site['trimBeforeValidationObserved'] is False and len(issues) < 16:
+                path = site['toolPath'].removeprefix('source/')
+                issues.append({'fieldPath': '/source', 'reasonCode': email_normalization.REASON,
+                    'requirementKey': 'REQ-003', 'sourcePath': path, 'repairSourcePath': path,
+                    'lineNumber': site['line'], 'reviewRevision': site['reviewRevision'],
+                    'emailNormalizationContext': email_normalization.context(site)})
     validation_context = None
 
     def add(code, path, node, key, *, repair_path=None):
@@ -264,7 +249,6 @@ def inspect_signup_quality(source_root, contract):
                 plain_models.add((module, n.name))
 
     for module, (path, tree) in modules.items():
-        email_parsers = _imported(tree, 'email_validator', 'validate_email')
         conflict_types = {'IntegrityError', 'DBAPIError', 'DatabaseError', 'SQLAlchemyError', 'Exception'}
         for exception in tuple(conflict_types - {'Exception'}):
             conflict_types.update(_imported(tree, 'sqlalchemy.exc', exception))
@@ -314,23 +298,6 @@ def inspect_signup_quality(source_root, contract):
                             if (_name(h.type) == 'Exception' and any(_status(n) == 500 for n in ast.walk(h)
                                                                     if isinstance(n, ast.Call))):
                                 add('COMMIT_CONFLICT_MAPPED_TO_SERVER_ERROR', path, h, 'REQ-003')
-            states, origins = {}, set()
-            for n in sorted(ast.walk(fn), key=lambda n: getattr(n, 'lineno', 0)):
-                if isinstance(n, (ast.Assign, ast.AnnAssign)):
-                    value = n.value
-                    for target in n.targets if isinstance(n, ast.Assign) else [n.target]:
-                        if isinstance(target, (ast.Name, ast.Attribute)):
-                            key, methods = _email_key(target), _email_chain(value, states)
-                            if _email_origin(value, origins):
-                                origins.add(key)
-                            else:
-                                origins.discard(key)
-                            states[key] = methods
-                if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in email_parsers
-                        and n.args and 'REQ-003' in keys and contract.get('emailPolicy', {}).get('trimWhitespace')
-                        and _email_origin(n.args[0], origins)
-                        and 'strip' not in _email_chain(n.args[0], states)):
-                    add('EMAIL_VALIDATED_BEFORE_CANONICAL_TRIM', path, n, 'REQ-003')
             if 'REQ-006' not in keys:
                 continue
             for handler in (n for n in ast.walk(fn) if isinstance(n, ast.ExceptHandler) and n.name):

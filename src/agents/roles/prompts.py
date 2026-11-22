@@ -53,6 +53,7 @@ COMMON_RULES = (
     "구현 단계(첫 구현)의 READY는 implementationPlan의 모든 Task와 externalContract의 공개 경로(signupApi 등)를 이 단계 안에서 모두 구현한 뒤에만 낸다. 파일은 여러 번의 응답과 도구 호출로 나눠 써도 되고, 한 응답에 모든 파일을 몰아 쓰지 않는다. Task 하나를 끝냈다고 READY를 내지 않는다. READY 다음은 곧바로 Host 빌드·검증이라 남은 Task를 이어서 할 기회가 없다.",
     "startingSourceStartup에는 승인된 시작 Source의 초기화 위치와 앱·DB·모델 연결 좌표가 있다. 파일 교체 전에 이 파일들을 읽고 초기화 경로를 보존한다. startupPreservationNotice는 누락 가능성의 정적 안내이며 PASS나 수정 명령의 자동 실행이 아니다. activeRepairFocus.brief.startupRepairTargets가 있으면 실제 Build에서 get_db의 사용자 테이블 누락이 확인된 것이다. 등록된 모델·Base·engine·get_db의 같은 DB 연결을 앱 초기화에서 복구하고 기존 기능을 보존한다. QA/Test가 대신 테이블을 만들거나 DATABASE_URL을 우회해서 통과시키지 않는다.",
     "계약을 구현할 때 emailPolicy 정규화(앞뒤 공백 제거·소문자화)는 이메일 형식 검사보다 먼저 적용하고, '합의한 이메일 파서'는 실행 이미지에 설치된 email-validator(check_deliverability=False)다(직접 만든 느슨한 형식 검사를 쓰지 않는다). responseRule은 성공 응답뿐 아니라 검증 실패(422 포함)·오류 응답에도 적용되므로, 오류 응답에 요청 입력값을 그대로 넣지 않는다.",
+    "emailNormalizationRepair가 있으면 선택된 시험에서 정상 canonical 계정 생성이 거부된 것이다. sourceSites는 정적으로 찾은 후보 함수이며 실행된 예외 프레임은 아니다. 그 함수와 파서 호출을 읽고 원래 이메일을 먼저 strip한 뒤 승인된 대소문자 규칙·형식 검사를 적용한다. email_validator가 공백을 자동 제거한다고 가정하지 않는다. 중복 거부 시험 PASS만으로 공백 포함 정상 가입·정규화 저장까지 성공했다고 판단하지 않는다. DB 예외 처리나 주석만 바꾸거나 같은 파일을 다시 쓰는 것으로 이 경로를 고쳤다고 보고하지 않는다.",
     "INPUT_REQUIRED/AUTH_REQUIRED 질문을 게시한 실행은 반환한다. terminal Task는 재실행하지 않으며 새 Message/attempt 승인은 Runtime이 처리한다.",
     "입력·인증 대기 또는 거부·실행 실패 시 완성 Artifact를 꾸미지 않는다. 확인된 상태와 이유만 Runtime 제어 경로로 전달한다.",
     "완성 Artifact는 기존 JSON Schema의 필드와 타입을 지키며 자연어·Markdown code fence를 JSON 대신 출력하지 않는다. 알 수 없는 필드를 추가하지 않는다.",

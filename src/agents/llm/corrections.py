@@ -32,7 +32,7 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V4'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V5'
 
 VALIDATION_ERROR_GUIDANCE = (
     'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
@@ -283,6 +283,12 @@ def _issue(item, *, start_precheck=False) -> dict | None:
         context = _validation_error_context(item.get('validationErrorContext'))
         if context is not None:
             issue['validationErrorContext'] = context
+    if code == 'EMAIL_VALIDATED_BEFORE_CANONICAL_TRIM':
+        from agents.runtime.email_normalization import valid_context
+        context = item.get('emailNormalizationContext')
+        if valid_context(context):
+            issue['emailNormalizationContext'] = {k: context[k] for k in (
+                'sourceRef', 'parser', 'trimBeforeValidationObserved')}
     key = item.get('requirementKey')
     if isinstance(key, str) and _REQUIREMENT_KEY.match(key):
         issue['requirementKey'] = key
@@ -499,7 +505,8 @@ def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_
     body = {'code': kind, 'executed': False, 'issues': issues[:MAX_ISSUES], 'correctionsRemaining': remaining,
             'instruction': instruction}
     if kind == 'READY_SIGNUP_QUALITY_REVIEW':
-        targets = validation_error_repair_targets(issues)
+        from agents.runtime.email_normalization import repair_targets as email_targets
+        targets = validation_error_repair_targets(issues) + email_targets(issues)
         if targets:
             body['sourceRepairTargets'] = targets
     if stage is not None:
