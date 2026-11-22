@@ -27,7 +27,8 @@ class RejectedEdit(Exception):
 def test_conflict_refresh_resends_content_instead_of_an_old_read_pointer():
     history = RepairReadHistory({})
     path = 'source/main.py'
-    result = {'path': path, 'content': 'current content', 'sha256': 'a' * 64, 'sizeBytes': 15}
+    content = 'current content\n' * 32
+    result = {'path': path, 'content': content, 'sha256': 'a' * 64, 'sizeBytes': len(content.encode())}
     serialized = json.dumps(result)
     assert history.for_model('read_project_file', {'path': path}, result, serialized, 'read-1') == serialized
     assert history.for_model('read_project_file', {'path': path}, result, serialized, 'read-2') != serialized
