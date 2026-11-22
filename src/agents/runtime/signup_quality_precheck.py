@@ -11,7 +11,7 @@ from pathlib import Path
 from agents.runtime.output_safety_precheck import inspect_output_safety
 from orchestrator.core.security import redact_text
 
-POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V2'
+POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V3'
 MAX_FILES, MAX_BYTES, MAX_TOTAL_BYTES, MAX_NODES = 64, 128_000, 1_048_576, 50_000
 
 
@@ -176,6 +176,7 @@ def inspect_signup_quality(source_root, contract):
     modules = _modules(root, entry)
     keys = {r.get('key') for r in contract.get('requirements', ())}
     issues = list(inspect_output_safety(root, contract))
+    validation_context = None
 
     def add(code, path, node, key, *, repair_path=None):
         ref = path.relative_to(root).as_posix()
@@ -192,6 +193,8 @@ def inspect_signup_quality(source_root, contract):
             digest.update(reviewed.relative_to(root).as_posix().encode())
             digest.update(ast.dump(next(t for p, t in modules.values() if p == reviewed)).encode())
         row['reviewRevision'] = digest.hexdigest()
+        if code == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' and validation_context is not None:
+            row['validationErrorContext'] = dict(validation_context)
         if row not in issues and len(issues) < 16:
             issues.append(row)
 
@@ -201,26 +204,55 @@ def inspect_signup_quality(source_root, contract):
     entry_tree = modules.get(entry, (None, None))[1]
     validation_handler, middleware = False, False
     simple_app = False
+    app_constructors = []
+    http_handler_lines = []
     if entry_tree is not None:
         factories = _imported(entry_tree, 'fastapi', 'FastAPI')
-        simple_app = any(isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
-                         and _name(n.value.func) in factories
-                         and any(isinstance(t, ast.Name) and t.id == app.get('attribute') for t in n.targets)
-                         for n in entry_tree.body)
+        app_constructors = [n.value for n in entry_tree.body
+                            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
+                            and _name(n.value.func) in factories
+                            and any(isinstance(t, ast.Name) and t.id == app.get('attribute') for t in n.targets)]
+        simple_app = bool(app_constructors)
         validation_errors = {'RequestValidationError'} | _imported(entry_tree, 'fastapi.exceptions', 'RequestValidationError')
+        http_errors = {'HTTPException'}
+        for origin in ('fastapi', 'fastapi.exceptions', 'starlette.exceptions'):
+            http_errors.update(_imported(entry_tree, origin, 'HTTPException'))
         for n in ast.walk(entry_tree):
             if isinstance(n, ast.Call):
-                if _name(n.func) in ('middleware', 'add_middleware'):
+                on_app = (isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+                          and n.func.value.id == app.get('attribute'))
+                if on_app and _name(n.func) in ('middleware', 'add_middleware'):
                     middleware = True
-                if (_name(n.func) in ('exception_handler', 'add_exception_handler') and n.args
-                        and _name(n.args[0]) in validation_errors):
-                    validation_handler = True
-                if any(k.arg == 'exception_handlers' for k in n.keywords):
-                    validation_handler = True  # custom mapping: measured checks remain authoritative
+                if on_app and _name(n.func) in ('exception_handler', 'add_exception_handler') and n.args:
+                    if _name(n.args[0]) in validation_errors:
+                        validation_handler = True
+                    if _name(n.args[0]) in http_errors:
+                        http_handler_lines.append(n.lineno)
+                if n in app_constructors:
+                    for keyword in n.keywords:
+                        if keyword.arg != 'exception_handlers':
+                            continue
+                        if isinstance(keyword.value, ast.Dict):
+                            for exception in keyword.value.keys:
+                                if _name(exception) in validation_errors:
+                                    validation_handler = True
+                                elif _name(exception) in http_errors:
+                                    http_handler_lines.append(n.lineno)
+                                elif exception is None or not isinstance(exception, ast.Constant):
+                                    middleware = True  # unknown mapping: leave to measured validation
+                        elif not (isinstance(keyword.value, ast.Constant) and keyword.value.value is None):
+                            middleware = True
+                if n in app_constructors and any(k.arg == 'middleware' for k in n.keywords):
+                    middleware = True
                 if any(isinstance(a, ast.Name) and a.id == app.get('attribute') for a in n.args):
                     middleware = True  # unknown external installation, not proof of missing protection
-            if (isinstance(n, ast.Attribute) and n.attr == 'exception_handlers'):
+            if (isinstance(n, ast.Attribute) and n.attr == 'exception_handlers'
+                    and isinstance(n.value, ast.Name) and n.value.id == app.get('attribute')):
                 middleware = True  # custom installation cannot be proved absent
+        validation_context = {'applicationAttribute': app.get('attribute'),
+                              'httpExceptionHandlerDetected': bool(http_handler_lines),
+                              'requestValidationHandlerDetected': validation_handler,
+                              'httpExceptionHandlerLines': sorted(set(http_handler_lines))[:8]}
 
     plain_models = set()
     for module, (_path, tree) in modules.items():

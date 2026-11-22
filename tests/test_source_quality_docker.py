@@ -55,6 +55,9 @@ def test_real_privacy_failure_then_engine_repair_then_nine_checks_pass(tmp_path,
     unsafe = dict(good)
     unsafe['main.py'] = good['main.py'].split('@app.exception_handler(RequestValidationError)')[0]
     unsafe['main.py'] += '\n@app.get("/")\ndef health():\n    return {"status": "ok"}\n'
+    unsafe['main.py'] += ('\nfrom fastapi import HTTPException\n'
+        '@app.exception_handler(HTTPException)\nasync def business_rejection(request, exc):\n'
+        '    return JSONResponse(status_code=exc.status_code, content={"detail": "REQUEST_REJECTED"})\n')
     write_tree(source, unsafe)
     write_tree(inputs, pt.protected_files('final'))
     (inputs / '_unit_runner.py').write_bytes(_runner_source())
@@ -72,11 +75,23 @@ def test_real_privacy_failure_then_engine_repair_then_nine_checks_pass(tmp_path,
     f.setUp()
     path = source / 'main.py'
     ready = {'kind': 'READY', 'summary': 'Candidate for Host validation.', 'questions': [], 'rejection': None}
+    targets = []
+    def read_target(request):
+        for item in json.loads(request.input_items_json):
+            if item.get('role') == 'user' and isinstance(item.get('content'), str):
+                targets.extend(json.loads(item['content']).get('hostCorrection', {}).get('sourceRepairTargets', []))
+        target, = targets
+        assert target['exceptionType'] == 'fastapi.exceptions.RequestValidationError'
+        assert target['preserveExistingHttpExceptionHandler'] is True
+        return tool_response(f.call('read-main', path=target['toolPath']))
     def edit_response(_request):
+        target, = targets
+        content = (path.read_text() + '\n' + target['importExample'] + '\n' + target['registrationExample']
+            + '\nasync def request_validation_rejection(request, exc):\n'
+              '    return JSONResponse(status_code=422, content={"detail": "INVALID_REQUEST"})\n')
         return tool_response(f.call('repair-main', name='write_source_file', path='source/main.py',
-            expectedSha256=sha256(path.read_bytes()).hexdigest(), content=good['main.py']))
-    provider = FakeProvider(text_response(json.dumps(ready)),
-        tool_response(f.call('read-main', path='source/main.py')), edit_response, text_response(json.dumps(ready)))
+            expectedSha256=sha256(path.read_bytes()).hexdigest(), content=content))
+    provider = FakeProvider(text_response(json.dumps(ready)), read_target, edit_response, text_response(json.dumps(ready)))
     def file_tool(call, arguments, _context):
         assert arguments['path'] == 'source/main.py'
         if call.name == 'read_project_file':
@@ -107,6 +122,7 @@ def test_real_privacy_failure_then_engine_repair_then_nine_checks_pass(tmp_path,
         source_progress_check=lambda: True, output_check=development_check(validate, signup_quality_check=probe),
         budget=f.budget(max_output_corrections=2, max_model_calls=8, max_tool_calls=6)))
     assert result.data == ready and not probe()
+    assert path.read_text().startswith(unsafe['main.py'])
     name = 'source-repair-start-' + uuid4().hex[:12]
     command = runner._base_command(name) + ['--mount', f'type=bind,src={source},dst=/snapshot,readonly',
         '--entrypoint', runner.python, image, *scn001_build_argv(runner.python)[1:]]

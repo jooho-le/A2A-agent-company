@@ -8,7 +8,7 @@ from orchestrator.domain.states import AgentRole
 from orchestrator.domain.role_outputs import ROLE_ARTIFACT_NAMES
 
 
-ROLE_CONTRACT_VERSION = "6"
+ROLE_CONTRACT_VERSION = "7"
 # v5 (2026-11-22): 동결 기준을 보존하는 역할별 수행·자체 점검 절차를 Single/Multi에 공유한다.
 # v4 (2026-11-18, Codex 재검토 1번, 주호 확인 필요): 모델에게 보이는 "허용 Tool"을 MCP 권한 정책이 아니라
 # 각 Runtime이 모델에 실제로 제공하는 Tool로 맞추고, Developer의 Build 책임 문장을 Host 책임으로 고쳤다.

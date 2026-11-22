@@ -32,7 +32,18 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TARGETED_SOURCE_REPAIR_V3'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V4'
+
+VALIDATION_ERROR_GUIDANCE = (
+    'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
+    'the signup endpoint runs. Import RequestValidationError from fastapi.exceptions and register its '
+    'handler on the approved FastAPI application in repairSourcePath. Keep the existing HTTPException '
+    'handler and its business rejection behavior. Changing only that handler, catching inside signup, '
+    'or adding Pydantic field validators does not protect this earlier error path. '
+    'Return a value-free response using the approved validation rejection status and schema. '
+    'Do not serialize unfiltered exc.errors(), exc.body, str(exc), or a request body containing credentials, '
+    'and do not log those values. Do not import main.app into a router or from main itself. '
+    'This is public framework API guidance, not a measured finding, hidden test or permission to change requirements.')
 
 INSTRUCTIONS = {
     'READY_SIGNUP_QUALITY_REVIEW': (
@@ -268,6 +279,10 @@ def _issue(item, *, start_precheck=False) -> dict | None:
     revision = item.get('reviewRevision')
     if isinstance(revision, str) and re.fullmatch('[a-f0-9]{64}', revision):
         issue['reviewRevision'] = revision
+    if code == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS':
+        context = _validation_error_context(item.get('validationErrorContext'))
+        if context is not None:
+            issue['validationErrorContext'] = context
     key = item.get('requirementKey')
     if isinstance(key, str) and _REQUIREMENT_KEY.match(key):
         issue['requirementKey'] = key
@@ -285,6 +300,44 @@ def source_review_paths(issues):
     """Only files from the trusted checker, still subject to MCP ACL and CAS."""
     return tuple(dict.fromkeys('source/' + path for row in issues
                               if _safe_review_file(path := row.get('repairSourcePath', row.get('sourcePath')))))
+
+
+def _validation_error_context(value):
+    """Closed Host observations only; no model explanations or source body."""
+    if not isinstance(value, dict):
+        return None
+    name = value.get('applicationAttribute')
+    lines = value.get('httpExceptionHandlerLines')
+    if (not isinstance(name, str) or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', name) is None
+            or redact_text(name) != name
+            or type(value.get('httpExceptionHandlerDetected')) is not bool
+            or type(value.get('requestValidationHandlerDetected')) is not bool
+            or not isinstance(lines, list) or len(lines) > 8
+            or any(type(line) is not int or not 0 < line <= 1048576 for line in lines)):
+        return None
+    return {'applicationAttribute': name, 'httpExceptionHandlerDetected': value['httpExceptionHandlerDetected'],
+            'requestValidationHandlerDetected': value['requestValidationHandlerDetected'],
+            'httpExceptionHandlerLines': sorted(set(lines))}
+
+
+def validation_error_repair_targets(issues):
+    targets = []
+    for row in issues:
+        if row.get('reasonCode') != 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS':
+            continue
+        context = _validation_error_context(row.get('validationErrorContext'))
+        path = row.get('repairSourcePath')
+        if context is None or not _safe_review_file(path):
+            continue
+        target = {'toolPath': 'source/' + path, 'applicationAttribute': context['applicationAttribute'],
+                  'exceptionType': 'fastapi.exceptions.RequestValidationError',
+                  'importExample': 'from fastapi.exceptions import RequestValidationError',
+                  'registrationExample': '@' + context['applicationAttribute'] + '.exception_handler(RequestValidationError)',
+                  'preserveExistingHttpExceptionHandler': context['httpExceptionHandlerDetected'],
+                  'observed': context}
+        if target not in targets:
+            targets.append(target)
+    return targets[:MAX_ISSUES]
 
 
 def report_issues(report) -> list[dict]:
@@ -382,6 +435,9 @@ def ready_path_trace(feedback):
 def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_name=None, repair_brief=None) -> dict:
     reasons = {item['reasonCode'] for item in issues}
     instruction = INSTRUCTIONS[kind]
+    if (kind in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_OUTPUT_SAFETY_REVIEW')
+            and 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' in reasons):
+        instruction += ' ' + VALIDATION_ERROR_GUIDANCE
     if kind in ('READY_PATH_EVIDENCE_MISMATCH', 'READY_RUNTIME_REPAIR_REQUIRED'):
         issues = [dict(row) for row in issues]
         for row in issues:
@@ -442,6 +498,10 @@ def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_
             instruction += ' Also address these independent Host checks: ' + INSTRUCTIONS[supplement]
     body = {'code': kind, 'executed': False, 'issues': issues[:MAX_ISSUES], 'correctionsRemaining': remaining,
             'instruction': instruction}
+    if kind == 'READY_SIGNUP_QUALITY_REVIEW':
+        targets = validation_error_repair_targets(issues)
+        if targets:
+            body['sourceRepairTargets'] = targets
     if stage is not None:
         body['stage'] = stage
     if tool_name is not None:
