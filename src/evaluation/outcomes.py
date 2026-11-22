@@ -48,6 +48,7 @@ CODE_CAUSES = {
     'LLM_BUDGET_EXHAUSTED': ('BUDGET_EXHAUSTED', 'VALID'),
     'LLM_RESPONSE_INVALID': ('MODEL_OUTPUT_INVALID', 'VALID'),
     'LLM_SCHEMA_INVALID': ('MODEL_OUTPUT_INVALID', 'VALID'),
+    'LLM_SOURCE_REPAIR_EXHAUSTED': ('SOURCE_REPAIR_EXHAUSTED', 'VALID'),
     'LLM_RESPONSE_INCOMPLETE': ('MODEL_OUTPUT_INVALID', 'VALID'),
     'LLM_REFUSED': ('MODEL_REFUSED', 'VALID'),
     'LLM_TOOL_POLICY_VIOLATION': ('TOOL_POLICY_VIOLATION', 'VALID'),
@@ -320,6 +321,19 @@ def classify_run(bundle, trace=None, a2a=None):
                 cause, validity = 'HOST_INTEGRATION_FAILURE', 'UNVERIFIED'
             elif route['category'] == 'EXECUTION_UNCERTAIN' and stopped['code'] == 'LLM_RESPONSE_INVALID':
                 cause, validity = 'MODEL_RESPONSE_UNVERIFIED', 'REVIEW_REQUIRED'
+        elif stopped.get('code') == 'LLM_SCHEMA_INVALID' and stopped.get('taskId'):
+            # Historical engines used SCHEMA for an exhausted source review.
+            # Reclassify only a bound, verified STOP for this exact Task; an
+            # earlier warning or an unverified telemetry page proves nothing.
+            reviews = [row for row in result['recovery']['decisions']
+                       if row['taskId'] == stopped['taskId'] and row['action'] == 'STOP']
+            if (reviews and reviews[-1]['category'] == 'MODEL_EXECUTION'
+                    and reviews[-1]['code'] in ('READY_LIBRARY_TYPE_MISMATCH',
+                        'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW')):
+                route = reviews[-1]
+                cause, validity = 'SOURCE_REPAIR_EXHAUSTED', 'VALID'
+                details.update(failureCategory=route['category'], recoveryAction=route['action'],
+                               sourceReviewCode=route['code'])
     if cause == 'SEMANTIC_REVIEW_HOLD':
         resume = RESUME_POLICIES.get(policy, 'OPERATOR_DECISION')
     elif cause == 'SEMANTIC_REVIEW_FAILURE':

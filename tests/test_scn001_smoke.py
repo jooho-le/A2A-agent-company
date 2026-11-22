@@ -1,9 +1,30 @@
 """Offline checks for credentials, frozen inputs and one-run isolation."""
 import importlib.util
+from copy import deepcopy
 import json
 from pathlib import Path
 
 import pytest
+
+from orchestrator.domain.scenario_registry import get_scenario, SCN_001_ID
+from orchestrator.sandbox.scn001_start_contract import scn001_build_argv
+
+
+@pytest.mark.parametrize('tail', [['-m', 'compileall', '/snapshot'],
+    ['-I', '-X', 'pycache_prefix=/work/pycache', '-m', 'compileall', '-q', '/snapshot']])
+def test_new_configuration_runs_startup_probe_without_mutating_legacy_approval(tail):
+    tools = {'build': {'profile': {'name': 'scn001-compile', 'argv': ['/usr/local/bin/python', *tail]}},
+             'browser': None}
+    before = deepcopy(tools)
+    copied = smoke.api_only_tools(tools, get_scenario(SCN_001_ID).planner_contract())
+    assert tools == before
+    assert copied['build']['profile']['argv'] == scn001_build_argv()
+
+
+def test_custom_build_commands_are_preserved():
+    tools = {'build': {'profile': {'name': 'custom', 'argv': ['/usr/local/bin/python', '-m', 'custom_build']}},
+             'browser': None}
+    assert smoke.api_only_tools(tools, get_scenario(SCN_001_ID).planner_contract()) == tools
 
 
 _SPEC = importlib.util.spec_from_file_location(

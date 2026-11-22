@@ -109,6 +109,7 @@ class LLMEngine:
         required_alternatives = ()  # e.g. edit_source_file beside a forced write_source_file
         required_test_paths = ()
         source_repair_path = source_repair_sha256 = None
+        source_review_pending = []
         sequence = operation_sequence = None
         decided_sequence = None
         recovery_sink_failed = False
@@ -295,7 +296,8 @@ class LLMEngine:
                     # A resolved path and a newly exposed risk may use the
                     # remaining shared allowance; moving a line or rewording
                     # READY does not buy another correction for the same risks.
-                    signature = (kind, tuple(sorted({(r.get('sourcePath', ''), r['reasonCode']) for r in issues})))
+                    signature = (kind, tuple(sorted({(r.get('sourcePath', ''), r['reasonCode'],
+                                                       r.get('reviewRevision', '')) for r in issues})))
                 allowed = budget_for.take(signature)
                 reason = budget_for.last_reason
                 repair_input = task_input.get('taskInput')
@@ -320,10 +322,15 @@ class LLMEngine:
                     # Source work and a subsequent truthful report share the existing Run budget.
                     messages = [*items, {'role': 'user', 'content': json_text(feedback, max_bytes=limit)}]
                     history = json.dumps(messages, ensure_ascii=False, separators=(',', ':'))
+                    review_paths = (correction_rules.source_review_paths(issues)
+                                    if kind == 'READY_SIGNUP_QUALITY_REVIEW'
+                                    and {'read_project_file', 'write_source_file'} <= self._definitions.keys() else ())
+                    required_calls = 2 * len(review_paths) + 1 if review_paths else 2
+                    required_tools = 2 * len(review_paths) if review_paths else 1
                     if (len(history.encode()) + len(prompt.system_prompt.encode()) > limit
-                            or budget.tool_calls >= budget.limits.max_tool_calls
+                            or budget.limits.max_tool_calls - budget.tool_calls < required_tools
                             or kind in ('READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW') and
-                            budget.limits.max_model_calls - budget.model_calls < 2):
+                            budget.limits.max_model_calls - budget.model_calls < required_calls):
                         # Fixing the incompatible call requires a source tool turn and a later READY turn.
                         allowed, reason = False, 'LIMIT_REACHED'
                     else:
@@ -837,6 +844,11 @@ class LLMEngine:
                             raise LLMRuntimeError(LLMErrorCode.NO_PROGRESS)
                         required_tool = None
                         source_repair_path = source_repair_sha256 = None
+                        if source_review_pending:
+                            source_repair_path = source_review_pending.pop(0)
+                            required_tool, required_alternatives = 'read_project_file', ()
+                            if read_history is not None:
+                                read_history.require_fresh_content(source_repair_path)
                     continue
                 if response.output_text is None:
                     raise LLMRuntimeError(LLMErrorCode.RESPONSE)
@@ -914,7 +926,15 @@ class LLMEngine:
                             refresh_path_output = bool(restricted_paths)
                         if not allowed and rejection['code'] in ('READY_PATH_EVIDENCE_MISMATCH', 'READY_RUNTIME_REPAIR_REQUIRED',
                                                                  'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'):
-                            raise LLMRuntimeError(LLMErrorCode.SCHEMA)
+                            raise LLMRuntimeError(LLMErrorCode.SOURCE_REPAIR)
+                        if allowed and rejection['code'] == 'READY_SIGNUP_QUALITY_REVIEW':
+                            paths = correction_rules.source_review_paths(rejection['issues'])
+                            if paths and {'read_project_file', 'write_source_file'} <= self._definitions.keys():
+                                source_repair_path, *source_review_pending = paths
+                                source_repair_sha256 = None
+                                required_tool, required_alternatives = 'read_project_file', ()
+                                if read_history is not None:
+                                    read_history.require_fresh_content(source_repair_path)
                         if rejection['code'] == 'READY_WITHOUT_CHANGES':
                             if not allowed:
                                 raise LLMRuntimeError(LLMErrorCode.NO_PROGRESS)

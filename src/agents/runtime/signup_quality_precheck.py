@@ -5,12 +5,13 @@ repair it automatically, disclose protected cases, or prove safety by absence
 of warnings. Unknown/custom implementations still require measured validation.
 """
 import ast
+from hashlib import sha256
 from pathlib import Path
 
 from agents.runtime.output_safety_precheck import inspect_output_safety
 from orchestrator.core.security import redact_text
 
-POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V1'
+POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V2'
 MAX_FILES, MAX_BYTES, MAX_TOTAL_BYTES, MAX_NODES = 64, 128_000, 1_048_576, 50_000
 
 
@@ -176,12 +177,21 @@ def inspect_signup_quality(source_root, contract):
     keys = {r.get('key') for r in contract.get('requirements', ())}
     issues = list(inspect_output_safety(root, contract))
 
-    def add(code, path, node, key):
+    def add(code, path, node, key, *, repair_path=None):
         ref = path.relative_to(root).as_posix()
         if redact_text(ref) != ref:
             return
         row = {'fieldPath': '/source', 'reasonCode': code, 'requirementKey': key,
                'sourcePath': ref, 'lineNumber': node.lineno}
+        repair_path = repair_path or path
+        row['repairSourcePath'] = repair_path.relative_to(root).as_posix()
+        # Host-derived revision, not a model assertion. A changed reviewed file
+        # may use the remaining correction allowance; the total cap never grows.
+        digest = sha256()
+        for reviewed in dict.fromkeys((path, repair_path)):
+            digest.update(reviewed.relative_to(root).as_posix().encode())
+            digest.update(ast.dump(next(t for p, t in modules.values() if p == reviewed)).encode())
+        row['reviewRevision'] = digest.hexdigest()
         if row not in issues and len(issues) < 16:
             issues.append(row)
 
@@ -217,7 +227,6 @@ def inspect_signup_quality(source_root, contract):
         bases = _imported(tree, 'pydantic', 'BaseModel')
         for n in tree.body:
             if (isinstance(n, ast.ClassDef) and any(_name(b) in bases for b in n.bases)
-                    and not any(isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef)) for c in n.body)
                     and any(isinstance(f, ast.AnnAssign) and _name(f.target) == 'password'
                             and _name(f.annotation) == 'str' for f in n.body)):
                 plain_models.add((module, n.name))
@@ -255,7 +264,10 @@ def inspect_signup_quality(source_root, contract):
                     and any(_name(a.annotation) in model_names for a in (*fn.args.posonlyargs, *fn.args.args))):
                 issues[:] = [r for r in issues if not (r['reasonCode'] == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS'
                                                        and 'sourcePath' not in r)]
-                add('DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS', path, fn, 'REQ-006')
+                # The handler belongs to the application entrypoint. Asking a
+                # router module to import main.app can create a circular import.
+                add('DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS', path, fn, 'REQ-006',
+                    repair_path=modules[entry][0])
             if is_signup and 'REQ-003' in keys:
                 for trial in (n for n in ast.walk(fn) if isinstance(n, ast.Try)):
                     commits = any(isinstance(n, ast.Call) and _name(n.func) == 'commit'

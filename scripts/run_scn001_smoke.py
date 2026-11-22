@@ -43,6 +43,18 @@ def api_only_tools(tools, contract):
     if browser is not None and any(s.get('kind') != 'QA_TESTS' for s in browser.get('suites', ())):
         raise ValueError('SCN001_BROWSER_PROTECTED_POLICY_CONFLICT')
     copied['browser'] = None
+    # Existing local configurations may predate the startup probe. Upgrade only
+    # the precisely known compile-only command in this NEW experiment copy.
+    # Never alter an approved Run, arbitrary operator commands or local files.
+    profile = copied.get('build', {}).get('profile', {})
+    argv = profile.get('argv')
+    from orchestrator.sandbox.scn001_start_contract import scn001_build_argv
+    legacy_shapes = (['-m', 'compileall', '/snapshot'],
+                     ['-I', '-X', 'pycache_prefix=/work/pycache', '-m', 'compileall', '-q', '/snapshot'])
+    if (profile.get('name') == 'scn001-compile' and isinstance(argv, list) and argv
+            and argv[0] in ('/usr/local/bin/python', '/usr/local/bin/python3')
+            and argv[1:] in legacy_shapes):
+        profile['argv'] = scn001_build_argv(argv[0])
     return copied
 
 

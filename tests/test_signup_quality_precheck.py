@@ -84,6 +84,17 @@ def test_raw_validation_errors_remain_reviewable_with_a_registered_handler(tmp_p
     assert any(r['reasonCode'] == 'VALIDATION_ERRORS_FORWARD_INPUT' for r in issues)
 
 
+def test_field_validators_do_not_protect_default_error_responses(tmp_path):
+    # FastAPI still serializes the supplied input on validation errors. Merely
+    # adding Pydantic validators must not make this source review disappear.
+    source = APP.replace('from pydantic import BaseModel', 'from pydantic import BaseModel, field_validator')
+    source = source.replace('    password: str\n', '    password: str\n'
+        '    @field_validator("email")\n    @classmethod\n'
+        '    def validate_email(cls, value):\n        return value.strip().lower()\n')
+    issues = inspect(tmp_path, {'main.py': source})
+    assert any(i['reasonCode'] == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' for i in issues)
+
+
 def test_unrelated_exception_handler_does_not_suppress_default_validation_hint(tmp_path):
     source = APP + SAFE_HANDLER.replace('RequestValidationError)', 'ValueError)')
     assert any(r['reasonCode'] == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS'

@@ -38,7 +38,7 @@ import re
 
 MAX_FILES = 400
 # Recorded in the Host policy for both Single and Multi.
-START_PRECHECK_POLICY = 'STATIC_START_PRECHECK_V4'
+START_PRECHECK_POLICY = 'STATIC_START_PRECHECK_V5'
 _ROUTE_METHODS = frozenset({'get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'api_route', 'route'})
 _READY_CHECK = re.compile(r'GET\s+(/\S*)')
 MAX_FILE_BYTES = 1_048_576
@@ -380,6 +380,18 @@ def inspect(source_root, external_contract) -> list[dict]:
             issues.append({'fieldPath': module.replace('.', '/') + '.py', 'reasonCode': code})
         elif node is None and not dynamic:
             issues.append({'fieldPath': path.relative_to(root).as_posix(), 'reasonCode': code})
+        elif (isinstance(node, ast.ImportFrom) and not node.level and node.module == module
+              and not dynamic and node in trees[path].body):
+            # An import binding alone does not create app. In the failed frozen
+            # Source, main.py imported main.app before defining it. Never import
+            # the generated module on the Host to find this out.
+            before = ast.Module(body=trees[path].body[:trees[path].body.index(node)], type_ignores=[])
+            previous, uncertain = _bindings(before)
+            imported = next((a.name for a in node.names if (a.asname or a.name) == name), None)
+            if imported and imported not in previous and not uncertain:
+                issues.append({'fieldPath': path.relative_to(root).as_posix(),
+                               'reasonCode': 'ENTRYPOINT_SELF_IMPORT', 'sourcePath': path.relative_to(root).as_posix(),
+                               'lineNumber': node.lineno})
     # Keep going: report every certain problem at once so one correction can fix them all
     # (live Run 8b49bebd v1 had both main.py without app and a User without a primary key).
 

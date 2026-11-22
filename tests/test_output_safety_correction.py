@@ -62,7 +62,7 @@ def test_actual_engine_requires_a_safe_candidate_or_stops_within_shared_limits(t
     else:
         with pytest.raises(LLMRuntimeError) as caught:
             asyncio.run(operation)
-        assert caught.value.code is LLMErrorCode.SCHEMA
+        assert caught.value.code is LLMErrorCode.SOURCE_REPAIR
         stopped = events[-1].public()
         assert stopped['code'] == 'READY_OUTPUT_SAFETY_REVIEW' and stopped['action'] == 'STOP'
         assert stopped['reason'] == ('REPEATED' if outcome=='reworded' else 'LIMIT_REACHED')

@@ -13,7 +13,7 @@ from agents.llm.contracts import LLMErrorCode
 from agents.llm.development_rejection import RejectionAssessment
 
 POLICY = 'BOUNDED_PRE_EXECUTION_REGENERATION_V1'
-DEVELOPMENT_PROGRESS_POLICY = 'HOST_NET_DIFF_FOCUSED_RUNTIME_REPAIR_V6'
+DEVELOPMENT_PROGRESS_POLICY = 'HOST_NET_DIFF_FOCUSED_SOURCE_REPAIR_V7'
 GENERATED_TEST_READY_POLICY = 'HOST_REQUIRED_TEST_FILE_WRITE_AND_EXHAUSTION_V1'
 CORRECTION_CODES = frozenset({
     'TOOL_ARGUMENTS_INVALID', 'TOOL_REQUEST_REJECTED', 'MODEL_OUTPUT_INVALID',
@@ -226,6 +226,8 @@ def failure_route(error, *, sequence, operation_sequence):
         category = 'BUDGET_LIMIT'
     elif code in (LLMErrorCode.REFUSAL, LLMErrorCode.TOOL_POLICY):
         category = 'POLICY_BLOCK'
+    elif code is LLMErrorCode.SOURCE_REPAIR:
+        category = 'MODEL_EXECUTION'
     else:
         category = 'MODEL_FORMAT'
     return FailureRoute(sequence=sequence, operationSequence=operation_sequence, code=code.value,

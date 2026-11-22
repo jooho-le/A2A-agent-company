@@ -1,0 +1,1306 @@
+{
+  "date": "2026-11-23",
+  "plannedRuns": 20,
+  "completedRuns": 20,
+  "additionalCompletedRuns": 16,
+  "allFiveRepetitionsComplete": true,
+  "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "model": "gpt-4.1-mini-2025-04-14",
+  "implementationUnchanged": true,
+  "stoppedReason": null,
+  "experimentId": "a24e1b21-04e8-4968-8591-c35557ca4105",
+  "inheritedResultsUnchanged": true,
+  "configurationParityVerified": true,
+  "uniqueRunIds": 20,
+  "operationalStopHistory": [
+    {
+      "afterOrder": 8,
+      "reason": "LLM_TOOL_EXECUTION_FAILED",
+      "audit": "All failed file attempts settled with resultUnknown=false; no unknown or transport effects.",
+      "action": "Keep all eight observations; submit only the twelve remaining originally authorized slots."
+    }
+  ],
+  "configuredPriceBookKnownTotalCostUsd": "2.4072860",
+  "additionalKnownCostUsd": "2.1456044",
+  "costComplete": false,
+  "incompleteCostRuns": 3,
+  "samePriceBook": true,
+  "modelCalls": 467,
+  "knownTotalTokens": 8117762,
+  "tokenTotalsComplete": false,
+  "groups": {
+    "single-ver1": {
+      "runs": 5,
+      "productPasses": 0,
+      "confirmedProductFailures": 1,
+      "unverifiedProducts": 4,
+      "completeEvaluations": 1,
+      "hostSuccesses": 0,
+      "meanElapsedSeconds": 150.5702,
+      "meanCompleteCostSampleUsd": 0.0855602,
+      "completeCostSamples": 4,
+      "meanKnownCostUsd": 0.09465872,
+      "costComplete": false,
+      "meanFixAttempts": 0.2,
+      "meanSuccessVerdictSeconds": null,
+      "successTimeSamples": 0,
+      "requirementObservationRuns": 1,
+      "meanRequirementLowerAmongObserved": 0.7142857142857143,
+      "meanRequirementUpperAmongObserved": 0.7142857142857143
+    },
+    "multi-ver1": {
+      "runs": 5,
+      "productPasses": 0,
+      "confirmedProductFailures": 1,
+      "unverifiedProducts": 4,
+      "completeEvaluations": 1,
+      "hostSuccesses": 0,
+      "meanElapsedSeconds": 88.2244,
+      "meanCompleteCostSampleUsd": 0.0620609,
+      "completeCostSamples": 4,
+      "meanKnownCostUsd": 0.06691952,
+      "costComplete": false,
+      "meanFixAttempts": 0.0,
+      "meanSuccessVerdictSeconds": null,
+      "successTimeSamples": 0,
+      "requirementObservationRuns": 1,
+      "meanRequirementLowerAmongObserved": 0.8571428571428571,
+      "meanRequirementUpperAmongObserved": 0.8571428571428571
+    },
+    "single-ver2": {
+      "runs": 5,
+      "productPasses": 0,
+      "confirmedProductFailures": 2,
+      "unverifiedProducts": 3,
+      "completeEvaluations": 2,
+      "hostSuccesses": 0,
+      "meanElapsedSeconds": 178.1862,
+      "meanCompleteCostSampleUsd": 0.108789,
+      "completeCostSamples": 4,
+      "meanKnownCostUsd": 0.13870808,
+      "costComplete": false,
+      "meanFixAttempts": 0.6,
+      "meanSuccessVerdictSeconds": null,
+      "successTimeSamples": 0,
+      "requirementObservationRuns": 2,
+      "meanRequirementLowerAmongObserved": 0.7857142857142857,
+      "meanRequirementUpperAmongObserved": 0.7857142857142857
+    },
+    "multi-ver2": {
+      "runs": 5,
+      "productPasses": 0,
+      "confirmedProductFailures": 3,
+      "unverifiedProducts": 2,
+      "completeEvaluations": 2,
+      "hostSuccesses": 0,
+      "meanElapsedSeconds": 220.5806,
+      "meanCompleteCostSampleUsd": 0.18117088,
+      "completeCostSamples": 5,
+      "meanKnownCostUsd": 0.18117088,
+      "costComplete": true,
+      "meanFixAttempts": 1.4,
+      "meanSuccessVerdictSeconds": null,
+      "successTimeSamples": 0,
+      "requirementObservationRuns": 3,
+      "meanRequirementLowerAmongObserved": 0.47619047619047616,
+      "meanRequirementUpperAmongObserved": 0.6666666666666666
+    }
+  },
+  "rows": [
+    {
+      "condition": "multi-ver1",
+      "repetition": 1,
+      "order": 1,
+      "runId": "8d740750-9f98-49e0-ab18-a69e5ca27375",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 66.299,
+      "successVerdictSeconds": null,
+      "modelCalls": 11,
+      "toolCalls": 9,
+      "totalTokens": 172662,
+      "costUsd": "0.0476604",
+      "knownTotalTokens": 172662,
+      "usageComplete": true,
+      "knownCostUsd": "0.0476604",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-once-20261123-post92/01-multi-ver1-r01"
+    },
+    {
+      "condition": "single-ver1",
+      "repetition": 1,
+      "order": 2,
+      "runId": "3b5bd97f-bcd4-41fa-b6d9-a7d74507b3b5",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 47.118,
+      "successVerdictSeconds": null,
+      "modelCalls": 9,
+      "toolCalls": 7,
+      "totalTokens": 153007,
+      "costUsd": "0.0356908",
+      "knownTotalTokens": 153007,
+      "usageComplete": true,
+      "knownCostUsd": "0.0356908",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-once-20261123-post92/02-single-ver1-r01"
+    },
+    {
+      "condition": "single-ver2",
+      "repetition": 1,
+      "order": 3,
+      "runId": "d8a22987-bb37-4c34-8d15-b0981961ca60",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "UNVERIFIED",
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {
+        "ERROR": 9
+      },
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 0,
+        "failedRequirements": 0,
+        "unverifiedRequirements": 7,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.0,
+        "fullSatisfactionUpper": 1.0,
+        "checkCount": 9,
+        "decidedChecks": 0,
+        "checkDecidability": 0.0,
+        "qaPassRate": 0.0,
+        "blockingSecurityFindings": 0,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "ERROR"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "ERROR"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "ERROR"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 182.095,
+      "successVerdictSeconds": null,
+      "modelCalls": 25,
+      "toolCalls": 21,
+      "totalTokens": 398569,
+      "costUsd": "0.1269472",
+      "knownTotalTokens": 398569,
+      "usageComplete": true,
+      "knownCostUsd": "0.1269472",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [],
+      "stopRoutes": [],
+      "evaluationErrors": [
+        "APP_IMPORT_FAILED"
+      ],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-once-20261123-post92/03-single-ver2-r01"
+    },
+    {
+      "condition": "multi-ver2",
+      "repetition": 1,
+      "order": 4,
+      "runId": "bc741e70-a06f-4920-9c57-61076dbf63a7",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 52.414,
+      "successVerdictSeconds": null,
+      "modelCalls": 12,
+      "toolCalls": 10,
+      "totalTokens": 182587,
+      "costUsd": "0.0513832",
+      "knownTotalTokens": 182587,
+      "usageComplete": true,
+      "knownCostUsd": "0.0513832",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-once-20261123-post92/04-multi-ver2-r01"
+    },
+    {
+      "condition": "multi-ver2",
+      "repetition": 2,
+      "order": 5,
+      "runId": "9259f4f0-b54d-4ea1-8582-341dd393a834",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 64.701,
+      "successVerdictSeconds": null,
+      "modelCalls": 14,
+      "toolCalls": 11,
+      "totalTokens": 222180,
+      "costUsd": "0.0525756",
+      "knownTotalTokens": 222180,
+      "usageComplete": true,
+      "knownCostUsd": "0.0525756",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_SCHEMA_INVALID"
+      ],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/05-multi-ver2-r02"
+    },
+    {
+      "condition": "single-ver2",
+      "repetition": 2,
+      "order": 6,
+      "runId": "9f23a1a1-afce-4c6d-afb3-f9833439b5cd",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 81.217,
+      "successVerdictSeconds": null,
+      "modelCalls": 18,
+      "toolCalls": 15,
+      "totalTokens": 373367,
+      "costUsd": "0.0936392",
+      "knownTotalTokens": 373367,
+      "usageComplete": true,
+      "knownCostUsd": "0.0936392",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_SCHEMA_INVALID"
+      ],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/06-single-ver2-r02"
+    },
+    {
+      "condition": "single-ver1",
+      "repetition": 2,
+      "order": 7,
+      "runId": "0796a68d-ae54-40b1-b5fc-a128a1c88b52",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {
+        "ERROR": 9
+      },
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 0,
+        "failedRequirements": 0,
+        "unverifiedRequirements": 7,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.0,
+        "fullSatisfactionUpper": 1.0,
+        "checkCount": 9,
+        "decidedChecks": 0,
+        "checkDecidability": 0.0,
+        "qaPassRate": 0.0,
+        "blockingSecurityFindings": 0,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "ERROR"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "ERROR"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "ERROR"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 208.713,
+      "successVerdictSeconds": null,
+      "modelCalls": 26,
+      "toolCalls": 24,
+      "totalTokens": 429970,
+      "costUsd": "0.1300324",
+      "knownTotalTokens": 429970,
+      "usageComplete": true,
+      "knownCostUsd": "0.1300324",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "SECURITY_TEST_INPUT_INVALID"
+      ],
+      "stopRoutes": [],
+      "evaluationErrors": [
+        "APP_IMPORT_FAILED"
+      ],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/07-single-ver1-r02"
+    },
+    {
+      "condition": "multi-ver1",
+      "repetition": 2,
+      "order": 8,
+      "runId": "d7948418-2c4f-49b7-9ba6-9f1d0aa2a534",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 89.108,
+      "successVerdictSeconds": null,
+      "modelCalls": 14,
+      "toolCalls": 13,
+      "totalTokens": 241191,
+      "costUsd": "0.0728952",
+      "knownTotalTokens": 241191,
+      "usageComplete": true,
+      "knownCostUsd": "0.0728952",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_TOOL_EXECUTION_FAILED"
+      ],
+      "stopRoutes": [
+        {
+          "code": "LLM_TOOL_EXECUTION_FAILED",
+          "category": "EXECUTION_UNCERTAIN"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/08-multi-ver1-r02"
+    },
+    {
+      "condition": "multi-ver1",
+      "repetition": 3,
+      "order": 9,
+      "runId": "b64ee4e7-a9e4-4d24-805c-e8f4b767f7ec",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "UNVERIFIED",
+      "productJudgment": "FAIL",
+      "evaluationComplete": true,
+      "checkCounts": {
+        "PASS": 8,
+        "FAIL": 1
+      },
+      "decidedChecks": 9,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 6,
+        "failedRequirements": 1,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.8571428571428571,
+        "fullSatisfactionUpper": 0.8571428571428571,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 1,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "FAIL"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 145.053,
+      "successVerdictSeconds": null,
+      "modelCalls": 21,
+      "toolCalls": 17,
+      "totalTokens": null,
+      "costUsd": null,
+      "knownTotalTokens": 274625,
+      "usageComplete": false,
+      "knownCostUsd": "0.086354",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": false,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_VALIDATION_DRAFT_EXHAUSTED"
+      ],
+      "stopRoutes": [
+        {
+          "code": "LLM_VALIDATION_DRAFT_EXHAUSTED",
+          "category": "MODEL_FORMAT"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        }
+      ],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/09-multi-ver1-r03"
+    },
+    {
+      "condition": "single-ver1",
+      "repetition": 3,
+      "order": 10,
+      "runId": "8b35d099-9310-4d6a-bb30-aef89596a0c1",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 74.45,
+      "successVerdictSeconds": null,
+      "modelCalls": 11,
+      "toolCalls": 8,
+      "totalTokens": 195910,
+      "costUsd": "0.043492",
+      "knownTotalTokens": 195910,
+      "usageComplete": true,
+      "knownCostUsd": "0.043492",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_SCHEMA_INVALID"
+      ],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/10-single-ver1-r03"
+    },
+    {
+      "condition": "single-ver2",
+      "repetition": 3,
+      "order": 11,
+      "runId": "f737ce1b-4f3b-418b-bf33-1a0276f0ca2c",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "FAIL",
+      "productJudgment": "FAIL",
+      "evaluationComplete": true,
+      "checkCounts": {
+        "PASS": 8,
+        "FAIL": 1
+      },
+      "decidedChecks": 9,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 6,
+        "failedRequirements": 1,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.8571428571428571,
+        "fullSatisfactionUpper": 0.8571428571428571,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 1,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "FAIL"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "PASS"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 248.538,
+      "successVerdictSeconds": null,
+      "modelCalls": 30,
+      "toolCalls": 28,
+      "totalTokens": 572087,
+      "costUsd": "0.1647236",
+      "knownTotalTokens": 572087,
+      "usageComplete": true,
+      "knownCostUsd": "0.1647236",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 1,
+      "terminalAgentCodes": [
+        "LLM_DEVELOPMENT_NO_PROGRESS",
+        "LLM_VALIDATION_DRAFT_EXHAUSTED"
+      ],
+      "stopRoutes": [
+        {
+          "code": "LLM_VALIDATION_DRAFT_EXHAUSTED",
+          "category": "MODEL_FORMAT"
+        },
+        {
+          "code": "READY_WITHOUT_CHANGES",
+          "category": "MODEL_FORMAT"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "perspective": "SECURITY",
+          "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e"
+        }
+      ],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/11-single-ver2-r03"
+    },
+    {
+      "condition": "multi-ver2",
+      "repetition": 3,
+      "order": 12,
+      "runId": "9edaf349-f935-46de-8651-84a51ac67c03",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "FAIL",
+      "productJudgment": "FAIL",
+      "evaluationComplete": true,
+      "checkCounts": {
+        "PASS": 8,
+        "FAIL": 1
+      },
+      "decidedChecks": 9,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 6,
+        "failedRequirements": 1,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.8571428571428571,
+        "fullSatisfactionUpper": 0.8571428571428571,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 1,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "FAIL"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 393.386,
+      "successVerdictSeconds": null,
+      "modelCalls": 58,
+      "toolCalls": 61,
+      "totalTokens": 1021941,
+      "costUsd": "0.3381408",
+      "knownTotalTokens": 1021941,
+      "usageComplete": true,
+      "knownCostUsd": "0.3381408",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 3,
+      "terminalAgentCodes": [
+        "LLM_TOOL_POLICY_VIOLATION"
+      ],
+      "stopRoutes": [
+        {
+          "code": "LLM_TOOL_POLICY_VIOLATION",
+          "category": "POLICY_BLOCK"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        }
+      ],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/12-multi-ver2-r03"
+    },
+    {
+      "condition": "multi-ver2",
+      "repetition": 4,
+      "order": 13,
+      "runId": "c10fd3cd-627a-40a4-b8ec-709ff267f14d",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "FAIL",
+      "productJudgment": "FAIL",
+      "evaluationComplete": true,
+      "checkCounts": {
+        "PASS": 6,
+        "FAIL": 3
+      },
+      "decidedChecks": 9,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 4,
+        "failedRequirements": 3,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.5714285714285714,
+        "fullSatisfactionUpper": 0.5714285714285714,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 0.6666666666666666,
+        "blockingSecurityFindings": 1,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "FAIL"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 384.878,
+      "successVerdictSeconds": null,
+      "modelCalls": 62,
+      "toolCalls": 59,
+      "totalTokens": 1037013,
+      "costUsd": "0.3242448",
+      "knownTotalTokens": 1037013,
+      "usageComplete": true,
+      "knownCostUsd": "0.3242448",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 3,
+      "terminalAgentCodes": [
+        "LLM_VALIDATION_DRAFT_EXHAUSTED"
+      ],
+      "stopRoutes": [
+        {
+          "code": "LLM_VALIDATION_DRAFT_EXHAUSTED",
+          "category": "MODEL_FORMAT"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [
+        {
+          "testId": "dbc502d9-5e40-4a03-9ea1-a38924a3a2ce",
+          "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+          "perspective": "QA",
+          "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd"
+        },
+        {
+          "testId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+          "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+          "perspective": "QA",
+          "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        }
+      ],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/13-multi-ver2-r04"
+    },
+    {
+      "condition": "single-ver2",
+      "repetition": 4,
+      "order": 14,
+      "runId": "040cf376-0028-4cd9-9203-93dcfcc8837f",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 55.756,
+      "successVerdictSeconds": null,
+      "modelCalls": 10,
+      "toolCalls": 8,
+      "totalTokens": 172747,
+      "costUsd": "0.049846",
+      "knownTotalTokens": 172747,
+      "usageComplete": true,
+      "knownCostUsd": "0.049846",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_SCHEMA_INVALID"
+      ],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/14-single-ver2-r04"
+    },
+    {
+      "condition": "single-ver1",
+      "repetition": 4,
+      "order": 15,
+      "runId": "26861878-816a-4014-a7de-3ee2275a5f0a",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "UNVERIFIED",
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {
+        "ERROR": 9
+      },
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 0,
+        "failedRequirements": 0,
+        "unverifiedRequirements": 7,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.0,
+        "fullSatisfactionUpper": 1.0,
+        "checkCount": 9,
+        "decidedChecks": 0,
+        "checkDecidability": 0.0,
+        "qaPassRate": 0.0,
+        "blockingSecurityFindings": 0,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "ERROR"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "ERROR"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "ERROR"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 218.585,
+      "successVerdictSeconds": null,
+      "modelCalls": 28,
+      "toolCalls": 25,
+      "totalTokens": 461504,
+      "costUsd": "0.1330256",
+      "knownTotalTokens": 461504,
+      "usageComplete": true,
+      "knownCostUsd": "0.1330256",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [],
+      "stopRoutes": [],
+      "evaluationErrors": [
+        "APP_IMPORT_FAILED"
+      ],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/15-single-ver1-r04"
+    },
+    {
+      "condition": "multi-ver1",
+      "repetition": 4,
+      "order": 16,
+      "runId": "cc5e7923-e790-4426-a365-d256d83aac8e",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 49.682,
+      "successVerdictSeconds": null,
+      "modelCalls": 12,
+      "toolCalls": 9,
+      "totalTokens": 179717,
+      "costUsd": "0.04037",
+      "knownTotalTokens": 179717,
+      "usageComplete": true,
+      "knownCostUsd": "0.04037",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_SCHEMA_INVALID"
+      ],
+      "stopRoutes": [
+        {
+          "code": "READY_SIGNUP_QUALITY_REVIEW",
+          "category": "MODEL_EXECUTION"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/16-multi-ver1-r04"
+    },
+    {
+      "condition": "multi-ver1",
+      "repetition": 5,
+      "order": 17,
+      "runId": "a52fb476-5ac9-4020-9e00-c86ea887cb65",
+      "hostStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "productJudgment": "UNVERIFIED",
+      "evaluationComplete": false,
+      "checkCounts": {},
+      "decidedChecks": 0,
+      "requiredChecks": 9,
+      "accuracy": null,
+      "elapsedSeconds": 90.98,
+      "successVerdictSeconds": null,
+      "modelCalls": 19,
+      "toolCalls": 17,
+      "totalTokens": 346854,
+      "costUsd": "0.087318",
+      "knownTotalTokens": 346854,
+      "usageComplete": true,
+      "knownCostUsd": "0.087318",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 0,
+      "terminalAgentCodes": [
+        "LLM_TOOL_EXECUTION_FAILED"
+      ],
+      "stopRoutes": [
+        {
+          "code": "LLM_TOOL_EXECUTION_FAILED",
+          "category": "EXECUTION_UNCERTAIN"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/17-multi-ver1-r05"
+    },
+    {
+      "condition": "single-ver1",
+      "repetition": 5,
+      "order": 18,
+      "runId": "834fc0ea-bbf4-4a8c-8b34-0a7cd87fa2c6",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "FAIL",
+      "productJudgment": "FAIL",
+      "evaluationComplete": true,
+      "checkCounts": {
+        "PASS": 7,
+        "FAIL": 2
+      },
+      "decidedChecks": 9,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 5,
+        "failedRequirements": 2,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.7142857142857143,
+        "fullSatisfactionUpper": 0.7142857142857143,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 2,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "FAIL"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "FAIL"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 203.985,
+      "successVerdictSeconds": null,
+      "modelCalls": 26,
+      "toolCalls": 23,
+      "totalTokens": null,
+      "costUsd": null,
+      "knownTotalTokens": 478109,
+      "usageComplete": false,
+      "knownCostUsd": "0.1310528",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": false,
+      "fixAttempts": 1,
+      "terminalAgentCodes": [
+        "LLM_RESPONSE_INVALID"
+      ],
+      "stopRoutes": [
+        {
+          "code": "LLM_RESPONSE_INVALID",
+          "category": "EXECUTION_UNCERTAIN"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "perspective": "SECURITY",
+          "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        }
+      ],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/18-single-ver1-r05"
+    },
+    {
+      "condition": "single-ver2",
+      "repetition": 5,
+      "order": 19,
+      "runId": "fbad2094-c38d-4666-95a6-6f11cf466ed0",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "FAIL",
+      "productJudgment": "FAIL",
+      "evaluationComplete": true,
+      "checkCounts": {
+        "PASS": 7,
+        "FAIL": 2
+      },
+      "decidedChecks": 9,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 5,
+        "failedRequirements": 2,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.7142857142857143,
+        "fullSatisfactionUpper": 0.7142857142857143,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 2,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "FAIL"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "FAIL"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 323.325,
+      "successVerdictSeconds": null,
+      "modelCalls": 39,
+      "toolCalls": 40,
+      "totalTokens": null,
+      "costUsd": null,
+      "knownTotalTokens": 833413,
+      "usageComplete": false,
+      "knownCostUsd": "0.2583844",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": false,
+      "fixAttempts": 2,
+      "terminalAgentCodes": [
+        "LLM_DEVELOPMENT_NO_PROGRESS"
+      ],
+      "stopRoutes": [
+        {
+          "code": "READY_WITHOUT_CHANGES",
+          "category": "MODEL_FORMAT"
+        }
+      ],
+      "evaluationErrors": [],
+      "failedChecks": [
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "perspective": "SECURITY",
+          "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        }
+      ],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/19-single-ver2-r05"
+    },
+    {
+      "condition": "multi-ver2",
+      "repetition": 5,
+      "order": 20,
+      "runId": "2fda4e37-1c35-4da3-b4b7-c3b0e75b08a5",
+      "hostStatus": "FINISHED",
+      "hostVerdict": "FAIL",
+      "productJudgment": "FAIL",
+      "evaluationComplete": false,
+      "checkCounts": {
+        "FAIL": 3,
+        "ERROR": 6
+      },
+      "decidedChecks": 3,
+      "requiredChecks": 9,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 0,
+        "failedRequirements": 3,
+        "unverifiedRequirements": 4,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.0,
+        "fullSatisfactionUpper": 0.5714285714285714,
+        "checkCount": 9,
+        "decidedChecks": 3,
+        "checkDecidability": 0.3333333333333333,
+        "qaPassRate": 0.0,
+        "blockingSecurityFindings": 0,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "ERROR"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "ERROR"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "ERROR"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "elapsedSeconds": 207.524,
+      "successVerdictSeconds": null,
+      "modelCalls": 22,
+      "toolCalls": 20,
+      "totalTokens": 370309,
+      "costUsd": "0.13951",
+      "knownTotalTokens": 370309,
+      "usageComplete": true,
+      "knownCostUsd": "0.13951",
+      "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+      "costComplete": true,
+      "fixAttempts": 1,
+      "terminalAgentCodes": [
+        "LLM_RESPONSE_INCOMPLETE"
+      ],
+      "stopRoutes": [
+        {
+          "code": "OUTPUT_LIMIT_REACHED",
+          "category": "MODEL_FORMAT"
+        }
+      ],
+      "evaluationErrors": [
+        "CONCURRENT_SIGNUP_NOT_CREATED",
+        "DATABASE_ERROR_NOT_INJECTED",
+        "PRECONDITION_SIGNUP_FAILED",
+        "STORED_USER_NOT_FOUND"
+      ],
+      "failedChecks": [
+        {
+          "testId": "28f5b695-2d40-4c9d-acb2-7ef682cfacf8",
+          "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+          "perspective": "QA",
+          "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+        },
+        {
+          "testId": "720c082c-a1f5-4147-ad53-14a27a60deaf",
+          "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+          "perspective": "QA",
+          "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3"
+        },
+        {
+          "testId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+          "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+          "perspective": "QA",
+          "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+        }
+      ],
+      "rawResultDirectory": ".data/experiments/scn001-five-20261123-post92/20-multi-ver2-r05"
+    }
+  ],
+  "interpretation": "UNVERIFIED is not a confirmed product failure. Elapsed time includes stops. Success verdict time requires independent PASS and Host SUCCESS. Costs use the configured price book; known costs are lower bounds if costComplete is false.",
+  "verification": {
+    "uniqueRunIds": 20,
+    "newRunIds": 16,
+    "runsPerCondition": 5,
+    "originalResultsPreserved": true,
+    "configurationParityVerified": true,
+    "frozenImplementationFiles": 371,
+    "implementationUnchanged": true,
+    "independentFullyDecidedRuns": 6,
+    "independentPartiallyDecidedRuns": 1,
+    "aggregateMathVerified": true,
+    "costCompleteRuns": 17,
+    "remainingExperimentHostPids": 0,
+    "experimentPortListeners": 0,
+    "runningDockerContainers": 0,
+    "gitDiffCheckPassed": true
+  },
+  "diagnosticCorrection": {
+    "date": "2026-11-23",
+    "affectedOrders": [
+      5,
+      6,
+      10,
+      14,
+      16
+    ],
+    "terminalCode": "LLM_SCHEMA_INVALID",
+    "verifiedStopCode": "READY_SIGNUP_QUALITY_REVIEW",
+    "cause": "SOURCE_REPAIR_EXHAUSTED",
+    "explanation": "These five terminal codes were traced to repeated or exhausted source-quality review, not a proven JSON parse/schema failure. Original Run, grading, timing and cost measurements are unchanged."
+  }
+}

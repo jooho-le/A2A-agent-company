@@ -1043,7 +1043,7 @@ class PlannerRunDispatcher:
             if (status.get('state') != 'TASK_STATE_FAILED' or len(parts) != 1
                     or parts[0].get('data', {}).get('code') not in (
                         'LLM_DEVELOPMENT_NO_PROGRESS', 'LLM_DEVELOPMENT_REJECTION_EXHAUSTED', 'LLM_RESPONSE_INVALID', 'LLM_SCHEMA_INVALID',
-                        'LLM_RESPONSE_INCOMPLETE')):
+                        'LLM_RESPONSE_INCOMPLETE', 'LLM_SOURCE_REPAIR_EXHAUSTED')):
                 return False
             return self._repository.finish_development_no_progress(
                 result.step.run_id, result.step.workflow_step_id, result.task.id)

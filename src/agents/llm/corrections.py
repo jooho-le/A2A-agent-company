@@ -32,7 +32,7 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TARGETED_DRAFT_REPAIR_V2'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TARGETED_SOURCE_REPAIR_V3'
 
 INSTRUCTIONS = {
     'READY_SIGNUP_QUALITY_REVIEW': (
@@ -40,6 +40,10 @@ INSTRUCTIONS = {
         'not measured security findings or proof of product success. Read the listed sourcePath and lineNumber. '
         'sourcePath is repository-relative; read it using fileAccess coordinates such as source/<sourcePath>, '
         'never a Host absolute path. '
+        'repairSourcePath is the file to edit; it may differ from sourcePath where the risk was observed. '
+        'For default request validation, install protection on the FastAPI app in that entrypoint; '
+        'do not import main.app back into a router or import main from itself. The Host requires a fresh '
+        'read and a changed source write at each repair target before accepting another READY. '
         'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS / VALIDATION_ERRORS_FORWARD_INPUT: protect request validation '
         'errors before the endpoint runs. Do not return exc.errors() with its input fields or raw request bodies. '
         'RAW_EXCEPTION_IN_ERROR_RESPONSE / EXCEPTION_LOG_MAY_EXPOSE_DB_PARAMETERS: inspect database exceptions, '
@@ -258,10 +262,29 @@ def _issue(item, *, start_precheck=False) -> dict | None:
             and not source_path.startswith('/') and all(p not in ('', '.', '..') for p in source_path.split('/'))
             and redact_text(source_path) == source_path and type(line) is int and 0 < line <= 1048576):
         issue.update(sourcePath=source_path, lineNumber=line)
+    repair_path = item.get('repairSourcePath')
+    if _safe_review_file(repair_path):
+        issue['repairSourcePath'] = repair_path
+    revision = item.get('reviewRevision')
+    if isinstance(revision, str) and re.fullmatch('[a-f0-9]{64}', revision):
+        issue['reviewRevision'] = revision
     key = item.get('requirementKey')
     if isinstance(key, str) and _REQUIREMENT_KEY.match(key):
         issue['requirementKey'] = key
     return issue
+
+
+def _safe_review_file(path):
+    return (isinstance(path, str) and 0 < len(path) <= 256
+            and re.fullmatch(r'[A-Za-z0-9_./-]+\.py', path) is not None
+            and not path.startswith('/') and all(p not in ('', '.', '..') for p in path.split('/'))
+            and redact_text(path) == path)
+
+
+def source_review_paths(issues):
+    """Only files from the trusted checker, still subject to MCP ACL and CAS."""
+    return tuple(dict.fromkeys('source/' + path for row in issues
+                              if _safe_review_file(path := row.get('repairSourcePath', row.get('sourcePath')))))
 
 
 def report_issues(report) -> list[dict]:
@@ -400,6 +423,10 @@ def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_
                        'is never returned or logged. The handler still produces the same response. ' + instruction)
     if kind == 'START_CONTRACT_PRECHECK_FAILED' and 'APIROUTER_EXCEPTION_HANDLER_UNAVAILABLE' in reasons:
         instruction += ' ' + _router_handler_guidance(issues)
+    if kind == 'START_CONTRACT_PRECHECK_FAILED' and 'ENTRYPOINT_SELF_IMPORT' in reasons:
+        instruction += (' The entry module imports its own not-yet-defined binding. Preserve the existing '
+                        'FastAPI app in the entrypoint; do not import main.app from main itself or introduce '
+                        'a router-to-entrypoint circular import. Host Build will actually import and start the app.')
     # One bounded correction may contain independent draft defects. Explain
     # every included class without copying model text or adding retry budgets.
     supplements = []

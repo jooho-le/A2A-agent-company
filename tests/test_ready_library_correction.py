@@ -65,7 +65,7 @@ def test_library_type_stops_before_acceptance_or_resumes_within_budget(outcome, 
     else:
         with pytest.raises(LLMRuntimeError) as caught:
             asyncio.run(runner)
-        assert caught.value.code is LLMErrorCode.SCHEMA
+        assert caught.value.code is LLMErrorCode.SOURCE_REPAIR
         last = events[-1].public()
         assert (last['code'], last['action']) == ('READY_LIBRARY_TYPE_MISMATCH', 'STOP')
         assert last['reason'] == {'disabled': 'DISABLED', 'one_call_left': 'LIMIT_REACHED',
