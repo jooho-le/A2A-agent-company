@@ -65,7 +65,8 @@ def _host_files(entry, base):
 
 def host_configuration_checks(plan, base, add, warnings, lock_bytes=None):
     """계획과 구조별 Host 실행 설정 파일의 대조. 설정을 주지 않았거나 읽지 못하면 미검증이다."""
-    from .experiment_run import RUNTIME_LIMITS
+    from agents.platform.pricing import has_requested_model_rate
+    from .experiment_run import RUNTIME_LIMITS, optional_limit_differences
     from .parity import config_parity, static_tool_parity
     configs = plan.get('hostConfigurations')
     if not isinstance(configs, dict) or set(configs) != set(ARCHITECTURES):
@@ -90,6 +91,10 @@ def host_configuration_checks(plan, base, add, warnings, lock_bytes=None):
         # 계획의 LLM 한도 전체(모델·도구 호출, 출력·총 토큰, 호출 제한시간)와 시간 예산을 대조한다. 계획에 없는 칸도 다르다고 본다.
         differing = [key for key, target in RUNTIME_LIMITS.items()
                      if key not in limits or target not in llm or limits[key] != llm[target]]
+        differing.extend(optional_limit_differences(limits, llm))
+        if plan.get('requireCostMeasurement') is True or 'priceBook' in paths:
+            add(f'hostPriceBook.{architecture}', has_requested_model_rate(paths.get('priceBook'), host_model),
+                'COST_UNAVAILABLE_FOR_REQUESTED_MODEL')
         if limits.get('runtimeBudgetMs') is None or runtime.get('runtimeBudgetMs') != limits.get('runtimeBudgetMs'):
             differing.append('runtimeBudgetMs')
         add(f'hostLimits.{architecture}', not differing, 'HOST_LIMITS_DIFFER_FROM_PLAN', detail=differing or None)
@@ -212,6 +217,10 @@ def browser_execution_checks(plan, base, add, *, docker, files, enabled):
             # 브라우저 부분만 dev와 같은 디코더로 읽는다(dev 도구 설정 해석과 같은 공통 이미지·Docker 주소 주입).
             _paths, documents = _host_files(configurations.get(architecture), Path(base))
             tools = documents['tools']
+            if tools.get('browser', 'MISSING') is None:
+                # Explicitly absent capability, not a passing browser execution.
+                add(name + '.notConfigured', True, None)
+                continue
             image = tools['imageReference']
             browser = decode_browser_configuration(json.dumps({**tools['browser'], 'image_reference': image,
                                                                'docker_endpoint': tools['dockerEndpoint']}))
@@ -239,6 +248,7 @@ def _call_limit_checks(limits, add, warnings):
 
 def check_preparation(plan, *, base=Path('.'), docker='docker', connect_docker=True):
     checks, warnings = [], []
+    from .experiment_run import ExperimentRunError, _planned_request_digest, _registered_run_token_limit
 
     def add(name, valid, reason, detail=None):
         row = {'check': name, 'status': 'PASS' if valid else 'UNVERIFIED', 'reason': None if valid else reason}
@@ -250,6 +260,12 @@ def check_preparation(plan, *, base=Path('.'), docker='docker', connect_docker=T
         raise ValueError('DOCKER_CHECK_OPTION_INVALID')
     if not isinstance(plan, dict):
         raise ValueError('PLAN_INVALID')
+    try:
+        _planned_request_digest(plan)
+    except ExperimentRunError as error:
+        add('requestText', False, error.code)
+    else:
+        add('requestText', True, None)
     try:
         valid_id = UUID(plan.get('experimentId')).version == 4
     except (ValueError, TypeError, AttributeError):
@@ -274,6 +290,10 @@ def check_preparation(plan, *, base=Path('.'), docker='docker', connect_docker=T
     add('warmupState', bool(plan.get('warmupState')), 'WARMUP_STATE_REQUIRED')
     add('hardwareProfile', bool(plan.get('hardwareProfile')), 'HARDWARE_PROFILE_REQUIRED')
     _call_limit_checks(limits, add, warnings)
+    if plan.get('requireTotalTokenLimit') is True:
+        add('runTotalTokenLimit', _registered_run_token_limit(plan), 'RUN_TOTAL_TOKEN_LIMIT_NOT_SET')
+    elif plan.get('requireCostMeasurement') is True and not _registered_run_token_limit(plan):
+        warnings.append({'code': 'RUN_TOTAL_TOKEN_LIMIT_NOT_SET'})
     source = plan.get('source')
     source_ok, lock_ok, clean, lock_bytes, files = False, False, False, None, None
     if isinstance(source, dict):

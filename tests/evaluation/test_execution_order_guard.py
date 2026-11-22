@@ -26,6 +26,17 @@ def test_new_submission_cannot_skip_unrecorded_predecessors(setup, order_mode, i
     assert not (out / er.LEDGER).exists()
 
 
+def test_registered_ceiling_is_required_before_contacting_host(setup):
+    base, out = setup
+    plan = _matching_plan(requireTotalTokenLimit=True)
+    host = _Host(['FINISHED'])
+    with pytest.raises(er.ExperimentRunError, match='RUN_TOTAL_TOKEN_LIMIT_NOT_SET'):
+        er.run_one(plan, er.schedule(plan)['runs'][0], out, base,
+                   client_factory=host.client, exporter=_exporter([]))
+    assert host.requests == []
+    assert not (out / er.LEDGER).exists()
+
+
 def test_closed_first_slot_does_not_authorize_skipping_the_second(setup):
     base, out = setup
     plan = _matching_plan()

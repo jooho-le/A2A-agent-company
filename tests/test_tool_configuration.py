@@ -16,6 +16,7 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+import pytest
 from unittest.mock import patch
 
 from agents.platform.tool_configuration import (
@@ -620,3 +621,22 @@ class ToolConfigurationCLITests(_ToolConfigurationFixture, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_operator_can_explicitly_disable_browser_without_default_or_other_tools_disabled():
+    data = configuration_data()
+    data['browser'] = None
+    config = decode_tool_configuration(json.dumps(data))
+    assert config.browser_configuration is None
+    assert config._browser_json == 'null'
+    assert config.unit_configuration_for(AgentRole.QA) is not None
+    assert config.security_configuration is not None
+    assert replace(config).browser_configuration is None
+    for key in ('build', 'unit', 'security'):
+        bad = deepcopy(data)
+        bad[key] = None
+        with pytest.raises(ToolConfigurationError):
+            decode_tool_configuration(json.dumps(bad))
+    del data['browser']
+    with pytest.raises(ToolConfigurationError):
+        decode_tool_configuration(json.dumps(data))

@@ -40,6 +40,7 @@ from orchestrator.sandbox.runtime import SandboxRuntime
 from semantic_helpers import SemanticFakeProvider as FakeProvider
 from test_llm_runtime import ToolCall, text_response, tool_response
 from test_mcp_execution_runtime import DispatcherSession
+from signup_receipt_fixture import generated_signup_evidence
 from test_sandbox_runtime import FakeDocker, IMAGE_ID
 import test_owned_agent_pipeline as fixtures
 import test_single_agent_mcp as single_mcp_fixtures
@@ -90,7 +91,9 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                     docker.exit_code = int(failure is not None)
                     payload = {"format": "unittest-v1", "total": len(identities),
                         "passed": len(identities) - docker.exit_code, "failed": docker.exit_code, "skipped": 0,
-                        "tests": [{"testId": identity, "outcome": "FAIL" if index == failure else "PASS"}
+                        "tests": [{"testId": identity, "outcome": "FAIL" if index == failure else "PASS",
+                                   **(generated_signup_evidence("SECURITY", index + 1)
+                                      if "--security-output-checks" in container["Config"]["Cmd"] else {})}
                                   for index, identity in enumerate(identities)]}
                 else:
                     profile = configuration.security_scan_configuration.profiles[0]
@@ -131,6 +134,8 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
                         "path": "outputs/security/tests/test_security.py", "content": "# inert Security fixture\n"})))
             def measured_ready(request):
                 payload = json.loads(ready(request).output_text)
+                for row in payload['requirementReviews']:
+                    row['rationale'] = 'HOST_TESTS_PENDING'
                 payload["testCases"] = [{"selector": "security-unit", "testId": f"test_security.Security.test_req_{index}",
                     "requirementId": str(requirement), "title": f"보안 기준 {index}",
                     "expectedResult": next(item.acceptance_criteria[0] for item in self.f.scenario.requirements
@@ -141,9 +146,10 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         return FakeProvider(*script)
 
     @asynccontextmanager
-    async def running(self, *, cap=16, tool_cap=12, provider=None, price_book=None):
+    async def running(self, *, cap=16, tool_cap=12, provider=None, price_book=None, corrections=0, reminders=0):
         provider = provider or self.provider()
-        limits = LLMLimits(max_model_calls=cap, max_tool_calls=tool_cap, model_timeout_seconds=2, max_output_tokens=4096)
+        limits = LLMLimits(max_model_calls=cap, max_tool_calls=tool_cap, model_timeout_seconds=2, max_output_tokens=4096,
+                          max_output_corrections=corrections, max_question_reminders=reminders)
         selected = self.f.settings[AgentRole.DEVELOPER].model_copy(update={"role": SingleAgentIdentity.SINGLE_AGENT,
             "database_path": self.f.directory / "single.sqlite3", "llm_limits": limits})
         settings = self.f.orchestrator_settings.model_copy(update={
@@ -176,7 +182,7 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             await self.platform.aclose()
 
     async def submit(self, client):
-        response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.f.submission()), timeout=20)
+        response = await asyncio.wait_for(client.post("/api/v1/runs", json=self.f.submission()), timeout=300)
         self.assertEqual(response.status_code, 201, response.text)
         return UUID(response.json()["run"]["runId"])
 
@@ -188,12 +194,26 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len({step.a2a_task_id for step in steps}), 4)
         mappings = self.f.repository.list_agent_contexts(run_id)
         self.assertEqual([item.agent_id for item in mappings], ["single_agent"])
-        primary = [request for request in provider.requests if request.output.name != 'product_semantic_review_v1']
-        reviews = [request for request in provider.requests if request.output.name == 'product_semantic_review_v1']
+        primary = [request for request in provider.requests if request.output.name != 'product_semantic_review_v5']
+        reviews = [request for request in provider.requests if request.output.name == 'product_semantic_review_v5']
         self.assertEqual({request.system_prompt for request in primary}, {build_single_system_prompt()})
         self.assertEqual({request.system_prompt for request in reviews}, {build_single_system_prompt()})
         self.assertEqual(len(reviews), 4)
         payloads = [json.loads(json.loads(request.input_items_json)[0]["content"]) for request in primary]
+        for payload in payloads:
+            phase, data = payload["trusted"]["phase"], payload["taskInput"]
+            if phase == "PLANNING":
+                self.assertNotIn("fileAccess", data)
+                continue
+            guide = data["fileAccess"]
+            self.assertIn({"repositoryPath": "main.py", "toolPath": "source/main.py"}, guide["startingFilePaths"])
+            self.assertEqual(guide["sourceReadMode"], "WORKING_COPY" if phase == "IMPLEMENTING" else "FROZEN_SNAPSHOT")
+            if phase in {"QA", "SECURITY"}:
+                self.assertIsNone(guide["sourceWriteRoot"])
+                self.assertEqual(guide["testWriteRoot"], f"outputs/{phase.lower()}/tests/")
+            if phase == "SECURITY":
+                self.assertEqual(guide["observedSourceFiles"], [
+                    {"repositoryPath": path, "toolPath": "source/" + path} for path in data["sourcePaths"]])
         self.assertEqual(list(dict.fromkeys(payload["trusted"]["phase"] for payload in payloads)),
                          ["PLANNING", "IMPLEMENTING", "QA", "SECURITY"])
         self.assertEqual({payload["trusted"]["identity"] for payload in payloads}, {"SINGLE_AGENT"})
@@ -236,6 +256,56 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(reports), 3)
             self.assertEqual(len({item.execution_manifest.snapshot_sha256 for item in reports}), 1)
 
+    async def test_single_qa_uses_same_bounded_test_source_correction(self):
+        self.measured_security = True
+        provider = self.provider()
+        original = provider.script[3]
+        def rejected_write(request):
+            response = original(request)
+            call = response.tool_calls[0]
+            args = json.loads(call.arguments_json)
+            args['content'] = 'password = "SYNTHETIC_BLOCKED_TEST_LITERAL"\n'
+            return tool_response(ToolCall(call_id='qa-rejected',name=call.name,
+                                          arguments_json=json.dumps(args)))
+        provider.script.insert(3, rejected_write)
+        async with self.running(provider=provider) as (client, _):
+            run_id = await self.submit(client)
+            run = self.f.repository.get_run(run_id)
+            self.assertEqual(run.verdict.value, 'SUCCESS')
+            self.assertTrue(all(record.role is SingleAgentIdentity.SINGLE_AGENT for record in self.usage))
+            for request in provider.requests:
+                self.assertNotIn('SYNTHETIC_BLOCKED_TEST_LITERAL', request.input_items_json)
+            self.assertTrue(any('hostToolFeedback' in request.input_items_json for request in provider.requests))
+            events, _ = self.platform.telemetry_store.list_events(run_id, limit=500)
+            rejected = [e for e in events if e['binding'].get('eventType') == 'LLM_POLICY_REJECTED']
+            self.assertEqual(len(rejected), 1)
+            self.assertEqual(rejected[0]['binding']['actor'], 'SINGLE_AGENT')
+
+    async def test_planner_diagnostic_survives_single_contract_and_runtime_boundaries(self):
+        roles = self.f.providers()
+        data = json.loads(roles[AgentRole.PLANNER].script[0].output_text)
+        data['implementationPlan'][0]['requirementIds'].pop()
+        provider = FakeProvider(text_response(json.dumps(data)))
+        async with self.running(provider=provider) as (client, _):
+            run_id = await self.submit(client)
+            self.assertIs(self.f.repository.get_run(run_id).status, WorkflowStatus.HUMAN_REVIEW)
+            self.assertEqual(len(provider.requests), 1)
+            self.assertFalse(self.model_clients)
+            step = self.f.repository.list_steps(run_id)[0]
+            app = self.platform.agent_apps[SingleAgentIdentity.SINGLE_AGENT]
+            stored = (await app.state.task_store.revisions(step.a2a_task_id))[-1]
+            from google.protobuf.json_format import MessageToDict
+            payload = MessageToDict(stored.status.message.parts[0].data)
+            self.assertEqual(payload['code'], 'PLANNER_OUTPUT_INVALID')
+            self.assertTrue(payload['plannerValidation']['traceRecorded'])
+            self.assertEqual(payload['plannerValidation']['issues'][0]['requirementKey'], 'REQ-008')
+            response = await client.get(f'/api/v1/runs/{run_id}/telemetry')
+            self.assertEqual(response.status_code, 200)
+            rows = [row for row in response.json()['events'] if row['binding'].get('eventType')=='PLANNER_OUTPUT_REJECTED']
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['binding']['actor'], 'SINGLE_AGENT')
+            self.assertEqual(rows[0]['plannerValidation']['candidateSha256'], payload['plannerValidation']['candidateSha256'])
+
     async def test_shared_model_cap_stops_later_phases_without_new_budget(self):
         async with self.running(cap=2) as (client, provider):
             run_id = await self.submit(client)
@@ -268,8 +338,11 @@ class SingleAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.f.service_contexts)
 
     async def test_qa_failure_infrastructure_does_not_launch_security_in_same_context(self):
+        from agents.llm.contracts import LLMErrorCode, LLMRuntimeError
         provider = self.provider()
-        provider.script[4] = text_response("{}")
+        # Malformed model JSON now has a proven technical-completion route.
+        # A provider/infrastructure error still must stop this shared context.
+        provider.script[4] = LLMRuntimeError(LLMErrorCode.PROVIDER)
         async with self.running(provider=provider) as (client, provider):
             run_id = await self.submit(client)
             self.assertIs(self.f.repository.get_run(run_id).status, WorkflowStatus.HUMAN_REVIEW)

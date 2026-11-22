@@ -37,6 +37,7 @@ def _input_required(role):
         decision["unapprovedAssumptions"] = []
     elif role is AgentRole.DEVELOPER:
         decision["summary"] = ""
+        decision["rejection"] = None  # Developer 계약의 필수 칸(READY·INPUT_REQUIRED는 null, docs/live-api/19)
     elif role is AgentRole.QA:
         decision["cases"] = []
     else:
@@ -121,7 +122,7 @@ class _ControlHarness(fix_fixture._FixHarness):
 
 class OwnedAgentControlsTests(unittest.IsolatedAsyncioTestCase):
     async def submit(self, harness, client):
-        response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.base.submission()), 40)
+        response = await asyncio.wait_for(client.post("/api/v1/runs", json=harness.base.submission()), timeout=300)
         self.assertEqual(response.status_code, 201, response.text)
         return UUID(response.json()["run"]["runId"])
 

@@ -33,7 +33,7 @@ import test_validation_revalidation_services as revalidation_fixture
 
 class EvaluationPolicyPinningTests(unittest.IsolatedAsyncioTestCase):
     def borrow(self, role, *, protected=False):
-        case = qa_fixture.QAServicesTests("test_protected_scope_hidden_and_always_executed_after_ready"
+        case = qa_fixture.QAServicesTests("test_protected_scope_hidden_run_at_entry_and_reused_after_restart_and_ready"
             if protected else "test_constructor_inert_and_private_repr") if role is AgentRole.QA \
             else security_fixture.SecurityAgentServicesTests("test_constructor_is_inert_and_private_repr")
         case.setUp()
@@ -335,6 +335,14 @@ class EvaluationPolicyPinningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.list_for_run(case.metadata.run_id), ())
         with case.repository._connection() as connection:
             self.assertIsNone(connection.execute("SELECT 1 FROM sqlite_master WHERE name='run_evaluation_policies'").fetchone())
+
+    def test_docker_control_bytes_are_pinned_for_both_validation_roles(self):
+        from orchestrator.sandbox import docker_cli
+        for role, digest in ((AgentRole.QA, qa_policy_sha256), (AgentRole.SECURITY, security_policy_sha256)):
+            configuration = self.borrow(role).configuration
+            original = digest(configuration, ())
+            with self.subTest(role=role), patch.object(docker_cli, '__file__', __file__):
+                self.assertNotEqual(digest(configuration, ()), original)
 
     async def test_read_only_query_returns_typed_immutable_hash_after_termination(self):
         case = self.borrow(AgentRole.SECURITY)

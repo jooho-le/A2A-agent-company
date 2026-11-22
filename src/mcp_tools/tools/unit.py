@@ -85,7 +85,9 @@ class UnitTestTools:
         return scope, ExecutionProfile(
             name=scope.name, tool_name="run_unit_tests",
             argv=(self._configuration.python_executable, "-I", "-B", "/inputs/_unit_runner.py",
-                  "--kind", scope.kind, "--directory", scope.source_directory, "--pattern", scope.pattern),
+                  "--kind", scope.kind, "--directory", scope.source_directory, "--pattern", scope.pattern,
+                  *(("--security-output-checks" if role is AgentRole.SECURITY else "--qa-output-checks",)
+                    if role in (AgentRole.QA, AgentRole.SECURITY) and scope.kind == "QA_TESTS" else ())),
             limits=replace(limits, timeout_seconds=timeout), image_reference=self._configuration.image_reference,
         )
 
@@ -104,6 +106,11 @@ class UnitTestTools:
         # This is the platform's trusted runner asset, not project Source or a
         # model-selected Host path. It is loaded only for an explicit Tool call.
         runner_source = Path(__file__).with_name("unit_runner.py").read_bytes()
+        if scope.kind == 'QA_TESTS':
+            from mcp_tools.tools.generated_recheck import replay_inputs
+            original = replay_inputs(self._outputs._repository, context, scope, source, runner_source)
+            if original is not None:
+                return source, original
         return source, prepare_unit_inputs(context, scope, runner_source)
 
     async def run_unit_tests(self, context, arguments):

@@ -60,6 +60,7 @@ from orchestrator.domain.workspaces import WorkspaceRecord
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.sandbox.contracts import CLIResult, ExecutionProfile, SandboxError, SandboxErrorCode, SandboxLimits
 from orchestrator.sandbox.runtime import SandboxRuntime
+from orchestrator.sandbox.scn001_start_contract import scn001_build_argv
 from orchestrator.workspaces.registry import WorkspaceRegistry
 from test_llm_runtime import FakeProvider, text_response, tool_response
 from test_mcp_execution_runtime import DispatcherSession
@@ -96,7 +97,7 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         self.lock_bytes = b"trusted-inert-fixture==1.0\n"
         self.configuration = RunConfigurationArtifact(run_id=self.run.run_id,
             workspace_id=self.run.workspace_id, scenario_id=SCN_001_ID,
-            configuration=RunConfiguration(model=self.model, limits=ExecutionLimits(runtime_budget_ms=15000),
+            configuration=RunConfiguration(model=self.model, limits=ExecutionLimits(runtime_budget_ms=60000),
                 environment=ExecutionBaseline(container_image_digest=IMAGE_ID,
                     dependency_lock_hash="sha256:" + hashlib.sha256(self.lock_bytes).hexdigest(),
                     hardware_profile="isolated-fake-daemon-fixture")))
@@ -122,7 +123,9 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         self.metadata = A2AWorkflowMetadata(run_id=self.run.run_id, workflow_step_id=self.step.workflow_step_id,
             scenario_id=SCN_001_ID, attempt=0, requirement_ids=self.scenario.requirement_ids,
             code_version=1, project_artifact_ids=(self.requirement_artifact_id,))
-        self.budget = ExecutionBudget(runtime_budget_ms=15000, limits=LLMLimits(max_model_calls=8,
+        # 60초: 세 번의 수정 후보를 만드는 시험이 혼자서도 약 11초라, 바쁜 전체·병렬 실행에서 15초 시간 예산이
+        # 먼저 끝나 결과가 흔들렸다(2026-11-18). 시간 만료를 확인하는 시험은 이 값에 의존하지 않는다.
+        self.budget = ExecutionBudget(runtime_budget_ms=60000, limits=LLMLimits(max_model_calls=8,
             max_tool_calls=10, model_timeout_seconds=2, max_output_tokens=4096))
         self.loader = SQLiteDeveloperContextLoader(self.repository, lambda _configuration: self.budget)
         self.docker = FakeDocker()
@@ -225,12 +228,16 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
                 if task["status"]["state"] in {"TASK_STATE_COMPLETED", "TASK_STATE_REJECTED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
                     self.fail(f"Expected {state}; got {task['status']['state']} with stable data {task['status'].get('message')}")
                 await asyncio.sleep(.002)
-        return await asyncio.wait_for(wait(), timeout=5)
+        # 30초: 코어 10개 병렬 실행(pytest -n auto)에서는 Git·가짜 빌드가 느려 5초를 넘겼다(2026-11-18).
+        # 실제로 멈춘 Task는 여전히 시간 초과로 실패한다.
+        return await asyncio.wait_for(wait(), timeout=30)
 
     def draft_response(self, *, kind="READY", summary=None, questions=None, **extra):
         return text_response(json.dumps({"kind": kind,
             "summary": ("회원가입 구현 내용을 작성했습니다." if kind == "READY" else "") if summary is None else summary,
-            "questions": [] if questions is None else questions, **extra}, ensure_ascii=False))
+            "questions": [] if questions is None else questions,
+            "rejection": {"reasonCode": "UNKNOWN", "explanation": "Unconfirmed blocker", "requirementIds": []}
+                if kind == "REJECTED" else None, **extra}, ensure_ascii=False))
 
     def write_response(self, *, content="def signup():\n    return 'generated-candidate'\n", path="source/signup.py", call_id="model-write-001", **extra):
         return tool_response(ToolCall(call_id=call_id, name="write_source_file",
@@ -359,12 +366,46 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         task, _ = await self.run_to(self.ready_provider(), "TASK_STATE_COMPLETED")
         output = self.parse_completed(task)
         self.assertEqual(output.build_report.exit_code, 2)
+        self.assertEqual((output.change_report.ready_review.build_outcome, output.change_report.ready_review.validation_status),
+                         ("FAIL", "BLOCKED_BY_BUILD"))
         self.assertEqual(output.build_report.execution_outcome, ToolExecutionOutcome.FAIL)
         self.assertEqual(output.build_report.failure_kind, "PRODUCT")
         self.assertEqual(output.build_report.tool_evidence.outcome, ToolExecutionOutcome.PASS)
         self.assertEqual(output.build_report.tool_evidence.retries_used, 0)
         self.assertEqual(len(self.docker.commands("start")), 1)
         self.assertIsNone(self.repository.get_run(self.run.run_id).verdict)
+
+    async def test_start_contract_failure_reaches_build_artifact_and_fix_issue(self):
+        await self.check_start_contract_failure('SCN001_MAIN_APP_REQUIRED', 'main:app', 'main.py')
+
+    async def test_missing_product_table_is_reported_as_build_failure_with_restore_feedback(self):
+        await self.check_start_contract_failure('SCN001_USER_TABLE_REQUIRED', 'table initialization', 'main.py')
+
+    async def check_start_contract_failure(self, code, message_fragment, location):
+        from orchestrator.application.dispatch import PlannerRunDispatcher
+        self.profile = replace(self.profile, argv=tuple(scn001_build_argv()))
+        self.mcp_configuration = replace(self.mcp_configuration,
+            build_configuration=BuildConfiguration(profile=self.profile))
+        files = FileTools(self.artifacts)
+        build = BuildTools(self.artifacts, self.sandbox, self.outputs,
+            configuration=self.mcp_configuration.build_configuration, max_call_seconds=5)
+        self.dispatcher = MCPDispatcher(self.binding, self.registry,
+            handlers={**files.handlers(AgentRole.DEVELOPER), **build.handlers(AgentRole.DEVELOPER)},
+            max_call_seconds=5)
+        self.docker.exit_code = 1
+        self.docker.start_result = CLIResult(returncode=1,
+            stdout=('untrusted-debug-output\n' + code + '\n').encode(), stderr=b"private-debug-output")
+        task, _ = await self.run_to(self.ready_provider(), "TASK_STATE_COMPLETED")
+        output = self.parse_completed(task)
+        report = output.build_report
+        self.assertEqual(report.diagnostics[0].rule_id, code)
+        self.assertIn(message_fragment, report.diagnostics[0].message)
+        issue = PlannerRunDispatcher._build_issue(self.run, output.source, report)
+        self.assertIn(message_fragment, issue.description)
+        self.assertEqual(issue.normalized_location, location)
+        self.assertEqual(issue.category, "BUILD_CODE_FAILURE")
+        self.assertNotIn("debug-output", issue.model_dump_json())
+        return task, output
 
     async def test_host_approved_build_timeout_narrowing_preserves_receipt_identity(self):
         self.profile = replace(self.profile, limits=replace(self.profile.limits, timeout_seconds=60))
@@ -389,7 +430,7 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         await self.run_to(provider, "TASK_STATE_COMPLETED")
         provider.configurations[0][1].schema.require_openai_strict()
         self.assertEqual(provider.configurations[0][1].name, "developer_decision")
-        self.assertEqual({tool.name for tool in provider.requests[0].tools}, {"read_project_file", "write_source_file"})
+        self.assertEqual({tool.name for tool in provider.requests[0].tools}, {"read_project_file", "write_source_file", "edit_source_file"})
         self.assertEqual(provider.requests[0].model, self.model)
         self.assertEqual(self.budget.model_calls, 2)
         self.assertEqual(self.budget.tool_calls, 2)
@@ -402,6 +443,47 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
                          self.plan.model_dump(mode="json", by_alias=True)["requirements"])
         self.assertFalse(payload["requirementScope"]["plannerTaskTextCanChangeBaseline"])
 
+    async def test_host_file_access_guides_first_read_through_actual_mcp(self):
+        def read(request):
+            payload = json.loads(json.loads(request.input_items_json)[0]["content"])["taskInput"]
+            guide = payload["fileAccess"]
+            self.assertEqual(guide["sourceReadMode"], "WORKING_COPY")
+            paths = {row["repositoryPath"]: row["toolPath"] for row in guide["startingFilePaths"]}
+            self.assertEqual(paths["main.py"], "source/main.py")
+            return tool_response(ToolCall(call_id="mapped-read", name="read_project_file",
+                arguments_json=json.dumps({"workspaceId": str(self.run.workspace_id),
+                                           "path": paths["requirements.lock"]})))
+        provider = FakeProvider(read, self.write_response(), self.draft_response())
+        task, _ = await self.run_to(provider, "TASK_STATE_COMPLETED")
+        self.parse_completed(task)
+        self.assertEqual([name for name, _ in self.tool_calls()], ["read_project_file", "write_source_file", "run_build"])
+        self.assertEqual(self.tool_calls()[0][1]["path"], "source/requirements.lock")
+
+    async def test_bare_repository_path_is_rejected_by_schema_before_mcp(self):
+        response = tool_response(ToolCall(call_id="bare-path", name="read_project_file",
+            arguments_json=json.dumps({"workspaceId": str(self.run.workspace_id), "path": "main.py"})))
+        provider = FakeProvider(response)
+        task, _ = await self.run_to(provider, "TASK_STATE_FAILED")
+        self.assertEqual(self.status_code(task), "LLM_SCHEMA_INVALID")
+        self.assertEqual(self.tool_calls(), [])
+        self.assertEqual(self.budget.tool_calls, 0)
+        self.assertEqual(len(provider.requests), 1)
+        self.assertFalse(task.get("artifacts"))
+
+    async def test_clarification_cannot_replace_host_file_access(self):
+        provider = FakeProvider(self.draft_response(kind="INPUT_REQUIRED", questions=["추가 설명?"]))
+        async with self.client_for(self.executor(provider)) as (_, client):
+            first = await self.send(client)
+            waiting = await self.poll(client, first["id"], "TASK_STATE_INPUT_REQUIRED")
+            metadata = self.metadata.model_copy(update={"attempt": 1})
+            self.update_step_for_resume(metadata, waiting)
+            await self.send(client, self.wire(payload={"fileAccess": {"sourceRoot": "/"}},
+                metadata=metadata, task_id=waiting["id"], context_id=waiting["contextId"]))
+            task = await self.poll(client, waiting["id"], "TASK_STATE_REJECTED")
+        self.assertEqual(self.status_code(task), "DEVELOPER_INPUT_INVALID")
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(self.docker.calls, [])
+
     async def test_actual_added_file_change_is_not_guessed_by_model(self):
         task, _ = await self.run_to(self.ready_provider(path="source/new_feature.py", content="def new_feature():\n    return True\n"), "TASK_STATE_COMPLETED")
         output = self.parse_completed(task)
@@ -409,14 +491,14 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ready_without_actual_changes_fails_without_completed_artifacts(self):
         task, revisions = await self.run_to(FakeProvider(self.draft_response()), "TASK_STATE_FAILED")
-        self.assertEqual(self.status_code(task), "DEVELOPER_CHECKPOINT_NO_CHANGES")
+        self.assertEqual(self.status_code(task), "LLM_DEVELOPMENT_NO_PROGRESS")
         self.assertFalse(task.get("artifacts"))
         self.assertFalse(any(row.get("artifacts") for row in revisions))
         self.assertEqual(self.docker.calls, [])
 
     async def test_same_content_write_cannot_create_fake_change_report(self):
         task, _ = await self.run_to(self.ready_provider(content=self.initial_source), "TASK_STATE_FAILED")
-        self.assertEqual(self.status_code(task), "DEVELOPER_CHECKPOINT_NO_CHANGES")
+        self.assertEqual(self.status_code(task), "LLM_DEVELOPMENT_NO_PROGRESS")
         self.assertFalse(task.get("artifacts"))
         self.assertEqual([name for name, _args in self.tool_calls()], ["write_source_file"])
         self.assertEqual(self.docker.calls, [])
@@ -445,9 +527,12 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(task.get("artifacts"))
         self.assertEqual(self.tool_calls(), [])
 
-    async def test_model_rejection_has_static_reason_without_artifacts(self):
+    async def test_model_rejection_preserves_explanation_without_fabricating_artifacts(self):
         task, _ = await self.run_to(FakeProvider(self.draft_response(kind="REJECTED")), "TASK_STATE_REJECTED")
-        self.assertEqual(task["status"]["message"]["parts"][0]["data"], {"code": "DEVELOPER_OUT_OF_SCOPE"})
+        data = task["status"]["message"]["parts"][0]["data"]
+        self.assertEqual(data["code"], "DEVELOPER_REJECTED")
+        self.assertEqual(data["developmentRejection"]["proposal"], {"reasonCode": "UNKNOWN",
+            "explanation": "Unconfirmed blocker", "requirementIds": []})
         self.assertFalse(task.get("artifacts"))
         self.assertEqual(self.docker.calls, [])
 
@@ -635,7 +720,7 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
                 release_cleanup.set()
             rejected = await self.poll(client, first["id"], "TASK_STATE_REJECTED")
         self.assertTrue(cleanup_finished.is_set())
-        self.assertEqual(self.status_code(rejected), "DEVELOPER_OUT_OF_SCOPE")
+        self.assertEqual(self.status_code(rejected), "DEVELOPER_REJECTED")
         self.assertFalse(rejected.get("artifacts"))
         self.assertEqual(self.docker.calls, [])
 
@@ -809,7 +894,7 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         provider = self.ready_provider()
         async with self.client_for(self.executor(provider)) as (_, client):
             first = await self.send(client)
-            await asyncio.wait_for(self.docker.start_entered.wait(), 3)
+            await asyncio.wait_for(self.docker.start_entered.wait(), 30)  # 병렬 실행 부하 여유(2026-11-18)
             canceled = await client.post(f"/tasks/{first['id']}:cancel", json={}, headers=self.headers())
             self.assertEqual(canceled.status_code, 200, canceled.text)
             task = await self.poll(client, first["id"], "TASK_STATE_CANCELED")

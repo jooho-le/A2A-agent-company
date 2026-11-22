@@ -21,6 +21,19 @@ class LLMLimits(BaseModel):
     model_timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     tool_timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     max_json_bytes: int = Field(default=1_048_576, ge=128, strict=True)
+    # Pre-side-effect format mistakes (tool arguments, output schema, role
+    # contract, semantic-review format) may be regenerated with fixed feedback
+    # at most this many times per engine run, never twice for the same mistake.
+    # 0 keeps the original fail-closed behavior. See agents.llm.corrections.
+    max_output_corrections: int = Field(default=0, ge=0, le=3, strict=True)
+    # Autonomous measurement Runs: when a role/phase returns INPUT_REQUIRED, send
+    # one fixed reminder that nobody will answer and the scenario contract holds
+    # the fixed answers, then let it continue. Asking again stops as before.
+    # 0 keeps questions as an immediate pause (product default).
+    max_question_reminders: int = Field(default=0, ge=0, le=1, strict=True)
+    # Same call sent again after a provider failure with no model response
+    # (connection never made, HTTP 429/5xx). 0 = off; measurement configs only.
+    max_provider_retries: int = Field(default=0, ge=0, le=1, strict=True)
 
 
 class BudgetSnapshot(BaseModel):
@@ -40,7 +53,11 @@ class BudgetSnapshot(BaseModel):
     known_total_tokens: int = Field(default=0, ge=0, strict=True)
     usage_complete: bool = Field(default=True, strict=True)
     pending_model_sequences: tuple[int, ...] = ()
+    pending_token_reservations: dict[int, int] = Field(default_factory=dict)
     accounted_usage: dict[int, TokenUsage | None] = Field(default_factory=dict)
+    # 2026-11-18 (Codex review): a provider failure without usage stays unknown in accounted_usage;
+    # its conservative upper bound lives here and only feeds the token-cap check.
+    unknown_usage_bounds: dict[int, int] = Field(default_factory=dict)
     pending_tool_sequences: tuple[int, ...] = ()
     accounted_tool_sequences: tuple[int, ...] = ()
     invalidated: bool = Field(default=False, strict=True)
@@ -58,6 +75,9 @@ class BudgetSnapshot(BaseModel):
         if any(type(value) is not int or value < 1 for value in pending) or len(set(pending)) != len(pending):
             raise ValueError("budget pending sequences are invalid")
         keys = set(self.accounted_usage)
+        if (not set(self.pending_token_reservations).issubset(pending)
+                or any(type(v) is not int or v <= 0 for v in self.pending_token_reservations.values())):
+            raise ValueError('invalid pending token reservation')
         if any(type(value) is not int or value < 1 for value in keys) or keys.intersection(pending):
             raise ValueError("budget accounted sequences are invalid")
         if keys.union(pending) != set(range(1, self.model_calls + 1)):
@@ -66,6 +86,9 @@ class BudgetSnapshot(BaseModel):
         complete = all(value is not None for value in self.accounted_usage.values())
         if known != self.known_total_tokens or complete is not self.usage_complete:
             raise ValueError("budget token accounting is inconsistent")
+        if any(type(key) is not int or self.accounted_usage.get(key, 0) is not None
+               or type(value) is not int or value <= 0 for key, value in self.unknown_usage_bounds.items()):
+            raise ValueError("budget unknown-usage bounds are inconsistent")
         tool_sequences = self.pending_tool_sequences + self.accounted_tool_sequences
         if (any(type(value) is not int or value < 1 for value in tool_sequences)
                 or len(set(tool_sequences)) != len(tool_sequences)
@@ -77,9 +100,10 @@ class BudgetSnapshot(BaseModel):
 class ExecutionBudget:
     """Trusted host can share this object across roles in a single process.
 
-    Token usage is checked AFTER each response; input billing cannot be reserved
-    exactly without provider tokenization. Unknown usage blocks subsequent model
-    calls when a token cap is configured. Optional owned-Host persistence records
+    Actual token usage is checked AFTER each response. Callers may reserve a
+    conservative input allowance before sending; concurrent calls share these
+    reservations. This is not provider-exact tokenization. Unknown usage blocks subsequent model
+    calls when a token cap is configured, unless the engine recorded a conservative upper bound for it. Optional owned-Host persistence records
     reservations before effects; it is not distributed Run coordination.
     """
 
@@ -95,12 +119,16 @@ class ExecutionBudget:
         self._tool_calls = 0
         self._known_tokens = 0
         self._usage_complete = True
+        # Unknown usage with a recorded upper bound does not block the token cap (see BudgetSnapshot).
+        self._unknown_bounds = {}
+        self._usage_bounded = True
         self._guard = RLock()
         self._snapshot = None
         self._persistence = persistence
         self._utc_clock = utc_clock or (lambda: datetime.now(timezone.utc))
         self._failed = False
         self._pending = set()
+        self._pending_tokens = {}
         self._accounted = {}
         self._recovered_pending = False
         self._pending_tools = set()
@@ -123,11 +151,15 @@ class ExecutionBudget:
             self._known_tokens = snapshot.known_total_tokens
             self._usage_complete = snapshot.usage_complete
             self._pending = set(snapshot.pending_model_sequences)
+            self._pending_tokens = dict(snapshot.pending_token_reservations)
             self._accounted = dict(snapshot.accounted_usage)
+            self._unknown_bounds = dict(snapshot.unknown_usage_bounds)
+            self._usage_bounded = all(sequence in self._unknown_bounds
+                                      for sequence, usage in self._accounted.items() if usage is None)
             self._pending_tools = set(snapshot.pending_tool_sequences)
             self._accounted_tools = set(snapshot.accounted_tool_sequences)
             self._recovered_pending = (bool(self._pending or self._pending_tools)
-                or not self._usage_complete or snapshot.invalidated)
+                or not self._usage_bounded or snapshot.invalidated)
         elif persistence is not None:
             raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
 
@@ -191,64 +223,109 @@ class ExecutionBudget:
                 # A process restart cannot establish the external model result.
                 raise LLMRuntimeError(LLMErrorCode.BUDGET)
             cap = self.limits.max_total_tokens
-            if cap is not None and (not self._usage_complete or self._known_tokens > cap):
+            if cap is not None and (not self._usage_bounded or self._capped_tokens() > cap):
                 raise LLMRuntimeError(LLMErrorCode.BUDGET)
 
-    def reserve_model_call(self) -> tuple[int, int, float]:
+    def _capped_tokens(self) -> int:
+        """Known usage plus the upper bounds of unknown usage (the token-cap view, not billing)."""
+        return self._known_tokens + sum(self._unknown_bounds.values())
+
+    def reserve_model_call(self, *, input_tokens: int = 0) -> tuple[int, int, float]:
         with self._guard:
-            self.check_model_call()
+            self.check_model_call(input_tokens=input_tokens)
             output_cap = self.limits.max_output_tokens
+            reserved = 0
             if self.limits.max_total_tokens is not None:
-                output_cap = min(output_cap, self.limits.max_total_tokens - self._known_tokens)
+                available = self.limits.max_total_tokens - self._capped_tokens() - sum(self._pending_tokens.values())
+                output_cap = min(output_cap, available - input_tokens)
                 if output_cap < 16:
                     raise LLMRuntimeError(LLMErrorCode.BUDGET)
+                if input_tokens:
+                    reserved = input_tokens + output_cap
             sequence = self._model_calls + 1
-            self._persist(model_calls=sequence, pending_model_sequences=tuple(sorted(self._pending | {sequence})))
+            reservations = {**self._pending_tokens, **({sequence: reserved} if reserved else {})}
+            self._persist(model_calls=sequence, pending_model_sequences=tuple(sorted(self._pending | {sequence})),
+                          pending_token_reservations=reservations)
             self._model_calls = sequence
             self._pending.add(sequence)
+            self._pending_tokens = reservations
             return sequence, output_cap, min(self.remaining_seconds(), self.limits.model_timeout_seconds)
 
-    def check_model_call(self) -> None:
-        """Non-consuming admission check; never reset a continuation budget."""
+    def waits_for_pending_reservations(self, *, input_tokens: int = 0) -> bool:
+        """True when only other in-flight token reservations block this call (Codex review 2026-11-18).
+
+        Parallel QA and Security share one budget. A reservation still held by the other role
+        settles to its real usage, so this call may fit afterwards: the caller should wait within
+        the Run deadline instead of reporting exhaustion. Real exhaustion (no pending reservation,
+        no room even without them, call/time limits, unbounded unknown usage, restart) is False.
+        """
         with self._guard:
+            cap = self.limits.max_total_tokens
+            if (cap is None or not self._pending_tokens or self._failed or self._recovered_pending
+                    or not self._usage_bounded or self._model_calls >= self.limits.max_model_calls
+                    or type(input_tokens) is not int or input_tokens < 0):
+                return False
+            try:
+                self._remaining_seconds()
+            except LLMRuntimeError:
+                return False
+            free_without_pending = cap - self._capped_tokens() - input_tokens
+            return free_without_pending - sum(self._pending_tokens.values()) < 16 <= free_without_pending
+
+    def check_model_call(self, *, input_tokens: int = 0) -> None:
+        """Check that the estimated input and minimum output fit without reserving a call."""
+        with self._guard:
+            if type(input_tokens) is not int or input_tokens < 0:
+                raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
             self.check()
             if self._model_calls >= self.limits.max_model_calls:
                 raise LLMRuntimeError(LLMErrorCode.BUDGET)
             cap = self.limits.max_total_tokens
-            if cap is not None and cap - self._known_tokens < 16:
+            if cap is not None and cap - self._capped_tokens() - sum(self._pending_tokens.values()) - input_tokens < 16:
                 raise LLMRuntimeError(LLMErrorCode.BUDGET)
 
-    def account_usage(self, usage: TokenUsage | None, *, sequence: int | None = None) -> None:
+    def account_usage(self, usage: TokenUsage | None, *, sequence: int | None = None,
+                      bound: int | None = None) -> None:
+        """Record a call's measured usage. ``bound`` is only for unknown usage (``usage is None``): a
+        conservative upper bound that keeps the token cap enforceable without pretending to be usage."""
         with self._guard:
             if usage is not None and type(usage) is not TokenUsage:
                 raise LLMRuntimeError(LLMErrorCode.RESPONSE)
+            if bound is not None and (type(bound) is not int or bound <= 0 or usage is not None or sequence is None):
+                raise LLMRuntimeError(LLMErrorCode.BUDGET)
             if sequence is not None:
                 if type(sequence) is not int or sequence < 1 or sequence > self._model_calls:
                     raise LLMRuntimeError(LLMErrorCode.BUDGET)
                 if sequence in self._accounted:
-                    if self._accounted[sequence] != usage:
+                    if self._accounted[sequence] != usage or self._unknown_bounds.get(sequence) != bound:
                         raise LLMRuntimeError(LLMErrorCode.BUDGET)
                     return
-            elif self._snapshot is not None:
-                # Durable engine calls must bind their exact reservation.
+            elif self._snapshot is not None or self._pending_tokens:
+                # Durable or input-reserving calls must bind their exact reservation.
                 raise LLMRuntimeError(LLMErrorCode.BUDGET)
+            bounds = {**self._unknown_bounds, **({sequence: bound} if bound is not None else {})}
             if self._snapshot is not None:
                 receipts = {**self._accounted, sequence: usage}
                 self._persist(
                     known_total_tokens=self._known_tokens + (usage.total_tokens if usage is not None else 0),
                     usage_complete=self._usage_complete and usage is not None,
                     pending_model_sequences=tuple(sorted(self._pending - {sequence})),
+                    pending_token_reservations={k:v for k,v in self._pending_tokens.items() if k != sequence},
                     accounted_usage=receipts,
+                    unknown_usage_bounds=bounds,
                 )
             if usage is None:
                 self._usage_complete = False
+                self._usage_bounded = self._usage_bounded and bound is not None
             else:
                 self._known_tokens += usage.total_tokens
+            self._unknown_bounds = bounds
             if sequence is not None:
                 self._accounted[sequence] = usage
                 self._pending.discard(sequence)
+                self._pending_tokens.pop(sequence, None)
                 self._recovered_pending = self._recovered_pending and (
-                    bool(self._pending or self._pending_tools) or not self._usage_complete)
+                    bool(self._pending or self._pending_tools) or not self._usage_bounded)
 
     def check_tool_batch(self, count: int) -> None:
         with self._guard:
@@ -282,7 +359,7 @@ class ExecutionBudget:
             self._pending_tools.discard(sequence)
             self._accounted_tools.add(sequence)
             self._recovered_pending = self._recovered_pending and (
-                bool(self._pending or self._pending_tools) or not self._usage_complete)
+                bool(self._pending or self._pending_tools) or not self._usage_bounded)
 
     def invalidate(self) -> None:
         """Stop live side effects when a mandatory accounting sink fails."""

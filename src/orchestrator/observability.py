@@ -139,10 +139,10 @@ class ObservationStore:
         policy = {'schemaVersion': 1, 'runId': str(run.run_id),
                   'architecture': configuration.configuration.architecture,
                   'producer': 'OWNED_HOST_OBSERVATION_V1',
-                  'automaticRetries': {'A2A': 'DISABLED', 'LLM': 'DISABLED'},
+                  'automaticRetries': {'A2A': 'DISABLED', 'LLM': 'BOUNDED_PRE_EXECUTION_REGENERATION_V1'},
                   'repairRoutes': {'REPLAN': 'UNSUPPORTED', 'TEST_CHANGE': 'SNAPSHOT_AND_QA_INPUTS'},
                   'scope': 'OWNED_AUTOMATIC_SEGMENT',
-                  'limitations': ['No automatic A2A/LLM resubmission; polling is not a retry.',
+                  'limitations': ['No automatic A2A resubmission. LLM regenerations require call routing receipts; polling and normal Tool continuation are not retries.',
                                   'Output receipts cannot be matched against new secret values after collection.',
                                   'Only Run-attributed Host/Agent Python streams, Tool streams, and registered files are observed.']}
         with self.repository._transaction() as connection:

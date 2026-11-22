@@ -23,6 +23,22 @@ def failed_export(tmp_path, monkeypatch):
     return plan, host.run_id, out
 
 
+def test_two_policy_journals_for_one_experiment_cannot_use_different_requests(tmp_path, monkeypatch):
+    from evaluation.execution_journal import read_execution_journals
+
+    _, _, first = failed_export(tmp_path, monkeypatch)
+    second = tmp_path / 'other'
+    second.mkdir()
+    records = [json.loads(line) for line in (first / er.LEDGER).read_text().splitlines()]
+    for record in records:
+        record['loopPolicy'] = 'IN_LOOP_AND_FINAL'
+        if record['event'] == 'SUBMITTING':
+            record['requestTextSha256'] = '0' * 64
+    (second / er.LEDGER).write_text(''.join(json.dumps(row) + '\n' for row in records))
+    with pytest.raises(ValueError, match='EXECUTION_JOURNAL_REQUEST_MISMATCH'):
+        read_execution_journals([first, second])
+
+
 def recorded_result(root, plan):
     folder = keep(root, uid(19), None, real_report(uid(19), 'final'), real_report(uid(19), 'practice'))
     path = folder / 'bundle.json'
@@ -107,6 +123,7 @@ def test_different_run_cannot_fill_the_same_bound_slot(tmp_path, monkeypatch, un
     slots, _ = read_execution_journals([execution])
     configuration = er.submission(plan, _approved(architecture='SINGLE_AGENT'), 1)['configuration']
     replacement = {'architecture': 'SINGLE_AGENT', 'loopPolicy': 'FINAL_ONLY',
+                   'requestTextSha256': er._planned_request_digest(plan),
                    'configuration': {'runId': uid(99), 'configuration': configuration}}
     with pytest.raises(ValueError, match='EXECUTION_JOURNAL_SLOT_RUN_MISMATCH'):
         validate_bindings(slots, [replacement])
@@ -114,6 +131,8 @@ def test_different_run_cannot_fill_the_same_bound_slot(tmp_path, monkeypatch, un
     if not uncertain:
         replacement['configuration']['runId'] = run_id
         validate_bindings(slots, [replacement])
+        with pytest.raises(ValueError, match='EXECUTION_JOURNAL_REQUEST_MISMATCH'):
+            validate_bindings(slots, [{**replacement, 'requestTextSha256': 'b' * 64}])
     replacement['configuration']['runId'] = uid(99)
     replacement['configuration']['configuration']['executionOrder'] = 3
     validate_bindings(slots, [replacement])

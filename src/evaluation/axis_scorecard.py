@@ -241,7 +241,7 @@ def build_scorecard(*, run_id: str, architecture: Optional[str], exam: str, metr
                     status: Mapping, report: Optional[Mapping] = None, score: Optional[Mapping] = None,
                     trace: Optional[Mapping] = None, timing: Optional[Mapping] = None,
                     regression: Optional[Mapping] = None, process: Optional[Mapping] = None,
-                    tables: Optional[Mapping] = None) -> dict:
+                    tables: Optional[Mapping] = None, conflicts: Optional[Mapping] = None) -> dict:
     """채점한 Run은 report·score·trace·timing·regression을, 채점하지 못한 Run은 status의 사유를 쓴다."""
     reason = None if report is not None else (status.get('reason') or 'NOT_SCORED')
     accuracy = _accuracy(report, score, trace, reason)
@@ -253,9 +253,9 @@ def build_scorecard(*, run_id: str, architecture: Optional[str], exam: str, metr
             'loopPolicy': metrics.get('loopPolicy'), 'exam': exam, 'evaluationStatus': status.get('status'),
             'evaluationReason': status.get('reason'),
             'evaluationId': None if report is None else report.get('evaluationId'),
-            'axes': axes,
+            'axes': axes, 'conflictAnalysis': None if conflicts is None else dict(conflicts),
             'notes': ['값은 이미 계산된 결과(output.json·outcome.json·timing_metrics.json·process_metrics.json·'
-                      'regression.json·bundle.json)에서 모았다. 새로 측정하지 않는다.',
+                      'regression.json·bundle.json·conflict_analysis.json)에서 모았다. 새로 측정하지 않는다.',
                       '미확인은 0이 아니라 값을 확인하지 못했다는 뜻이다. 사유 코드를 함께 남긴다. 미확인이어도 일부 확인된 '
                       '값(예: PROC-01의 구현 수정 횟수)은 그대로 보여 준다.',
                       '비율·분포·변동(STAB-01~06의 비율, TIME-04, COST-03)은 계획 Run 전체를 분모로 comparison.md에서 계산한다.',
@@ -280,4 +280,13 @@ def render_scorecard(data: Mapping) -> str:
             shown = row['display'] if row['display'] is not None else ('미확인' if row['status'] == UNVERIFIED else '—')
             lines.append(f'| {_cell(row["id"])} | {_cell(row["name"])} | {_cell(shown)} | '
                          f'{STATUS_TEXT[row["status"]]} | {_cell(row["reason"]) or "—"} |')
+        if key == 'accuracy' and data.get('conflictAnalysis') is not None:
+            conflict = data['conflictAnalysis']
+            lines += ['', '### 정책 제외 충돌(ACC와 별도)', '',
+                      '| 제외 수 | 제품 결함 확인 | 시험 결함 확인 | 미확정 |', '|---|---|---|---|',
+                      '| ' + ' | '.join('미확인' if conflict[name] is None else str(conflict[name]) for name in
+                          ('excluded', 'productDefectConfirmed', 'testDefectConfirmed', 'undetermined')) + ' |', '',
+                      f'집계 상태: {_cell(conflict["status"])}' +
+                      (f' · {_cell(conflict["reason"])}' if conflict['reason'] else ''), '',
+                      '기록된 정책 제외 사건을 집계한다. 상세 항목과 재현 검토 근거: [충돌 분석](conflict_analysis.md).']
     return '\n'.join(lines) + '\n'

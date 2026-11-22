@@ -79,6 +79,70 @@ class DeveloperWorkspaceTests(unittest.TestCase):
         self.assertEqual(repr(checkpoint), "GitDeveloperCheckpoint()")
         self.assertNotIn(str(self.source), repr(checkpoint))
 
+    def test_library_types_are_rechecked_against_exact_bytes_before_freeze(self):
+        lock_hash = 'sha256:' + sha256((self.source / 'requirements.lock').read_bytes()).hexdigest()
+        environment = {'dependencyLockHash': lock_hash, 'containerImageDigest': 'fixture'}
+        checkpoint = self.make_checkpoint(library_environment=environment)
+        checkpoint.prepare()
+        path = self.source / 'app.py'
+
+        def inspect(files, approved_environment):
+            self.assertEqual(approved_environment, environment)
+            return [{'toolPath': 'source/app.py'}] if files['app.py'] == b'wrong = 1\n' else []
+
+        with patch('agents.runtime.developer_workspace.ready_library_type_mismatches', side_effect=inspect):
+            path.write_bytes(b'wrong = 1\n')
+            checkpoint.source_edit_status()
+            self.assertTrue(checkpoint.library_type_issues())
+            path.write_bytes(b'corrected = 2\n')
+            checkpoint.source_edit_status()
+            self.assertFalse(checkpoint.library_type_issues())
+            path.write_bytes(b'wrong = 1\n')
+            with patch.object(checkpoint, '_commit', side_effect=AssertionError('unapproved source committed')):
+                self.assert_code('LIBRARY_TYPE_MISMATCH', checkpoint.checkpoint)
+
+    def test_path_evidence_is_rechecked_under_freeze_lock(self):
+        from agents.runtime.ready_path_diff import INPUT
+        from orchestrator.domain.developer_artifacts import ReportedPathEdit
+        checkpoint = self.checkpoint
+        checkpoint.prepare()
+        checkpoint.configure_path_review([INPUT], {'externalContract': {'app': {'module': 'app', 'attribute': 'api'}}})
+        target = self.source / 'app.py'
+        prefix = 'from fastapi import FastAPI\nfrom fastapi.exceptions import RequestValidationError\napi = FastAPI()\n'
+        target.write_text(prefix + '@api.exception_handler(RequestValidationError)\ndef invalid(request, exc): return 1\n')
+        row = ReportedPathEdit(path=INPUT, edit='Changed the validation response.', sourceRef='source/app.py::invalid',
+                               recheck='Inspect a malformed request.')
+        draft = {'repairPaths': {INPUT: row.model_dump(by_alias=True)}}
+        self.assertTrue(checkpoint.has_source_changes())
+        self.assertEqual(checkpoint.ready_path_issues(draft), [])
+        target.write_text(prefix + 'def invalid(request, exc): return 1\n')
+        with patch.object(checkpoint, '_commit', side_effect=AssertionError('must not freeze')):
+            self.assert_code('PATH_EVIDENCE_MISMATCH', checkpoint.checkpoint, reported_path_edits=(row,))
+
+    def test_upstream_binding_is_frozen_as_indirect_pending_measurement(self):
+        from hashlib import sha256
+        from agents.runtime.normal_request_repair import NORMAL_REQUEST
+        from orchestrator.domain.developer_artifacts import ReportedPathEdit
+
+        original = b"from service import compute\ndef signup(value):\n    return compute(value)\n"
+        (self.source / "app.py").write_bytes(original)
+        helper = self.source / "service.py"
+        helper.write_text("def compute(value): return old_format(value)\n")
+        parent = self.commit()
+        checkpoint = self.make_checkpoint(baseline_commit_hash=parent)
+        checkpoint.prepare()
+        site = {"toolPath":"source/app.py", "line":3, "sourceSha256":sha256(original).hexdigest()}
+        checkpoint.configure_path_review([NORMAL_REQUEST], {}, [NORMAL_REQUEST], [site])
+        helper.write_text("def compute(value): return new_format(value)\n")
+        row = ReportedPathEdit(path=NORMAL_REQUEST, edit="Changed the helper used by the failing statement.",
+                               sourceRef="source/service.py::compute", recheck="Rerun normal creation.")
+        claim = {"repairPaths":{NORMAL_REQUEST:row.model_dump(by_alias=True)}}
+        self.assertTrue(checkpoint.has_source_changes())
+        self.assertEqual(checkpoint.pending_priority_paths(), ())
+        self.assertEqual(checkpoint.ready_path_issues(claim), [])
+        candidate = checkpoint.checkpoint(reported_path_edits=(row,))
+        self.assertEqual(candidate.reported_path_edits[0].host_diff_status, "INDIRECT_PENDING_TEST")
+
     def test_credential_candidate_fails_before_creating_git_objects(self):
         self.checkpoint.prepare()
         (self.source / "app.py").write_bytes(b'api_key="SYNTHETIC_CHECKPOINT_SECRET_NOT_REAL"\n')
@@ -87,6 +151,30 @@ class DeveloperWorkspaceTests(unittest.TestCase):
             self.assert_code("FAILED", self.checkpoint.checkpoint)
         self.assertEqual((self.source / ".git/index").read_bytes(), before_index)
         self.assertEqual(self.git("rev-parse", "HEAD").decode(), self.baseline)
+
+    def test_invalid_input_partial_ready_is_frozen_as_pending_and_exposure_remains_open(self):
+        from agents.runtime.repair_locations import INVALID_INPUT
+        from agents.runtime.ready_path_diff import INPUT
+        from orchestrator.domain.developer_artifacts import ReportedPathEdit
+        from test_invalid_input_ready_paths import BASE, ENTRY, FIX, RELATED, ROUTE, SITES
+
+        file = self.source / 'main.py'
+        file.write_bytes(BASE)
+        checkpoint = self.make_checkpoint(baseline_commit_hash=self.commit())
+        checkpoint.prepare()
+        scenario = {'externalContract': {'app': dict(zip(('module','attribute'), ENTRY)),
+                                        'signupApi': dict(zip(('method','path'), ROUTE))}}
+        checkpoint.configure_path_review([INVALID_INPUT, INPUT], scenario, invalid_input_sites=SITES)
+        file.write_bytes(FIX)
+        rows = (ReportedPathEdit(path=INVALID_INPUT, edit='Updated parsing at the related trace.', sourceRef=RELATED,
+                                 recheck='Remeasure the failed invalid-input cases.'),
+                ReportedPathEdit(path=INPUT, edit=None, sourceRef=None, recheck='Still open.'))
+        draft = {'repairPaths': {row.path: row.model_dump(by_alias=True) for row in rows}}
+        self.assertTrue(checkpoint.has_source_changes())
+        self.assertEqual(checkpoint.ready_path_issues(draft), [])
+        result = checkpoint.checkpoint(reported_path_edits=rows)
+        self.assertEqual([r.host_diff_status for r in result.reported_path_edits],
+                         ['INDIRECT_PENDING_TEST', 'NO_CHANGE_CLAIMED'])
 
     def test_constructor_rejects_untrusted_baseline_references(self):
         for value in ("HEAD", self.baseline[:10], self.baseline.upper(), self.baseline + "^{tree}", "--help", None, True):

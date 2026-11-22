@@ -1,11 +1,12 @@
 """Observe before provider submission; durable hash-only data, strict failure boundaries."""
 import json
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock
 
 from agents.llm.contracts import LLMRuntimeError
 from agents.llm.engine import LLMEngine
-from agents.llm.input_evidence import json_sha256
+from agents.llm.input_evidence import ModelInputEvidence, json_sha256, observe_input
 from agents.platform.telemetry_store import TelemetryStoreError
 import test_llm_runtime_telemetry as fixtures
 import test_llm_runtime as helpers
@@ -50,3 +51,28 @@ class ModelInputEvidenceTests(unittest.IsolatedAsyncioTestCase):
             await self.observed_run(provider, sink)
         assert not provider.requests
         assert self.budget.snapshot.invalidated is True
+
+    async def test_host_feedback_preserves_original_input_but_requirement_changes_do_not(self):
+        provider = helpers.FakeProvider(helpers.text_response())
+        await self.observed_run(provider, lambda data: None)
+        request = provider.requests[0]
+        original = observe_input(1, request)
+
+        def changed_request(key, value):
+            items = json.loads(request.input_items_json)
+            initial = json.loads(items[0]['content'])
+            initial['taskInput'][key] = value
+            items[0]['content'] = json.dumps(initial)
+            return replace(request, input_items_json=json.dumps(items))
+
+        for key in ('semanticReviewFeedback', 'testRunFeedback'):
+            changed = observe_input(2, changed_request(key, {'reasonCode': 'TEST_REASON'}))
+            self.assertEqual(changed['taskInputSha256'], original['taskInputSha256'])
+            self.assertEqual(changed['initialInputSha256'], original['initialInputSha256'])
+            self.assertNotEqual(changed['inputItemsSha256'], original['inputItemsSha256'])
+            self.assertEqual(set(changed['hostFollowUpSha256']), {key})
+        changed = observe_input(2, changed_request('requirements', ['A different requirement']))
+        self.assertNotEqual(changed['taskInputSha256'], original['taskInputSha256'])
+        self.assertNotEqual(changed['initialInputSha256'], original['initialInputSha256'])
+        with self.assertRaises(ValueError):
+            ModelInputEvidence.model_validate({**original, 'hostFollowUpSha256': {'requirements': 'a' * 64}})

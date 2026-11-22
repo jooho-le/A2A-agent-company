@@ -581,7 +581,8 @@ EXPECTED_FAILURES = {
     'broken_get_db': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
     'get_db_other_database': None,
     # 점검(2026-11-15): 평가용 DB에 쓰고도 커밋하지 않는 앱. 저장 누락은 미검증(DATABASE_URL_NOT_USED)이 아니라 FAIL이다.
-    'no_commit': {'QA-SIGNUP-001', 'QA-SIGNUP-003', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006', 'SEC-SIGNUP-003'},
+    'no_commit': {'QA-SIGNUP-001', 'QA-SIGNUP-003', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006',
+                  'SEC-SIGNUP-003', 'SEC-SIGNUP-005'},
     'engine_echo_hash': {'SEC-SIGNUP-005'},
     'engine_echo_hidden_parameters': set(),
     'missing_bootstrap': {'QA-SIGNUP-001', 'QA-SIGNUP-004', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
@@ -620,6 +621,9 @@ EXPECTED_FAILURES = {
     'duplicate_success_response': {'QA-SIGNUP-003', 'QA-SIGNUP-005', 'QA-SIGNUP-006'},
     'sha256_storage': {'SEC-SIGNUP-002'},
     'local_case_kept': {'QA-SIGNUP-003', 'QA-SIGNUP-006', 'SEC-SIGNUP-003'},
+    # 0.7.2 회귀(실제 Run 42f131fe v1, 2026-11-17): 이메일 칸이 기본 키여도 DB 중복 금지 제약으로 확인한다(전부 PASS).
+    'email_primary_key': set(),
+    'email_primary_key_only': set(),
 }
 # 모두 미검증이 되는 변형의 근거 코드
 UNVERIFIED_CODES = {'app_missing': {'APP_IMPORT_FAILED'}, 'wrong_signup_path': {'SIGNUP_ROUTE_NOT_FOUND'},
@@ -634,8 +638,8 @@ EXPECTED_UNVERIFIED = {'different_request_field': {'QA-SIGNUP-002', 'QA-SIGNUP-0
                                          'SEC-SIGNUP-005'},
                        'missing_bootstrap': {'QA-SIGNUP-002', 'QA-SIGNUP-003', 'SEC-SIGNUP-002', 'SEC-SIGNUP-003',
                                             'SEC-SIGNUP-005'},
-                       # 저장된 사용자가 없어 해시·노출을 확인할 수 없다.
-                       'no_commit': {'SEC-SIGNUP-002', 'SEC-SIGNUP-005'}}
+                       # 저장 해시는 없지만 DB 오류의 로그 노출은 직접 확인할 수 있다.
+                       'no_commit': {'SEC-SIGNUP-002'}}
 
 
 def _set_read_only(folder, read_only):
@@ -711,6 +715,21 @@ def test_protected_suite_catches_each_defect_in_every_set(variant):
             EXPECTED_UNVERIFIED.get(variant, set()), exam
         for result in results.values():  # 실패 설명에 해시 형식 글자가 남지 않는다.
             assert '$argon2' not in (result.actual_result or '')
+
+
+@pytest.mark.skipif(not RUNTIME, reason='fastapi·httpx·sqlalchemy·argon2-cffi가 있어야 실행 시험을 돈다')
+@pytest.mark.parametrize('variant, outcome', [('signup_server_error', 'FAIL'), ('no_commit', 'FAIL'),
+                                              ('good', 'PASS'), ('get_db_other_database', 'SKIP')])
+def test_unhandled_exception_is_a_product_failure_not_a_harness_error(variant, outcome):
+    """0.7.1 회귀(실제 Run 4f7ec809, 2026-11-17): 생성 코드가 처리하지 못한 예외를 던지면 Service.send가
+    used_database를 남기지 않아 QA-SIGNUP-001이 시험 도구 오류(AttributeError)로 끝났다. 이제 'DB를 쓰지
+    않았으면 미검증' 판단은 성공 응답(observe 통과)에만 쓰므로 500에서는 그 값을 읽지 않는다. 다른 DB에 쓰는 앱은
+    그대로 미검증이다."""
+    report = run_protected(variant, 'pilot')['report']
+    test = next(item for item in report['tests'] if item['testId'].endswith('test_qa_signup_001_valid_signup_creates_user'))
+    assert test['outcome'] == outcome
+    assert 'used_database' not in (test.get('details') or '')
+    assert 'AttributeError' not in (test.get('details') or '')
 
 
 # ---------------------------------------------------------------- 팀장 전달용 설정 내보내기

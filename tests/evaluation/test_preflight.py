@@ -12,9 +12,15 @@ from tests.evaluation.test_final_evaluation import IMAGE
 from tests.evaluation.test_run_metrics import uid
 
 
-# 실제 준비 도구가 쓰는 브라우저 설정(서비스 명령·Playwright 버전·한도)과 같은 칸
-BROWSER_SECTION = environment.tools_document(image_id=IMAGE, lock_file='requirements.lock', lock_hash='sha256:' + '0' * 64,
-                                             hardware_profile='fixture', unit_scopes=[])['browser']
+# Explicit UI scenario fixture; SCN-001's production configuration has no UI suite.
+BROWSER_SECTION = {
+    'suites': [{'name': 'qa-browser', 'kind': 'QA_TESTS', 'suite_path': 'tests/browser/suite.json'}],
+    'service_argv': [environment.PYTHON, '-m', 'uvicorn', '--app-dir', '/snapshot', 'main:app',
+                     '--host', '127.0.0.1', '--port', '8765'],
+    'playwright_version': environment.PLAYWRIGHT_VERSION, 'python_executable': environment.PYTHON,
+    'base_url': 'http://127.0.0.1:8765', 'ready_path': '/', 'startup_timeout_seconds': 20,
+    'action_timeout_ms': 5000, 'limits': environment._limits(90, memory_gib=2),
+}
 
 
 def plan(tmp_path, *, calls=30, change=None):
@@ -279,7 +285,16 @@ def test_optional_host_files_are_compared_between_architectures(tmp_path, monkey
         data['loopPolicy'] = 'IN_LOOP_AND_FINAL'
     for index, entry in enumerate(data['hostConfigurations'].values()):
         path = tmp_path / f'{key}-{index}.json'
-        path.write_text(json.dumps({'schemaVersion': 1, 'fixtureValue': index}))
+        document = {'schemaVersion': 1, 'fixtureValue': index}
+        if key == 'priceBook':
+            document = json.loads((environment.CONFIGS / 'owned-price-book.scn001.json').read_text())
+            document['priceBookId'] = f'fixture-price-{index}'
+            data['model'].update(provider='openai', modelId=document['entries'][0]['requestedModelId'])
+            runtime_path = Path(entry['runtime'])
+            runtime = json.loads(runtime_path.read_text())
+            runtime['model'].update(data['model'])
+            runtime_path.write_text(json.dumps(runtime))
+        path.write_text(json.dumps(document))
         entry[key] = path.name  # optional paths also follow the plan directory
     fake_docker(monkeypatch)
     report = preflight.check_preparation(data, base=tmp_path, docker='fixture-docker')
@@ -288,6 +303,22 @@ def test_optional_host_files_are_compared_between_architectures(tmp_path, monkey
 
     (tmp_path / f'{key}-1.json').write_bytes((tmp_path / f'{key}-0.json').read_bytes())
     assert preflight.check_preparation(data, base=tmp_path, docker='fixture-docker')['ready'] is True
+
+
+def test_required_pricing_registration_and_optional_limits_checked_before_submission(tmp_path, monkeypatch):
+    data = plan(tmp_path)
+    fake_docker(monkeypatch)
+    data.update(requireCostMeasurement=True, requireTotalTokenLimit=True, requestTextSha256='0' * 64)
+    data['limits']['outputCorrections'] = 2
+    for entry in data['hostConfigurations'].values():
+        entry['priceBook'] = str(environment.CONFIGS / 'owned-price-book.scn001.json')
+    result = preflight.check_preparation(data, base=tmp_path, docker='fixture-docker')
+    failed = {row['check']: row.get('reason') for row in result['checks'] if row['status'] != 'PASS'}
+    assert failed['requestText'] == 'REQUEST_TEXT_DIFFERS_FROM_REGISTRATION'
+    assert failed['runTotalTokenLimit'] == 'RUN_TOTAL_TOKEN_LIMIT_NOT_SET'
+    for arch in data['hostConfigurations']:
+        assert failed[f'hostLimits.{arch}'] == 'HOST_LIMITS_DIFFER_FROM_PLAN'
+        assert failed[f'hostPriceBook.{arch}'] == 'COST_UNAVAILABLE_FOR_REQUESTED_MODEL'
 
 
 @pytest.mark.parametrize('key', ['protectedCases', 'priceBook'])

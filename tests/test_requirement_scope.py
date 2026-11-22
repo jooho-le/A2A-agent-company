@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from agents.roles.qa_contract import QACaseBinding
 from agents.runtime.requirement_scope import (
-    RequirementScopeError, build_requirement_scope, validate_generated_case_expectations,
+    RequirementScopeError, build_requirement_scope, validate_generated_case_expectations, generated_case_expectation_issues, signup_observation_plan,
 )
 from orchestrator.domain.states import AgentRole
 from test_developer_context import _DeveloperContextFixture
@@ -116,6 +116,34 @@ class RequirementScopeTests(_DeveloperContextFixture, unittest.TestCase):
     def test_exact_generated_criteria_are_admitted_for_both_validation_roles(self):
         for role in (AgentRole.QA, AgentRole.SECURITY):
             self.assertIsNone(self.validate_cases(self.cases(role), role))
+
+    def test_every_public_acceptance_sentence_is_linked_before_ready(self):
+        role = AgentRole.QA
+        assigned = self.scope(role).requirements
+        first = assigned[0]
+        additional = 'An additional approved observation.'
+        modified = replace(first, acceptance_criteria=(*first.acceptance_criteria, additional))
+        cases = self.cases(role)
+        meta = self.role_metadata(role)
+        with patch('agents.runtime.requirement_scope._assigned_requirements', return_value=(None, (modified, *assigned[1:]))):
+            self.assert_denied(self.validate_cases, cases, role)
+            issues = generated_case_expectation_issues({'cases': [{'requirementId': str(c.requirement_id),
+                'expectedResult': c.expected_result} for c in cases]}, field='cases',
+                configuration=self.configuration, metadata=meta, role=role)
+            self.assertIn({'fieldPath': '/cases', 'reasonCode': 'ACCEPTANCE_CRITERION_WITHOUT_CASE'}, issues)
+            self.assertIsNone(self.validate_cases((*cases, replace(cases[0], test_id='test_scope.Scope.test_additional',
+                                                                   expected_result=additional)), role))
+
+    def test_public_compound_observations_follow_the_same_tasks_into_each_role(self):
+        contract = self.configuration.scenario_contract
+        identifier = next(r['requirementId'] for r in contract['requirements'] if r['key'] == 'REQ-003')
+        self.assertEqual(set(signup_observation_plan(contract)[identifier]['observationsByRole']), {'QA','SECURITY'})
+        for role in (AgentRole.QA, AgentRole.SECURITY):
+            assigned = signup_observation_plan(contract, self.scope(role))[identifier]
+            self.assertEqual(set(assigned['observationsByRole']), {role.value})
+            self.assertNotIn('implementationTaskIds', assigned)
+        self.assertEqual(signup_observation_plan(contract, self.scope())[identifier]['implementationTaskIds'], ['TASK-SIGNUP'])
+        self.assertFalse(signup_observation_plan({'scenarioKey': 'ANOTHER'}))
 
     def test_invented_weakened_paraphrased_or_mismatched_criterion_is_denied(self):
         cases = self.cases(AgentRole.QA)

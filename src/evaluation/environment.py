@@ -26,6 +26,8 @@ import re
 import subprocess
 import sys
 
+from orchestrator.sandbox.scn001_start_contract import SCN001_BUILD_PROBE, scn001_build_argv
+
 ROOT = Path(__file__).resolve().parents[2]
 PREPARED = ROOT / 'docker/sandbox/prepared'
 SANDBOX_CONTEXT = ROOT / 'docker/sandbox'
@@ -58,7 +60,6 @@ CHROMIUM_PACKAGES = ('libasound2t64', 'libatk-bridge2.0-0t64', 'libatk1.0-0t64',
                      'libxkbcommon0', 'libxrandr2', 'fonts-liberation')
 PYTHON = '/usr/local/bin/python'
 
-
 class EnvironmentError_(Exception):
     def __init__(self, code):
         super().__init__(code)
@@ -78,19 +79,14 @@ def tools_document(*, image_id, lock_file, lock_hash, hardware_profile, unit_sco
         'schemaVersion': 1, 'imageReference': image_id, 'dependencyLockFile': lock_file,
         'dependencyLockHash': lock_hash, 'hardwareProfile': hardware_profile,
         'dockerEndpoint': 'unix:///var/run/docker.sock', 'maxCallSeconds': MAX_CALL_SECONDS,
-        # 빌드 = 모든 파이썬 파일 문법 확인. /snapshot은 읽기 전용이라 바이트코드는 /work(임시 쓰기)에 둔다.
+        # 문법과 공개 시작 규격을 검사한다. 숨겨진 채점은 수행하지 않는다.
         'build': {'profile': {'name': 'scn001-compile',
-                              'argv': [PYTHON, '-I', '-X', 'pycache_prefix=/work/pycache', '-m', 'compileall', '-q',
-                                       '/snapshot'],
+                              'argv': scn001_build_argv(),
                               'limits': _limits(60)}},
         'unit': {'scopes': list(unit_scopes), 'python_executable': PYTHON, 'limits': _limits(90)},
-        # 브라우저 시험의 서버: 연결 규격대로 `uvicorn main:app`, 준비 확인은 GET /.
-        'browser': {'suites': [{'name': 'qa-browser', 'kind': 'QA_TESTS', 'suite_path': 'tests/browser/suite.json'}],
-                    'service_argv': [PYTHON, '-m', 'uvicorn', '--app-dir', '/snapshot', 'main:app',
-                                     '--host', '127.0.0.1', '--port', '8765'],
-                    'playwright_version': PLAYWRIGHT_VERSION, 'python_executable': PYTHON,
-                    'base_url': 'http://127.0.0.1:8765', 'ready_path': '/', 'startup_timeout_seconds': 20,
-                    'action_timeout_ms': 5000, 'limits': _limits(90, memory_gib=2)},
+        # SCN-001은 API·DB 요구만 포함하며 UI 검사는 범위 밖이다(evaluation_spec 7절).
+        # 브라우저가 필요한 다른 시나리오는 Host가 명시적 설정을 제공해야 한다.
+        'browser': None,
         'security': {'profiles': [{'name': 'scn001-bandit', 'scanner_version': BANDIT_VERSION,
                                    'rule_ids': list(BANDIT_RULES), 'profile_ref': BANDIT_PROFILE_REF}],
                      'python_executable': PYTHON, 'limits': _limits(60)},

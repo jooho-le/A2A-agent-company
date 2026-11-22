@@ -96,6 +96,24 @@ def schedule(plan: Mapping) -> dict:
                                    for index, row in enumerate(rows)]}
 
 
+def _registered_run_token_limit(plan):
+    """Plans that require a ceiling cannot submit until its value is registered."""
+    limits = plan.get('limits')
+    tokens = limits.get('totalTokens') if isinstance(limits, dict) else None
+    return type(tokens) is int and tokens > 0
+
+
+def _planned_request_digest(plan):
+    from orchestrator.domain.submissions import measurement_request_sha256
+    text = plan.get('requestText', DEFAULT_REQUEST_TEXT)
+    if not isinstance(text, str) or not text.strip():
+        raise ExperimentRunError('REQUEST_TEXT_INVALID')
+    digest = measurement_request_sha256(text)
+    if plan.get('requestTextSha256', digest) != digest:
+        raise ExperimentRunError('REQUEST_TEXT_DIFFERS_FROM_REGISTRATION')
+    return digest
+
+
 def _host_entry(plan: Mapping, architecture: str, base: Path) -> dict:
     # 계획의 구조별 Host 칸에서 파일 경로(계획 파일 위치 기준)와 API 주소를 읽는다.
     configurations = _object(plan.get('hostConfigurations') or {}, 'HOST_CONFIGURATION_REQUIRED')
@@ -151,7 +169,8 @@ def submission(plan: Mapping, approved, order: int) -> dict:
         configuration = RunConfiguration.model_validate(data)
     except Exception:
         raise ExperimentRunError('EXPERIMENT_BASELINE_INCOMPLETE') from None
-    request_text = plan.get('requestText') or DEFAULT_REQUEST_TEXT
+    request_text = plan.get('requestText', DEFAULT_REQUEST_TEXT)
+    _planned_request_digest(plan)
     return {'scenarioId': str(SCN_001_ID), 'requestText': request_text,
             'configuration': configuration.model_dump(mode='json', by_alias=True)}
 
@@ -257,6 +276,11 @@ def _digest(value):
     return found.group(0) if found else None
 
 
+def optional_limit_differences(limits, llm):
+    return [key for key, target in OPTIONAL_RUNTIME_LIMITS.items()
+            if limits.get(key, 0) != llm.get(target, 0)]
+
+
 def plan_differences(plan: Mapping, approved, runtime: Mapping) -> list:
     # 계획과 실제 Host 설정(승인 실행 설정·Host 실행 설정 파일)이 다른 칸 이름 목록. 계획 칸이 비어 있어도 다르다고 본다.
     # 같은 조건으로만 비교한다는 11-A 계약을 제출 직전에 지키기 위한 대조다(Ver1·Ver2 보호 테스트 참조는 따로 본다).
@@ -268,6 +292,9 @@ def plan_differences(plan: Mapping, approved, runtime: Mapping) -> list:
     llm = runtime.get('llmLimits') if isinstance(runtime.get('llmLimits'), Mapping) else {}
     differences += [f'limits.{key}' for key, target in RUNTIME_LIMITS.items()
                     if key not in limits or target not in llm or limits[key] != llm[target]]
+    # 부작용 전 형식 실수의 재생성 한도와 자율 실행의 질문 안내 횟수(없으면 0 = 끔, agents.llm.corrections).
+    # 두 구조가 같은 값이어야 한다.
+    differences.extend(f'limits.{key}' for key in optional_limit_differences(limits, llm))
     actual_limits = approved.limits
     for key, value in (('runtimeBudgetMs', actual_limits.runtime_budget_ms),
                        ('maxFixAttempts', actual_limits.max_fix_attempts),
@@ -348,6 +375,8 @@ def _ledger(out_root: Path) -> dict:
             if item.get('event') not in {'SUBMITTING', 'SUBMITTED', 'SUBMISSION_UNCERTAIN', 'ENDED', 'EXPORTED', 'EXPORT_FAILED'}:
                 raise ValueError()
             if item['event'] == 'SUBMITTING':
+                if 'requestTextSha256' in item and not re.fullmatch(r'[0-9a-f]{64}', item['requestTextSha256']):
+                    raise ValueError()
                 if any(not isinstance(item.get(name), str) or not re.fullmatch(r'[0-9a-f]{64}', item[name])
                        for name in ('submissionSha256', 'configurationSha256', 'hostRequestSha256')):
                     raise ValueError()
@@ -370,6 +399,8 @@ def _ledger(out_root: Path) -> dict:
         if item.get('event') == 'SUBMITTING':
             if current:
                 raise ExperimentRunError('LEDGER_HAS_TWO_SUBMISSION_INTENTS')
+            if 'requestTextSha256' in item:
+                current['requestTextSha256'] = item['requestTextSha256']
             current.update({name: item[name] for name in (
                 'intentAt', 'submissionSha256', 'configurationSha256', 'hostRequestSha256', 'idempotencyKey')})
         elif not current.get('intentAt'):
@@ -524,6 +555,10 @@ def _run_one_locked(plan, row, out_root, base, *, client_factory, poll_seconds, 
     journal = _ledger(out_root)
     if any(value['planFingerprint'] != fingerprint for identity, value in journal.items() if identity[:2] == key[:2]):
         raise ExperimentRunError('LEDGER_PLAN_CHANGED')
+    request_digest = _planned_request_digest(plan)
+    if any(value.get('requestTextSha256') not in (None, request_digest) for identity, value in journal.items()
+           if identity[0] == key[0]):
+        raise ExperimentRunError('EXPERIMENT_REQUEST_MISMATCH')
     state = journal.get(key, {})
     if state and state.get('architecture') not in (None, architecture):
         raise ExperimentRunError('LEDGER_ORDER_MISMATCH')
@@ -557,7 +592,13 @@ def _run_one_locked(plan, row, out_root, base, *, client_factory, poll_seconds, 
             if (not prior.get('runId') or prior.get('status') not in (*ENDED, *PAUSED)
                     or any(prior.get(name) != previous[name] for name in ('architecture', 'repetition'))):
                 raise ExperimentRunError('PREVIOUS_ORDER_NOT_COMPLETED')
+        if plan.get('requireTotalTokenLimit') is True and not _registered_run_token_limit(plan):
+            raise ExperimentRunError('RUN_TOTAL_TOKEN_LIMIT_NOT_SET')
         approved = approved_configuration(plan, architecture, base)
+        if plan.get('requireCostMeasurement') is True or entry.get('priceBook') is not None:
+            from agents.platform.pricing import has_requested_model_rate
+            if not has_requested_model_rate(entry.get('priceBook'), plan.get('model')):
+                raise ExperimentRunError('COST_UNAVAILABLE_FOR_REQUESTED_MODEL')
         if approved.architecture != architecture:
             raise ExperimentRunError('PLAN_CONFIGURATION_MISMATCH', ['architecture'])
         differences = plan_differences(plan, approved, json.loads(Path(entry['runtime']).read_text(encoding='utf-8')))
@@ -573,7 +614,7 @@ def _run_one_locked(plan, row, out_root, base, *, client_factory, poll_seconds, 
             _record(out_root, plan, row, 'SUBMITTING', fingerprint=fingerprint,
                     intentAt=datetime.now(timezone.utc).isoformat(), submissionSha256=_submission_hash(body),
                     configurationSha256=configuration_hash, hostRequestSha256=_host_request_hash(body),
-                    idempotencyKey=submission_key)
+                    idempotencyKey=submission_key, requestTextSha256=request_digest)
             try:
                 run_id = submit(client, body, idempotency_key=submission_key)
             except Exception:
@@ -613,6 +654,9 @@ def _run_one_locked(plan, row, out_root, base, *, client_factory, poll_seconds, 
 RUNTIME_LIMITS = {'modelCalls': 'max_model_calls', 'toolCalls': 'max_tool_calls', 'outputTokens': 'max_output_tokens',
                   'totalTokens': 'max_total_tokens', 'modelTimeoutSeconds': 'model_timeout_seconds',
                   'toolTimeoutSeconds': 'tool_timeout_seconds'}
+# 없으면 0(끔)으로 보는 한도. 측정 Run 전용 동작이라 제품 Host 설정에는 넣지 않는다(docs/live-api/02-failure-types-and-recovery.md).
+OPTIONAL_RUNTIME_LIMITS = {'outputCorrections': 'max_output_corrections', 'questionReminders': 'max_question_reminders',
+                           'providerRetries': 'max_provider_retries'}
 
 
 def runtime_configuration(example: Mapping, plan: Mapping, architecture: str) -> dict:
@@ -626,6 +670,7 @@ def runtime_configuration(example: Mapping, plan: Mapping, architecture: str) ->
     document['model'] = {key: model.get(key) for key in ('provider', 'modelId', 'modelRevision', 'temperature', 'seed')}
     llm = dict(document.get('llmLimits') or {})
     llm.update({target: limits[source] for source, target in RUNTIME_LIMITS.items() if source in limits})
+    llm.update({target: limits[source] for source, target in OPTIONAL_RUNTIME_LIMITS.items() if source in limits})
     document['llmLimits'] = llm
     document['runtimeBudgetMs'] = limits.get('runtimeBudgetMs')
     configurations = _object(plan.get('hostConfigurations') or {}, 'HOST_CONFIGURATION_REQUIRED')

@@ -7,7 +7,9 @@ request cancellation rather than left running after the request has ended.
 """
 
 import asyncio
+from collections import OrderedDict
 from hashlib import sha256
+from threading import Lock
 from types import MappingProxyType
 
 from agents.llm.content import sanitize_content
@@ -49,6 +51,13 @@ class FileTools:
             raise MCPConfigurationError()
         self._snapshots = SnapshotReader(artifact_store)
         self._selection = frozen_source
+        # Host-observed reads for this client; never retain source text.
+        self._read_versions = OrderedDict()
+        self._read_lock = Lock()
+
+    @staticmethod
+    def _read_key(context, path):
+        return (context.binding.run_id, context.binding.workspace_id, tuple(relative_parts(path)))
 
     def __repr__(self):
         return "FileTools()"
@@ -60,7 +69,8 @@ class FileTools:
         if role is not AgentRole.PLANNER:
             handlers["read_project_file"] = self.read_project_file
         if role is AgentRole.DEVELOPER:
-            handlers.update(write_source_file=self.write_source_file, apply_patch=self.apply_patch)
+            handlers.update(write_source_file=self.write_source_file, apply_patch=self.apply_patch,
+                            edit_source_file=self.edit_source_file)
         elif role in (AgentRole.QA, AgentRole.SECURITY):
             handlers["write_test_file"] = self.write_test_file
         return MappingProxyType(handlers)
@@ -108,7 +118,19 @@ class FileTools:
             sanitize_content({"content": content}, source_fields=("content",), reject_secrets=True)
         except Exception:
             raise MCPToolExecutionError("SECRET_DENIED") from None
-        return {"path": path, "content": content, "sha256": sha256(value).hexdigest(), "sizeBytes": len(value)}
+        digest = sha256(value).hexdigest()
+        if context.binding.role is AgentRole.DEVELOPER and parts[0] == 'source':
+            self._remember(context, path, digest)
+        return {"path": path, "content": content, "sha256": digest, "sizeBytes": len(value)}
+
+    def _remember(self, context, path, digest):
+        # The Developer knows these exact bytes: it read them, or the Host applied its own write/edit.
+        with self._read_lock:
+            key = self._read_key(context, path)
+            self._read_versions[key] = digest
+            self._read_versions.move_to_end(key)
+            while len(self._read_versions) > 1024:
+                self._read_versions.popitem(last=False)
 
     async def read_project_file(self, context, arguments):
         return await _run_file_operation(self._read, context, arguments["path"])
@@ -125,10 +147,17 @@ class FileTools:
                 raise MCPToolExecutionError("PATH_DENIED")
         return write_working(context.workspace, path, content.encode("utf-8"), expected_sha256)
 
+    def _write_source(self, context, path, content, expected_sha256):
+        result = self._write(context, path, content, expected_sha256, AgentRole.DEVELOPER)
+        # Codex review 2026-11-18: a follow-up edit of the file just written needs no extra read.
+        if relative_parts(path)[0] == 'source':
+            self._remember(context, path, result['sha256'])
+        return result
+
     async def write_source_file(self, context, arguments):
         return await _run_file_operation(
-            self._write, context, arguments["path"], arguments["content"],
-            arguments.get("expectedSha256"), AgentRole.DEVELOPER,
+            self._write_source, context, arguments["path"], arguments["content"],
+            arguments.get("expectedSha256"),
         )
 
     async def write_test_file(self, context, arguments):
@@ -138,6 +167,35 @@ class FileTools:
         )
         # Exact existing write_test_file outputSchema excludes sizeBytes.
         return {key: result[key] for key in ("path", "sha256", "changed")}
+
+    def _edit(self, context, arguments):
+        self._context(context)
+        if context.binding.role is not AgentRole.DEVELOPER:
+            raise MCPToolExecutionError('PERMISSION_DENIED')
+        if relative_parts(arguments['path'])[0] != 'source':
+            raise MCPToolExecutionError('PATH_DENIED')
+        current = read_working(context.workspace, arguments['path'])
+        old = arguments['oldText'].encode('utf-8')
+        with self._read_lock:
+            observed = self._read_versions.get(self._read_key(context, arguments['path']))
+        if observed is None:
+            raise MCPToolExecutionError('EDIT_READ_REQUIRED')
+        if observed != arguments['expectedSha256'] or sha256(current).hexdigest() != observed:
+            raise MCPToolExecutionError('EDIT_STALE_READ')
+        if not old or current.count(old) == 0:
+            raise MCPToolExecutionError('EDIT_TARGET_MISSING')
+        if current.count(old) != 1:
+            raise MCPToolExecutionError('EDIT_TARGET_AMBIGUOUS')
+        updated = current.replace(old, arguments['newText'].encode('utf-8'), 1)
+        result = self._write(context, arguments['path'], updated.decode('utf-8'),
+                             arguments['expectedSha256'], AgentRole.DEVELOPER)
+        # Codex review 2026-11-18 #3: after a Host-applied edit the new version is known, so the next
+        # edit of the same file with this sha256 is accepted; any other change in between still fails.
+        self._remember(context, arguments['path'], result['sha256'])
+        return result
+
+    async def edit_source_file(self, context, arguments):
+        return await _run_file_operation(self._edit, context, arguments)
 
     def _patch(self, context, patch_text, base_sha256):
         self._context(context)

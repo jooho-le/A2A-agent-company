@@ -63,9 +63,11 @@ class WorkflowStateMachineTests(unittest.TestCase):
                 WorkflowStatus.FIX_REQUIRED,
                 WorkflowStatus.HUMAN_REVIEW,
             },
+            # docs/live-api/05 14절(2026-11-18): 같은 결함이 반복되면 측정 결과로 FINISHED(주호 확인 필요).
             WorkflowStatus.FIX_REQUIRED: {
                 WorkflowStatus.FIXING,
                 WorkflowStatus.HUMAN_REVIEW,
+                WorkflowStatus.FINISHED,
             },
             WorkflowStatus.FIXING: {
                 WorkflowStatus.REVALIDATING,

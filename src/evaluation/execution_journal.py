@@ -6,6 +6,7 @@ from pathlib import Path
 def read_execution_journals(paths):
     from .experiment_run import ARCHITECTURES, LOOP_POLICIES, LEDGER, _ledger
     slots, run_ids, fingerprints, sources = {}, {}, {}, []
+    experiment_requests = {}
     for supplied in paths:
         path = Path(supplied).resolve()
         if path.is_dir():
@@ -21,6 +22,9 @@ def read_execution_journals(paths):
             if (policy not in LOOP_POLICIES or state.get('architecture') not in ARCHITECTURES
                     or type(state.get('repetition')) is not int or state['repetition'] < 1):
                 raise ValueError('EXECUTION_JOURNAL_SLOT_INVALID')
+            request_digest = state.get('requestTextSha256')
+            if request_digest is not None and experiment_requests.setdefault(experiment, request_digest) != request_digest:
+                raise ValueError('EXECUTION_JOURNAL_REQUEST_MISMATCH')
             key = experiment, policy, order
             bound = fingerprints.setdefault((experiment, policy), state['planFingerprint'])
             if bound != state['planFingerprint']:
@@ -29,6 +33,7 @@ def read_execution_journals(paths):
                    'architecture': state['architecture'], 'repetition': state['repetition'],
                    'runId': state.get('runId'), 'workflowStatus': state.get('status'),
                    'configurationSha256': state['configurationSha256'],
+                   'requestTextSha256': state.get('requestTextSha256'),
                    'state': 'SUBMISSION_UNCONFIRMED' if not state.get('runId') else
                    'EXPORTED' if state.get('export') else 'EXPORT_FAILED' if state.get('exportError') else
                    'ENDED' if state.get('status') not in (None, 'TIMEOUT') else 'SUBMITTED',
@@ -66,6 +71,8 @@ def validate_bindings(slots, entries):
         entry = by_id.get(slot['runId'])
         if entry is None:
             continue
+        if slot.get('requestTextSha256') is not None and slot['requestTextSha256'] != entry.get('requestTextSha256'):
+            raise ValueError('EXECUTION_JOURNAL_REQUEST_MISMATCH')
         config = RunConfiguration.model_validate(entry['configuration']['configuration'])
         if (entry['architecture'] != slot['architecture'] or entry['loopPolicy'] != slot['loopPolicy']
                 or config.execution_order != slot['order']

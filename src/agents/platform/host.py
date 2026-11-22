@@ -103,6 +103,23 @@ def _load_protected_cases(path):
     return _load_protected_case_file(path)[0]
 
 
+def _protected_selectors(tools):
+    """``tool:scope`` pairs of every Host in-loop protected suite (Ver1); empty for Ver2.
+
+    The verdict lets these settle generated-test results on the same
+    Requirement (orchestrator.application.validation_output.ProtectedSupersession).
+    """
+    selected = set()
+    for role in (AgentRole.QA, AgentRole.SECURITY):
+        unit = tools.unit_configuration_for(role)
+        selected.update("run_unit_tests:" + scope.name for scope in (() if unit is None else unit.scopes)
+                        if scope.kind == "PROTECTED")
+    browser = tools.browser_configuration
+    selected.update("run_browser_tests:" + suite.name for suite in (() if browser is None else browser.suites)
+                    if suite.kind == "PROTECTED")
+    return frozenset(selected)
+
+
 def _policy_references(tools, cases, roles=None):
     # This Host's case file is QA's in-loop suite. Security self-tests can be
     # enabled explicitly; a separate protected Security case contract is not
@@ -130,7 +147,7 @@ def _policy_references(tools, cases, roles=None):
         for tool, selected in (
             ("run_unit_tests", tools.unit_configuration_for(AgentRole.QA).scopes),
             ("run_unit_tests", () if security is None else security.scopes),
-            ("run_browser_tests", tools.browser_configuration.suites),
+            ("run_browser_tests", () if tools.browser_configuration is None else tools.browser_configuration.suites),
         ) for selector in selected if selector.kind == "PROTECTED"
     ]
     references = {selector.protected_suite_ref for _tool, selector in selectors}
@@ -268,7 +285,105 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         )
         source_identity = source.configuration.model_dump(mode="json", by_alias=True)
         source_identity.pop("repositoryPath")
+        from agents.llm.recovery import DEVELOPMENT_PROGRESS_POLICY, GENERATED_TEST_READY_POLICY
+        from agents.llm.development_rejection import POLICY as DEVELOPMENT_REJECTION_POLICY
+        from agents.roles.security_draft import SECURITY_DRAFT_POLICY
+        from agents.runtime.qa_catalog import QA_DRAFT_POLICY, SECURITY_ID_POLICY
+        from agents.llm.corrections import TOOL_ERROR_RETURN_POLICY, DRAFT_PRECHECK_POLICY
+        from agents.llm import corrections as correction_rules
+        from agents.llm.engine import UNKNOWN_USAGE_POLICY
+        from agents.llm.tool_wire import WORKSPACE_ARGUMENT_POLICY
+        from agents.runtime.start_precheck import START_PRECHECK_POLICY
+        from agents.runtime.semantic_revision import POLICY as SEMANTIC_REVISION_POLICY
+        from orchestrator.infrastructure.sqlite_workflows import DEVELOPMENT_STOP_POLICY, REPEATED_ISSUE_POLICY
+        from orchestrator.infrastructure.automatic_stop import POLICY as AUTOMATIC_STOP_POLICY
+        from agents.platform import package_service
+        from agents.roles import prompts as role_prompts
+        from agents.roles import work_rules
+        from agents.single import prompts as single_prompts
+        from mcp_tools.tools import generated_recheck, unit, unit_runner, unit_store
+        from orchestrator.sandbox import docker_cli
+        from agents.runtime import (repair_baseline, development_failure, developer_input, repair_locations, normal_request_repair,
+                                    developer_workspace, test_guidance, unused_rewrite, ready_path_diff, repair_dependencies)
+        from agents.runtime import developer, developer_services, library_contracts, ready_library_types, repair_call_history
+        from agents.runtime import (output_safety_precheck, signup_quality_precheck, generated_tests_precheck,
+                                    generated_test_inventory, qa_catalog, test_fix)
+        from agents.runtime import repair_input_failures, repair_progress as candidate_repair_history
+        from agents.single import runtime as single_runtime
+        from agents.roles import developer_contract
+        from agents.llm.engine import INPUT_RESERVATION_POLICY
+        from agents.llm import engine as llm_engine, budget as llm_budget, tool_wire
+        from agents.llm import development_rejection, developer_continuation, recovery
+        from mcp_tools.tools import files as file_tools
+        from orchestrator.domain import developer_artifacts, recovery_causes, repair_progress, validation_feedback, protected_feedback
+        from agents.runtime import generated_revalidation, qa_services, security_services, security_test_scope, requirement_scope, protected_scopes
+        from orchestrator.application import dispatch as validation_dispatch, validation_output
+        from orchestrator.infrastructure import automatic_stop, sqlite_workflows, validation_stop, protected_stop, protected_recheck
         policy = {
+            'developerReadyReportPolicy': 'REPORTED_PATH_EDITS_CHECKED_AGAINST_FROZEN_DIFF_V7',
+            'repairBaselinePolicy': repair_baseline.POLICY,
+            'developerInputProjectionPolicy': developer_input.POLICY,
+            'inputTokenReservationPolicy': INPUT_RESERVATION_POLICY,
+            'productPreconditionRecoveryPolicy': recovery_causes.POLICY,
+            'hostAppFixturePolicy': unit_runner.APP_FIXTURE_POLICY,
+            'partialEditPolicy': 'HOST_READ_BOUND_CAS_UNIQUE_FRAGMENT_V2',
+            'boundaryReportPolicy': 'IMMUTABLE_AUTOMATIC_BOUNDARY_V1',
+            'recoveryImplementationSha256': {name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
+                for name, module in (('baseline', repair_baseline), ('causes', recovery_causes), ('repairProgress', repair_progress),
+                                     ('developmentFailure', development_failure), ('rejection', development_rejection),
+                                     ('fileTools', file_tools), ('developerInput', developer_input),
+                                     ('repairLocations', repair_locations), ('normalRequestRepair', normal_request_repair),
+                                     ('invalidInputEvidence', repair_input_failures),
+                                     ('candidateRepairHistory', candidate_repair_history), ('repairCallHistory', repair_call_history),
+                                     ('libraryContracts', library_contracts), ('readyLibraryTypes', ready_library_types),
+                                     ('outputSafetyPrecheck', output_safety_precheck),
+                                     ('signupQualityPrecheck', signup_quality_precheck),
+                                     ('generatedTestInventory', generated_test_inventory), ('qaIdCatalog', qa_catalog),
+                                     ('toolWire', tool_wire),
+                                     ('generatedTestsPrecheck', generated_tests_precheck), ('generatedTestRepair', test_fix),
+                                     ('developerRuntime', developer), ('developerServices', developer_services),
+                                     ('singleRuntime', single_runtime), ('recoveryRouting', recovery),
+                                     ('readyPathDiff', ready_path_diff), ('repairDependencies', repair_dependencies),
+                                     ('testGuidance', test_guidance), ('requirements', requirement_scope),
+                                     ('dockerControl', docker_cli),
+                                     ('qaValidation', qa_services), ('securityValidation', security_services),
+                                     ('securityTestScope', security_test_scope), ('validationFeedback', validation_feedback),
+                                     ('validationDispatch', validation_dispatch), ('validationOutput', validation_output),
+                                     ('automaticStop', automatic_stop), ('validationStop', validation_stop),
+                                     ('workflowDecisions', sqlite_workflows), ('protectedScopeAdmissions', protected_scopes),
+                                     ('blockedValidatorReceipts', protected_stop), ('independentFixFeedback', protected_feedback),
+                                     ('protectedRecheck', protected_recheck), ('generatedRecheck', generated_recheck),
+                                     ('generatedRevalidation', generated_revalidation), ('unitInvocation', unit),
+                                     ('unitEvidenceStore', unit_store), ('unitRunner', unit_runner),
+                                     ('readyArtifact', developer_artifacts), ('resultPackage', package_service),
+                                     ('readySourceCheck', developer_workspace), ('unusedRewrite', unused_rewrite),
+                                     ('developerDecision', developer_contract),
+                                     ('llmEngine', llm_engine), ('llmBudget', llm_budget),
+                                     ('developerContinuation', developer_continuation))},
+            "developmentProgressPolicy": DEVELOPMENT_PROGRESS_POLICY,
+            "developmentRejectionPolicy": DEVELOPMENT_REJECTION_POLICY,
+            "generatedTestReadyPolicy": GENERATED_TEST_READY_POLICY,
+            "securityDraftPolicy": SECURITY_DRAFT_POLICY,
+            "qaDraftPolicy": QA_DRAFT_POLICY,
+            # Codex review 2026-11-18: every Run-changing recovery rule is pinned by version,
+            # and the instruction texts by hash, so two Runs compare only under the same rules.
+            "securityTestIdPolicy": SECURITY_ID_POLICY,
+            "workspaceArgumentPolicy": WORKSPACE_ARGUMENT_POLICY,
+            "providerUnknownUsagePolicy": UNKNOWN_USAGE_POLICY,
+            "toolErrorReturnPolicy": TOOL_ERROR_RETURN_POLICY,
+            "draftPrecheckPolicy": DRAFT_PRECHECK_POLICY,
+            "startPrecheckPolicy": START_PRECHECK_POLICY,
+            "outputSafetyPrecheckPolicy": output_safety_precheck.POLICY,
+            "signupQualityPrecheckPolicy": signup_quality_precheck.POLICY,
+            "semanticRevisionPolicy": SEMANTIC_REVISION_POLICY,
+            "repeatedIssuePolicy": REPEATED_ISSUE_POLICY,
+            "developmentStopPolicy": DEVELOPMENT_STOP_POLICY,
+            "automaticStopPolicy": AUTOMATIC_STOP_POLICY,  # docs/live-api/05 22절
+            "instructionSha256": {name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
+                                  for name, module in (("roles", role_prompts), ("roleWorkRules", work_rules), ("single", single_prompts),
+                                                       ("corrections", correction_rules))},
+            "testDataPolicy": {"version": unit_runner.TEST_DATA_POLICY,
+                               "runnerSha256": hashlib.sha256(Path(unit_runner.__file__).read_bytes()).hexdigest()},
             "schemaVersion": 1, "runConfiguration": approved.model_dump(mode="json", by_alias=True),
             "llmLimits": runtime.llm_limits.model_dump(mode="json"),
             "source": source_identity, "build": parse_json(tools._build_json),
@@ -390,7 +505,10 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
             qa_services_factory=services.qa, security_services_factory=services.security,
             prepare_workspace=prepare_workspace, limits=resolved.limits,
             orchestrator_host=resolved.orchestrator_host, orchestrator_port=resolved.orchestrator_port,
-            a2a_client_factory=a2a_client_factory, price_book=plan.price_book)
+            a2a_client_factory=a2a_client_factory, price_book=plan.price_book,
+            protected_selectors=_protected_selectors(plan.tools), protected_cases=plan.protected_cases,
+            # docs/live-api/05 22절 일반 종료 규칙: 모델 행동으로 멈추면 마지막 측정 결과로 끝낸다(주호 확인 필요).
+            automatic_stop=True)
         original_validator = platform.orchestrator_app.state.submission_validator
 
         def validate_submission(configuration):

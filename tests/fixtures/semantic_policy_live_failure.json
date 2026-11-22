@@ -1,0 +1,351 @@
+{
+  "description": "Observed policy quotation failure from diagnostic 6b608bb7, with Run bindings removed; offline provenance regression, not semantic accuracy.",
+  "requirements": [
+    {
+      "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "description": "유효한 이메일과 비밀번호로 계정을 생성할 수 있어야 함",
+      "acceptanceCriteria": [
+        "정상 입력 시 사용자 1건 생성 및 성공 응답"
+      ]
+    },
+    {
+      "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "description": "잘못된 이메일 형식을 거부해야 함",
+      "acceptanceCriteria": [
+        "합의한 이메일 파서에서 invalid인 값이 DB에 저장되지 않고 오류 응답"
+      ]
+    },
+    {
+      "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "description": "동일한 canonical email로 중복 계정을 만들 수 없어야 함",
+      "acceptanceCriteria": [
+        "애플리케이션 사전검사와 별개로 DB UNIQUE 제약이 존재하며 동시 요청에서도 중복 생성 불가"
+      ]
+    },
+    {
+      "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "description": "비밀번호는 최소 8자 이상이어야 함",
+      "acceptanceCriteria": [
+        "7자 이하는 거부, 8자 이상 정상 처리"
+      ]
+    },
+    {
+      "requirementId": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "description": "비밀번호는 승인된 Password Hash 정책으로 저장해야 함",
+      "acceptanceCriteria": [
+        "승인한 알고리즘·파라미터 충족, 평문/일반 SHA 계열 저장 없음"
+      ]
+    },
+    {
+      "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "description": "평문 비밀번호와 Password Hash가 API 응답, A2A Message/Artifact, 일반 로그, Trace에 노출되지 않아야 함",
+      "acceptanceCriteria": [
+        "지정 출력 전체에서 비밀번호 및 저장 Hash 미노출"
+      ]
+    },
+    {
+      "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "description": "실제 가입 처리 결과와 사용자 응답이 일치해야 함",
+      "acceptanceCriteria": [
+        "성공은 성공으로, 검증/중복 실패는 실패로 응답"
+      ]
+    },
+    {
+      "requirementId": "4876a535-23e1-4059-941f-bf49441f2276",
+      "description": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함",
+      "acceptanceCriteria": [
+        "Trace를 통해 전체 연결 관계 복원 가능"
+      ]
+    }
+  ],
+  "policies": {
+    "excludedFeatures": [
+      "로그인",
+      "OAuth",
+      "이메일 인증",
+      "비밀번호 찾기",
+      "프로필 관리"
+    ],
+    "securityPolicy": {
+      "passwordHashPolicy": {
+        "algorithm": "argon2id",
+        "iterations": 2,
+        "memoryKiB": 19456,
+        "parallelism": 1,
+        "storage": "encoded-library-hash",
+        "uniqueSalt": true
+      },
+      "secretExposure": "Passwords and password hashes must not appear in API, A2A, logs or Trace."
+    },
+    "emailPolicy": {
+      "canonicalEmailUniqueConstraint": true,
+      "domainCase": "lowercase",
+      "gmailDotRemoval": false,
+      "localPartCase": "lowercase",
+      "plusTagRemoval": false,
+      "trimWhitespace": true
+    },
+    "externalContract": {
+      "app": {
+        "attribute": "app",
+        "framework": "FastAPI",
+        "module": "main",
+        "readyCheck": "GET / 요청에 2xx 응답",
+        "serve": "uvicorn main:app"
+      },
+      "database": {
+        "access": "요청 처리의 DB 접근은 모두 Depends(get_db)로 한다",
+        "dependency": "get_db",
+        "engine": "SQLite에서 동작해야 한다",
+        "kind": "동기 함수(async 아님)",
+        "module": "database",
+        "urlEnv": "DATABASE_URL"
+      },
+      "packages": "실행 이미지에 설치된 패키지만 사용한다",
+      "responseRule": "응답 본문에 password와 password_hash 값을 넣지 않는다",
+      "signupApi": {
+        "bodyFields": [
+          "email",
+          "password"
+        ],
+        "bodyFormat": "JSON",
+        "method": "POST",
+        "path": "/api/auth/signup",
+        "rejected": "4xx (입력 검증 실패, 중복)",
+        "success": "2xx"
+      },
+      "startingFiles": [
+        "main.py",
+        "database.py",
+        "models.py",
+        "tests/test_health.py",
+        "requirements.lock"
+      ],
+      "userModel": {
+        "class": "User",
+        "columns": [
+          "email",
+          "password_hash"
+        ],
+        "module": "models",
+        "orm": "SQLAlchemy",
+        "uniqueInModel": [
+          "email"
+        ]
+      }
+    }
+  },
+  "fields": {
+    "/implementationPlan/0/title": "이메일과 비밀번호 입력 검증 구현",
+    "/implementationPlan/0/description": "회원가입 API에서 입력받은 이메일과 비밀번호의 유효성을 검증한다. 이메일은 시나리오 계약에 명시된 canonicalEmailUniqueConstraint, domainCase, localPartCase, trimWhitespace 등의 정책을 적용하여 정상 형식인지 확인하고, 비밀번호는 최소 8자 이상인지 검사한다.",
+    "/implementationPlan/1/title": "중복 이메일 가입 방지 및 DB UNIQUE 제약 적용",
+    "/implementationPlan/1/description": "입력된 이메일을 canonical 형태로 변환하여 DB에 중복된 계정이 생성되지 않도록 UNIQUE 제약 조건을 설정하고, 동시 요청 시에도 중복 생성이 불가능하도록 처리한다.",
+    "/implementationPlan/2/title": "비밀번호 해싱 및 저장 구현",
+    "/implementationPlan/2/description": "회원가입 시 입력된 비밀번호를 시나리오 계약에 명시된 승인된 Password Hash 정책(예: argon2id, iterations=2, memoryKiB=19456 등)에 따라 안전하게 해싱하여 DB에 저장한다. 평문 또는 일반 SHA 계열 해시는 저장하지 않는다.",
+    "/implementationPlan/3/title": "API 응답에서 비밀번호 및 해시 정보 제외",
+    "/implementationPlan/3/description": "회원가입 API의 성공 및 실패 응답에서 password 및 password_hash 필드를 포함하지 않도록 하여, 평문 비밀번호와 해시가 API 응답, 로그, Trace 등에 노출되지 않도록 한다.",
+    "/implementationPlan/4/title": "회원가입 처리 결과와 사용자 응답 일치 보장",
+    "/implementationPlan/4/description": "회원가입 처리 결과에 따라 성공 시 2xx 응답과 사용자 1건 생성, 실패 시 적절한 4xx 응답(입력 검증 실패, 중복 등)을 반환하여 실제 처리 결과와 사용자 응답이 일치하도록 구현한다.",
+    "/implementationPlan/5/title": "전체 요구사항 추적 및 연결 관계 복원 지원",
+    "/implementationPlan/5/description": "요구사항부터 개발, 검증, 이슈, 수정, 재검증까지 전체 연결 관계를 Trace를 통해 복원할 수 있도록 구현하여 추적 가능성을 확보한다."
+  },
+  "fieldReviews": {
+    "/implementationPlan/0/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+          "quote": "유효한 이메일과 비밀번호로 계정을 생성할 수 있어야 함"
+        },
+        {
+          "sourceRef": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+          "quote": "잘못된 이메일 형식을 거부해야 함"
+        },
+        {
+          "sourceRef": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+          "quote": "비밀번호는 최소 8자 이상이어야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/0/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+          "quote": "유효한 이메일과 비밀번호로 계정을 생성할 수 있어야 함"
+        },
+        {
+          "sourceRef": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+          "quote": "잘못된 이메일 형식을 거부해야 함"
+        },
+        {
+          "sourceRef": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+          "quote": "비밀번호는 최소 8자 이상이어야 함"
+        },
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "실제 가입 처리 결과와 사용자 응답이 일치해야 함"
+        },
+        {
+          "sourceRef": "@policy",
+          "quote": "emailPolicy: canonicalEmailUniqueConstraint, domainCase, localPartCase, trimWhitespace"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/1/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+          "quote": "동일한 canonical email로 중복 계정을 만들 수 없어야 함"
+        },
+        {
+          "sourceRef": "@policy",
+          "quote": "emailPolicy: canonicalEmailUniqueConstraint"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/1/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+          "quote": "동일한 canonical email로 중복 계정을 만들 수 없어야 함"
+        },
+        {
+          "sourceRef": "@policy",
+          "quote": "emailPolicy: canonicalEmailUniqueConstraint"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/2/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+          "quote": "비밀번호는 승인된 Password Hash 정책으로 저장해야 함"
+        },
+        {
+          "sourceRef": "@policy",
+          "quote": "securityPolicy: passwordHashPolicy: algorithm: argon2id, iterations: 2, memoryKiB: 19456"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/2/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+          "quote": "비밀번호는 승인된 Password Hash 정책으로 저장해야 함"
+        },
+        {
+          "sourceRef": "@policy",
+          "quote": "securityPolicy: passwordHashPolicy: algorithm: argon2id, iterations: 2, memoryKiB: 19456"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/3/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+          "quote": "평문 비밀번호와 Password Hash가 API 응답, A2A Message/Artifact, 일반 로그, Trace에 노출되지 않아야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/3/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+          "quote": "평문 비밀번호와 Password Hash가 API 응답, A2A Message/Artifact, 일반 로그, Trace에 노출되지 않아야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/4/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "실제 가입 처리 결과와 사용자 응답이 일치해야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/4/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "실제 가입 처리 결과와 사용자 응답이 일치해야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/5/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/5/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    }
+  },
+  "expectedIssues": [
+    {
+      "fieldPointer": "/implementationPlan/0/description",
+      "modelStatus": "SUPPORTED",
+      "category": "EVIDENCE",
+      "reasonCode": "QUOTE_NOT_IN_SOURCE",
+      "evidenceIndex": 4
+    },
+    {
+      "fieldPointer": "/implementationPlan/1/title",
+      "modelStatus": "SUPPORTED",
+      "category": "EVIDENCE",
+      "reasonCode": "QUOTE_NOT_IN_SOURCE",
+      "evidenceIndex": 1
+    },
+    {
+      "fieldPointer": "/implementationPlan/1/description",
+      "modelStatus": "SUPPORTED",
+      "category": "EVIDENCE",
+      "reasonCode": "QUOTE_NOT_IN_SOURCE",
+      "evidenceIndex": 1
+    },
+    {
+      "fieldPointer": "/implementationPlan/2/title",
+      "modelStatus": "SUPPORTED",
+      "category": "EVIDENCE",
+      "reasonCode": "QUOTE_NOT_IN_SOURCE",
+      "evidenceIndex": 1
+    },
+    {
+      "fieldPointer": "/implementationPlan/2/description",
+      "modelStatus": "SUPPORTED",
+      "category": "EVIDENCE",
+      "reasonCode": "QUOTE_NOT_IN_SOURCE",
+      "evidenceIndex": 1
+    }
+  ]
+}

@@ -34,7 +34,8 @@ class TrackedMCPError(RuntimeError):
     """Host-readable pointers and stable codes; never peer prose or Source."""
 
     def __init__(self, code="MCP_EXECUTION_FAILED", *, logical_call_id=None,
-                 evidence_ref=None, retry_decision=RetryDecision.DO_NOT_RETRY):
+                 evidence_ref=None, retry_decision=RetryDecision.DO_NOT_RETRY,
+                 error_kind=None, result_unknown=True):
         if code not in {
             "MCP_EXECUTION_FAILED", "MCP_EXECUTION_CONFIGURATION_INVALID",
             "MCP_EXECUTION_ARGUMENTS_INVALID", "MCP_EXECUTION_CONTEXT_DENIED",
@@ -46,6 +47,11 @@ class TrackedMCPError(RuntimeError):
         self.logical_call_id = logical_call_id
         self.evidence_ref = evidence_ref
         self.retry_decision = retry_decision
+        # The journaled failure class and whether the Tool's effect is known. Lets
+        # the engine tell a settled read rejection (e.g. FILE_NOT_FOUND) from an
+        # uncertain execution without re-reading the journal.
+        self.error_kind = error_kind if isinstance(error_kind, str) else None
+        self.result_unknown = result_unknown is not False
         super().__init__(code)
 
 
@@ -246,9 +252,11 @@ class TrackedMCPExecutor:
         return max(0, int((time.monotonic() - started) * 1000))
 
     @staticmethod
-    def _error(record, decision, code="MCP_EXECUTION_FAILED"):
+    def _error(record, decision, code="MCP_EXECUTION_FAILED", failure=None):
         return TrackedMCPError(code, logical_call_id=record.logical_call_id,
-                               evidence_ref=record.evidence_ref, retry_decision=decision)
+                               evidence_ref=record.evidence_ref, retry_decision=decision,
+                               error_kind=getattr(failure, "error_kind", None),
+                               result_unknown=getattr(failure, "result_unknown", True))
 
     async def invoke(self, name, arguments, *, deadline_monotonic=None, logical_call_id=None):
         self._invocation_started = True
@@ -333,7 +341,7 @@ class TrackedMCPExecutor:
                 except ToolEvidenceStoreError:
                     raise self._error(record, RetryDecision.INSPECT_STATE, "MCP_EXECUTION_EVIDENCE_FAILED") from None
                 if failure.retry_decision is not RetryDecision.RETRY:
-                    raise self._error(record, failure.retry_decision) from None
+                    raise self._error(record, failure.retry_decision, failure=failure) from None
                 await asyncio.sleep(self._retry_delay)
         raise self._error(record, RetryDecision.DO_NOT_RETRY)
 

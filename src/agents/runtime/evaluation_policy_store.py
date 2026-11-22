@@ -20,6 +20,7 @@ from mcp_tools.tools.unit_config import encode_unit_configuration
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
 from orchestrator.domain.states import AgentRole, WorkflowStepStatus
 from orchestrator.infrastructure.sqlite_workflows import SQLiteWorkflowRepository
+from orchestrator.sandbox import docker_cli
 from orchestrator.workspaces.policy import workspace_uuid
 
 
@@ -39,6 +40,7 @@ class EvaluationPolicyRecord:
 
 
 def _digest(payload):
+    payload = {**payload, "dockerControlSha256": sha256(Path(docker_cli.__file__).read_bytes()).hexdigest()}
     raw = json.dumps(payload, ensure_ascii=False, allow_nan=False, sort_keys=True,
                      separators=(",", ":")).encode("utf-8")
     if len(raw) > 256 * 1024:
@@ -98,6 +100,9 @@ def qa_policy_sha256(configuration, protected_cases):
     return _digest({"version": 1,
         "unit": None if unit is None else _policy(encode_unit_configuration(unit), "scopes"),
         "browser": None if browser is None else _policy(encode_browser_configuration(browser), "suites"),
+        **({"generatedAssertionScope": sha256(Path(__file__).with_name("security_test_scope.py").read_bytes()).hexdigest()}
+           if unit is not None else {}),
+        **({"protectedExecution": "ROLE_ENTRY_ONCE_V1"} if cases else {}),
         "protectedCases": cases, "runners": _runner_hashes(runners),
         "maxCallSeconds": configuration.max_call_seconds})
 
@@ -118,8 +123,11 @@ def security_policy_sha256(configuration, protected_cases=()):
                   "requirementId": str(case.requirement_id), "title": case.title,
                   "expectedResult": case.expected_result} for case in protected_cases]
         cases.sort(key=lambda item: (item["toolName"], item["selector"], item["testId"]))
+        if cases:
+            payload["protectedExecution"] = "ROLE_ENTRY_ONCE_V1"
         payload.update(unit=_policy(encode_unit_configuration(unit), "scopes"), protectedCases=cases,
-                       unitRunners=_runner_hashes(("unit_runner.py",)))
+                       unitRunners=_runner_hashes(("unit_runner.py",)), generatedOutputCoverage=sha256(
+                           Path(__file__).with_name("security_test_scope.py").read_bytes()).hexdigest())
     return _digest(payload)
 
 

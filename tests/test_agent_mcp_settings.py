@@ -274,7 +274,7 @@ class AgentMCPSettingsTests(unittest.TestCase):
         expected = {
             AgentRole.PLANNER: (),
             AgentRole.DEVELOPER: (
-                "read_project_file", "write_source_file", "apply_patch", "run_build", "run_unit_tests",
+                "read_project_file", "write_source_file", "edit_source_file", "apply_patch", "run_build", "run_unit_tests",
             ),
             AgentRole.QA: (
                 "read_project_file", "write_test_file", "run_unit_tests", "run_browser_tests", "read_test_report",

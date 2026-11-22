@@ -6,6 +6,7 @@ than replaying a request whose side effects cannot be established.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,6 +55,10 @@ _WAL_INITIALIZATION_RETRY_SECONDS = 0.01
 
 class AgentTaskStoreError(RuntimeError):
     """The local store cannot safely provide this operation."""
+
+
+class AgentContextLimitError(AgentTaskStoreError):
+    """An owned context exceeded an explicit record-count or byte bound."""
 
 
 class AgentStoreLeaseError(AgentTaskStoreError):
@@ -360,22 +365,51 @@ class SQLiteAgentTaskStore(VersionedTaskStore):
         uses one read transaction so concurrent saves cannot mix DB versions.
         Construction/restart never replays a model or Tool call.
         """
+        return self._context_items(context_id, metadata, context, max_tasks, max_bytes, project=None)
+
+    async def project_single_context(
+        self, context_id: str, metadata, context: ServerCallContext, *,
+        project: Callable[[dict], dict], max_bytes: int,
+    ) -> tuple[dict, ...]:
+        """Apply the model visibility policy per row, within one authorized read transaction."""
+        if self.role is not SingleAgentIdentity.SINGLE_AGENT:
+            raise AgentStoreRoleError("Only the Single runtime can read projected history")
+        return self._context_items(context_id, metadata, context, 128, max_bytes, project)
+
+    def _context_items(self, context_id, metadata, context, max_tasks, max_bytes, project):
         self._require_started()
         if (type(max_tasks) is not int or not 1 <= max_tasks <= 128
                 or type(max_bytes) is not int or not 1 <= max_bytes <= 1_048_576):
             raise AgentTaskStoreError("Agent Context history limits are invalid")
+        owner = self._owner(context)
+        items = []
+        used = 0
         with self._connection() as connection:
             connection.execute("BEGIN")
             self._assert_lease(connection)
-            self._check_context(connection, context_id, self._owner(context), metadata)
+            self._check_context(connection, context_id, owner, metadata)
+            if project is not None and connection.execute(
+                "SELECT 1 FROM agent_tasks WHERE context_id=? AND owner=? AND metadata_json=? LIMIT 1",
+                (context_id, owner, _json(metadata.to_a2a_json())),
+            ).fetchone() is None:
+                raise InvalidParamsError(message="Task does not belong to this Context")
             rows = connection.execute(
                 "SELECT t.payload_json FROM agent_tasks t WHERE t.context_id=? AND t.owner=? "
                 "ORDER BY (SELECT MIN(r.rowid) FROM agent_message_receipts r WHERE r.task_id=t.task_id), t.task_id "
-                "LIMIT ?", (context_id, self._owner(context), max_tasks + 1),
-            ).fetchall()
-        if len(rows) > max_tasks or sum(len(row[0].encode("utf-8")) for row in rows) > max_bytes:
-            raise AgentTaskStoreError("Agent Context history exceeds the configured limit")
-        return tuple(_load_task(row[0]) for row in rows)
+                "LIMIT ?", (context_id, owner, max_tasks + 1),
+            )
+            for (raw,) in rows:
+                if len(items) >= max_tasks:
+                    raise AgentContextLimitError("Agent Context task limit exceeded")
+                if project is None:
+                    used += len(raw.encode("utf-8"))
+                else:
+                    item = project(json.loads(raw))
+                    used += len(_json(item).encode("utf-8"))
+                if used > max_bytes:
+                    raise AgentContextLimitError("Agent Context byte limit exceeded")
+                items.append(_load_task(raw) if project is None else item)
+        return tuple(items)
 
     @staticmethod
     def _owner(context: ServerCallContext) -> str:

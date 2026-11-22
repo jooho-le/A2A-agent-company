@@ -155,6 +155,13 @@
                 "type": "null"
               }
             ]
+          },
+          "executionEvidence": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "tool_execution_evidence.schema.json"
+            }
           }
         }
       }

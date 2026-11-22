@@ -8,7 +8,10 @@ from orchestrator.domain.states import AgentRole
 from orchestrator.domain.role_outputs import ROLE_ARTIFACT_NAMES
 
 
-ROLE_CONTRACT_VERSION = "3"
+ROLE_CONTRACT_VERSION = "6"
+# v5 (2026-11-22): 동결 기준을 보존하는 역할별 수행·자체 점검 절차를 Single/Multi에 공유한다.
+# v4 (2026-11-18, Codex 재검토 1번, 주호 확인 필요): 모델에게 보이는 "허용 Tool"을 MCP 권한 정책이 아니라
+# 각 Runtime이 모델에 실제로 제공하는 Tool로 맞추고, Developer의 Build 책임 문장을 Host 책임으로 고쳤다.
 ARTIFACT_METADATA_SCHEMA = "schemas/project/developer_artifact_metadata.schema.json"
 
 
@@ -39,6 +42,21 @@ class AgentRoleContract:
     def allowed_tool_names(self) -> tuple[str, ...]:
         # One policy source, shared with the later MCP discovery/enforcement.
         return ROLE_TOOL_NAMES[self.role]
+
+    @property
+    def model_tool_names(self) -> tuple[str, ...]:
+        # What the role Runtime actually offers the model; the rest of the MCP policy (Build, test
+        # runs, scans) is executed by the Host with the same binding, never requested by the model.
+        return MODEL_TOOL_NAMES[self.role]
+
+
+MODEL_TOOL_NAMES = MappingProxyType({
+    AgentRole.PLANNER: (),
+    AgentRole.DEVELOPER: ("read_project_file", "write_source_file", "edit_source_file"),
+    AgentRole.QA: ("read_project_file", "write_test_file", "read_test_report"),
+    # write_test_file is offered when the Host configures Security test scopes (both Ver1 and Ver2).
+    AgentRole.SECURITY: ("read_project_file", "read_security_report", "write_test_file"),
+})
 
 
 ROLE_CONTRACTS = MappingProxyType({
@@ -72,8 +90,8 @@ ROLE_CONTRACTS = MappingProxyType({
         responsibilities=(
             "할당된 Source 영역만 수정하고 실제 변경 파일과 ADDED/MODIFIED/DELETED 작업을 기록한다.",
             "모델은 Runtime이 지정한 작업 Draft만 제안한다. Runtime이 실제 파일 변경·Git Snapshot·Build 실행 근거로 Artifact를 조립한다.",
-            "Build와 필요한 자체 Unit Test를 허용된 MCP Tool로 요청한다.",
-            "Runtime이 확정한 새 불변 Snapshot과 그 Snapshot의 실제 Build 결과를 보고한다.",
+            "제공된 파일 Tool(read_project_file·write_source_file·edit_source_file)로 Source만 수정하고, 수정을 마치면 READY를 제출한다.",
+            "새 불변 Snapshot 생성, Build 실행, 결과 기록은 Host(Runtime)가 맡는다. Developer는 Build·Unit Test를 실행하거나 그 결과를 보고하지 않는다.",
             "수정은 기존 Issue 근거를 해결하도록 최소화하고 이전 Artifact lineage를 유지한다.",
             "Source/Change/Build의 requirementIds와 codeVersion은 같은 Step·코드 후보를 가리킨다.",
         ),

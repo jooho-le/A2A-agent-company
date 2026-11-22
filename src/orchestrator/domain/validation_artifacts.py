@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
+import json
 from typing import Literal
 
 from pydantic import Field, UUID4, field_validator, model_validator
@@ -10,6 +11,7 @@ from orchestrator.domain.contract_validation import JSONInteger
 from orchestrator.domain.snapshot_handoff import ExecutionManifest, ImmutableDomainModel, _validate_artifact_uri
 from orchestrator.domain.states import AgentRole
 from orchestrator.domain.tool_evidence import ToolExecutionEvidence
+from orchestrator.domain import test_not_run
 
 
 class ValidationOutcome(str, Enum):
@@ -34,6 +36,7 @@ class FindingDisposition(str, Enum):
 
 
 class QATestResult(ImmutableDomainModel):
+    execution_evidence: tuple[ToolExecutionEvidence, ...] = Field(default=(), alias="executionEvidence", max_length=64)
     test_id: str = Field(alias="testId", min_length=1)
     requirement_id: UUID4 = Field(alias="requirementId")
     outcome: ValidationOutcome
@@ -56,6 +59,7 @@ class QATestResult(ImmutableDomainModel):
 
 
 class SecurityRequirementResult(ImmutableDomainModel):
+    execution_evidence: tuple[ToolExecutionEvidence, ...] = Field(default=(), alias="executionEvidence", max_length=64)
     requirement_id: UUID4 = Field(alias="requirementId")
     outcome: ValidationOutcome
     details: str | None = None
@@ -70,6 +74,46 @@ class SecurityRequirementResult(ImmutableDomainModel):
         if value is not None and not value.strip():
             raise ValueError("security result details must not be blank")
         return value.strip() if value is not None else None
+
+
+def validation_evidence_outcome_matches(item) -> bool:
+    """A successful runner may authentically report an unexecuted test body.
+
+    Do not rewrite the receipt's PASS (the tool completed) into UNVERIFIED.
+    Admit only closed, structured technical not-run rows; arbitrary skips or
+    semantic uncertainty still cannot use a successful tool as their proof.
+    """
+    evidence = item.tool_evidence
+    if evidence is None:
+        return True
+    expected = ValidationOutcome.UNVERIFIED if item.outcome == ValidationOutcome.UNVERIFIED else ValidationOutcome.PASS
+    if evidence.outcome == expected:
+        return True
+    if (item.outcome != ValidationOutcome.UNVERIFIED or evidence.outcome != ValidationOutcome.PASS
+            or evidence.tool_name != 'run_unit_tests'):
+        return False
+    try:
+        data = json.loads(item.details or '')
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    runner_reasons = test_not_run.TECHNICAL & test_not_run.RUNNER_REASONS
+    if isinstance(item, QATestResult):
+        return item.actual_result in runner_reasons and data.get('code') == item.actual_result
+    if not isinstance(item, SecurityRequirementResult) or data.get('code') != test_not_run.SECURITY_TESTS_NOT_RUN:
+        return False
+    rows = data.get('tests')
+    if not isinstance(rows, list) or not rows or not all(isinstance(row, dict) for row in rows):
+        return False
+    nonpassing = [row for row in rows if row.get('outcome') != 'PASS']
+    return bool(nonpassing) and all(
+        row.get('outcome') == 'UNVERIFIED' and isinstance(row.get('notRunReason'), str)
+        and row['notRunReason'] in test_not_run.TECHNICAL
+        for row in nonpassing) and any(
+            row.get('notRunReason') in runner_reasons
+            and isinstance(row.get('evidenceRefs'), list) and evidence.evidence_ref in row['evidenceRefs']
+            for row in nonpassing)
 
 
 class SecurityFinding(ImmutableDomainModel):
@@ -164,10 +208,11 @@ class QAReportArtifact(_ValidationArtifact):
         ):
             raise ValueError("QA tests cannot reference unknown requirements")
         for test in self.tests:
+            validate_execution_evidence(test, self.execution_manifest, {"run_unit_tests", "run_browser_tests"})
             if test.tool_evidence is not None and (
                 test.tool_evidence.execution_manifest != self.execution_manifest
                 or test.tool_evidence.tool_name not in {"run_unit_tests", "run_browser_tests"}
-                or test.tool_evidence.outcome != (ValidationOutcome.UNVERIFIED if test.outcome == ValidationOutcome.UNVERIFIED else ValidationOutcome.PASS)
+                or not validation_evidence_outcome_matches(test)
             ):
                 raise ValueError("QA Tool evidence must match the role, execution and Snapshot")
         return self
@@ -210,12 +255,13 @@ class SecurityReportArtifact(_ValidationArtifact):
         ):
             raise ValueError("Security findings cannot reference unknown requirements")
         for result in self.requirement_results:
+            validate_execution_evidence(result, self.execution_manifest, {"run_unit_tests", "run_security_scan"})
             if result.tool_evidence is not None and (
                 result.tool_evidence.execution_manifest != self.execution_manifest
                 # Scanner evidence, or measured Security unit-test receipts when
                 # the Host runs Security on the same test path as QA.
                 or result.tool_evidence.tool_name not in {"run_security_scan", "run_unit_tests"}
-                or result.tool_evidence.outcome != (ValidationOutcome.UNVERIFIED if result.outcome == ValidationOutcome.UNVERIFIED else ValidationOutcome.PASS)
+                or not validation_evidence_outcome_matches(result)
             ):
                 raise ValueError("Security Tool evidence must match the role, execution and Snapshot")
         return self
@@ -233,3 +279,30 @@ class SecurityReportArtifact(_ValidationArtifact):
             result.outcome == ValidationOutcome.UNVERIFIED
             for result in self.requirement_results
         )
+
+
+def validate_execution_evidence(item, manifest, allowed_tools):
+    """Attempt provenance is independent of whether a product check completed."""
+    seen = set()
+    for evidence in item.execution_evidence:
+        if (evidence.execution_manifest != manifest or evidence.tool_name not in allowed_tools
+                or evidence.execution_id in seen):
+            raise ValueError('execution evidence must be unique and bound to this Snapshot')
+        seen.add(evidence.execution_id)
+    if item.execution_evidence and item.tool_evidence is not None and item.tool_evidence not in item.execution_evidence:
+        raise ValueError('verdict evidence must belong to execution evidence')
+    if item.execution_evidence:
+        try:
+            data = json.loads(item.details or '{}')
+        except (ValueError, TypeError):
+            # Legacy/browser reports carry a stable text code, without per-case refs.
+            return
+        if not isinstance(data, dict):
+            raise ValueError('execution details must be an object')
+        rows = data.get('tests', [data])
+        refs = {e.evidence_ref for e in item.execution_evidence}
+        if (not isinstance(rows, list) or any(not isinstance(row, dict)
+                or not isinstance(row.get('evidenceRefs', []), list)
+                or any(not isinstance(ref, str) or ref not in refs for ref in row.get('evidenceRefs', []))
+                for row in rows)):
+            raise ValueError('test evidence reference is not bound to an execution receipt')

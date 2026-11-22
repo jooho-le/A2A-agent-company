@@ -202,8 +202,10 @@ class ValidationRevalidationServicesTests(unittest.IsolatedAsyncioTestCase):
         report = await self.qa_report(case)
         self.assertEqual((report.code_version, report.artifact_version), (2, 2))
         self.assertEqual(report.previous_artifact_id, initial.artifact_id)
-        self.assertEqual({item.tool_evidence.tool_name for item in report.tests}, {"run_browser_tests"})
-        self.assertEqual({item.tool_evidence.execution_manifest.project_artifact_id for item in report.tests},
+        self.assertEqual(report.tests[2].actual_result, "CONCURRENT_SIGNUPS_NOT_OBSERVED")
+        self.assertIsNone(report.tests[2].tool_evidence)
+        self.assertEqual({item.execution_evidence[0].tool_name for item in report.tests}, {"run_browser_tests"})
+        self.assertEqual({item.execution_evidence[0].execution_manifest.project_artifact_id for item in report.tests},
                          {case.source.artifact_id})
 
     async def test_stale_browser_receipt_from_prior_source_is_rejected(self):

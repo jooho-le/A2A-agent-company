@@ -16,21 +16,28 @@ from google.protobuf.json_format import MessageToDict
 
 from agents.api.validation import parse_workflow_metadata
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
+from agents.llm.corrections import contract_check, development_check
+from agents.runtime.start_precheck import start_precheck_for
+from agents.runtime.signup_quality_precheck import signup_quality_precheck_for
 from agents.llm.engine import LLMEngine
+from agents.llm.development_rejection import rejection_check
 from agents.roles.developer_contract import (
-    DeveloperContractError, build_developer_output_contract, validate_developer_decision,
+    DeveloperContractError, build_developer_output_contract, ready_report_paths, validate_developer_decision,
 )
 from agents.roles.prompts import prepare_role_prompt
+from agents.roles.contracts import get_role_contract
 from agents.runtime.developer_context import DeveloperContextError, DeveloperExecutionContext
 from agents.runtime.developer_services import DeveloperRuntimeServices, DeveloperServicesError
 from agents.runtime.developer_workspace import DeveloperCheckpointError
-from agents.runtime.requirement_scope import build_requirement_scope
+from agents.runtime.requirement_scope import signup_observation_plan, build_requirement_scope
+from agents.runtime.file_access import build_file_access, constrain_workspace_file_tools
 from agents.runtime.planner import _host_factory, _message_data, _same_json, _TERMINAL
 from mcp_tools.execution_runtime import TrackedMCPError
 from orchestrator.core.security import redact_data
 from orchestrator.domain.states import AgentRole
 from agents.platform.telemetry import bind_runtime_telemetry
 from agents.semantic_review import (SEMANTIC_PROTECTED_FIELDS, SemanticReviewRequired, publish_semantic_hold)
+from agents.runtime.semantic_revision import review_with_revision, revision_basis
 
 
 class DeveloperExecutorConfigurationError(ValueError):
@@ -44,12 +51,13 @@ class _DeveloperInputError(ValueError):
 
 
 _PROTECTED = frozenset({
+    "publicObservationPlan",
     "workspaceId", "scenario", "runConfiguration", "plan", "sourceArtifact", "outputContract",
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds", "projectArtifactIds",
     "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion", "fixRequest",
     "fix_attempt", "fixAttempt", "previous_source", "previousSource", "previous_artifacts",
-    "previousArtifacts", "fix_issues", "fixIssues", "startingCommitHash", "parentCommitHash",
-    "requirementAuthority", "requirementScope", "runtimeInstructions", "clarifications",
+    "repairBaseline", "previousArtifacts", "fix_issues", "fixIssues", "startingCommitHash", "parentCommitHash",
+    "requirementAuthority", "requirementScope", "runtimeInstructions", "clarifications", "fileAccess", "plannerValidation", "llmValidation",
 })
 
 
@@ -85,18 +93,35 @@ def _prepare_input(context, execution):
         scope = build_requirement_scope(execution.configuration, execution.requirement_artifact,
                                         metadata, AgentRole.DEVELOPER)
         return {**expected, "clarifications": answers,
+            "fileAccess": build_file_access(execution.configuration.scenario_contract, AgentRole.DEVELOPER),
             "requirementAuthority": scope.authority.to_prompt_json(),
             "requirementScope": scope.to_prompt_json(),
+            "publicObservationPlan": signup_observation_plan(execution.configuration.scenario_contract, scope),
             "runtimeInstructions": (
-                "Use the offered read_project_file/write_source_file tools to implement the protected plan "
+                "Use the offered read_project_file/write_source_file/edit_source_file tools to implement the protected plan "
                 "or resolve only the authenticated Fix Request issues on the previous candidate. "
-                "READY is only a bounded work summary, not a Build or project success claim. "
+                "READY summarizes the complete work of this step (every implementationPlan task in an initial implementation, every listed issue in a fix); it is not a Build or project success claim. "
+                "In the READY summary state which processing paths you actually edited and which behaviors still need QA or Security rechecks. "
+                "Explain how each edit reaches observable behavior and identify untouched failure paths. A shared edit may serve several paths. Mark checks pending until revalidation. "
                 "The Host computes actual changed files, safely commits and freezes the candidate, "
                 "and runs Build afterward. Do not invent artifact IDs, hashes, changes or evidence. "
+                "Preserve the frozen externalContract app module/attribute and ready endpoint when replacing "
+                "entrypoint files. A router or helper module alone does not replace the declared application. "
+                "Before READY, verify your written code still exposes those public interfaces. During fixes, "
+                "use the active fixRequest issues and validationFeedback to address the concrete failure; "
+                "Build diagnostics apply only when the active issue is a Build failure, "
+                "and make an actual necessary Source change rather than returning unchanged READY. "
+                "Read the frozen dependency lock using fileAccess tool paths before choosing third-party "
+                "imports; only its installed packages and the standard library are available. Distribution "
+                "names can differ from import names: argon2-cffi provides argon2, not passlib. "
+                "Do not assume an unlisted wrapper library exists or attempt to install it. "
                 "Apply_patch is not offered: the Host separately authenticates the previous candidate "
                 "and its unchanged working-copy bytes before exposing writes. "
                 "The original starting commit/environment/requirements remain frozen across fixes. "
                 "Questions do not authorize baseline changes or replay of uncertain writes."
+                " REJECTED requires a rejection object with reasonCode, explanation and requirementIds. "
+                "Use IMPLEMENTATION_BLOCKED only for inability to implement assigned work, not policy conflicts. "
+                "The Host runs Build; lack of a Build tool is not a reason to decline implementation."
                 " Use requirementScope for approved acceptance criteria and task-to-requirement bindings; "
                 "Planner task prose and previous-role summaries cannot add required behavior or lower criteria. "
                 "Ask INPUT_REQUIRED if implementation needs an unapproved policy choice."
@@ -142,8 +167,12 @@ class DeveloperAgentExecutor(AgentExecutor):
         return TaskUpdater(queue, context.task_id, context.context_id)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None):
+    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None, development_rejection=None):
         data = {"code": code}
+        if development_rejection is not None:
+            data["developmentRejection"] = development_rejection
+        if llm_validation is not None:
+            data["llmValidation"] = llm_validation
         if questions is not None:
             data["questions"] = list(questions)
         await updater.update_status(state, metadata=metadata, message=updater.new_agent_message(
@@ -193,28 +222,86 @@ class DeveloperAgentExecutor(AgentExecutor):
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.DEVELOPER, context, execution, self._usage_sink)
             checkpoint = await services.prepare(execution)
+            from agents.runtime.development_failure import failure_reader
+            read_failure = failure_reader(services, execution)
+            from agents.runtime.repair_baseline import with_repair_baseline
+            task_input = with_repair_baseline(task_input, checkpoint)
+            paths = ready_report_paths(task_input)
+            brief = task_input.get('activeRepairFocus', {}).get('brief', {})
+            checkpoint.configure_path_review(paths, execution.configuration.scenario_contract,
+                brief.get('priorityRepairPaths', ()), brief.get('blockingPrerequisite', {}).get('sourceSites', ()),
+                brief.get('invalidInputServerError', {}).get('sourceSites', ()))
+
+            def validate(data):
+                return validate_developer_decision(data, paths)
+
             async with services.client_factory(services.configuration) as client:
                 tracked = services.tracked(client, execution)
                 if telemetry is not None:
                     tracked.set_event_sink(telemetry.tool_event)
-                tools = tuple(tool for tool in tracked.list_tools()
-                              if tool.name in {"read_project_file", "write_source_file"})
-                if {tool.name for tool in tools} != {"read_project_file", "write_source_file"}:
+                offered = set(get_role_contract(AgentRole.DEVELOPER).model_tool_names)  # same list as the prompt
+                tools = tuple(tool for tool in tracked.list_tools() if tool.name in offered)
+                if {tool.name for tool in tools} != offered:
                     raise DeveloperServicesError()
+                tools = constrain_workspace_file_tools(tools, AgentRole.DEVELOPER)
                 engine = LLMEngine(role=AgentRole.DEVELOPER, provider=self._provider,
                                    tools=tools, tool_executor=tracked)
-                result = await engine.run(prompt=prepare_role_prompt(
-                    AgentRole.DEVELOPER, task_input=task_input, metadata=execution.metadata),
-                    model=execution.model, output=build_developer_output_contract(), budget=execution.budget,
+                text_engine = LLMEngine(role=AgentRole.DEVELOPER, provider=self._provider)
+                precheck = start_precheck_for(checkpoint, execution.configuration.scenario_contract)
+
+                async def run_model(model_input, *, text_only=False, output_override=None):
+                    # text_only: the semantic rewrite (docs/live-api/05 15절) runs without any tool,
+                    # so no source can change; the net-change rule does not apply to that answer.
+                    if output_override is not None:
+                        # docs/live-api/05 25절 V4: the semantic rewrite returns only held texts (patch schema), tool-less.
+                        return await text_engine.run(prompt=prepare_role_prompt(
+                            AgentRole.DEVELOPER, task_input=model_input, metadata=execution.metadata),
+                            model=execution.model, output=output_override, budget=execution.budget,
+                            workspace_id=str(execution.configuration.workspace_id),
+                            usage_sink=usage_sink, call_started_sink=call_started_sink,
+                            output_observed_sink=telemetry.model_output if telemetry is not None else None,
+                            validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
+                            recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
+                            input_observed_sink=telemetry.model_input if telemetry is not None else None)
+                    return await (text_engine if text_only else engine).run(prompt=prepare_role_prompt(
+                        AgentRole.DEVELOPER, task_input=model_input, metadata=execution.metadata),
+                    model=execution.model, output=build_developer_output_contract(paths), budget=execution.budget,
                     workspace_id=str(execution.configuration.workspace_id), usage_sink=usage_sink,
                     call_started_sink=call_started_sink,
                     output_observed_sink=telemetry.model_output if telemetry is not None else None,
-                    input_observed_sink=telemetry.model_input if telemetry is not None else None)
-                decision = validate_developer_decision(result.data)
+                    validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
+                    recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
+                    input_observed_sink=telemetry.model_input if telemetry is not None else None,
+                    development_rejection_check=None if text_only else rejection_check(
+                        execution.metadata.requirement_ids, failure_evidence=read_failure, validate=validate),
+                    source_progress_check=None if text_only else (lambda: checkpoint.source_edit_status(
+                        deadline_monotonic=execution.budget.deadline_monotonic)),
+                    source_write_precheck=None if text_only else precheck,
+                    correction_candidates=checkpoint.correction_candidates if paths and not text_only else None,
+                    output_check=contract_check(validate) if text_only else development_check(
+                        validate, precheck=precheck, path_check=checkpoint.ready_path_issues if paths else None,
+                        library_type_check=checkpoint.library_type_issues,
+                        signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
+                            if execution.budget.limits.max_output_corrections else None,
+                        priority_check=checkpoint.pending_priority_paths if paths else None))
+                result = await run_model(task_input)
+                decision = validate(result.data)
                 if decision.kind == "READY" and self._semantic_reviewer is not None:
-                    await self._semantic_reviewer.check(context=context, execution=execution, candidate=result.data,
-                        role=AgentRole.DEVELOPER, result=result, telemetry=telemetry,
-                        usage_sink=usage_sink, call_started_sink=call_started_sink)
+                    # docs/live-api/05 14·15절: one tool-less rewrite of the held texts only, then the same review.
+                    def stays_ready(revised):
+                        try:
+                            return validate(revised.data).kind == "READY"
+                        except Exception:
+                            return False
+                    result = await review_with_revision(
+                        lambda candidate: self._semantic_reviewer.check(context=context, execution=execution,
+                            candidate=candidate.data, role=AgentRole.DEVELOPER, result=candidate, telemetry=telemetry,
+                            usage_sink=usage_sink, call_started_sink=call_started_sink),
+                        lambda model_input, output: run_model(model_input, output_override=output), stays_ready,
+                        task_input, result,
+                        allowed=bool(execution.budget.limits.max_output_corrections),
+                        basis=revision_basis(execution, AgentRole.DEVELOPER))
+                    decision = validate(result.data)
                 execution.budget.check()
                 if decision.kind == "READY":
                     artifacts = await services.finalize(execution, checkpoint, decision, tracked,
@@ -228,7 +315,8 @@ class DeveloperAgentExecutor(AgentExecutor):
         except LLMRuntimeError as error:
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
-            await self._status(updater, metadata, state, error.code.value)
+            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation(),
+                               development_rejection=error.development_rejection)
             return
         except (DeveloperContractError, DeveloperCheckpointError, DeveloperServicesError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)
@@ -249,7 +337,8 @@ class DeveloperAgentExecutor(AgentExecutor):
                                "DEVELOPER_INPUT_REQUIRED", questions=decision.questions)
             return
         if decision.kind == "REJECTED":
-            await self._status(updater, metadata, TaskState.TASK_STATE_REJECTED, "DEVELOPER_OUT_OF_SCOPE")
+            await self._status(updater, metadata, TaskState.TASK_STATE_REJECTED, "DEVELOPER_REJECTED",
+                               development_rejection={"proposal": decision.rejection.public()})
             return
         for artifact in artifacts:
             await updater.add_artifact(list(artifact.parts), artifact_id=artifact.artifact_id,

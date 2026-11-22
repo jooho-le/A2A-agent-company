@@ -187,6 +187,15 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
         with self.assertRaises((FrozenInstanceError, AttributeError, TypeError)):
             plan.approved_configuration = RunConfiguration()
 
+    def test_explicit_no_browser_changes_policy_without_changing_image_or_requirements(self):
+        original = self.inspect()
+        self.tools["browser"] = None
+        self.write()
+        current = self.inspect()
+        self.assertNotEqual(original.policy_sha256, current.policy_sha256)
+        self.assertEqual(original.approved_configuration, current.approved_configuration)
+        self.assertIsNone(current.tools.browser_configuration)
+
     def test_policy_fingerprint_is_stable_canonical_and_not_a_credential(self):
         approved = self.inspect().policy_sha256
         self.assertRegex(approved, r"^[0-9a-f]{64}$")
@@ -197,6 +206,37 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
         with patch.dict(os.environ, self.environment):
             self.assertEqual(self.inspect().policy_sha256, approved)
         self.assertFalse((self.directory / ".data").exists())
+
+    def test_test_data_policy_and_its_runner_bytes_change_the_fingerprint(self):
+        from mcp_tools.tools import unit_runner
+        approved = self.inspect().policy_sha256
+        with patch.object(unit_runner, 'TEST_DATA_POLICY', 'RUNTIME_SYNTHETIC_TEST_DATA_V_NEXT'):
+            self.assertNotEqual(self.inspect().policy_sha256, approved)
+        altered_runner = self.directory / 'fixture_runner.py'
+        altered_runner.write_text(Path(unit_runner.__file__).read_text() + '\n# changed fixture\n')
+        with patch.object(unit_runner, '__file__', str(altered_runner)):
+            self.assertNotEqual(self.inspect().policy_sha256, approved)
+        self.assertEqual(self.inspect().policy_sha256, approved)
+
+    def test_generated_validation_and_terminal_policy_bytes_change_the_run_fingerprint(self):
+        from agents.llm import recovery
+        from agents.runtime import developer, developer_services, qa_services, ready_library_types
+        from agents.runtime import output_safety_precheck, generated_tests_precheck, test_fix
+        from agents.roles import work_rules
+        from agents.runtime import repair_input_failures, requirement_scope, security_services, security_test_scope
+        from agents.single import runtime as single_runtime
+        from orchestrator.application import validation_output
+        from orchestrator.infrastructure import validation_stop
+        from orchestrator.sandbox import docker_cli
+        original = self.inspect().policy_sha256
+        altered = self.directory / 'alternate-validation-policy.py'
+        altered.write_text('# alternate policy bytes\n')
+        for module in (qa_services, requirement_scope, security_services, security_test_scope,
+                       validation_output, validation_stop, docker_cli, ready_library_types, developer,
+                       developer_services, single_runtime, recovery, repair_input_failures,
+                       output_safety_precheck, generated_tests_precheck, test_fix, work_rules):
+            with self.subTest(module=module.__name__), patch.object(module, '__file__', str(altered)):
+                self.assertNotEqual(self.inspect().policy_sha256, original)
 
     def test_execution_policies_not_expressed_by_image_baseline_change_the_fingerprint(self):
         approved = self.inspect().policy_sha256

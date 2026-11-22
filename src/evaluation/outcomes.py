@@ -21,6 +21,7 @@
 from decimal import Decimal, InvalidOperation
 from .host_evidence import budget_assessment
 from .package_evidence import package_assessment
+from .recovery_evidence import recovery_assessment
 
 CLOSED_STATUSES = ('FINISHED', 'ABORTED', 'HUMAN_REVIEW', 'WAITING_INPUT')  # 자동 실행 구간이 닫힌 상태
 PAUSED_STATUSES = ('HUMAN_REVIEW', 'WAITING_INPUT')                         # 사람 입력·판단을 기다리며 멈춘 상태
@@ -34,6 +35,10 @@ def has_resumed(bundle):
 # 코드 → (원인, 비교 유효성). 에이전트 상태 메시지 code, 의미 검토 reasonCode, 호출 영수증 outcome에 같은 이름이 쓰인다.
 CODE_CAUSES = {
     'SEMANTIC_REVIEW_INPUT_REQUIRED': ('SEMANTIC_REVIEW_HOLD', 'VALID'),
+    'SEMANTIC_REVIEW_FAILED': ('SEMANTIC_REVIEW_FAILURE', 'VALID'),
+    'SEMANTIC_EVIDENCE_INVALID': ('SEMANTIC_REVIEW_FAILURE', 'VALID'),
+    'SEMANTIC_RESPONSE_INVALID': ('SEMANTIC_REVIEW_FAILURE', 'VALID'),
+    'SEMANTIC_REVIEW_BINDING_INVALID': ('SEMANTIC_REVIEW_FAILURE', 'VALID'),
     'PLANNER_INPUT_REQUIRED': ('PLANNER_QUESTION', 'VALID'),
     'REQUIREMENT_SCOPE_INVALID': ('REQUIREMENT_SCOPE_INVALID', 'VALID'),
     'LLM_PROVIDER_ERROR': ('MODEL_API_FAILURE', 'UNVERIFIED'),
@@ -51,6 +56,7 @@ CODE_CAUSES = {
 # 의미 검토가 보류한 사유 중 "내용이 승인 범위를 벗어났거나 근거가 부족함"(검토 호출 오류가 아닌 것)
 SEMANTIC_HOLD_REASONS = frozenset({'UNSUPPORTED_MEANING', 'UNAPPROVED_DATA_SCOPE', 'INSUFFICIENT_EVIDENCE',
                                    'UNAPPROVED_SCOPE', 'REVIEW_RESPONSE_INVALID'})
+SEMANTIC_CAUSES = frozenset({'SEMANTIC_REVIEW_HOLD', 'SEMANTIC_REVIEW_FAILURE'})
 STOP_STATES = frozenset({'TASK_STATE_INPUT_REQUIRED', 'TASK_STATE_AUTH_REQUIRED', 'TASK_STATE_FAILED',
                          'TASK_STATE_REJECTED', 'TASK_STATE_CANCELED'})
 RESUME_POLICIES = {'REGENERATE_AND_REVIEW': 'ANSWER_THEN_REVIEW', 'NEW_RUN_REQUIRED': 'NEW_RUN_REQUIRED'}
@@ -100,7 +106,8 @@ def stop_signals(a2a):
                             'questions': len(data['questions']) if isinstance(data.get('questions'), list) else 0,
                             'unapprovedAssumptions': (len(data['unapprovedAssumptions'])
                                                       if isinstance(data.get('unapprovedAssumptions'), list) else 0),
-                            'resumePolicy': review.get('resumePolicy'), 'reviewReason': review.get('reasonCode')})
+                            'resumePolicy': review.get('resumePolicy'), 'reviewReason': review.get('reasonCode'),
+                            'reviewCategory': review.get('category')})
     return sorted(signals, key=lambda item: (item['at'] or '', item['identity'], item['taskId'] or ''))
 
 
@@ -118,7 +125,7 @@ def semantic_reviews(trace):
         sequences = value('modelCallSequences')
         reviews.append({'reviewId': value('reviewId'), 'workflowStepId': binding.get('workflowStepId'),
                         'actor': binding.get('actor'), 'stepRole': value('stepRole'), 'phase': value('phase'),
-                        'status': value('status'), 'reasonCode': value('reasonCode'),
+                        'status': value('status'), 'reasonCode': value('reasonCode'), 'category': value('category'),
                         'resumePolicy': value('resumePolicy'), 'at': binding.get('occurredAt'),
                         'modelCallSequences': [_number(item) for item in sequences] if isinstance(sequences, list) else None})
     return sorted(reviews, key=lambda item: item['at'] or '')
@@ -240,7 +247,8 @@ def classify_run(bundle, trace=None, a2a=None):
                           for item in signals] + [{'source': 'SEMANTIC_REVIEW', 'identity': item['stepRole'],
                                                    'state': item['status'], 'code': item['reasonCode']}
                                                   for item in held] + errors,
-              'resumedDuringRun': has_resumed(bundle)}
+              'resumedDuringRun': has_resumed(bundle),
+              'recovery': recovery_assessment(bundle, trace or {})}
     if result['resumedDuringRun']:
         # 첫 인계가 재개 뒤에 왔다면 그 최종 코드·누적 사용량은 자동 구간의 결과가 아니다.
         # 이전 자동 구간의 Snapshot/비용/시간을 이 기록만으로 추정하지 않는다.
@@ -264,17 +272,22 @@ def classify_run(bundle, trace=None, a2a=None):
         stopped = {key: chosen[key] for key in ('source', 'identity', 'taskId', 'state', 'code')}
         details = {'questions': chosen['questions'], 'unapprovedAssumptions': chosen['unapprovedAssumptions']}
         policy = None
-        if cause == 'SEMANTIC_REVIEW_HOLD':
+        if cause in SEMANTIC_CAUSES:
             policy = chosen['resumePolicy'] or (review or {}).get('resumePolicy')
             details.update(reviewReason=chosen['reviewReason'] or (review or {}).get('reasonCode'), resumePolicy=policy)
+            category = chosen['reviewCategory'] or (review or {}).get('category')
+            if category is not None:
+                details['reviewCategory'] = category
     elif review is not None:
         reason = review['reasonCode']
         cause, validity = (('SEMANTIC_REVIEW_HOLD', 'VALID') if reason in SEMANTIC_HOLD_REASONS or reason not in CODE_CAUSES
                            else CODE_CAUSES[reason])
         stopped = {'source': 'SEMANTIC_REVIEW', 'identity': review['stepRole'], 'taskId': None,
                    'state': review['status'], 'code': reason}
-        policy = review['resumePolicy'] if cause == 'SEMANTIC_REVIEW_HOLD' else None
-        details = {'reviewReason': reason, 'resumePolicy': policy} if cause == 'SEMANTIC_REVIEW_HOLD' else {}
+        policy = review['resumePolicy'] if cause in SEMANTIC_CAUSES else None
+        details = {'reviewReason': reason, 'resumePolicy': policy} if cause in SEMANTIC_CAUSES else {}
+        if cause in SEMANTIC_CAUSES and review.get('category') is not None:
+            details['reviewCategory'] = review['category']
     elif errors:
         cause, validity = _cause_of(errors[-1]['code'])
         stopped, policy, details = errors[-1], None, {}
@@ -291,8 +304,28 @@ def classify_run(bundle, trace=None, a2a=None):
                 'details': {'terminationReason': run.get('terminationReason'), 'underlyingCode': underlying}}
     if cause is None:
         cause = 'DISPATCH_REVIEW' if 'A2A_DISPATCH_REQUIRES_REVIEW' in event_types else 'UNKNOWN_HOLD'
+    # The same LLM_SCHEMA_INVALID code can describe model arguments OR a
+    # malformed Host Tool result after execution. Only bound recovery receipts
+    # can distinguish them; never attribute an integration bug to model accuracy.
+    if result['recovery']['status'] == 'PASS' and stopped is not None:
+        matches = [row for row in result['recovery']['decisions']
+                   if row['code'] == stopped.get('code') and (
+                       row['taskId'] == stopped.get('taskId') if stopped.get('taskId') else
+                       row['sequence'] == stopped.get('sequence'))]
+        if matches:
+            route = matches[-1]
+            details['failureCategory'] = route['category']
+            details['recoveryAction'] = route['action']
+            if route['category'] == 'HOST_CONFIGURATION' and stopped['code'] == 'LLM_SCHEMA_INVALID':
+                cause, validity = 'HOST_INTEGRATION_FAILURE', 'UNVERIFIED'
+            elif route['category'] == 'EXECUTION_UNCERTAIN' and stopped['code'] == 'LLM_RESPONSE_INVALID':
+                cause, validity = 'MODEL_RESPONSE_UNVERIFIED', 'REVIEW_REQUIRED'
     if cause == 'SEMANTIC_REVIEW_HOLD':
         resume = RESUME_POLICIES.get(policy, 'OPERATOR_DECISION')
+    elif cause == 'SEMANTIC_REVIEW_FAILURE':
+        # Invalid review output is not a missing user requirement. In particular,
+        # REGENERATE_AND_REVIEW must not become an instruction to answer a question.
+        resume = 'NEW_RUN_REQUIRED' if policy == 'NEW_RUN_REQUIRED' else 'OPERATOR_DECISION'
     elif cause in ('PLANNER_QUESTION', 'AGENT_QUESTION'):
         resume = 'ANSWER'
     elif cause == 'MODEL_AUTH_FAILURE':
@@ -305,6 +338,29 @@ def classify_run(bundle, trace=None, a2a=None):
 
 def _condition(status, reason=None):
     return {'status': status, 'reason': reason}
+
+
+_UNEXECUTED_STOPS = {
+    'QA_REPORT': {'QA_MODEL_VALIDATION_STOP', 'QA_DRAFT_CORRECTIONS_EXHAUSTED', 'DEVELOPMENT_NO_PROGRESS_EXHAUSTED', 'DEVELOPMENT_CORRECTIONS_EXHAUSTED', 'DEVELOPMENT_REJECTION_EXHAUSTED',
+                  'AUTOMATIC_STOP_FINISHED'},
+    'SECURITY_REPORT': {'SECURITY_MODEL_VALIDATION_STOP', 'SECURITY_DRAFT_CORRECTIONS_EXHAUSTED', 'DEVELOPMENT_NO_PROGRESS_EXHAUSTED',
+                        'DEVELOPMENT_CORRECTIONS_EXHAUSTED', 'DEVELOPMENT_REJECTION_EXHAUSTED',
+                        'AUTOMATIC_STOP_FINISHED'},
+}
+
+
+def _declared_unexecuted(export, bundle, kind, final):
+    declared = ((export.get('packageFinalReport') or {}).get('unexecutedValidation') or {}).get(kind)
+    if kind not in _UNEXECUTED_STOPS or not isinstance(declared, dict):
+        return False
+    reason = declared.get('reason')
+    stop_events = {e.get('eventType') for e in bundle.get('events') or [] if e.get('codeVersion') == final}
+    if declared.get('status') == 'UNVERIFIED':
+        return reason in _UNEXECUTED_STOPS[kind] and reason in stop_events
+    # A build that failed before validation: the stop event names why no report exists.
+    return (declared.get('status') == 'NOT_RUN' and reason == 'BUILD_FAILED'
+            and bool(stop_events & {'DEVELOPMENT_NO_PROGRESS_EXHAUSTED', 'DEVELOPMENT_CORRECTIONS_EXHAUSTED', 'DEVELOPMENT_REJECTION_EXHAUSTED',
+                                    'SAME_ISSUE_REPEAT_LIMIT_REACHED', 'AUTOMATIC_STOP_FINISHED'}))
 
 
 def auto_completion(export, run_document, *, report=None, outcome=None, metrics=None):
@@ -361,6 +417,11 @@ def auto_completion(export, run_document, *, report=None, outcome=None, metrics=
             if not any(item.get('artifactType') == kind and (kind not in VERSIONED_ARTIFACTS or item.get('codeVersion') == final)
                        for item in artifacts):
                 missing.append(kind)
+        # docs/live-api/05: a validation report the Host could not produce (technical draft
+        # exhaustion, or a build that failed before validation) is a declared gap of a finished
+        # Run, not a missing package part. Only count it when the packaged final report declares
+        # it and the Trace holds the Host's own stop event for that report on the final version.
+        missing = [kind for kind in missing if not _declared_unexecuted(export, bundle, kind, final)]
         coverage = handoff.get('coverage') or {}
         records_complete = (bundle.get('eventsTotal') == len(bundle.get('events') or [])
                             and bundle.get('snapshotConsistent') is not False

@@ -665,6 +665,31 @@ class ToolExecutionStore:
         except Exception:
             raise ToolStoreError("TOOL_EVIDENCE_STORAGE_ERROR") from None
 
+    def count_step_executions(self, binding, workflow_step_id, tool_names):
+        """Durably journaled calls of these execution tools in one step and binding.
+
+        Restart-safe: the in-step test fix (docs/live-api/05 section 4) is open
+        only while this step has never run a test tool.
+        """
+        _binding(binding)
+        step = _uuid(workflow_step_id)
+        names = tuple(sorted(set(tool_names)))
+        if not names or any(name not in _EXECUTIONS for name in names):
+            raise ToolStoreError("TOOL_EVIDENCE_INVALID")
+        try:
+            with self._repository._transaction() as connection:
+                self._ensure_schema(connection)
+                row = connection.execute(
+                    "SELECT COUNT(*) FROM tool_execution_calls WHERE run_id=? AND workspace_id=? AND workflow_step_id=? "
+                    "AND json_extract(payload_json,'$.role')=? AND json_extract(payload_json,'$.toolName') IN ("
+                    + ",".join("?" for _ in names) + ")",
+                    (str(binding.run_id), str(binding.workspace_id), str(step), binding.role.value, *names)).fetchone()
+                return int(row[0])
+        except ToolStoreError:
+            raise
+        except Exception:
+            raise ToolStoreError("TOOL_EVIDENCE_STORAGE_ERROR") from None
+
     def read_evidence(self, binding, artifactref):
         _binding(binding)
         if type(artifactref) is not str:

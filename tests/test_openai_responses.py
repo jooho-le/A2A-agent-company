@@ -103,8 +103,9 @@ class OpenAIResponsesTests(unittest.IsolatedAsyncioTestCase):
             "schema": STRICT_SCHEMA,
         })
         self.assertEqual(wire["include"], ["reasoning.encrypted_content"])
-        for setting in ("store", "background", "stream", "parallel_tool_calls"):
+        for setting in ("store", "background", "stream"):
             self.assertIs(wire[setting], False)
+        self.assertIs(wire["parallel_tool_calls"], bool(wire["tools"]))
         self.assertNotIn("seed", wire)
         self.assertNotIn("previous_response_id", wire)
         self.assertEqual(result.model_id, "gpt-4.1-2025-04-14")
@@ -117,6 +118,37 @@ class OpenAIResponsesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.total_tokens, 24)
         self.assertEqual(result.usage.cached_input_tokens, 3)
         self.assertEqual(result.usage.reasoning_output_tokens, 2)
+
+    async def test_semantic_wire_sends_ids_not_quoted_policy_literals_in_schema(self):
+        from pathlib import Path
+        from agents.semantic_review import evidence_catalog, review_output
+        case = json.loads((Path(__file__).parent / 'fixtures/semantic_source_pair_live_failure.json').read_text())
+        catalog = evidence_catalog(case['basis'])
+        refs = [item['requirementId'] for item in case['basis']['requirements']] + ['@policy']
+        output = review_output(case['fields'], refs, catalog=catalog,
+            candidate_sha='a' * 64, basis_sha='b' * 64)
+        _result, sent = await self.call(request=make_request(output=output,
+            input_items_json=json.dumps([{'role': 'user', 'content': json.dumps({'evidenceCatalog': catalog})}])))
+        body = json.loads(sent[0].content)
+        enum_values = []
+        def collect(node):
+            if type(node) is dict:
+                enum_values.extend(node.get('enum', []))
+                for child in node.values(): collect(child)
+            elif type(node) is list:
+                for child in node: collect(child)
+        collect(body['text']['format']['schema'])
+        self.assertTrue(set(catalog).issubset(enum_values))
+        self.assertTrue(all('"' not in value for value in enum_values))
+        self.assertEqual(json.loads(body['input'][0]['content'])['evidenceCatalog'], catalog)
+
+    async def test_tools_allow_batched_model_requests_while_strict_schema_remains_enabled(self):
+        tool = ToolDefinition("read_project_file", "read", JsonSchema.from_dict(STRICT_SCHEMA),
+                              JsonSchema.from_dict(STRICT_SCHEMA))
+        _result, sent = await self.call(request=make_request(tools=(tool,)))
+        body = json.loads(sent[0].content)
+        self.assertIs(body["parallel_tool_calls"], True)
+        self.assertIs(body["tools"][0]["strict"], True)
 
     async def test_actual_cache_write_is_input_subset_without_double_counting(self):
         usage = response_payload()["usage"]
@@ -259,7 +291,7 @@ class OpenAIResponsesTests(unittest.IsolatedAsyncioTestCase):
                 result, _ = await self.call(payload)
                 self.assertIsNone(result.usage)
 
-    async def test_function_schema_stays_optional_and_is_not_made_strict(self):
+    async def test_function_wire_is_strict_while_project_optional_schema_is_unchanged(self):
         schema = {
             "type": "object", "properties": {
                 "workspaceId": {"type": "string"},
@@ -269,8 +301,10 @@ class OpenAIResponsesTests(unittest.IsolatedAsyncioTestCase):
         tool = ToolDefinition("write_source_file", "Write allowed source", JsonSchema.from_dict(schema), JsonSchema.from_dict(STRICT_SCHEMA))
         _, sent = await self.call(request=make_request(tools=(tool,)))
         function = json.loads(sent[0].content)["tools"][0]
-        self.assertIs(function["strict"], False)
-        self.assertEqual(function["parameters"], schema)
+        self.assertIs(function["strict"], True)
+        self.assertEqual(function["parameters"]["required"], ["workspaceId", "expectedSha256"])
+        self.assertEqual(function["parameters"]["properties"]["expectedSha256"]["anyOf"],
+                         [{"type": "string"}, {"type": "null"}])
         self.assertEqual(tool.input_schema.to_dict(), schema)
 
     async def test_function_call_and_encrypted_reasoning_are_preserved(self):
@@ -308,6 +342,13 @@ class OpenAIResponsesTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.status, status)
                 self.assertEqual(result.usage.total_tokens, 24)
                 self.assertNotIn("SYNTHETIC_ERROR_BODY_SECRET", repr(result))
+
+    async def test_only_closed_provider_incomplete_reasons_cross_the_adapter(self):
+        for reason, expected in [('max_output_tokens','max_output_tokens'), ('content_filter','content_filter'),
+                                 ('steered','steered'), ('max_messages','max_messages'), (SECRET,'other')]:
+            result, _ = await self.call(response_payload(status='incomplete', output=[], incomplete_details={'reason': reason}))
+            self.assertEqual(result.incomplete_reason, expected)
+            self.assertNotIn(SECRET, repr(result))
 
     async def test_interrupted_function_arguments_preserve_status_and_usage(self):
         item = {

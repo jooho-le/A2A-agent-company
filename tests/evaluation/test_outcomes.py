@@ -77,6 +77,64 @@ def test_semantic_hold_keeps_reason_identity_and_resume_policy(name, identity, p
     assert (result['details']['reviewReason'], result['details']['resumePolicy']) == ('UNSUPPORTED_MEANING', policy)
 
 
+def _semantic_failure(name, identity, reason, category):
+    data, _ = real(name)
+    data['bundle']['run']['status'] = 'HUMAN_REVIEW'
+    for row in data['a2a']['roles'][identity]['events']:
+        status = row['event']['status']
+        for part in (status.get('message') or {}).get('parts') or []:
+            message = part.get('data') or {}
+            if message.get('code') == 'SEMANTIC_REVIEW_INPUT_REQUIRED':
+                status['state'] = 'TASK_STATE_FAILED'
+                message['code'] = 'SEMANTIC_REVIEW_FAILED'
+                message['questions'] = []
+                message['semanticReview'].update(schemaVersion=2, reasonCode=reason, category=category,
+                                                issues=[{'fieldPointer': '/summary', 'reasonCode': reason}])
+    for row in data['trace']['telemetry']:
+        if row['binding'].get('eventType') == 'AGENT_SEMANTIC_REVIEWED' and row['detail']['status'] == 'HELD':
+            row['detail'].update(reasonCode=reason, category=category)
+    return data
+
+
+@pytest.mark.parametrize('reason,category', [
+    ('SEMANTIC_EVIDENCE_INVALID', 'EVIDENCE'),
+    ('SEMANTIC_RESPONSE_INVALID', 'FORMAT'),
+    ('SEMANTIC_REVIEW_BINDING_INVALID', 'BINDING'),
+])
+@pytest.mark.parametrize('name,identity,policy,resume', [
+    ('plannerSemanticHold', 'PLANNER', 'REGENERATE_AND_REVIEW', 'OPERATOR_DECISION'),
+    ('developerSemanticHold', 'DEVELOPER', 'NEW_RUN_REQUIRED', 'NEW_RUN_REQUIRED'),
+    ('singleSemanticHold', 'SINGLE_AGENT', 'NEW_RUN_REQUIRED', 'NEW_RUN_REQUIRED'),
+])
+def test_technical_semantic_failure_keeps_details_without_requesting_user_requirements(
+        reason, category, name, identity, policy, resume):
+    data = _semantic_failure(name, identity, reason, category)
+    result = classify_run(data['bundle'], data['trace'], data['a2a'])
+    assert (result['runStatus'], result['cause'], result['comparisonValidity'], result['resume']) == \
+        ('HUMAN_REVIEW', 'SEMANTIC_REVIEW_FAILURE', 'VALID', resume)
+    assert result['details'] == {'questions': 0, 'unapprovedAssumptions': 0,
+                                 'reviewReason': reason, 'resumePolicy': policy, 'reviewCategory': category}
+    assert result['stoppedBy']['code'] == 'SEMANTIC_REVIEW_FAILED'
+    assert result['stoppedBy']['identity'] == identity
+    assert result['stoppedBy']['state'] == 'TASK_STATE_FAILED'
+
+
+@pytest.mark.parametrize('reason,category', [
+    ('SEMANTIC_EVIDENCE_INVALID', 'EVIDENCE'),
+    ('SEMANTIC_RESPONSE_INVALID', 'FORMAT'),
+    ('SEMANTIC_REVIEW_BINDING_INVALID', 'BINDING'),
+])
+def test_technical_semantic_failure_trace_fallback_preserves_reason_and_policy(reason, category):
+    data = _semantic_failure('plannerSemanticHold', 'PLANNER', reason, category)
+    result = classify_run(data['bundle'], data['trace'], None)
+    assert (result['cause'], result['comparisonValidity'], result['resume']) == \
+        ('SEMANTIC_REVIEW_FAILURE', 'VALID', 'OPERATOR_DECISION')
+    assert result['details'] == {'reviewReason': reason, 'resumePolicy': 'REGENERATE_AND_REVIEW',
+                                 'reviewCategory': category}
+    assert result['stoppedBy']['source'] == 'SEMANTIC_REVIEW'
+    assert result['evidenceComplete'] is False
+
+
 def test_aborted_run_keeps_the_operator_reason_and_the_canceled_review():
     data, _ = real('abortedDuringReview')
     result = classify_run(data['bundle'], data['trace'], data['a2a'])

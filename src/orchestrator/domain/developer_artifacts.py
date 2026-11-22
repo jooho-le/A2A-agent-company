@@ -32,6 +32,66 @@ class ChangeReportFile(ImmutableDomainModel):
         return value
 
 
+class ReadyEdit(ChangeReportFile):
+    changed_functions: tuple[str, ...] = Field(default=(), alias="changedFunctions")
+
+
+class ReadyRecheck(ImmutableDomainModel):
+    issue_id: UUID4 = Field(alias="issueId")
+    prior_report_id: UUID4 | None = Field(default=None, alias="priorReportId", exclude_if=lambda v: v is None)
+    prior_protected_receipt_id: UUID4 | None = Field(default=None, alias="priorProtectedReceiptId", exclude_if=lambda v: v is None)
+    role: Literal["QA", "SECURITY"]
+    requirement_id: UUID4 = Field(alias="requirementId")
+    test_id: str = Field(alias="testId", min_length=1)
+    unresolved_cases: tuple[str, ...] = Field(alias="unresolvedCases")
+
+    @model_validator(mode="after")
+    def unique_measurement_origin(self):
+        if (self.prior_report_id is None) == (self.prior_protected_receipt_id is None):
+            raise ValueError("Exactly one prior report or independent receipt is required")
+        return self
+
+
+class ReportedPathEdit(ImmutableDomainModel):
+    """A Developer claim about an observed path. Execution evidence comes from QA/Security."""
+    path: str = Field(pattern=r"^[A-Z][A-Z0-9_]{1,63}$")
+    edit: str | None = Field(max_length=400)
+    recheck: str = Field(min_length=1, max_length=400)
+    source_ref: str | None = Field(default=None, alias="sourceRef", max_length=400, exclude_if=lambda v: v is None)
+    host_diff_status: Literal["LINKED_PENDING_TEST", "INDIRECT_PENDING_TEST", "NO_CHANGE_CLAIMED"] | None = Field(
+        default=None, alias="hostDiffStatus", exclude_if=lambda v: v is None)
+
+    @model_validator(mode="after")
+    def consistent_diff_status(self):
+        if self.host_diff_status is not None:
+            linked = self.host_diff_status in ("LINKED_PENDING_TEST", "INDIRECT_PENDING_TEST")
+            if linked != (self.source_ref is not None) or linked != (self.edit is not None):
+                raise ValueError("inconsistent Host path comparison")
+        return self
+
+    def with_host_comparison(self, *, indirect):
+        if self.edit is None:
+            status = "NO_CHANGE_CLAIMED"
+        elif indirect:
+            status = "INDIRECT_PENDING_TEST"
+        else:
+            status = "LINKED_PENDING_TEST"
+        return self.model_copy(update={"host_diff_status": status})
+
+
+class ReadyReview(ImmutableDomainModel):
+    """Host observations at submission time, before validation of this candidate."""
+    working_base_commit: str = Field(alias="workingBaseCommit", pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+    edits: tuple[ReadyEdit, ...] = Field(min_length=1)
+    rechecks: tuple[ReadyRecheck, ...]
+    reported_path_edits: tuple[ReportedPathEdit, ...] = Field(
+        default=(), alias="reportedPathEdits", exclude_if=lambda rows: not rows)
+    source_artifact_id: UUID4 = Field(alias="sourceArtifactId")
+    build_report_id: UUID4 = Field(alias="buildReportId")
+    build_outcome: Literal["PASS", "FAIL"] = Field(alias="buildOutcome")
+    validation_status: Literal["PENDING_QA_SECURITY", "BLOCKED_BY_BUILD"] = Field(alias="validationStatus")
+
+
 class ChangeReportArtifact(ImmutableDomainModel):
     artifact_id: UUID4 = Field(alias="artifactId")
     artifact_type: Literal["CHANGE_REPORT"] = Field(
@@ -47,6 +107,7 @@ class ChangeReportArtifact(ImmutableDomainModel):
     requirement_ids: tuple[UUID4, ...] = Field(min_length=1, alias="requirementIds")
     code_version: JSONInteger = Field(ge=1, le=4, alias="codeVersion")
     summary: str = Field(min_length=1)
+    ready_review: ReadyReview | None = Field(default=None, alias="readyReview", exclude_if=lambda v: v is None)
     artifact_uri: str = Field(default="", alias="artifactUri")
     changes: tuple[ChangeReportFile, ...] = Field(min_length=1, alias="fileChanges")
     created_at: datetime = Field(
@@ -104,6 +165,10 @@ class BuildDiagnostic(ImmutableDomainModel):
     rule_id: str = Field(alias="ruleId", min_length=1)
     normalized_location: str = Field(alias="normalizedLocation", min_length=1)
     message: str = Field(min_length=1)
+    missing_name: str | None = Field(default=None, alias="missingName", pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+                                     exclude_if=lambda value: value is None)
+    source_expression: str | None = Field(default=None, alias="sourceExpression", max_length=192,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$", exclude_if=lambda value: value is None)
 
     @field_validator("rule_id", "normalized_location", "message")
     @classmethod

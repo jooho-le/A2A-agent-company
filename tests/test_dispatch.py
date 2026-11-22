@@ -608,8 +608,10 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         run = self.repository.get_run(self.run.run_id)
         steps = self.repository.list_steps(self.run.run_id)
         events, _ = self.repository.list_events(self.run.run_id, limit=200, offset=0)
-        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
-        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
+        # docs/live-api/05 14절(2026-11-18): the same Issue twice closes with the measured result
+        # kept (was HUMAN_REVIEW with SAME_ISSUE_REQUIRES_REVIEW).
+        self.assertEqual(run.status, WorkflowStatus.FINISHED)
+        self.assertEqual(run.verdict.value, "FAIL")
         self.assertEqual(run.fix_attempt, 2)
         self.assertEqual(run.code_version, 3)
         self.assertEqual(len(self.repository.list_project_artifacts(self.run.run_id)), 10)
@@ -618,7 +620,7 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
             any(step.agent_role in (AgentRole.QA, AgentRole.SECURITY) for step in steps)
         )
         self.assertFalse(client.handoffs)
-        self.assertIn("SAME_ISSUE_REQUIRES_REVIEW", [event.event_type for event in events])
+        self.assertIn("SAME_ISSUE_REPEAT_LIMIT_REACHED", [event.event_type for event in events])
 
     async def test_missing_validator_endpoint_preserves_candidate_for_review(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED")
@@ -643,17 +645,18 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(client.handoffs)
 
-    async def test_repeated_validation_failure_stops_for_human_review(self) -> None:
+    async def test_repeated_unversioned_failure_uses_fix_limit_and_keeps_reports(self) -> None:
         client = FakePlannerClient("TASK_STATE_COMPLETED", qa_outcome="FAIL")
 
         await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
 
         run = self.repository.get_run(self.run.run_id)
         events, _ = self.repository.list_events(self.run.run_id, limit=200, offset=0)
-        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
-        self.assertEqual(run.fix_attempt, 2)
-        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 15)
-        self.assertIn("SAME_ISSUE_REQUIRES_REVIEW", [e.event_type for e in events])
+        # docs/live-api/05 14절(2026-11-18): closes as FINISHED FAIL with the measured reports kept.
+        self.assertEqual((run.status, run.verdict.value), (WorkflowStatus.FINISHED, "FAIL"))
+        self.assertEqual(run.fix_attempt, 3)
+        self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 20)
+        self.assertNotIn("SAME_ISSUE_REPEAT_LIMIT_REACHED", [e.event_type for e in events])
 
     async def test_new_issues_can_exhaust_the_three_fix_attempt_limit(self) -> None:
         client = FakePlannerClient(
@@ -751,10 +754,13 @@ class PlannerDispatchTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatcher_for(client).dispatch_planner(self.run.run_id)
 
         run = self.repository.get_run(self.run.run_id)
-        self.assertEqual(run.status, WorkflowStatus.HUMAN_REVIEW)
+        # The existing repeat-limit policy closes the Run after two fixes.
+        # This legacy fixture has no measured FAIL receipt for its finding,
+        # so preserve uncertainty instead of inventing a product FAIL.
+        self.assertEqual(run.status, WorkflowStatus.FINISHED)
         self.assertEqual(run.fix_attempt, 2)
         self.assertEqual(len(self.repository.list_issue_records(self.run.run_id)), 3)
-        self.assertEqual(run.verdict.value, "HUMAN_REVIEW")
+        self.assertEqual(run.verdict.value, "UNVERIFIED")
 
     async def test_confirmed_medium_security_finding_requires_policy_review(self) -> None:
         client = FakePlannerClient(

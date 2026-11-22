@@ -3,11 +3,19 @@
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Literal
+from hashlib import sha256
+
+from orchestrator.core.security import redact_text
 
 from pydantic import Field, UUID4
 
 from orchestrator.domain.snapshot_handoff import ImmutableDomainModel
 from orchestrator.domain.models import WorkflowRun, WorkflowStep
+
+
+def measurement_request_sha256(text: str) -> str:
+    """Fingerprint the effective public request, independently of role, policy and slot."""
+    return sha256(redact_text(text.strip()).encode("utf-8")).hexdigest()
 
 
 class RunSubmissionRecord(ImmutableDomainModel):

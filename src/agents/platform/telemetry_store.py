@@ -320,8 +320,14 @@ class AgentTelemetryStore:
                         or (not previous.usage_complete and snapshot.usage_complete)
                         or (previous.invalidated and not snapshot.invalidated)
                         or not set(previous.accounted_tool_sequences).issubset(snapshot.accounted_tool_sequences)
+                        or any(sequence in snapshot.pending_model_sequences
+                               and snapshot.pending_token_reservations.get(sequence) != amount
+                               for sequence, amount in previous.pending_token_reservations.items())
                         or any(snapshot.accounted_usage.get(sequence, object()) != usage
-                               for sequence, usage in previous.accounted_usage.items())):
+                               for sequence, usage in previous.accounted_usage.items())
+                        # An unknown-usage bound, once booked, is never lowered or removed.
+                        or any(snapshot.unknown_usage_bounds.get(sequence) != bound
+                               for sequence, bound in previous.unknown_usage_bounds.items())):
                     raise ValueError()
                 saved = BudgetSnapshot.model_validate({**snapshot.model_dump(),
                     "last_observed_utc": self.now(), "revision": previous.revision + 1})
@@ -468,7 +474,90 @@ class AgentTelemetryStore:
                 'candidateSha256': bound['candidateSha256'], 'stepRole': bound['stepRole'],
                 'phase': bound['phase'], 'isRequirementApproval': False, 'requestedModel': _safe_model(model)}
             detail['modelCallSequences'] = record['modelCallSequences']
+            validation = record.get('validation')
+            if type(validation) is dict:
+                detail['category'] = validation['category']
+                detail['issueCount'] = len(validation['issues'])
             return self._append(event, public_binding, detail, 'LLM', f'semantic-review:{review_id}', 'EVENT')
+        except Exception:
+            raise TelemetryStoreError() from None
+
+    def append_planner_validation(self, event: TraceEvent, report, model) -> dict:
+        """Append closed failure fields, never raw response or exception text."""
+        try:
+            from agents.roles.planner_diagnostics import PlannerValidationReport
+            from orchestrator.domain.models import WorkflowStep
+            if (type(event) is not TraceEvent or event.event_type != 'PLANNER_OUTPUT_REJECTED'
+                    or type(report) is not PlannerValidationReport):
+                raise ValueError()
+            # Revalidate instead of trusting constructed/modified model instances.
+            validated = PlannerValidationReport.model_validate(report.model_dump(mode='json', by_alias=True))
+            with self._connection() as connection:
+                row = connection.execute('SELECT payload_json FROM workflow_steps WHERE workflow_step_id=? AND run_id=?',
+                    (str(event.workflow_step_id), str(event.run_id))).fetchone()
+            if row is None or WorkflowStep.model_validate_json(row[0]).agent_role is not AgentRole.PLANNER:
+                raise ValueError()
+            detail = {'purpose': 'PLANNER_CONTRACT_VALIDATION', 'plannerValidation': validated.public(),
+                      'requestedModel': _safe_model(model)}
+            return self._append(event, event.to_trace_json(), detail, 'LLM',
+                f'planner-validation:{event.workflow_step_id}:{event.attempt}', 'EVENT')
+        except Exception:
+            raise TelemetryStoreError() from None
+
+    def append_llm_validation(self, event: TraceEvent, report, model) -> dict:
+        try:
+            from agents.llm.validation import LLMValidationReport, LLMPolicyReport
+            policy = type(report) is LLMPolicyReport
+            if (type(event) is not TraceEvent
+                    or event.event_type != ('LLM_POLICY_REJECTED' if policy else 'LLM_SCHEMA_REJECTED')
+                    or type(report) not in (LLMValidationReport, LLMPolicyReport)):
+                raise ValueError()
+            validated = type(report).model_validate(report.model_dump(mode='json', by_alias=True))
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT payload_json FROM agent_runtime_events WHERE run_id=? AND kind='LLM' AND idempotency_key=?",
+                    (str(event.run_id), f'model-start:{validated.sequence}')).fetchone()
+            if row is None:
+                raise ValueError()
+            started = json.loads(row[0])['binding']
+            binding = event.to_trace_json()
+            if any(started.get(key) != binding.get(key) for key in (
+                    'runId', 'workflowStepId', 'a2aTaskId', 'agentContextId', 'actor', 'attempt',
+                    'codeVersion', 'requirementIds', 'inputArtifactIds')):
+                raise ValueError()
+            detail = {'purpose': 'LLM_TOOL_POLICY_VALIDATION' if policy else 'LLM_SCHEMA_VALIDATION',
+                      'llmValidation': validated.public(),
+                      'requestedModel': _safe_model(model)}
+            return self._append(event, binding, detail, 'LLM',
+                f'llm-validation:{validated.sequence}', 'EVENT')
+        except Exception:
+            raise TelemetryStoreError() from None
+
+    def append_llm_recovery(self, event: TraceEvent, route, model) -> dict:
+        """One closed routing receipt per call/decision, linked to its start."""
+        try:
+            from agents.llm.recovery import CallRoute, FailureRoute
+            if type(route) not in (CallRoute, FailureRoute) or type(event) is not TraceEvent:
+                raise ValueError()
+            route = type(route).model_validate(route.public())
+            if event.event_type != ('LLM_CALL_ROUTED' if type(route) is CallRoute else 'LLM_RECOVERY_DECIDED'):
+                raise ValueError()
+            binding = event.to_trace_json()
+            with self._connection() as connection:
+                for sequence in {route.sequence, route.operation_sequence}:
+                    row = connection.execute(
+                        "SELECT payload_json FROM agent_runtime_events WHERE run_id=? AND kind='LLM' AND idempotency_key=?",
+                        (str(event.run_id), f'model-start:{sequence}')).fetchone()
+                    if row is None:
+                        raise ValueError()
+                    started = json.loads(row[0])['binding']
+                    if any(started.get(key) != binding.get(key) for key in (
+                            'runId', 'workflowStepId', 'a2aTaskId', 'agentContextId', 'actor', 'attempt',
+                            'codeVersion', 'requirementIds', 'inputArtifactIds')):
+                        raise ValueError()
+            detail = {'purpose': 'LLM_RECOVERY', 'recovery': route.public(), 'requestedModel': _safe_model(model)}
+            return self._append(event, binding, detail, 'LLM',
+                f'llm-recovery:{route.kind}:{route.sequence}', 'EVENT')
         except Exception:
             raise TelemetryStoreError() from None
 
@@ -685,7 +774,12 @@ class AgentTelemetryStore:
                     "pendingModelSequences": list(snapshot.pending_model_sequences) if snapshot else [],
                     "pendingToolSequences": list(snapshot.pending_tool_sequences) if snapshot else [],
                     "missingUsageSequences": missing,
-                    "executionBlocked": bool(snapshot and (snapshot.invalidated or not snapshot.usage_complete
-                        or snapshot.pending_model_sequences or snapshot.pending_tool_sequences or missing))}
+                    # Codex review 2026-11-18 #5: same rule as the budget. Unknown usage with a booked
+                    # cap bound does not block execution; usageComplete above still reports it unknown.
+                    "executionBlocked": bool(snapshot and (snapshot.invalidated
+                        or any(usage is None and sequence not in snapshot.unknown_usage_bounds
+                               for sequence, usage in snapshot.accounted_usage.items())
+                        or snapshot.pending_model_sequences or snapshot.pending_tool_sequences or missing)),
+                    "unknownUsageBoundSequences": sorted(snapshot.unknown_usage_bounds) if snapshot else []}
         except Exception:
             raise TelemetryStoreError() from None

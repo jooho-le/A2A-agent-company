@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 
+from orchestrator.domain.validation_feedback import validate_row_diagnostic, validate_status_origin
 from . import protected_tests
 from .protected_tests.tests.signup.signup_details import matches, plan, safe_actual
 
@@ -47,13 +48,13 @@ def plans_from_source(source):
     return result
 
 
-LABELS = {'http_status': '응답 상태', 'user_delta': '사용자 수 증가량', 'account_count': '해당 이메일 계정 수', 'rows_unchanged': '기존 사용자 정보 불변', 'success_count': '성공 응답 수', 'response_statuses': '모든 응답이 2xx 또는 4xx', 'response_matches_db': '응답 성공 여부와 계정 생성 일치', 'no_plaintext': '저장값이 문자열이며 비밀번호 원문 미포함', 'argon2id': '모든 저장값의 Argon2id 형식', 'm': 'Argon2 메모리 m', 't': 'Argon2 반복 t', 'p': 'Argon2 병렬도 p', 'distinct_salts': '서로 다른 salt 수', 'correct_password': '가입 비밀번호 검증 성공', 'wrong_password': '다른 비밀번호 검증 성공', 'canonical': '저장 이메일이 정규화 정책과 일치', 'unique': 'DB 직접 중복 삽입 거부', 'injected': 'DB 오류 주입 확인', 'password_exposed': '비밀번호 노출 여부', 'hash_exposed': '해시 또는 해시 부분 노출 여부', 'ready': '앱·DB 관찰 준비'}
+LABELS = {'http_status': '응답 상태', 'user_delta': '사용자 수 증가량', 'account_count': '해당 이메일 계정 수', 'rows_unchanged': '기존 사용자 정보 불변', 'success_count': '성공 응답 수', 'response_statuses': '모든 응답이 2xx 또는 4xx', 'response_matches_db': '응답 성공 여부와 계정 생성 일치', 'no_plaintext': '저장값이 문자열이며 비밀번호 원문 미포함', 'argon2id': '모든 저장값의 Argon2id 형식', 'm': 'Argon2 메모리 m', 't': 'Argon2 반복 t', 'p': 'Argon2 병렬도 p', 'distinct_salts': '서로 다른 salt 수', 'correct_password': '가입 비밀번호 검증 성공', 'wrong_password': '다른 비밀번호 검증 성공', 'canonical': '저장 이메일이 정규화 정책과 일치', 'unique': 'DB 직접 중복 삽입 거부', 'injected': 'DB 오류 주입 확인', 'password_exposed': '비밀번호 노출 여부', 'hash_exposed': '해시 또는 해시 부분 노출 여부', 'ready': '앱·DB 관찰 준비', 'response_status': '받은 응답의 상태 코드', 'password_in_crash': '처리하지 못한 예외 traceback의 비밀번호 노출', 'hash_in_crash': '처리하지 못한 예외 traceback의 해시 노출'}
 
 STATUSES = ('PASS', 'FAIL', 'NOT_RUN', 'UNVERIFIED')
 REASONS = {None, 'EXPECTATION_MISMATCH', 'NOT_REACHED', 'PRIOR_ASSERTION_FAILED',
            'PRECONDITION_OR_OBSERVATION_UNAVAILABLE', 'CHECK_INTERRUPTED',
            'OBSERVATION_INTERRUPTED', 'OBSERVATION_UNAVAILABLE', 'RESPONSE_NOT_CAPTURED',
-           'HASH_FORMAT_REQUIRED', 'HASH_VALUES_REQUIRED'}
+           'HASH_FORMAT_REQUIRED', 'HASH_VALUES_REQUIRED', 'STORED_USER_REQUIRED', 'UNHANDLED_APP_EXCEPTION'}
 MAX_BYTES = 1024 * 1024
 
 
@@ -76,13 +77,13 @@ def _validated(rows, plan):
         raise ValueError('DETAIL_ROWS_INCOMPLETE')
     result = []
     for row, expected in zip(rows, plan):
-        if (not isinstance(row, dict) or set(row) != set(expected) | {'status', 'actual', 'reason'}
+        if (not isinstance(row, dict) or set(row) - {'handlerEntry', 'diagnostic', 'statusOrigin'} != set(expected) | {'status', 'actual', 'reason'}
                 or json.dumps({name: row.get(name) for name in expected}, sort_keys=True, allow_nan=False)
                 != json.dumps(expected, sort_keys=True, allow_nan=False)
                 or row['status'] not in STATUSES or row['reason'] not in REASONS):
             raise ValueError('DETAIL_ROW_INVALID')
         status, actual, reason = row['status'], row['actual'], row['reason']
-        if reason in {'HASH_FORMAT_REQUIRED', 'HASH_VALUES_REQUIRED'} and status != 'NOT_RUN':
+        if reason in {'HASH_FORMAT_REQUIRED', 'HASH_VALUES_REQUIRED', 'STORED_USER_REQUIRED'} and status != 'NOT_RUN':
             raise ValueError('DETAIL_REASON_INVALID')
         if status in ('PASS', 'FAIL'):
             if not safe_actual(actual) or matches(expected['expected'], actual) != (status == 'PASS'):
@@ -92,7 +93,19 @@ def _validated(rows, plan):
         elif actual is not None or reason in (None, 'EXPECTATION_MISMATCH'):
             raise ValueError('DETAIL_UNOBSERVED_VALUE')
         # Copy trusted definitions; only validated scalar observations cross.
-        result.append({**deepcopy(expected), 'actual': deepcopy(actual), 'status': status, 'reason': reason})
+        detail = {**deepcopy(expected), 'actual': deepcopy(actual), 'status': status, 'reason': reason}
+        if 'statusOrigin' in row:
+            validate_status_origin(row)
+            detail['statusOrigin'] = row['statusOrigin']
+        if 'diagnostic' in row:
+            validate_row_diagnostic(row)
+            detail['diagnostic'] = deepcopy(row['diagnostic'])
+        if 'handlerEntry' in row:
+            if (expected['kind'] != 'precondition' or expected['itemId'] != 'response_status'
+                    or row['handlerEntry'] not in ('ENTERED', 'NOT_ENTERED', 'UNKNOWN')):
+                raise ValueError('DETAIL_ROW_INVALID')
+            detail['handlerEntry'] = row['handlerEntry']
+        result.append(detail)
     return result
 
 

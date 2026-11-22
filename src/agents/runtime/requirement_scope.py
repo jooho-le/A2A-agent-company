@@ -21,6 +21,47 @@ from orchestrator.domain.scenario_registry import RequirementValidator
 from orchestrator.domain.states import AgentRole
 
 
+def signup_observation_plan(contract, scope=None):
+    """Break compound public SCN-001 criteria into evidence the assigned roles can observe."""
+    if contract.get('scenarioKey') != 'SCN-001':
+        return {}
+    criteria = {
+        'REQ-001': {'QA': ['successful response and exactly one committed account from the same request']},
+        'REQ-002': {'QA': ['invalid email is rejected and leaves both new and existing stored rows unchanged']},
+        'REQ-003': {'QA': ['same canonical address is rejected after case and whitespace normalization',
+                           'concurrent signup outcomes and committed canonical row count'],
+                    'SECURITY': ['deployed unique key on the canonical email']},
+        'REQ-004': {'QA': ['approved password length boundary rejects shorter input without storing an account',
+                           'approved length is accepted without inventing extra complexity requirements']},
+        'REQ-005': {'SECURITY': ['stored credential verifies against the supplied synthetic password',
+                                 'observed algorithm, memory, iterations, parallelism and per-account salts meet the approved policy']},
+        'REQ-006': {'SECURITY': ['success response', 'input rejection response',
+                                 'framework validation response before the signup handler',
+                                 'missing fields, wrong field types and non-object request bodies', 'storage error response',
+                                 'request logs', 'storage error request logs']},
+        'REQ-007': {'QA': ['response agrees with committed database effects for accepted and rejected input',
+                           'a rejected attempt does not block a later valid signup']},
+        'REQ-008': {'ORCHESTRATOR': ['requirement, source version, validation, issue, fix and revalidation lineage']},
+    }
+    assigned = {str(r.requirement_id) for r in scope.requirements} if scope else None
+    plan = {}
+    for requirement in contract['requirements']:
+        key, identifier = requirement['key'], requirement['requirementId']
+        if key not in criteria or (assigned is not None and identifier not in assigned):
+            continue
+        tasks = [task for task, ids in scope.task_bindings if any(str(r) == identifier for r in ids)] if scope else []
+        observations = criteria[key]
+        if scope and scope.role.value in ('QA', 'SECURITY'):
+            observations = {scope.role.value: observations[scope.role.value]} if scope.role.value in observations else {}
+        if observations:
+            plan[identifier] = {'observationsByRole': observations,
+                                'acceptanceCriteria': list(requirement['acceptanceCriteria']),
+                                'purpose': 'PUBLIC_REQUIREMENT_IMPLEMENTATION_GUIDANCE_NOT_TEST_RESULTS'}
+            if tasks:
+                plan[identifier]['implementationTaskIds'] = tasks
+    return plan
+
+
 class RequirementScopeError(ValueError):
     """Stable reason only; private criteria and nested failures are discarded."""
 
@@ -119,8 +160,8 @@ def build_requirement_scope(configuration, artifact, metadata, role) -> Requirem
 def validate_generated_case_expectations(cases, *, configuration, metadata, role):
     """Reject invented/weakened expectations before executing generated tests.
 
-    A test may bind one exact criterion from its assigned Requirement. This
-    does not prove the test implements that criterion or covers every clause.
+    Each approved criterion must be linked to a generated case from its assigned role.
+    Runtime evidence determines whether that case observed the criterion's clauses.
     Protected tests are separately admitted Host policy, not model decisions.
     """
     invalid = False
@@ -134,9 +175,61 @@ def validate_generated_case_expectations(cases, *, configuration, metadata, role
             if (type(case) is not QACaseBinding or case.requirement_id not in criteria
                     or case.expected_result not in criteria[case.requirement_id]):
                 raise ValueError
-        if {case.requirement_id for case in cases} != set(criteria):
+        linked = {(case.requirement_id, case.expected_result) for case in cases}
+        if any((identifier, criterion) not in linked for identifier, values in criteria.items() for criterion in values):
             raise ValueError
     except Exception:
         invalid = True
     if invalid:
         raise RequirementScopeError() from None
+
+
+def assigned_acceptance_criteria(configuration, metadata, role) -> tuple[str, ...]:
+    """The criteria a generated case of this role may quote; () when the Host cannot tell."""
+    try:
+        _authority, assigned = _assigned_requirements(configuration, metadata, role)
+    except Exception:
+        return ()
+    return tuple(criterion for item in assigned for criterion in item.acceptance_criteria)
+
+
+def generated_case_expectation_issues(data, *, field, configuration, metadata, role) -> list[dict]:
+    """Where a draft breaks ``validate_generated_case_expectations``, as closed field pointers.
+
+    The same rule, read from the model's JSON before the engine returns, so the
+    model gets one correction that names the case (docs/live-api problem P5, live Run 3754980f:
+    an expectedResult that differed from its criterion ended the step with no
+    chance to fix it). Values are never echoed. ``[]`` means nothing to report or
+    the Host cannot judge here; the caller still runs the authoritative check.
+    """
+    try:
+        _authority, assigned = _assigned_requirements(configuration, metadata, role)
+    except Exception:
+        return []
+    rows = data.get(field) if isinstance(data, dict) and isinstance(field, str) else None
+    if not isinstance(rows, list):
+        return []
+    criteria = {str(item.requirement_id): tuple(item.acceptance_criteria) for item in assigned}
+    issues = []
+    if not 1 <= len(rows) <= 256:
+        issues.append({"fieldPath": "/" + field, "reasonCode": "CASE_COUNT_INVALID"})
+    covered, linked, invalid_expectations = set(), set(), set()
+    for index, row in enumerate(rows[:256]):
+        if not isinstance(row, dict):
+            continue
+        requirement = row.get("requirementId")
+        if not isinstance(requirement, str) or requirement not in criteria:
+            issues.append({"fieldPath": f"/{field}/{index}/requirementId", "reasonCode": "CASE_REQUIREMENT_NOT_ASSIGNED"})
+            continue
+        covered.add(requirement)
+        if row.get("expectedResult") not in criteria[requirement]:
+            invalid_expectations.add(requirement)
+            issues.append({"fieldPath": f"/{field}/{index}/expectedResult",
+                           "reasonCode": "EXPECTED_RESULT_NOT_ACCEPTANCE_CRITERION"})
+        else:
+            linked.add((requirement, row['expectedResult']))
+    if any((identifier, criterion) not in linked for identifier in covered - invalid_expectations for criterion in criteria[identifier]):
+        issues.append({"fieldPath": "/" + field, "reasonCode": "ACCEPTANCE_CRITERION_WITHOUT_CASE"})
+    if covered != set(criteria):
+        issues.append({"fieldPath": "/" + field, "reasonCode": "ASSIGNED_REQUIREMENT_WITHOUT_CASE"})
+    return issues

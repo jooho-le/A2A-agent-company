@@ -2,6 +2,7 @@
 from copy import deepcopy
 from dataclasses import replace
 import json
+import sys
 
 import pytest
 
@@ -47,7 +48,17 @@ def test_all_nine_checks_have_complete_same_execution_details(good):
         assert all(row['actual'] is not None for row in check['items'])
     qa1 = details['checks'][0]
     assert len([row for row in qa1['items'] if row['kind'] == 'assertion']) == 6
-    assert sum(len(row['items']) for row in details['checks']) == 139
+    # 0.7.3: SEC-SIGNUP-005에 요청 사례별 응답 상태 코드 8개와 처리하지 못한 예외 기록의 노출 2개를 더했다(139 → 149).
+    assert sum(len(row['items']) for row in details['checks']) == 149
+    security = next(check for check in details['checks'] if check['checkId'] == 'SEC-SIGNUP-005')
+    assert len(security['items']) == 31
+    entries = {row['caseId']: row['handlerEntry'] for row in security['items'] if 'handlerEntry' in row}
+    assert len(entries) == 8
+    if hasattr(sys, 'monitoring'):
+        assert entries['success'] == 'ENTERED'
+        assert entries['malformed_list'] == 'NOT_ENTERED'
+    else:
+        assert set(entries.values()) == {'UNKNOWN'}
 
 
 def test_public_detail_values_do_not_contain_private_inputs(good):
@@ -80,6 +91,17 @@ def test_failed_observations_keep_independent_results_and_block_only_dependencie
         assert not any(r['status'] == 'NOT_RUN' for r in check['items'])
     else:
         assert any(row['status'] == 'NOT_RUN' and row['actual'] is None for row in rows)
+    if variant == 'no_commit':
+        check = next(c for c in output['checkDetails']['checks'] if c['checkId'] == 'SEC-SIGNUP-005')
+        by_key = {(r['caseId'], r['itemId']): r for r in check['items']}
+        assert check['recordIssue'] is None
+        for case in ('invalid_email', 'short_password', 'malformed_list'):
+            assert by_key[case, 'password_exposed']['status'] == 'PASS'
+            assert by_key[case, 'hash_exposed']['reason'] == 'HASH_VALUES_REQUIRED'
+        assert by_key['duplicate', 'password_exposed']['reason'] == 'STORED_USER_REQUIRED'
+        assert by_key['application_logs', 'password_exposed']['status'] == 'PASS'
+        assert by_key['application_logs', 'hash_exposed']['status'] == 'FAIL'
+        assert check['parentStatus'] == 'FAIL'
     if variant == 'plaintext_storage':
         check = next(c for c in output['checkDetails']['checks'] if c['checkId'] == 'SEC-SIGNUP-002')
         by_key = {(r['caseId'], r['itemId']): r for r in check['items']}
@@ -171,6 +193,66 @@ def test_security_leak_still_fails_parent_after_later_passes():
     assert rows['success', 'hash_exposed']['status'] == 'FAIL'
     assert rows['application_logs', 'hash_exposed']['status'] == 'PASS'
     assert check['parentStatus'] == 'FAIL' and check['recordIssue'] is None
+
+
+def _exposure_rows(variant):
+    archive = snapshot(variant)
+    output = final(archive, manifest(archive), CaptureRunner())
+    check = next(c for c in output['checkDetails']['checks'] if c['checkId'] == 'SEC-SIGNUP-005')
+    return check, {(r['caseId'], r['itemId']): r for r in check['items']}
+
+
+def test_malformed_body_leak_records_the_received_status_code():
+    """0.7.3(실제 Run d3a18c1c 모양): 형식이 틀린 본문의 비밀번호 노출이 받은 상태 코드(422)와 함께 남는다.
+    Developer가 '어느 응답에서' 새는지 알 수 있어야 한다. 합격 기준은 그대로라 부모 FAIL·기록 문제 없음이다."""
+    check, rows = _exposure_rows('validation_input_echoed')
+    assert check['parentStatus'] == 'FAIL' and check['recordIssue'] is None
+    for kind in ('missing_email', 'list', 'misspelled'):
+        case = 'malformed_' + kind
+        assert rows[case, 'response_status']['kind'] == 'precondition'
+        assert (rows[case, 'response_status']['status'], rows[case, 'response_status']['actual']) == ('PASS', 422)
+        assert rows[case, 'password_exposed']['status'] == 'FAIL'
+    assert rows['success', 'response_status']['actual'] == 201
+    for item in ('password_in_crash', 'hash_in_crash'):
+        assert rows['application_logs', item]['status'] == 'PASS'
+
+
+def test_unhandled_db_error_is_named_and_its_traceback_leak_is_separated():
+    """0.7.3: DB 오류를 처리하지 않으면 응답이 없다는 사실을 UNHANDLED_APP_EXCEPTION으로 남기고, 로그의 해시 노출이
+    그 처리하지 못한 예외의 traceback에서 나왔음을 따로 표시한다(로그 노출의 일부라 FAIL 조건은 그대로)."""
+    check, rows = _exposure_rows('db_error_unhandled')
+    assert check['parentStatus'] == 'FAIL'
+    for item in ('response_status', 'password_exposed', 'hash_exposed'):
+        assert (rows['db_error', item]['status'], rows['db_error', item]['reason']) == \
+            ('UNVERIFIED', 'UNHANDLED_APP_EXCEPTION')
+        assert rows['db_error', item]['actual'] is None
+    assert rows['application_logs', 'hash_exposed']['status'] == 'FAIL'
+    assert rows['application_logs', 'hash_in_crash']['status'] == 'FAIL'
+    assert rows['application_logs', 'password_in_crash']['status'] == 'PASS'
+    assert rows['duplicate', 'response_status']['status'] == 'PASS'
+
+
+def test_regular_log_leak_is_not_attributed_to_an_unhandled_exception():
+    """엔진 SQL 로그(echo)의 해시 노출은 일반 로그 출력이다. 처리하지 못한 예외 기록 항목은 PASS로 남는다."""
+    check, rows = _exposure_rows('engine_echo_hash')
+    assert check['parentStatus'] == 'FAIL'
+    assert rows['application_logs', 'hash_exposed']['status'] == 'FAIL'
+    assert rows['application_logs', 'hash_in_crash']['status'] == 'PASS'
+    assert all(rows[case, 'response_status']['status'] == 'PASS'
+               for case, item in rows if item == 'response_status')
+
+
+def test_unhandled_exception_reason_crosses_the_feedback_wire():
+    """새 사유·항목은 개발 피드백의 닫힌 형식에서도 받아들여지고 라벨이 붙는다."""
+    from orchestrator.domain.validation_feedback import LABELS, observation_json
+    rows = [{'caseId': 'db_error', 'itemId': 'response_status', 'kind': 'precondition', 'actual': None,
+             'status': 'UNVERIFIED', 'reason': 'UNHANDLED_APP_EXCEPTION'},
+            {'caseId': 'malformed_list', 'itemId': 'response_status', 'kind': 'precondition', 'actual': 422,
+             'status': 'PASS', 'reason': None},
+            {'caseId': 'application_logs', 'itemId': 'hash_in_crash', 'kind': 'assertion', 'actual': True,
+             'status': 'FAIL', 'reason': 'EXPECTATION_MISMATCH'}]
+    observation_json(rows)
+    assert {'response_status', 'password_in_crash', 'hash_in_crash'} <= set(LABELS)
 
 
 def test_failed_setup_is_unverified_and_followups_are_not_run():

@@ -15,7 +15,10 @@ from orchestrator.core.security import contains_registered_secret, contains_uri_
 
 
 class SourceCredentialError(ValueError):
-    def __init__(self):
+    def __init__(self, *, rule=None, line=None):
+        self.rule = rule if type(rule) is str and rule in {'REGISTERED_SECRET', 'CREDENTIAL_ASSIGNMENT',
+                                    'CREDENTIAL_PATTERN', 'URI_CREDENTIAL'} else None
+        self.line = line if type(line) is int and 1 <= line <= 1000000 else None
         super().__init__("SOURCE_CREDENTIAL_DENIED")
 
 
@@ -32,7 +35,10 @@ _LITERAL = re.compile(
 )
 _BARE_CREDENTIAL = re.compile(
     r"\bBearer\s+[A-Za-z0-9._~+/-]+=*|"
-    r"\$argon2(?:id|i|d)\$|\$2[aby]\$\d{2}\$|"
+    # An algorithm marker alone is not a stored password hash. Keep rejecting
+    # payload-bearing (including split/escaped) hashes; tests may inspect the
+    # public marker without embedding any account credential.
+    r"\$argon2(?:id|i|d)\$(?=[^\s'\"`])|\$2[aby]\$\d{2}\$(?=[A-Za-z0-9./])|"
     r"(?<![\w.-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![\w.-])|"
     r"(?<![\w-])sk-(?:(?:proj|svcacct)-)?[A-Za-z0-9_-]{16,}(?![\w-])|"
     r"(?<![\w])(?:AKIA|ASIA)[A-Z0-9]{16}(?![\w])|"
@@ -48,6 +54,31 @@ _DYNAMIC = re.compile(r"\$?\{[^{}]*\}")
 _MAX_FILE_BYTES = 1024 * 1024
 _MAX_TOTAL_BYTES = 16 * 1024 * 1024
 _MAX_FILES = 1000
+
+
+def source_credential_locations(source):
+    """Bounded, value-free diagnostics; never authorize or rewrite any Source.
+
+    Only original-text pattern locations are reported. Decoded/normalized,
+    registered-secret and URI checks still belong to validate_source_text;
+    an empty list is NOT evidence that Source is allowed.
+    """
+    if type(source) is not str or len(source) > _MAX_FILE_BYTES:
+        return {"issues": [], "truncated": True, "coverage": "ORIGINAL_TEXT_PATTERNS"}
+    limit = 16
+    found = []
+    for rule, pattern in (("CREDENTIAL_ASSIGNMENT", _LITERAL), ("CREDENTIAL_PATTERN", _BARE_CREDENTIAL)):
+        for index, match in enumerate(pattern.finditer(source)):
+            found.append((match.start(), rule))
+            if index >= limit:
+                break
+    issues = []
+    for offset, rule in sorted(found):
+        issue = {"sourceRule": rule, "sourceLine": source.count("\n", 0, offset) + 1}
+        if issue not in issues:
+            issues.append(issue)
+    return {"issues": issues[:limit], "truncated": len(found) > limit,
+            "coverage": "ORIGINAL_TEXT_PATTERNS"}
 
 
 def _decoded_escape(match):
@@ -123,10 +154,18 @@ def validate_source_text(source: str) -> None:
     for value in views:
         # A split recognizable API key must not evade a literal-only guard.
         joined = _JOINED_LITERAL.sub("", value) if '"' in value or "'" in value else value
-        if any(contains_registered_secret(view) or _LITERAL.search(view) or _BARE_CREDENTIAL.search(view)
-               or _uri_credentials(view)
-               for view in dict.fromkeys((value, joined))):
-            raise SourceCredentialError()
+        for view in dict.fromkeys((value, joined)):
+            if contains_registered_secret(view):
+                raise SourceCredentialError(rule='REGISTERED_SECRET')
+            for rule, pattern in (('CREDENTIAL_ASSIGNMENT', _LITERAL), ('CREDENTIAL_PATTERN', _BARE_CREDENTIAL)):
+                match = pattern.search(view)
+                if match:
+                    # Locations apply only to the original text, never pretend
+                    # a decoded/normalized inspection view has original lines.
+                    line = source.count('\n', 0, match.start()) + 1 if view == source else None
+                    raise SourceCredentialError(rule=rule, line=line)
+            if _uri_credentials(view):
+                raise SourceCredentialError(rule='URI_CREDENTIAL')
 
 
 def validate_source_bytes(content: bytes) -> None:
