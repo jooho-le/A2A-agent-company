@@ -176,6 +176,16 @@ def _fixture_issues(path, source_root):
     return set()
 
 
+def _fixture_api_issues(path):
+    from mcp_tools.tools.unit_runner import app_fixture_source_issues
+    try:
+        if path.is_symlink() or path.stat().st_size > MAX_FILE_BYTES:
+            return set()
+        return {item['reasonCode'] for item in app_fixture_source_issues(path.read_text(encoding='utf-8'))}
+    except (OSError, ValueError, UnicodeDecodeError):
+        return set()
+
+
 def _import_issues(path: Path, source_root, tests_root: Path) -> set:
     """``TEST_IMPORT_NAME_MISSING`` when a product-module import certainly fails at collection."""
     from agents.runtime.start_precheck import _bindings, _module_file, _parse
@@ -251,7 +261,7 @@ def inspect_generated_tests(tests_dir, scopes, rows, field, source_root=None, *,
             ids, file_codes, file_shows_tests = _analyze(path, module)
             codes |= file_codes | _import_issues(path, source_root, selected_root)
             if host_app_fixture:
-                codes |= _fixture_issues(path, source_root)
+                codes |= _fixture_issues(path, source_root) | _fixture_api_issues(path)
             shows_tests = shows_tests or file_shows_tests
             found = None if found is None or ids is None else found | ids
         for code in sorted(codes):

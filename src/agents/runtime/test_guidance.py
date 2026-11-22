@@ -8,14 +8,17 @@ UNIT_TEST_ID_DESCRIPTION = (
 )
 
 PASSWORD_FIXTURE_EXAMPLE = (
+    'from uuid import uuid4\n'
     'from _host_test_data import new_password\n'
+    'fresh_email = f"case-{uuid4().hex}@example.org"\n'
     'sample = new_password(length=12)\n'
     'payload = {"email": fresh_email}\n'
     'payload["password"] = sample'
 )
 
 PASSWORD_FIXTURE_GUIDANCE = (
-    "For Host Python unittest, choose your own fresh_email and build the request with the testData factory:\n"
+    "For Host Python unittest, fresh_email is your local variable, NOT self.fresh_email or a Host method. "
+    "new_password is a module function, NOT self.new_password. Build the request with the testData factory:\n"
     + PASSWORD_FIXTURE_EXAMPLE
     + "\nChoose the length from the public requirements or your case, including 0. Use this same factory for every "
     "password and reuse the variable for repeated requests. The Host supplies the module; do not write it."
@@ -25,7 +28,21 @@ CONCURRENT_SIGNUP_GUIDANCE = (
     "self.concurrent_signup_statuses(first_payload, second_payload) returns tuple[int, int], the two HTTP "
     "status codes in payload order. Use statuses = self.concurrent_signup_statuses(first_payload, second_payload) "
     "to check both codes. Separately call state = self.signup_email_state(expected_canonical_email) to check "
-    "the committed row counts."
+    "the committed row counts. Do not use an individual integer status as a container. Use a fresh identity "
+    "that has not already been submitted when measuring simultaneous creation. Derive success/rejection "
+    "ranges from the public contract, not an assumed exact 200 or 400."
+)
+
+APP_FIXTURE_USAGE_GUIDANCE = (
+    "testTargets.appFixture.methods declares the exact Host parameters and return shapes. "
+    "state = self.signup_email_state(expected_canonical_email) is a dict: read state['totalRows'], "
+    "state['exactEmailRows'] and state['hasDirectEmailUniqueKey'] by key. Never unpack that dict as row values. "
+    "concurrent_signup_statuses returns two integer HTTP codes, not status containers or row metadata. "
+    "Use the success/rejection ranges in the public contract; do not narrow a 2xx/4xx range to only 200/400. "
+    "For simultaneous creation use an identity not already created by a preceding request. "
+    "Measure signup_hash_parameters on two distinct committed accounts within one test and assert the "
+    "public policy; a helper call alone is not an assertion. Write runnable Python, never a REDACTED placeholder. "
+    "This is public fixture usage, not a product verdict or permission to change assigned criteria."
 )
 
 UNIT_FIXTURE_GUIDANCE = (
@@ -38,7 +55,7 @@ UNIT_FIXTURE_GUIDANCE = (
     "For other contracts use their declared lifecycle. Use fresh synthetic emails unless testing "
     "duplicates. Generate all test "
     "passwords at execution time, including short/long/invalid cases; never embed credential literals. "
-    + PASSWORD_FIXTURE_GUIDANCE + " "
+    + PASSWORD_FIXTURE_GUIDANCE + " " + APP_FIXTURE_USAGE_GUIDANCE + " "
     "Do not print password/hash values in assertions or reports. Group independent source reads "
     "in one model response when multiple tool calls are supported."
 )
@@ -56,13 +73,12 @@ def unit_test_data_contract():
 
 
 def unit_test_targets(configuration, role):
+    from mcp_tools.tools.unit_runner import app_fixture_contract
     return [{"toolName": "run_unit_tests", "selector": scope.name,
              "directory": f"outputs/{role}/" + scope.source_directory,
              "pattern": scope.pattern, "format": "python-unittest", "required": True,
              "testIdRule": UNIT_TEST_ID_DESCRIPTION, "fixtureGuidance": UNIT_FIXTURE_GUIDANCE,
-             "appFixture": {"module": "_host_app_test", "class": "AppTestCase",
-                            "contract": "SCN-001", "attributes": ["client", "db", "User", "app"],
-                            "createsProductTables": False},
+             "appFixture": app_fixture_contract(),
              "signupEmailEvidence": (
                  "For an assigned SCN-001 REQ-003, select your own fresh synthetic identities using the public emailPolicy. "
                  "self.signup_email_state(expected_canonical_email) reads the committed database and returns totalRows, "

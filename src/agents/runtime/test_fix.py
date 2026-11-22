@@ -14,7 +14,7 @@ the role gets exactly one chance, in the same step, to fix only its test files:
 Protected scopes never trigger it: they are Host tests, not the model's.
 """
 from agents.llm.contracts import json_text, parse_json
-from agents.runtime.test_guidance import CONCURRENT_SIGNUP_GUIDANCE
+from agents.runtime.test_guidance import CONCURRENT_SIGNUP_GUIDANCE, APP_FIXTURE_USAGE_GUIDANCE, PASSWORD_FIXTURE_GUIDANCE
 from orchestrator.domain import test_not_run
 
 
@@ -68,7 +68,10 @@ INSTRUCTION = (
     "TestClient lifespan before database setup and register cleanup; entering it only in the test body is too late. "
     "This does not prove the product is correct: preserve its startup behavior, and do not create missing product "
     "tables in the test to hide a startup defect. NOT_RUN_ASYNC_NOT_AWAITED: an async def test in a plain TestCase never "
-    "ran; use def. Fix only your test files with write_test_file. Keep every declared case exactly as it was (same "
+    "ran; use def. NOT_RUN_FIXTURE_MEMBER_MISSING: a missing Host member was used in the failing test frame. "
+    "NOT_RUN_FIXTURE_RETURN_MISUSED: the test unpacked the Host dict keys as numeric database counts. "
+    "These are narrowly verified test-writing errors, not proof that the product passed. "
+    "Fix only your test files with write_test_file. Keep every declared case exactly as it was (same "
     "testId, requirementId, title and expectedResult); do not remove or weaken a check. Then return the same READY JSON.")
 
 
@@ -86,6 +89,8 @@ class TestFixRequired(Exception):
     def task_input(self, task_input, previous_ready):
         """The same task input plus the fixed feedback and the model's own previous READY draft."""
         guidance = []
+        if set(self.reasons) & test_not_run.FIXTURE_USAGE:
+            guidance.extend((APP_FIXTURE_USAGE_GUIDANCE, PASSWORD_FIXTURE_GUIDANCE))
         if any(r.startswith('OUTPUT_NOT_OBSERVED_') for r in self.reasons):
             guidance.append('Exercise the missing output channels with check_signup_output on your own cases.')
         if 'DB_CONSTRAINT_NOT_OBSERVED' in self.reasons:

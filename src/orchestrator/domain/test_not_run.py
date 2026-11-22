@@ -7,6 +7,8 @@ the runner-side reasons into a SKIP row's ``details``; it is stdlib-only inside
 the Container, so it repeats these strings instead of importing them. The
 helper-assertion reason means the body started but its assertion could not
 evaluate any product condition because it used the Host return type incorrectly.
+The fixture-usage reasons likewise require the generated runner's failing-frame
+and public-API checks; exception text or an ordinary assertion alone is insufficient.
 
 Only TECHNICAL reasons can end a Run as FINISHED UNVERIFIED once recovery is
 spent. A deliberate fixture skip is the test author's choice, like any skip.
@@ -18,9 +20,12 @@ SCOPE_FAILED = "NOT_RUN_SCOPE_FAILED"
 ASYNC_NOT_AWAITED = "NOT_RUN_ASYNC_NOT_AWAITED"
 FIXTURE_SKIPPED = "NOT_RUN_FIXTURE_SKIPPED"
 HELPER_ASSERTION = "NOT_RUN_HELPER_ASSERTION"
+FIXTURE_MEMBER_MISSING = "NOT_RUN_FIXTURE_MEMBER_MISSING"
+FIXTURE_RETURN_MISUSED = "NOT_RUN_FIXTURE_RETURN_MISUSED"
+FIXTURE_USAGE = frozenset({FIXTURE_MEMBER_MISSING, FIXTURE_RETURN_MISUSED})
 
-RUNNER_REASONS = frozenset({SETUP_FAILED, ASYNC_NOT_AWAITED, FIXTURE_SKIPPED, HELPER_ASSERTION})
-TECHNICAL = frozenset({SETUP_FAILED, SCOPE_FAILED, ASYNC_NOT_AWAITED, HELPER_ASSERTION})
+RUNNER_REASONS = frozenset({SETUP_FAILED, ASYNC_NOT_AWAITED, FIXTURE_SKIPPED, HELPER_ASSERTION}) | FIXTURE_USAGE
+TECHNICAL = frozenset({SETUP_FAILED, SCOPE_FAILED, ASYNC_NOT_AWAITED, HELPER_ASSERTION}) | FIXTURE_USAGE
 
 # Security requirement result code when every non-PASS case is a technical not-run.
 SECURITY_TESTS_NOT_RUN = "SECURITY_TESTS_NOT_RUN"

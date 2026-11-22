@@ -32,7 +32,7 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V5'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V6'
 
 VALIDATION_ERROR_GUIDANCE = (
     'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
@@ -136,7 +136,13 @@ INSTRUCTIONS = {
         'module that defines it. TEST_HOST_FIXTURE_REQUIRED: for SCN-001 subclass the Host AppTestCase '
         'from _host_app_test, use self.client/self.db/self.User in test methods, and remove product imports '
         'at module level and custom setup/teardown. The Host handles isolated DB and lifespan; it does not '
-        'create missing product tables. Then return READY.'),
+        'create missing product tables. TEST_HOST_MEMBER_MISSING: self.fresh_email and self.new_password are not '
+        'Host members; create a local fresh_email (for example with uuid4) and import new_password from '
+        '_host_test_data. Respect explicitly defined custom helpers. TEST_HOST_RETURN_MISUSED: '
+        'signup_email_state returns a dict; read totalRows/exactEmailRows/hasDirectEmailUniqueKey by key, '
+        'never as unpacked numeric row values. Use testTargets.appFixture.methods for actual signatures '
+        'and return types. concurrent_signup_statuses returns two integer HTTP codes; an individual code '
+        'cannot be the container argument of assertIn. Keep all assigned expectations. Then return READY.'),
     'CODE_REFERENCE_INVALID': (
         'A code reference in your review cannot be anchored yet. REFERENCE_FILE_NOT_READ: read that file with '
         'read_project_file in this step before citing it. When sourceReferenceCatalog is present, find the '
