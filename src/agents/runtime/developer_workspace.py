@@ -326,6 +326,25 @@ class GitDeveloperCheckpoint:
         files = self._progress_base if self._progress_base is not None else self._snapshot_files(self._parent)
         return {path: content for path, (content, _mode) in files.items() if path.endswith('.py')}
 
+    def starting_source_files(self):
+        """Immutable approved starting code, never the latest generated candidate."""
+        with self._guard:
+            if self._state != "PREPARED":
+                raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_STATE_INVALID")
+            return {path: content for path, (content, _mode) in self._snapshot_files(self._baseline).items()
+                    if path.endswith('.py')}
+
+    def review_source_files(self, *, deadline_monotonic=None):
+        """Read-only bounded working inventory under the existing workspace lock."""
+        with self._guard:
+            if self._state != "PREPARED":
+                raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_STATE_INVALID")
+            deadline = self._deadline(deadline_monotonic)
+            with _locked_root(self._workspace, write=False) as root_fd:
+                with walk_directory(root_fd, ("source",)) as source_fd:
+                    files = self._inventory(source_fd, deadline)
+            return {path: content for path, (content, _mode) in files.items() if path.endswith('.py')}
+
     def prepare(self, *, deadline_monotonic=None):
         self._enter("NEW", "PREPARING")
         failure = None

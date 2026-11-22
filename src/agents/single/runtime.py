@@ -22,6 +22,7 @@ from agents.llm.development_rejection import rejection_check
 from agents.llm.corrections import case_expectation_check, contract_check, development_check
 from agents.roles.expected_results import with_expected_results
 from agents.runtime.start_precheck import start_precheck_for
+from agents.runtime.startup_preservation import preservation_notice_for
 from agents.runtime.signup_quality_precheck import signup_quality_precheck_for
 from agents.llm.engine import LLMEngine
 from agents.runtime.file_access import build_file_access, constrain_frozen_read_tools, constrain_workspace_file_tools
@@ -146,7 +147,7 @@ class SingleAgentExecutor(AgentExecutor):
                      precheck=None, source_progress_check=None, expectations=None, explain=None, extra_checks=(),
                      output_refresh=None, text_only=False, failure_evidence=None, path_check=None, priority_check=None,
                      library_type_check=None, correction_candidates=None, output_safety_check=None,
-                     signup_quality_check=None):
+                     signup_quality_check=None, source_preservation_check=None):
         # text_only: the semantic rewrite (docs/live-api/05 15절) — no tool, no forced edit, no catalog stop.
         if text_only and (tools or executor is not None or source_progress_check is not None):
             raise SingleExecutionError()
@@ -168,6 +169,7 @@ class SingleAgentExecutor(AgentExecutor):
                 if not text_only and phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING) else None),
             source_progress_check=source_progress_check,
             source_write_precheck=precheck if not text_only and phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING) else None,
+            source_preservation_check=source_preservation_check if not text_only else None,
             output_refresh=output_refresh,
             correction_candidates=correction_candidates,
             close_invalid_qa_draft=not text_only and (
@@ -261,6 +263,8 @@ class SingleAgentExecutor(AgentExecutor):
         if role is AgentRole.DEVELOPER:
             from agents.runtime.repair_baseline import with_repair_baseline
             task_input = with_repair_baseline(task_input, checkpoint)
+            from agents.runtime.startup_preservation import with_startup_context
+            task_input = with_startup_context(task_input, checkpoint, execution.configuration.scenario_contract)
         async with services.client_factory(services.configuration) as host:
             host_tracked = services.tracked(host, execution)
             if telemetry is not None:
@@ -325,6 +329,9 @@ class SingleAgentExecutor(AgentExecutor):
                         tools = constrain_frozen_read_tools(tools, measured.source_paths,
                             [receipt.report_ref for _record, receipt, _evidence in measured.scans])
                     decision, result, prompt = await self._model(context, execution, model_input, phase, contract, tools=tools,
+                        source_preservation_check=(preservation_notice_for(checkpoint,
+                            execution.configuration.scenario_contract, deadline_monotonic=execution.budget.deadline_monotonic)
+                            if role is AgentRole.DEVELOPER else None),
                         failure_evidence=read_failure,
                         library_type_check=checkpoint.library_type_issues if role is AgentRole.DEVELOPER else None,
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)

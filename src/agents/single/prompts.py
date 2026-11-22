@@ -19,7 +19,7 @@ from orchestrator.domain.scenario_registry import ScenarioDefinition
 from orchestrator.domain.validation_feedback import without_expectations
 
 
-SINGLE_PROMPT_VERSION = "7"
+SINGLE_PROMPT_VERSION = "8"
 MAX_SINGLE_PROMPT_BYTES = 1_048_576
 
 

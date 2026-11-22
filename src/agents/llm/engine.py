@@ -93,6 +93,7 @@ class LLMEngine:
         recovery_sink: Callable | None = None,
         output_check: Callable[[dict, tuple], dict | None] | None = None,
         source_write_precheck: Callable[[], list[dict]] | None = None,
+        source_preservation_check: Callable | None = None,
         source_progress_check: Callable[[], bool | SourceEditStatus] | None = None,
         correction_candidates: Callable | None = None,
         output_refresh: Callable | None = None,
@@ -739,6 +740,7 @@ class LLMEngine:
                     required_tool_succeeded = False
                     recovery_source_changed = False
                     check_written_paths = set()
+                    changed_source_paths = set()
                     for call, definition, arguments in prepared:
                         tool_sequence, timeout = budget.reserve_tracked_tool_call()
                         seen_calls.add(call.call_id)
@@ -789,6 +791,8 @@ class LLMEngine:
                             call.name in {'write_source_file', 'edit_source_file'} and tool_result.get('changed') is True
                             or call.name == 'apply_patch' and bool(tool_result.get('changedFiles')))
                         source_changed |= changed_now
+                        if changed_now and call.name in {'write_source_file', 'edit_source_file'}:
+                            changed_source_paths.add(arguments['path'])
                         recovery_source_changed |= changed_now
                         if changed_now and restricted_paths:
                             refresh_path_output = True
@@ -812,6 +816,8 @@ class LLMEngine:
                         items.append({"type": "function_call_output", "call_id": call.call_id, "output": tool_output})
                         required_tool_succeeded |= call.name in (required_tool, *required_alternatives)
                     notices = (correction_rules.source_write_notice(source_write_precheck, check_written_paths),
+                               source_preservation_check(tuple(sorted(changed_source_paths)))
+                                   if source_preservation_check is not None and changed_source_paths else None,
                                read_history.completed_inspection() if read_history is not None else None)
                     for notice in filter(None, notices):
                         message = json_text(notice)

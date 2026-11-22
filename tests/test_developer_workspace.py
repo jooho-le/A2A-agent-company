@@ -79,6 +79,23 @@ class DeveloperWorkspaceTests(unittest.TestCase):
         self.assertEqual(repr(checkpoint), "GitDeveloperCheckpoint()")
         self.assertNotIn(str(self.source), repr(checkpoint))
 
+    def test_starting_source_and_current_review_are_distinct_readonly_inventories(self):
+        checkpoint = self.checkpoint
+        checkpoint.prepare()
+        original = (self.source / 'app.py').read_bytes()
+        baseline = checkpoint.starting_source_files()
+        (self.source / 'app.py').write_bytes(b'raise RuntimeError("candidate must remain inert")\n')
+        head, index = self.git('rev-parse', 'HEAD'), (self.source / '.git/index').read_bytes()
+        observed = checkpoint.review_source_files()
+        self.assertEqual(baseline['app.py'], original)
+        self.assertEqual(checkpoint.starting_source_files()['app.py'], original)
+        self.assertEqual(observed['app.py'], (self.source / 'app.py').read_bytes())
+        self.assertNotEqual(observed, baseline)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), head)
+        self.assertEqual((self.source / '.git/index').read_bytes(), index)
+        observed['app.py'] = b'caller mutation'
+        self.assertNotEqual(checkpoint.review_source_files()['app.py'], observed['app.py'])
+
     def test_library_types_are_rechecked_against_exact_bytes_before_freeze(self):
         lock_hash = 'sha256:' + sha256((self.source / 'requirements.lock').read_bytes()).hexdigest()
         environment = {'dependencyLockHash': lock_hash, 'containerImageDigest': 'fixture'}

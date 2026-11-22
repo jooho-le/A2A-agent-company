@@ -226,6 +226,8 @@ class DeveloperAgentExecutor(AgentExecutor):
             read_failure = failure_reader(services, execution)
             from agents.runtime.repair_baseline import with_repair_baseline
             task_input = with_repair_baseline(task_input, checkpoint)
+            from agents.runtime.startup_preservation import with_startup_context, preservation_notice_for
+            task_input = with_startup_context(task_input, checkpoint, execution.configuration.scenario_contract)
             paths = ready_report_paths(task_input)
             brief = task_input.get('activeRepairFocus', {}).get('brief', {})
             checkpoint.configure_path_review(paths, execution.configuration.scenario_contract,
@@ -277,6 +279,9 @@ class DeveloperAgentExecutor(AgentExecutor):
                     source_progress_check=None if text_only else (lambda: checkpoint.source_edit_status(
                         deadline_monotonic=execution.budget.deadline_monotonic)),
                     source_write_precheck=None if text_only else precheck,
+                    source_preservation_check=None if text_only else preservation_notice_for(
+                        checkpoint, execution.configuration.scenario_contract,
+                        deadline_monotonic=execution.budget.deadline_monotonic),
                     correction_candidates=checkpoint.correction_candidates if paths and not text_only else None,
                     output_check=contract_check(validate) if text_only else development_check(
                         validate, precheck=precheck, path_check=checkpoint.ready_path_issues if paths else None,

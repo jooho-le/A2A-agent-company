@@ -308,7 +308,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from agents.runtime import developer, developer_services, library_contracts, ready_library_types, repair_call_history
         from agents.runtime import (output_safety_precheck, signup_quality_precheck, generated_tests_precheck,
                                     generated_test_inventory, qa_catalog, test_fix)
-        from agents.runtime import repair_input_failures, repair_progress as candidate_repair_history
+        from agents.runtime import repair_input_failures, startup_preservation, repair_progress as candidate_repair_history
         from agents.single import runtime as single_runtime
         from agents.roles import developer_contract
         from agents.llm.engine import INPUT_RESERVATION_POLICY
@@ -322,6 +322,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         policy = {
             'developerReadyReportPolicy': 'REPORTED_PATH_EDITS_CHECKED_AGAINST_FROZEN_DIFF_V7',
             'repairBaselinePolicy': repair_baseline.POLICY,
+            'startingSourceStartupPolicy': startup_preservation.POLICY,
             'developerInputProjectionPolicy': developer_input.POLICY,
             'inputTokenReservationPolicy': INPUT_RESERVATION_POLICY,
             'productPreconditionRecoveryPolicy': recovery_causes.POLICY,
@@ -332,6 +333,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                 for name, module in (('baseline', repair_baseline), ('causes', recovery_causes), ('repairProgress', repair_progress),
                                      ('developmentFailure', development_failure), ('rejection', development_rejection),
                                      ('fileTools', file_tools), ('developerInput', developer_input),
+                                     ('startupPreservation', startup_preservation),
                                      ('repairLocations', repair_locations), ('normalRequestRepair', normal_request_repair),
                                      ('invalidInputEvidence', repair_input_failures),
                                      ('candidateRepairHistory', candidate_repair_history), ('repairCallHistory', repair_call_history),
