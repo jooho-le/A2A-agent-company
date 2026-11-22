@@ -1,0 +1,198 @@
+{
+  "date": "2026-11-23",
+  "task": 102,
+  "architecture": "SINGLE_AGENT",
+  "loopPolicy": "IN_LOOP_AND_FINAL",
+  "requestedNewRuns": 1,
+  "newRunsSubmitted": 1,
+  "automaticResubmission": false,
+  "runId": "443d9b83-c29a-479e-9c8f-de6dd4a24bca",
+  "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "model": {
+    "provider": "openai",
+    "modelId": "gpt-4.1-mini-2025-04-14",
+    "modelRevision": null,
+    "temperature": 0.0,
+    "seed": null
+  },
+  "roleContractVersion": "9",
+  "singlePromptVersion": "9",
+  "agentServerIdentities": [
+    "SINGLE_AGENT"
+  ],
+  "recordedUsageActorRoles": [
+    "SINGLE_AGENT"
+  ],
+  "runStartedAtKst": "2026-11-23T06:47:02.395534+09:00",
+  "hostStatus": "FINISHED",
+  "hostVerdict": "SUCCESS",
+  "registeredCodeVersion": 2,
+  "independentEvaluationAvailable": true,
+  "productVerdict": "PASS",
+  "plannedFinalChecks": 9,
+  "finalChecksPassed": 9,
+  "finalChecksFailed": 0,
+  "finalCheckPassRate": 1.0,
+  "requirementSatisfaction": 1.0,
+  "requirementsPassed": 7,
+  "requirementsTotal": 7,
+  "requirementWeightedCheckScore": 1.0,
+  "finalChecks": [
+    {
+      "checkId": "QA-SIGNUP-001",
+      "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-002",
+      "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-003",
+      "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-004",
+      "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-005",
+      "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-006",
+      "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+      "status": "PASS"
+    },
+    {
+      "checkId": "SEC-SIGNUP-002",
+      "title": "SEC-SIGNUP-002 비밀번호 저장값",
+      "status": "PASS"
+    },
+    {
+      "checkId": "SEC-SIGNUP-003",
+      "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+      "status": "PASS"
+    },
+    {
+      "checkId": "SEC-SIGNUP-005",
+      "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+      "status": "PASS"
+    }
+  ],
+  "metrics": {
+    "totalMs": 187735,
+    "successfulHostVerdictMs": 187735,
+    "firstBuildPassMs": 115515,
+    "firstPassingSnapshotMs": null,
+    "firstPassingSnapshotTimingStatus": "UNVERIFIED",
+    "firstPassingSnapshotTimingReason": "EARLIER_PASS_UNVERIFIED",
+    "fixAttempts": 1,
+    "registeredRepairCandidates": 1,
+    "modelCalls": 26,
+    "toolCalls": 28,
+    "inputTokens": 480203,
+    "outputTokens": 16411,
+    "totalTokens": 496614,
+    "costUsd": "0.154134",
+    "costComplete": true,
+    "usageComplete": true
+  },
+  "pricedCalls": 26,
+  "settledToolAttempts": 28,
+  "unknownToolResults": 0,
+  "builds": [
+    {
+      "codeVersion": 1,
+      "executionOutcome": "FAIL",
+      "exitCode": 1,
+      "diagnostics": [
+        {
+          "rule_id": "SCN001_NAME_UNDEFINED",
+          "normalized_location": "main.py:68",
+          "missing_name": "get_db",
+          "source_expression": "get_db"
+        }
+      ]
+    },
+    {
+      "codeVersion": 2,
+      "executionOutcome": "PASS",
+      "exitCode": 0,
+      "diagnostics": []
+    }
+  ],
+  "rawAgentReportSummary": [
+    {
+      "artifactType": "QA_REPORT",
+      "codeVersion": 2,
+      "outcomes": {
+        "FAIL": 5,
+        "PASS": 6
+      }
+    },
+    {
+      "artifactType": "SECURITY_REPORT",
+      "codeVersion": 2,
+      "outcomes": {
+        "FAIL": 3
+      }
+    }
+  ],
+  "recoveryDecisions": [
+    {
+      "sequence": 9,
+      "code": "READY_SIGNUP_QUALITY_REVIEW",
+      "category": "MODEL_EXECUTION",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    }
+  ],
+  "outcomeCause": "COMPLETED_SUCCESS",
+  "comparisonValidity": "VALID",
+  "runRecordPrivacyStatus": "UNVERIFIED",
+  "runRecordTraceStatus": "PASS",
+  "supplementaryStaticReq003": "UNVERIFIED",
+  "implementationUnchanged": true,
+  "manuallyRepairedGeneratedSource": false,
+  "comparisonWithMultiVer1": {
+    "runId": "cf2d0a10-7f51-4af6-a436-8c33075b6478",
+    "samplesPerCondition": 1,
+    "checks": {
+      "sameRequest": true,
+      "sameModel": true,
+      "sameLimits": true,
+      "sameRuntimeBudget": true,
+      "samePriceBook": true,
+      "sameToolsAndImage": true,
+      "samePracticeCases": true,
+      "sameImplementation": true,
+      "sameStartingSource_repositoryId": true,
+      "sameStartingSource_commitHash": true,
+      "sameStartingSource_treeHash": true,
+      "sameStartingSource_snapshotSha256": true,
+      "sameStartingSource_dependencyLockHash": true
+    },
+    "multiSuccessfulHostVerdictMs": 245496,
+    "multiCostUsd": null,
+    "multiCostComplete": false,
+    "multiKnownCostUsd": "0.1630532",
+    "multiFixAttempts": 2
+  },
+  "sourceDirectory": ".data/experiments/scn001-single-ver1-post100-20261123",
+  "evaluationDirectory": ".data/experiments/scn001-single-ver1-post100-20261123/evaluation/443d9b83-c29a-479e-9c8f-de6dd4a24bca",
+  "limitations": [
+    "One sample per architecture; no general architecture ranking or success-rate estimate.",
+    "Multi Ver1 has one provider error with unknown usage; its full cost is not available.",
+    "Raw generated tests contain failures; Host applies the frozen Ver1 protected-test supersession policy.",
+    "Run-record privacy, supplementary static REQ-003 and first-passing-snapshot timing remain UNVERIFIED.",
+    "Ver2 has not been run with this source edition."
+  ],
+  "agentContextRecordCount": 1,
+  "distinctStepAgentContextCount": 1,
+  "sameAgentContextAcrossAllSteps": true
+}
