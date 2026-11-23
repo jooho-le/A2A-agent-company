@@ -12,10 +12,11 @@ import re
 import sqlite3
 from uuid import RFC_4122, UUID
 
-from pydantic import BaseModel, ConfigDict, Field, UUID4
+from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 
 from agents.llm.budget import BudgetSnapshot
 from agents.llm.contracts import LLMErrorCode, TokenUsage, UsageRecord, parse_json
+from agents.llm.failure_diagnostics import FailureDiagnostic, checked_diagnostic
 from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity
 from agents.platform.pricing import (
     ApprovedPriceBook, quote_frozen_usage, validate_frozen_price_book,
@@ -61,6 +62,12 @@ class _UsageDetail(BaseModel):
     reasoning_output_tokens: int | None = Field(default=None, ge=0, strict=True, alias="reasoningOutputTokens")
     cache_write_input_tokens: int | None = Field(default=None, ge=0, strict=True, alias="cacheWriteInputTokens")
     cost_usd: None = Field(default=None, alias="costUsd")
+    failure_diagnostic: FailureDiagnostic | None = Field(default=None, alias='failureDiagnostic')
+
+    @field_validator('failure_diagnostic')
+    @classmethod
+    def closed_failure(cls, value, info):
+        return checked_diagnostic(value, code=info.data.get('outcome'))
 
 
 class _Binding(BaseModel):
@@ -268,7 +275,7 @@ def _usage(connection, run_id, sequence):
     record = UsageRecord(sequence=sequence, role=detail.role, requested_model=model,
         reported_model_id=detail.reported_model_id, outcome=detail.outcome,
         duration_ms=detail.duration_ms, usage=usage, reported_service_tier=detail.reported_service_tier,
-        billing_context=detail.billing_context)
+        billing_context=detail.billing_context, failure_diagnostic=detail.failure_diagnostic)
     trace_row = connection.execute("SELECT * FROM trace_events WHERE event_id=?", (row["trace_event_id"],)).fetchone()
     if trace_row is None:
         raise ValueError

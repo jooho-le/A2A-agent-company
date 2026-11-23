@@ -10,6 +10,7 @@ from time import monotonic
 from agents.llm import corrections as correction_rules
 from agents.llm import raw_capture
 from agents.llm.developer_continuation import MeasuredInput, RepairReadHistory
+from agents.llm.failure_diagnostics import safe_diagnostic, provider_retry_delay, timeout_diagnostic
 from agents.llm.recovery import CallRoute, CorrectionObservation, FailureRoute, correction_route, failure_route
 from agents.llm.budget import ExecutionBudget
 from agents.llm.content import sanitize_content, validate_source_fields
@@ -181,13 +182,15 @@ class LLMEngine:
                 return None
 
         def decide_correction(sequence, kind, allowed, reason, *, qa_exhausted=False, draft_issue=None,
-                              development_rejection=None, observation=None, unlinked_paths=(), path_evidence=()):
+                              development_rejection=None, observation=None, unlinked_paths=(), path_evidence=(),
+                              failure_diagnostic=None):
             nonlocal pending_correction, decided_sequence, correction_attempt
             route = (FailureRoute(sequence=sequence, operationSequence=operation_sequence,
                 code=LLMErrorCode.VALIDATION_DRAFT.value, category='MODEL_FORMAT', action='STOP', reason=reason)
                 if qa_exhausted else correction_route(kind, sequence=sequence, operation_sequence=operation_sequence,
                                                      allowed=allowed, reason=reason,
-                                                     development_rejection=development_rejection))
+                                                     development_rejection=development_rejection,
+                                                     failure_diagnostic=failure_diagnostic))
             if draft_issue is not None:
                 route = route.model_copy(update={'draft_issue': draft_issue})
             if observation is not None:
@@ -486,6 +489,9 @@ class LLMEngine:
                     code = error.code if isinstance(error, LLMRuntimeError) else (
                         LLMErrorCode.TIMEOUT if isinstance(error, asyncio.TimeoutError) else LLMErrorCode.PROVIDER
                     )
+                    diagnostic = (safe_diagnostic(error.failure_diagnostic, code=code.value)
+                                  if isinstance(error, LLMRuntimeError) else
+                                  timeout_diagnostic('MODEL_CALL', timeout) if isinstance(error, asyncio.TimeoutError) else None)
                     known_usage = error.usage if isinstance(error, LLMRuntimeError) else None
                     if known_usage is not None:
                         try:
@@ -508,7 +514,8 @@ class LLMEngine:
                             estimate = self._usage_upper_bound(prompt, history, wire_tools, output, output_cap)
                             bound = None if estimate is None else estimate.total_tokens
                     budget.account_usage(known_usage, sequence=sequence, bound=bound)
-                    record = UsageRecord(sequence, self._role, model, None, code.value, self._duration(started), known_usage)
+                    record = UsageRecord(sequence, self._role, model, None, code.value, self._duration(started), known_usage,
+                                         failure_diagnostic=diagnostic)
                     records.append(record)
                     if usage_sink is not None:
                         self._publish_usage(usage_sink, record, budget)
@@ -518,14 +525,18 @@ class LLMEngine:
                     # A refused retry keeps the original failure record below.
                     # Codex review 2026-11-18 #1: wait like a normal call while only another role's
                     # pending reservation blocks the re-send; spend the retry only once it can be sent.
+                    delay = provider_retry_delay(diagnostic, PROVIDER_RETRY_DELAY_SECONDS)
                     if (isinstance(error, LLMRuntimeError) and error.transient and provider_retries.enabled
+                            and delay is not None
                             and await self._budget_allows_another_call(budget, input_reserve)
+                            and delay < budget.remaining_seconds()
                             and provider_retries.take(('PROVIDER_TRANSIENT_RETRY',))):
-                        decide_correction(sequence, 'PROVIDER_TRANSIENT_RETRY', True, provider_retries.last_reason)
-                        await asyncio.sleep(min(PROVIDER_RETRY_DELAY_SECONDS, max(0.0, budget.remaining_seconds())))
+                        decide_correction(sequence, 'PROVIDER_TRANSIENT_RETRY', True, provider_retries.last_reason,
+                                          failure_diagnostic=diagnostic)
+                        await asyncio.sleep(delay)
                         budget.check()
                         continue
-                    raise LLMRuntimeError(code) from None
+                    raise LLMRuntimeError(code, failure_diagnostic=diagnostic) from None
                 budget.account_usage(response.usage, sequence=sequence)
                 if developer_repair and input_reserve and not any(item.get('type') == 'reasoning' for item in items):
                     measured_input = MeasuredInput.from_receipt(request, response, len(items))
@@ -773,7 +784,8 @@ class LLMEngine:
                                 self._executor.execute(call, arguments, context), timeout=timeout,
                             )
                         except asyncio.TimeoutError:
-                            raise LLMRuntimeError(LLMErrorCode.TIMEOUT) from None
+                            raise LLMRuntimeError(LLMErrorCode.TIMEOUT,
+                                failure_diagnostic=timeout_diagnostic('TOOL_CALL', timeout)) from None
                         except Exception as failure:
                             # A read-only Tool that settled with a known rejection (file not
                             # found, report not found, ...) changed nothing. When corrections
@@ -1033,13 +1045,15 @@ class LLMEngine:
                 return LLMResult(json_text(sanitized, max_bytes=limit), tuple(records), executed, tuple(executed_names))
         except LLMRuntimeError as error:
             code, validation = error.code, error.validation
+            diagnostic = safe_diagnostic(error.failure_diagnostic, code=code.value)
         except asyncio.CancelledError:
             raise
         except Exception:
             code, validation = LLMErrorCode.RESPONSE, None
+            diagnostic = None
         if (sequence is not None and operation_sequence is not None and decided_sequence != sequence
                 and not recovery_sink_failed):
-            publish_route(failure_route(LLMRuntimeError(code, validation=validation),
+            publish_route(failure_route(LLMRuntimeError(code, validation=validation, failure_diagnostic=diagnostic),
                                        sequence=sequence, operation_sequence=operation_sequence))
         recorded = False
         if validation is not None and validation_failed_sink is not None:
@@ -1049,6 +1063,7 @@ class LLMEngine:
                 pass  # Preserve the original rejection and its A2A report.
         # Do not retain raw validation exceptions in __context__ or __cause__.
         raise LLMRuntimeError(code, records=tuple(records), validation=validation,
+                              failure_diagnostic=diagnostic,
                               validation_recorded=recorded,
                               development_rejection=last_development_rejection
                               if code is LLMErrorCode.DEVELOPMENT_BLOCKED else None) from None

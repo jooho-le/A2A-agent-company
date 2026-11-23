@@ -210,10 +210,12 @@ class ExecutionBudget:
                 raise LLMRuntimeError(LLMErrorCode.BUDGET)
             self._last_utc_observed = now
             if now >= self._snapshot.deadline_utc:
-                raise LLMRuntimeError(LLMErrorCode.BUDGET)
+                from agents.llm.failure_diagnostics import timeout_diagnostic
+                raise LLMRuntimeError(LLMErrorCode.BUDGET, failure_diagnostic=timeout_diagnostic('RUN_BUDGET'))
         remaining = self._deadline - monotonic()
         if remaining <= 0:
-            raise LLMRuntimeError(LLMErrorCode.BUDGET)
+            from agents.llm.failure_diagnostics import timeout_diagnostic
+            raise LLMRuntimeError(LLMErrorCode.BUDGET, failure_diagnostic=timeout_diagnostic('RUN_BUDGET'))
         return remaining
 
     def check(self) -> None:

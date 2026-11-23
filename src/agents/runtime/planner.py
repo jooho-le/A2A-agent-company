@@ -55,7 +55,7 @@ _PROTECTED_FIELDS = _INITIAL_FIELDS - {"request"} | frozenset({
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds",
     "projectArtifactId", "projectArtifactIds", "artifactVersion", "model", "limits", "configuration",
     "codeVersion", "fixRequest", "fixAttempt", "fix_attempt", "startingCommitHash", "parentCommitHash",
-    "requirementAuthority", "fileAccess", "plannerValidation", "llmValidation",
+    "requirementAuthority", "fileAccess", "plannerValidation", "llmValidation", "llmFailure",
 })
 
 
@@ -239,8 +239,11 @@ class PlannerAgentExecutor(AgentExecutor):
         return result
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None, unapproved_assumptions=(), planner_validation=None, llm_validation=None):
+    async def _status(updater, metadata, state, code, *, questions=None, unapproved_assumptions=(), planner_validation=None,
+                      llm_validation=None, llm_failure=None):
         data = {"code": code}
+        if llm_failure is not None:
+            data['llmFailure'] = llm_failure
         if llm_validation is not None:
             data["llmValidation"] = llm_validation
         if planner_validation is not None:
@@ -331,7 +334,8 @@ class PlannerAgentExecutor(AgentExecutor):
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else
                      TaskState.TASK_STATE_FAILED)
-            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation())
+            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation(),
+                               llm_failure=error.public_failure())
             return
         except SemanticReviewRequired as held:
             await publish_semantic_hold(updater, metadata, held)

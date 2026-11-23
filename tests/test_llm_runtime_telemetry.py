@@ -9,6 +9,7 @@ import test_agent_durable_budgets as budget_fixtures
 import test_llm_runtime as llm_helpers
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, OPENAI_RESPONSES_GLOBAL_TEXT, StructuredOutput, ToolCall, ToolDefinition, TokenUsage, UsageRecord, json_text
 from agents.llm.engine import LLMEngine
+from agents.llm.failure_diagnostics import FailureDiagnostic
 from agents.platform.budgets import RunBudgetError
 from agents.platform.telemetry_store import TelemetryStoreError
 from agents.roles.prompts import prepare_role_prompt
@@ -94,6 +95,31 @@ class LLMRuntimeTelemetryTests(unittest.IsolatedAsyncioTestCase):
         snapshot = self.store.load_budget(self.fixture.run.run_id)
         self.assertEqual(snapshot.accounted_usage[1], llm_helpers.measured_usage())
         self.assertEqual(snapshot.pending_model_sequences, ())
+
+    async def test_closed_failure_survives_engine_and_durable_usage_without_inventing_tokens(self):
+        diagnostic = FailureDiagnostic(boundary='HTTP', reason='QUOTA_EXHAUSTED', httpStatus=429,
+                                       providerCode='insufficient_quota')
+        provider = llm_helpers.FakeProvider(LLMRuntimeError(LLMErrorCode.PROVIDER,
+                                                          failure_diagnostic=diagnostic))
+        with self.assertRaises(LLMRuntimeError) as caught:
+            await self.run_engine(provider)
+        self.assertEqual(caught.exception.public_failure(), diagnostic.public())
+        row = self.store.list_usage(self.fixture.run.run_id)[0][0]
+        self.assertEqual(row['failureDiagnostic'], diagnostic.public())
+        self.assertFalse(row['usageKnown'])
+        self.assertIsNone(row['totalTokens'])
+        self.assertIsNone(row['costUsd'])
+        self.assertEqual(self.store.load_budget(self.fixture.run.run_id).model_calls, 1)
+
+    async def test_mutated_failure_metadata_cannot_be_persisted_as_usage(self):
+        sequence, _, _ = self.budget.reserve_model_call()
+        self.budget.account_usage(None, sequence=sequence)
+        record = UsageRecord(sequence, self.role, self.model, None, 'LLM_PROVIDER_ERROR', 1, None,
+                            failure_diagnostic=FailureDiagnostic(boundary='HTTP', reason='SERVER_ERROR', httpStatus=500))
+        object.__setattr__(record.failure_diagnostic, 'provider_code', 'SYNTHETIC_PRIVATE_ERROR')
+        with self.assertRaises(TelemetryStoreError):
+            self.store.append_usage(self.fixture.binding, record)
+        self.assertEqual(self.store.list_usage(self.fixture.run.run_id)[0], [])
 
     async def test_actual_provenance_and_cache_write_survive_usage_and_budget_restart(self):
         measured = TokenUsage(9, 6, 15, 4, 2, 3)

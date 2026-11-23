@@ -291,6 +291,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from agents.runtime.qa_catalog import QA_DRAFT_POLICY, SECURITY_ID_POLICY
         from agents.llm.corrections import TOOL_ERROR_RETURN_POLICY, DRAFT_PRECHECK_POLICY
         from agents.llm import corrections as correction_rules
+        from agents.llm import failure_diagnostics, contracts as llm_contracts, openai_responses
         from agents.llm.engine import UNKNOWN_USAGE_POLICY
         from agents.llm.tool_wire import WORKSPACE_ARGUMENT_POLICY
         from agents.runtime.start_precheck import START_PRECHECK_POLICY
@@ -365,6 +366,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                      ('readySourceCheck', developer_workspace), ('unusedRewrite', unused_rewrite),
                                      ('developerDecision', developer_contract),
                                      ('llmEngine', llm_engine), ('llmBudget', llm_budget),
+                                     ('llmFailureDiagnostics', failure_diagnostics), ('llmContracts', llm_contracts),
+                                     ('openaiResponses', openai_responses),
                                      ('developerContinuation', developer_continuation))},
             "developmentProgressPolicy": DEVELOPMENT_PROGRESS_POLICY,
             "developmentRejectionPolicy": DEVELOPMENT_REJECTION_POLICY,
@@ -376,6 +379,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             "securityTestIdPolicy": SECURITY_ID_POLICY,
             "workspaceArgumentPolicy": WORKSPACE_ARGUMENT_POLICY,
             "providerUnknownUsagePolicy": UNKNOWN_USAGE_POLICY,
+            "providerFailurePolicy": failure_diagnostics.POLICY,
             "toolErrorReturnPolicy": TOOL_ERROR_RETURN_POLICY,
             "draftPrecheckPolicy": DRAFT_PRECHECK_POLICY,
             "startPrecheckPolicy": START_PRECHECK_POLICY,

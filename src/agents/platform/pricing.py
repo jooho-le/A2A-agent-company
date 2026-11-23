@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from agents.llm.content import sanitize_content
 from agents.llm.contracts import TokenUsage, UsageRecord, parse_json
+from agents.llm.failure_diagnostics import checked_diagnostic
 from agents.core.identity import SingleAgentIdentity
 from orchestrator.domain.run_configuration import ModelConfiguration
 from orchestrator.domain.states import AgentRole
@@ -208,6 +209,7 @@ def _record(value):
             or type(value.requested_model) is not ModelConfiguration):
         raise ValueError
     model = value.requested_model
+    checked_diagnostic(value.failure_diagnostic, code=value.outcome)
     checked = ModelConfiguration.model_validate(model.model_dump(by_alias=True), strict=True)
     if checked != model:
         raise ValueError

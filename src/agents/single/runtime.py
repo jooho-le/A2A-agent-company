@@ -127,8 +127,11 @@ class SingleAgentExecutor(AgentExecutor):
         return step.agent_role, self._loaders[step.agent_role](context)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, questions=None, unapproved_assumptions=(), planner_validation=None, llm_validation=None, development_rejection=None):
+    async def _status(updater, metadata, state, code, questions=None, unapproved_assumptions=(), planner_validation=None,
+                      llm_validation=None, development_rejection=None, llm_failure=None):
         data = {"code": code}
+        if llm_failure is not None:
+            data['llmFailure'] = llm_failure
         if development_rejection is not None:
             data["developmentRejection"] = development_rejection
         if llm_validation is not None:
@@ -409,7 +412,8 @@ class SingleAgentExecutor(AgentExecutor):
         except asyncio.CancelledError:
             raise
         except LLMRuntimeError as error:
-            await self._status(updater, context.metadata, TaskState.TASK_STATE_FAILED, error.code.value)
+            await self._status(updater, context.metadata, TaskState.TASK_STATE_FAILED, error.code.value,
+                               llm_failure=error.public_failure())
             return
         except Exception:
             await self._status(updater, context.metadata, TaskState.TASK_STATE_REJECTED, "SINGLE_AGENT_CONTEXT_DENIED")
@@ -424,7 +428,7 @@ class SingleAgentExecutor(AgentExecutor):
             state = TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else (
                 TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, context.metadata, state, error.code.value, llm_validation=error.public_validation(),
-                               development_rejection=error.development_rejection)
+                               development_rejection=error.development_rejection, llm_failure=error.public_failure())
             return
         except SemanticReviewRequired as held:
             await publish_semantic_hold(updater, context.metadata, held)

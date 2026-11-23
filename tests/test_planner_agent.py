@@ -437,7 +437,11 @@ class PlannerAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_timeout_fails_without_retry_or_artifact(self):
         provider = FakeProvider(asyncio.TimeoutError("DUMMY_UNLABELLED_PROVIDER_SECRET"))
         task, _ = await self.run_to(provider, "TASK_STATE_FAILED")
-        self.assertEqual(task["status"]["message"]["parts"][0]["data"], {"code": "LLM_EXECUTION_TIMEOUT"})
+        self.assertEqual(task["status"]["message"]["parts"][0]["data"], {
+            "code": "LLM_EXECUTION_TIMEOUT", "llmFailure": {
+                "policy": "CLOSED_PROVIDER_FAILURE_AND_BOUNDED_SERVER_DELAY_V1",
+                "boundary": "MODEL_CALL", "reason": "MODEL_CALL_TIMEOUT", "limitMs": 1000}})
+        self.assertNotIn("DUMMY_UNLABELLED_PROVIDER_SECRET", json.dumps(task))
         self.assertFalse(task.get("artifacts")); self.assertEqual(len(provider.requests), 1)
 
     async def test_real_async_timeout_obeys_shared_budget(self):

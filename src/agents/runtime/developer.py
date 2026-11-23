@@ -57,7 +57,7 @@ _PROTECTED = frozenset({
     "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion", "fixRequest",
     "fix_attempt", "fixAttempt", "previous_source", "previousSource", "previous_artifacts",
     "repairBaseline", "previousArtifacts", "fix_issues", "fixIssues", "startingCommitHash", "parentCommitHash",
-    "requirementAuthority", "requirementScope", "runtimeInstructions", "clarifications", "fileAccess", "plannerValidation", "llmValidation",
+    "requirementAuthority", "requirementScope", "runtimeInstructions", "clarifications", "fileAccess", "plannerValidation", "llmValidation", "llmFailure",
 })
 
 
@@ -167,8 +167,11 @@ class DeveloperAgentExecutor(AgentExecutor):
         return TaskUpdater(queue, context.task_id, context.context_id)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None, development_rejection=None):
+    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None, development_rejection=None,
+                      llm_failure=None):
         data = {"code": code}
+        if llm_failure is not None:
+            data['llmFailure'] = llm_failure
         if development_rejection is not None:
             data["developmentRejection"] = development_rejection
         if llm_validation is not None:
@@ -321,7 +324,7 @@ class DeveloperAgentExecutor(AgentExecutor):
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation(),
-                               development_rejection=error.development_rejection)
+                               development_rejection=error.development_rejection, llm_failure=error.public_failure())
             return
         except (DeveloperContractError, DeveloperCheckpointError, DeveloperServicesError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)
