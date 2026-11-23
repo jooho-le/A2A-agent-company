@@ -27,6 +27,7 @@ def test_public_contract_matches_actual_signatures_and_has_independent_copies(tm
     with runner._app_test_api(tmp_path):
         cls = sys.modules[contract['module']].AppTestCase
         for name, spec in contract['methods'].items():
+            assert {a['name'] for a in spec['arguments']} == set(spec['parameters']) | set(spec['keywordOnly'])
             parameters = inspect.signature(getattr(cls, name)).parameters
             assert [k for k, v in parameters.items() if k != 'self' and v.kind != v.KEYWORD_ONLY] == spec['parameters']
             assert [k for k, v in parameters.items() if v.kind == v.KEYWORD_ONLY] == spec['keywordOnly']
@@ -99,9 +100,11 @@ def cases(tmp_path):
         __tablename__ = 'users'
         id = Column(Integer, primary_key=True)
         email = Column(String, unique=True)
+        password_hash = Column(String)
     engine = create_engine('sqlite:///' + str(tmp_path / 'fixture.db'))
     User.metadata.create_all(engine)
-    with runner._app_test_api(tmp_path):
+    issued = set()
+    with runner._app_test_api(tmp_path, exposure_checks={}, issued_passwords=issued, signup_checks={}):
         AppTestCase = sys.modules[runner.APP_FIXTURE_MODULE].AppTestCase
 
         class Cases(AppTestCase):
@@ -110,6 +113,23 @@ def cases(tmp_path):
 
             def test_missing_factory(self):
                 self.new_password(length=12)
+
+            def test_invalid_password_argument(self):
+                self.check_signup_output({'password': self.sample}, password=[self.sample])
+
+            def test_invalid_hash_argument(self):
+                self.signup_hash_parameters('sample@example.org', password=[self.sample])
+
+            def test_short_password_argument(self):
+                sample = runner._new_test_password(length=7)
+                self.check_signup_output({'password': sample}, password=sample)
+
+            def test_unknown_hash_result_key(self):
+                state = self.signup_hash_parameters('sample@example.org', password=self.sample)
+                self.assertEqual(state['algorithm'], 'argon2id')
+
+            def test_forged_guard_text(self):
+                raise ValueError('SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST')
 
             def test_misread_dict(self):
                 total, exact, unique = self.signup_email_state('unused@example.org')
@@ -138,6 +158,13 @@ def cases(tmp_path):
             def make(method):
                 case = Cases(method)
                 case.db, case.User, case.client = db, User, N(status_code=500)
+                case.sample = runner._new_test_password()
+                issued.add(case.sample)
+                if method == 'test_unknown_hash_result_key':
+                    from argon2 import PasswordHasher
+                    db.query(User).delete()
+                    db.add(User(email='sample@example.org', password_hash=PasswordHasher().hash(case.sample)))
+                    db.commit()
                 return case
             yield make
     engine.dispose()
@@ -165,6 +192,10 @@ def measure(case, *, protected=False, generated=True):
     ('test_missing_member', test_not_run.FIXTURE_MEMBER_MISSING),
     ('test_missing_factory', test_not_run.FIXTURE_MEMBER_MISSING),
     ('test_misread_dict', test_not_run.FIXTURE_RETURN_MISUSED),
+    ('test_invalid_password_argument', test_not_run.FIXTURE_ARGUMENT_INVALID),
+    ('test_invalid_hash_argument', test_not_run.FIXTURE_ARGUMENT_INVALID),
+    ('test_short_password_argument', test_not_run.FIXTURE_ARGUMENT_INVALID),
+    ('test_unknown_hash_result_key', test_not_run.FIXTURE_RETURN_MISUSED),
 ])
 def test_proven_errors_get_same_case_repair_with_safe_feedback(cases, method, reason):
     case = cases(method)
@@ -184,7 +215,7 @@ def test_proven_errors_get_same_case_repair_with_safe_feedback(cases, method, re
 
 
 @pytest.mark.parametrize('method', ['test_wrong_product_rows', 'test_wrong_product_status',
-    'test_unrelated_attribute', 'test_unrelated_assertion', 'test_intentional_key_failure'])
+    'test_unrelated_attribute', 'test_unrelated_assertion', 'test_intentional_key_failure', 'test_forged_guard_text'])
 def test_real_or_uncertain_failures_remain_fail(cases, method):
     row = measure(cases(method))
     assert row.outcome == 'FAIL' and not technical_reasons([], [row])

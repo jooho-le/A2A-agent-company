@@ -405,7 +405,13 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verified_fixture_misuse_gets_one_repair_then_stays_unverified(self):
         from orchestrator.domain import test_not_run
-        reason = test_not_run.FIXTURE_MEMBER_MISSING
+        await self._fixture_misuse_stays_unverified(test_not_run.FIXTURE_MEMBER_MISSING)
+
+    async def test_verified_fixture_argument_error_keeps_source_cases_and_one_repair(self):
+        from orchestrator.domain import test_not_run
+        await self._fixture_misuse_stays_unverified(test_not_run.FIXTURE_ARGUMENT_INVALID)
+
+    async def _fixture_misuse_stays_unverified(self, reason):
         tests = [{'testId': identifier, 'outcome': 'SKIP', 'details': reason} for identifier in self.case_ids]
         report = {'format': 'unittest-v1', 'total': len(tests), 'passed': 0, 'failed': 0,
                   'skipped': len(tests), 'tests': tests}

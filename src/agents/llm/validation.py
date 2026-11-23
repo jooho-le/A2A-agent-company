@@ -35,6 +35,7 @@ POLICY_REASONS = MappingProxyType({
     'WORKSPACE_MISMATCH': '도구의 작업공간이 현재 Run과 다릅니다.',
     'ARGUMENT_CREDENTIAL_DENIED': '일반 도구 인자에 인증정보 패턴이 감지됐습니다.',
     'SOURCE_CREDENTIAL_DENIED': '코드 또는 테스트 내용에 인증정보 리터럴 패턴이 감지됐습니다.',
+    'TEST_SOURCE_INVALID': '생성 시험 코드의 문법 또는 Host 보조 기능 사용 규격이 올바르지 않습니다.',
 })
 
 

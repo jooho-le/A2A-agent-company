@@ -37,7 +37,7 @@ def test_conflict_refresh_resends_content_instead_of_an_old_read_pointer():
 
 
 @pytest.mark.parametrize('single', [False, True], ids=['multi', 'single'])
-@pytest.mark.parametrize('mode', ['changed', 'unchanged', 'unknown'])
+@pytest.mark.parametrize('mode', ['changed', 'unchanged', 'unknown', 'bad_partial_retry'])
 def test_source_recovery_is_read_bound_and_finite(single, mode):
     fixture = _RuntimeFixture()
     fixture.setUp()
@@ -46,16 +46,19 @@ def test_source_recovery_is_read_bound_and_finite(single, mode):
     start = fixture.call('edit-first', name='edit_source_file', path=source,
                          oldText='old fragment', newText='repaired fragment', expectedSha256=old_hash)
     read = fixture.call('read-current', path=source)
-    repaired = fixture.call('edit-fresh', name='edit_source_file', path=source,
-                            oldText='current fragment', newText='repaired fragment', expectedSha256=fresh_hash)
+    repaired = fixture.call('write-fresh', name='write_source_file', path=source,
+                            content='repaired fragment', expectedSha256=fresh_hash)
     ready = {'kind': 'READY', 'summary': 'Ready for measured validation.', 'questions': [], 'rejection': None}
     provider = FakeProvider(tool_response(start), tool_response(read), tool_response(repaired),
                             text_response(json.dumps(ready)))
+    if mode == 'bad_partial_retry':
+        provider.script.insert(2, tool_response(fixture.call('ignored-partial', name='edit_source_file', path=source,
+            oldText='guessed fragment', newText='another guess', expectedSha256=fresh_hash)))
     error = RejectedEdit()
     if mode == 'unknown':
         error.result_unknown = True
     executor = FakeToolExecutor(error, {'sha256': fresh_hash, 'content': 'current fragment'},
-                                {'changed': mode == 'changed'})
+                                {'changed': mode in ('changed', 'bad_partial_retry')})
     write_output = object_schema({'changed': {'type': 'boolean'}})
     tools = (
         fixture.tool('read_project_file', output_schema=object_schema({
@@ -80,12 +83,14 @@ def test_source_recovery_is_read_bound_and_finite(single, mode):
     operation = engine.run(prompt=prompt, model=fixture.model, output=output, workspace_id=fixture.workspace_id,
         source_progress_check=lambda: True,
         budget=fixture.budget(max_output_corrections=2, max_model_calls=6, max_tool_calls=5))
-    if mode == 'changed':
+    if mode in ('changed', 'bad_partial_retry'):
         assert asyncio.run(operation).data == ready
         assert provider.requests[1].required_tool == 'read_project_file'
         assert provider.requests[1].tools[0].input_schema.to_dict()['properties']['path']['enum'] == [source]
+        assert [tool.name for tool in provider.requests[2].tools] == ['write_source_file']
         for tool in provider.requests[2].tools:
             assert tool.input_schema.to_dict()['properties']['expectedSha256']['enum'] == [fresh_hash]
+        assert len(executor.calls) == 3  # a second partial edit is never executed
     else:
         with pytest.raises(LLMRuntimeError) as caught:
             asyncio.run(operation)

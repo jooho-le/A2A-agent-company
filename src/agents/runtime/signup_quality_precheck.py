@@ -12,7 +12,7 @@ from agents.runtime.output_safety_precheck import inspect_output_safety
 from agents.runtime import email_normalization
 from orchestrator.core.security import redact_text
 
-POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V4'
+POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V5'
 MAX_FILES, MAX_BYTES, MAX_TOTAL_BYTES, MAX_NODES = 64, 128_000, 1_048_576, 50_000
 
 
@@ -268,9 +268,6 @@ def inspect_signup_quality(source_root, contract):
                          or isinstance(n.value.func, ast.Attribute) and n.value.func.attr == 'getLogger'
                          and isinstance(n.value.func.value, ast.Name) and n.value.func.value.id in log_modules)):
                 loggers.update(t.id for t in n.targets if isinstance(t, ast.Name))
-        filtered_loggers = {n.func.value.id for n in ast.walk(tree)
-                            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                            and n.func.attr == 'addFilter' and isinstance(n.func.value, ast.Name)}
         for fn in (n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):
             is_signup = any(isinstance(d, ast.Call) and _name(d.func) == 'post' and d.args
                             and isinstance(d.args[0], ast.Constant) and isinstance(d.args[0].value, str)
@@ -300,6 +297,33 @@ def inspect_signup_quality(source_root, contract):
                                 add('COMMIT_CONFLICT_MAPPED_TO_SERVER_ERROR', path, h, 'REQ-003')
             if 'REQ-006' not in keys:
                 continue
+            if is_signup:
+                parents = {child: node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
+                integrity_names = {'IntegrityError'} | _imported(tree, 'sqlalchemy.exc', 'IntegrityError')
+                broad_names = {'Exception', 'BaseException', 'SQLAlchemyError', 'DBAPIError'}
+                for name in ('SQLAlchemyError', 'DBAPIError'):
+                    broad_names.update(_imported(tree, 'sqlalchemy.exc', name))
+                for trial in (n for n in ast.walk(fn) if isinstance(n, ast.Try)):
+                    commits = [n for statement in trial.body for n in ast.walk(statement)
+                               if isinstance(n, ast.Call) and _name(n.func) == 'commit']
+                    handlers = {_name(t) for h in trial.handlers if h.type is not None for t in ast.walk(h.type)
+                                if isinstance(t, (ast.Name, ast.Attribute))}
+                    enclosing_catch = False
+                    child = trial
+                    while child in parents:
+                        parent = parents[child]
+                        if isinstance(parent, ast.Try) and child in parent.body:
+                            names = {_name(t) for h in parent.handlers if h.type is not None for t in ast.walk(h.type)}
+                            if names & broad_names or any(h.type is None for h in parent.handlers):
+                                enclosing_catch = True
+                                break
+                        child = parent
+                    # Exact known pattern: commit is protected only against uniqueness failures.
+                    # Unknown handler types are left to measured validation, not guessed safe/unsafe.
+                    if (commits and handlers and handlers <= integrity_names and not enclosing_catch
+                            and not any(h.type is None for h in trial.handlers)
+                            and not handlers & broad_names):
+                        add('DB_ERROR_PATH_NOT_HANDLED', path, commits[0], 'REQ-006')
             for handler in (n for n in ast.walk(fn) if isinstance(n, ast.ExceptHandler) and n.name):
                 for call in (n for n in ast.walk(handler) if isinstance(n, ast.Call)):
                     logging_call = (isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name)
@@ -307,9 +331,9 @@ def inspect_signup_quality(source_root, contract):
                     logging_call |= isinstance(call.func, ast.Name) and call.func.id in log_calls
                     trace = _name(call.func) == 'exception' or any(k.arg == 'exc_info' and not
                         (isinstance(k.value, ast.Constant) and k.value.value is False) for k in call.keywords)
-                    custom_filter = (isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name)
-                                     and call.func.value.id in filtered_loggers)
-                    if logging_call and not custom_filter and (trace or any(_raw_exception(a, handler.name) for a in call.args)):
+                    # Merely registering a filter does not prove exc_info, cached exc_text,
+                    # exception arguments or SQL bind values were scrubbed.
+                    if logging_call and (trace or any(_raw_exception(a, handler.name) for a in call.args)):
                         add('EXCEPTION_LOG_MAY_EXPOSE_DB_PARAMETERS', path, call, 'REQ-006')
                     if _name(call.func) in ('HTTPException', 'JSONResponse') and any(
                             _raw_exception(value, handler.name) for value in _response_values(call)):

@@ -33,7 +33,7 @@ TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V1"
 TEST_DATA_MODULE = "_host_test_data"
 TEST_DATA_EXPORTS = ("new_password",)
 MAX_TEST_PASSWORD_LENGTH = 4096
-APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V6'
+APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V7'
 APP_FIXTURE_MODULE = '_host_app_test'
 APP_FIXTURE_EXPORTS = ('AppTestCase',)
 
@@ -42,21 +42,28 @@ APP_FIXTURE_ATTRIBUTES = ('client', 'db', 'User', 'app')
 APP_FIXTURE_METHODS = {
     'concurrent_signup_statuses': {
         'parameters': ['first', 'second'], 'keywordOnly': [],
+        'arguments': [{'name': 'first', 'type': 'json'}, {'name': 'second', 'type': 'json'}],
         'returns': {'type': 'tuple', 'items': ['int', 'int'], 'order': 'payload order'},
     },
     'signup_email_state': {
         'parameters': ['canonical_email'], 'keywordOnly': [],
+        'arguments': [{'name': 'canonical_email', 'type': 'str'}],
         'returns': {'type': 'dict', 'properties': {
             'totalRows': 'int', 'exactEmailRows': 'int', 'hasDirectEmailUniqueKey': 'bool'}},
     },
     'signup_hash_parameters': {
         'parameters': ['canonical_email'], 'keywordOnly': ['password'],
+        'arguments': [{'name': 'canonical_email', 'type': 'str'},
+                      {'name': 'password', 'type': 'str', 'runtimeFactory': '_host_test_data.new_password'}],
         'returns': {'type': 'dict', 'properties': {
             'argon2id': 'bool', 'verified': 'bool', 'memoryKiB': 'int',
             'iterations': 'int', 'parallelism': 'int', 'distinctSalts': 'bool (after two accounts)'}},
     },
     'check_signup_output': {
         'parameters': ['payload'], 'keywordOnly': ['password'],
+        'arguments': [{'name': 'payload', 'type': 'json', 'contains': 'the same synthetic password string'},
+                      {'name': 'password', 'type': 'str', 'minimumLength': 8,
+                       'runtimeFactory': '_host_test_data.new_password', 'createdInside': 'current test body'}],
         'returns': {'type': 'httpx.Response', 'records': 'value-free channel observations'},
     },
 }
@@ -679,6 +686,49 @@ def _method_fixture_issues(method, members):
                 and node.attr in ('fresh_email', 'new_password') and node.attr not in members | assigned):
             issues.append({'reasonCode': 'TEST_HOST_MEMBER_MISSING', 'sourceLine': node.lineno,
                            'member': node.attr})
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in APP_FIXTURE_METHODS
+                and node.func.attr not in members and _self_call(node, node.func.attr)):
+            spec = APP_FIXTURE_METHODS[node.func.attr]
+            positional, keyword_only = spec['parameters'], spec['keywordOnly']
+            types = {a['name']: a['type'] for a in spec['arguments']}
+            unpacked = any(isinstance(arg, ast.Starred) for arg in node.args) or any(k.arg is None for k in node.keywords)
+            names = [*positional[:len(node.args)], *(k.arg for k in node.keywords if k.arg is not None)]
+            invalid = not unpacked and (len(node.args) > len(positional) or len(names) != len(set(names))
+                or set(names) != set(positional) | set(keyword_only))
+            values = [*zip(positional, node.args), *((k.arg, k.value) for k in node.keywords)]
+            for parameter, value in values:
+                if types.get(parameter) != 'str':
+                    continue
+                if (isinstance(value, (ast.List, ast.Tuple, ast.Set, ast.Dict))
+                        or isinstance(value, ast.Constant) and not isinstance(value.value, str)):
+                    invalid = True
+            if invalid:
+                issues.append({'reasonCode': 'TEST_HOST_ARGUMENT_INVALID', 'sourceLine': node.lineno,
+                               'member': node.func.attr})
+    # A direct helper assignment followed by a read of an impossible result key.
+    # Do not infer through intervening calls, mutation, aliases or unknown overrides.
+    for assignment, statement in zip(method.body, method.body[1:]):
+        if (not isinstance(assignment, ast.Assign) or len(assignment.targets) != 1
+                or not isinstance(assignment.targets[0], ast.Name) or not isinstance(assignment.value, ast.Call)):
+            continue
+        helper = next((name for name in ('signup_email_state', 'signup_hash_parameters')
+                       if name not in members and _self_call(assignment.value, name)), None)
+        if helper is None:
+            continue
+        if any(isinstance(n, ast.Call) and not any(
+                _self_call(n, name) and name not in members for name in
+                ('assertEqual', 'assertTrue', 'assertFalse', 'assertGreater', 'assertGreaterEqual', 'assertLess', 'assertLessEqual'))
+               for n in ast.walk(statement)):
+            continue
+        properties = APP_FIXTURE_METHODS[helper]['returns']['properties']
+        for node in ast.walk(statement):
+            if (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
+                    and isinstance(node.value, ast.Name) and node.value.id == assignment.targets[0].id
+                    and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)
+                    and node.slice.value not in properties):
+                issues.append({'reasonCode': 'TEST_HOST_RESULT_KEY_UNKNOWN', 'sourceLine': node.lineno,
+                               'member': helper, 'assignment': assignment, 'subscript': node})
     # Intentionally narrow: adjacent, straight-line unpack + numeric unittest assertion.
     # Iterating dictionary keys intentionally is valid, as are custom helper return types.
     for assignment, assertion in zip(method.body, method.body[1:]):
@@ -767,7 +817,7 @@ def app_fixture_source_issues(source):
 def _fixture_usage_reason(test, err):
     """Bind a closed repair code to the actual failing frame and the unchanged Host API."""
     fixture = getattr(sys.modules.get(APP_FIXTURE_MODULE), 'AppTestCase', None)
-    if fixture is None or not isinstance(test, fixture) or err[0] not in (AttributeError, AssertionError, TypeError):
+    if fixture is None or not isinstance(test, fixture) or err[0] not in (AttributeError, AssertionError, TypeError, ValueError, KeyError):
         return None
     try:
         if (inspect.getattr_static(type(test), '__getattribute__') is not object.__getattribute__
@@ -779,6 +829,18 @@ def _fixture_usage_reason(test, err):
             frame = frame.tb_next
         if frame is None:
             return None
+        terminal = frame
+        while terminal.tb_next:
+            terminal = terminal.tb_next
+        for name, marker in (('check_signup_output', 'SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST'),
+                             ('signup_hash_parameters', 'SUPPLY_SYNTHETIC_SIGNUP_ACCOUNT')):
+            original = getattr(fixture, name)
+            if (inspect.getattr_static(test, name) is original and terminal.tb_frame.f_code is original.__code__
+                    and terminal.tb_frame.f_locals.get('self') is test
+                    and (err[0] is ValueError and err[1].args == (marker,)
+                         or err[0] is TypeError and name == 'signup_hash_parameters'
+                         and type(terminal.tb_frame.f_locals.get('password')) is not str)):
+                return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
         lines, first = inspect.getsourcelines(method)
         node = ast.parse(textwrap.dedent(''.join(lines))).body[0]
         members = set(vars(test)) | {key for cls in type(test).__mro__ if cls not in fixture.__mro__ for key in vars(cls)}
@@ -789,6 +851,15 @@ def _fixture_usage_reason(test, err):
                 if (err[0] is AttributeError and getattr(err[1], 'obj', None) is test
                         and getattr(err[1], 'name', None) == item['member'] and frame.tb_next is None):
                     return 'NOT_RUN_FIXTURE_MEMBER_MISSING'
+                continue
+            if item['reasonCode'] == 'TEST_HOST_RESULT_KEY_UNKNOWN':
+                helper = item['member']
+                owner = frame.tb_frame.f_locals.get(item['assignment'].targets[0].id)
+                properties = APP_FIXTURE_METHODS[helper]['returns']['properties']
+                if (err[0] is KeyError and err[1].args == (item['subscript'].slice.value,)
+                        and frame.tb_next is None and type(owner) is dict and set(owner) <= set(properties)
+                        and inspect.getattr_static(test, helper) is getattr(fixture, helper)):
+                    return 'NOT_RUN_FIXTURE_RETURN_MISUSED'
                 continue
             if item['member'] != 'signup_email_state':
                 continue  # the existing integer-container runtime classifier handles concurrency
@@ -1065,7 +1136,7 @@ class _Result(unittest.TestResult):
         # A test-authored skip cannot claim that the trusted runner verified a helper misuse.
         details = str(reason)
         self._outcome(parent if parent is not None else test, "SKIP",
-                      'test skipped' if details in ('NOT_RUN_HELPER_ASSERTION', 'NOT_RUN_FIXTURE_MEMBER_MISSING',
+                      'test skipped' if details in ('NOT_RUN_HELPER_ASSERTION', 'NOT_RUN_FIXTURE_ARGUMENT_INVALID', 'NOT_RUN_FIXTURE_MEMBER_MISSING',
                                                     'NOT_RUN_FIXTURE_RETURN_MISUSED') else details)
 
     def addExpectedFailure(self, test, err):

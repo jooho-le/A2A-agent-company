@@ -69,7 +69,9 @@ INSTRUCTION = (
     "This does not prove the product is correct: preserve its startup behavior, and do not create missing product "
     "tables in the test to hide a startup defect. NOT_RUN_ASYNC_NOT_AWAITED: an async def test in a plain TestCase never "
     "ran; use def. NOT_RUN_FIXTURE_MEMBER_MISSING: a missing Host member was used in the failing test frame. "
-    "NOT_RUN_FIXTURE_RETURN_MISUSED: the test unpacked the Host dict keys as numeric database counts. "
+    "NOT_RUN_FIXTURE_RETURN_MISUSED: the test used the Host return shape or a result key incorrectly. "
+    "NOT_RUN_FIXTURE_ARGUMENT_INVALID: the trusted helper rejected its arguments before any product request; "
+    "use the exact argument types and synthetic data lifetime in testTargets.appFixture.methods. "
     "These are narrowly verified test-writing errors, not proof that the product passed. "
     "Fix only your test files with write_test_file. Keep every declared case exactly as it was (same "
     "testId, requirementId, title and expectedResult); do not remove or weaken a check. Then return the same READY JSON.")

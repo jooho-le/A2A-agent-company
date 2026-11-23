@@ -110,6 +110,7 @@ class LLMEngine:
         required_alternatives = ()  # e.g. edit_source_file beside a forced write_source_file
         required_test_paths = ()
         source_repair_path = source_repair_sha256 = None
+        source_repair_full_write = False
         source_review_pending = []
         sequence = operation_sequence = None
         decided_sequence = None
@@ -700,6 +701,24 @@ class LLMEngine:
                                         'instruction': instruction}})})
                                 correct_test_source = True
                                 break
+                            if (call.name == 'write_test_file'
+                                    and (self._role in (AgentRole.QA, AgentRole.SECURITY)
+                                         or self._role is SingleAgentIdentity.SINGLE_AGENT
+                                         and self._single_phase in (SinglePhase.QA, SinglePhase.SECURITY))):
+                                from agents.runtime.test_write_precheck import inspect_test_write
+                                issues = correction_rules.checked_rejection({
+                                    'code': 'GENERATED_TESTS_INVALID', 'issues': inspect_test_write(arguments)})
+                                if issues is not None and issues['issues']:
+                                    failure = policy_error('TEST_SOURCE_INVALID', sequence=sequence,
+                                                           tool_name=call.name, field_path='/content')
+                                    if correct(sequence, 'GENERATED_TESTS_INVALID', issues=issues['issues'],
+                                            report=failure.validation, stage='TOOL_ARGUMENTS',
+                                            tool_name=call.name, tool_calls=response.tool_calls):
+                                        seen_calls.update(item.call_id for item in response.tool_calls
+                                                          if isinstance(item.call_id, str) and item.call_id.strip())
+                                        correct_test_source = True
+                                        break
+                                    exhausted_qa_draft(failure.validation)
                             prepared.append((execution_call, definition, arguments))
                             batch_ids.add(call.call_id)
                     except LLMRuntimeError as rejected:
@@ -774,6 +793,7 @@ class LLMEngine:
                                     and isinstance(arguments.get('path'), str) and arguments['path'].startswith('source/')
                                     and {'read_project_file', 'write_source_file'} <= self._definitions.keys()):
                                 source_repair_path, source_repair_sha256 = arguments['path'], None
+                                source_repair_full_write |= code in ('EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS')
                                 required_tool, required_alternatives = 'read_project_file', ()
                                 if read_history is not None:
                                     read_history.require_fresh_content(source_repair_path)
@@ -838,7 +858,7 @@ class LLMEngine:
                         # A failed read must not count as having refreshed the file.
                         if required_tool_succeeded:
                             required_tool = 'write_source_file'
-                            required_alternatives = (('edit_source_file',) if 'edit_source_file' in self._definitions
+                            required_alternatives = (('edit_source_file',) if not source_repair_full_write and 'edit_source_file' in self._definitions
                                                      else ())
                     elif required_tool is not None:
                         if (source_status() is not SourceEditStatus.CHANGED
@@ -850,6 +870,7 @@ class LLMEngine:
                             raise LLMRuntimeError(LLMErrorCode.NO_PROGRESS)
                         required_tool = None
                         source_repair_path = source_repair_sha256 = None
+                        source_repair_full_write = False
                         if source_review_pending:
                             source_repair_path = source_review_pending.pop(0)
                             required_tool, required_alternatives = 'read_project_file', ()

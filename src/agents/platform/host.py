@@ -307,7 +307,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                     developer_workspace, test_guidance, unused_rewrite, ready_path_diff, repair_dependencies)
         from agents.runtime import developer, developer_services, library_contracts, ready_library_types, repair_call_history
         from agents.runtime import (output_safety_precheck, signup_quality_precheck, generated_tests_precheck,
-                                    generated_test_inventory, qa_catalog, test_fix)
+                                    generated_test_inventory, qa_catalog, test_fix, test_write_precheck)
         from agents.runtime import repair_input_failures, startup_preservation, email_normalization, repair_progress as candidate_repair_history
         from agents.single import runtime as single_runtime
         from agents.roles import developer_contract
@@ -345,6 +345,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                      ('generatedTestInventory', generated_test_inventory), ('qaIdCatalog', qa_catalog),
                                      ('toolWire', tool_wire),
                                      ('generatedTestsPrecheck', generated_tests_precheck), ('generatedTestRepair', test_fix),
+                                     ('generatedTestWritePrecheck', test_write_precheck),
                                      ('developerRuntime', developer), ('developerServices', developer_services),
                                      ('singleRuntime', single_runtime), ('recoveryRouting', recovery),
                                      ('readyPathDiff', ready_path_diff), ('repairDependencies', repair_dependencies),

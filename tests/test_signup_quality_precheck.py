@@ -156,6 +156,42 @@ def save(db):
     assert inspect(tmp_path, {'main.py': source}) == []
 
 
+@pytest.mark.parametrize('handling', ['integrity_only', 'sqlalchemy', 'outer_catch', 'unknown'])
+def test_nonduplicate_commit_failure_requires_its_own_safe_path(tmp_path, handling):
+    header = APP[:APP.index('@app.post')] + SAFE_HANDLER + '\nfrom sqlalchemy.exc import IntegrityError, SQLAlchemyError\n'
+    body = '''    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail='DUPLICATE')
+'''
+    if handling == 'sqlalchemy':
+        body += "    except SQLAlchemyError:\n        db.rollback()\n        raise HTTPException(status_code=500, detail='STORAGE_ERROR')\n"
+    elif handling == 'outer_catch':
+        body = '    try:\n' + ''.join('    ' + line for line in body.splitlines(keepends=True))
+        body += "    except SQLAlchemyError:\n        db.rollback()\n        raise HTTPException(status_code=500, detail='STORAGE_ERROR')\n"
+    elif handling == 'unknown':
+        body += '    except CustomDatabaseError:\n        custom_handler()\n'
+    source = header + "@app.post('/api/auth/signup')\ndef signup(payload: Payload, db):\n" + body
+    issues = inspect(tmp_path, {'main.py': source})
+    assert any(i['reasonCode'] == 'DB_ERROR_PATH_NOT_HANDLED' for i in issues) is (handling == 'integrity_only')
+
+
+def test_registering_a_filter_alone_does_not_silence_exception_log_review(tmp_path):
+    source = APP + SAFE_HANDLER + '''
+import logging
+logger = logging.getLogger(__name__)
+logger.addFilter(custom_filter)
+def save(db):
+    try:
+        db.commit()
+    except Exception as exc:
+        logger.exception('STORAGE_ERROR')
+'''
+    assert any(i['reasonCode'] == 'EXCEPTION_LOG_MAY_EXPOSE_DB_PARAMETERS'
+               for i in inspect(tmp_path, {'main.py': source}))
+
+
 def test_source_links_survive_feedback_but_source_text_never_does(tmp_path):
     inspect(tmp_path, {'main.py': APP})
     probe = signup_quality_precheck_for(SimpleNamespace(source_root=tmp_path), contract())

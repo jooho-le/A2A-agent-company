@@ -32,7 +32,7 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V6'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V7'
 
 VALIDATION_ERROR_GUIDANCE = (
     'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
@@ -59,7 +59,13 @@ INSTRUCTIONS = {
         'errors before the endpoint runs. Do not return exc.errors() with its input fields or raw request bodies. '
         'RAW_EXCEPTION_IN_ERROR_RESPONSE / EXCEPTION_LOG_MAY_EXPOSE_DB_PARAMETERS: inspect database exceptions, '
         'SQL parameters and exc_info/tracebacks in responses and logs. Use value-free error codes/exception types '
-        'rather than exception strings or credential values. Register handlers on the application, not APIRouter. '
+        'rather than exception strings or credential values. A registered logging filter alone does not prove '
+        'traceback or cached exception text is scrubbed. DB_ERROR_PATH_NOT_HANDLED: an IntegrityError handler '
+        'covers duplicates, not other SQLAlchemy failures. Keep its duplicate rejection, add rollback and a '
+        'value-free server-error response for other SQLAlchemy errors at the commit boundary, and prevent '
+        'uncaught database exceptions from reaching framework traceback logs. Configure create_engine with '
+        'hide_parameters=True as defense in depth; it does not replace safe error handling. Do not disable '
+        'all logging, suppress real failures, or change test criteria. Register handlers on the application, not APIRouter. '
         'EMAIL_VALIDATED_BEFORE_CANONICAL_TRIM: apply the approved emailPolicy before validating; use the same '
         'canonical value for lookup, insert and UNIQUE enforcement. Do not invent dot/plus alias removal. '
         'COMMIT_CONFLICT_MAPPED_TO_SERVER_ERROR: a duplicate may occur after the initial lookup during commit. '
@@ -127,7 +133,9 @@ INSTRUCTIONS = {
         'whose testId is module.Class.method exactly; declare it or remove the extra method. '
         'DECLARED_TEST_NOT_IN_FILE: choose a matching selector and exact testId from hostTestIdCatalog; '
         'never guess or add a tests. prefix. Do not remove required coverage. '
-        'GENERATED_TEST_SYNTAX_INVALID: a test file is not valid Python; rewrite it. GENERATED_TEST_NONE: the '
+        'GENERATED_TEST_SYNTAX_INVALID: a test file is not valid Python; rewrite it. Never place an actual '
+        'NUL byte in source. Construct control-character request data at execution time, for example chr(0), '
+        'while preserving the negative test. GENERATED_TEST_NONE: the '
         'scope has no test method; write the declared tests. TEST_CLIENT_NOT_STARTED: open the app only as '
         '"with TestClient(app) as client:" so its lifespan creates the tables, as tests/test_health.py does; a '
         'TestClient made without with fails even on a correct product. ASYNC_TEST_IN_SYNC_CASE: a unittest.TestCase '
@@ -142,7 +150,16 @@ INSTRUCTIONS = {
         'signup_email_state returns a dict; read totalRows/exactEmailRows/hasDirectEmailUniqueKey by key, '
         'never as unpacked numeric row values. Use testTargets.appFixture.methods for actual signatures '
         'and return types. concurrent_signup_statuses returns two integer HTTP codes; an individual code '
-        'cannot be the container argument of assertIn. Keep all assigned expectations. Then return READY.'),
+        'cannot be the container argument of assertIn. TEST_HOST_ARGUMENT_INVALID: use the exact parameter '
+        'names and keywordOnly arguments in appFixture.methods; do not pass keyword-only values positionally. '
+        'The password keyword requires the '
+        'runtime synthetic string itself, not [sample], a tuple or a dict. check_signup_output requires '
+        'a string of at least 8 characters generated inside the current test body and present in the body. '
+        'Keep short/missing-password negative cases using self.client.post and their normal response/DB '
+        'assertions; do not remove them. TEST_HOST_RESULT_KEY_UNKNOWN: use only the helper result keys in '
+        'testTargets.appFixture.methods; hash parameters expose argon2id/verified/memoryKiB/iterations/'
+        'parallelism and optional distinctSalts, not algorithm or memory_cost. Keep all assigned expectations. '
+        'Then return READY.'),
     'CODE_REFERENCE_INVALID': (
         'A code reference in your review cannot be anchored yet. REFERENCE_FILE_NOT_READ: read that file with '
         'read_project_file in this step before citing it. When sourceReferenceCatalog is present, find the '
@@ -447,6 +464,10 @@ def ready_path_trace(feedback):
 def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_name=None, repair_brief=None) -> dict:
     reasons = {item['reasonCode'] for item in issues}
     instruction = INSTRUCTIONS[kind]
+    if kind == 'GENERATED_TESTS_INVALID' and stage == 'TOOL_ARGUMENTS':
+        instruction += (' No tool call in this rejected batch was executed. Previously successful writes remain. '
+                        'Fix all listed source issues together and reissue only the still-needed calls. '
+                        'Source has not been automatically escaped, normalized or modified by the Host.')
     if (kind in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_OUTPUT_SAFETY_REVIEW')
             and 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' in reasons):
         instruction += ' ' + VALIDATION_ERROR_GUIDANCE
@@ -811,14 +832,14 @@ RETURNABLE_WRITE_ERRORS = frozenset({'WRITE_CONFLICT'})
 RETURNABLE_EDIT_ERRORS = frozenset({'EDIT_READ_REQUIRED', 'EDIT_STALE_READ',
                                     'EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS'})
 # Recorded in the Host policy: settled read errors and a known WRITE_CONFLICT go back to the model.
-TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_AND_BOUND_EDIT_ERRORS_V3'
+TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_AND_BOUND_EDIT_ERRORS_V4'
 RETURNABLE_TOOL_ERRORS = frozenset({'FILE_NOT_FOUND', 'REPORT_NOT_FOUND', 'FILE_TOO_LARGE', 'FILE_ENCODING_ERROR',
                                     'PATH_TRAVERSAL'})
 _TOOL_ERROR_HINTS = {
     'EDIT_READ_REQUIRED': 'Nothing was written. Read this source file with read_project_file in this step before editing it. Use the returned sha256 and a unique fragment from that content.',
     'EDIT_STALE_READ': 'Nothing was written. The edit is not bound to the current Host-observed read. Read the file again and use that returned sha256 and current content; do not guess hashes or reuse a rejected candidate.',
-    'EDIT_TARGET_MISSING': 'Nothing was written. Read the current file again and use its returned sha256. Choose an exact nonempty fragment from that content; preserve whitespace and escapes. If a unique patch cannot be formed, use the already offered write_source_file with the full current file plus your correction and the observed expectedSha256, preserving unrelated code.',
-    'EDIT_TARGET_AMBIGUOUS': 'Nothing was written. oldText occurs more than once. Include more surrounding lines from the file you read so the fragment occurs exactly once.',
+    'EDIT_TARGET_MISSING': 'Nothing was written. The Host now requires read_project_file for this file, then write_source_file with the complete current file plus your correction and that read sha256. Partial edit_source_file is not offered on this recovery turn. Preserve unrelated code and whitespace; never guess another oldText or omit expectedSha256.',
+    'EDIT_TARGET_AMBIGUOUS': 'Nothing was written. oldText is not unique. The Host now requires a fresh read followed by write_source_file with the complete current file plus your correction and that read sha256. Partial edits are not offered on this recovery turn; preserve all unrelated code.',
     'FILE_NOT_FOUND': 'That file does not exist. Read only files listed in fileAccess or files you wrote in this step.',
     'REPORT_NOT_FOUND': 'That report does not exist. Use a report reference exactly as given in the task input.',
     'FILE_TOO_LARGE': 'That file is too large to read with this tool.',
