@@ -96,7 +96,9 @@ class _SingleFixHarness:
                 self.fix_inputs.append(data)
             return tool_response(ToolCall(call_id=f"single-write-{version}", name="write_source_file",
                 arguments_json=json.dumps({"workspaceId": data["workspaceId"], "path": "source/signup.py",
-                    "content": f"def signup():\n    return 'single-inert-candidate-{version}'\n"})))
+                    "content": f"def signup():\n    return 'single-inert-candidate-{version}'\n",
+                    "expectedSha256": fixtures.hashlib.sha256((self.f.directory / 'workspaces'
+                        / data['workspaceId'] / 'source/signup.py').read_bytes()).hexdigest()})))
         script = [seed[0]]
         for version in range(1, 5):
             script.extend((write, seed[2]))

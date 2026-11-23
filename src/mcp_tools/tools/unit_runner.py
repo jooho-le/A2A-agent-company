@@ -33,7 +33,7 @@ TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V1"
 TEST_DATA_MODULE = "_host_test_data"
 TEST_DATA_EXPORTS = ("new_password",)
 MAX_TEST_PASSWORD_LENGTH = 4096
-APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V7'
+APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V8'
 APP_FIXTURE_MODULE = '_host_app_test'
 APP_FIXTURE_EXPORTS = ('AppTestCase',)
 
@@ -57,7 +57,14 @@ APP_FIXTURE_METHODS = {
                       {'name': 'password', 'type': 'str', 'runtimeFactory': '_host_test_data.new_password'}],
         'returns': {'type': 'dict', 'properties': {
             'argon2id': 'bool', 'verified': 'bool', 'memoryKiB': 'int',
-            'iterations': 'int', 'parallelism': 'int', 'distinctSalts': 'bool (after two accounts)'}},
+            'iterations': 'int', 'parallelism': 'int', 'distinctSalts': 'bool (after two accounts)'},
+            'required': ['argon2id', 'verified', 'memoryKiB', 'iterations', 'parallelism'],
+            'optional': {'distinctSalts': 'Present only in the current return after observing another distinct '
+                         'committed account in this test. Earlier return dictionaries are snapshots and never update.'},
+            'usage': 'first = self.signup_hash_parameters(email1, password=sample); '
+                     'second = self.signup_hash_parameters(email2, password=sample); '
+                     'self.assertTrue(second["distinctSalts"]). Never read first["distinctSalts"]. '
+                     'Check each account with its own synthetic password. Public numeric hash parameters are minimums.'},
     },
     'check_signup_output': {
         'parameters': ['payload'], 'keywordOnly': ['password'],
@@ -661,6 +668,44 @@ def _self_call(node, name):
             and node.func.value.id == 'self')
 
 
+def _fixture_result_accesses(method, members):
+    """Direct, unmodified Host dict results only; do not follow aliases or dynamic flow."""
+    if any(not isinstance(stmt, (ast.Assign, ast.Expr)) for stmt in method.body):
+        return []
+    parents = {id(child): parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)}
+    hash_calls = [n for stmt in method.body for n in ast.walk(stmt)
+                  if _self_call(n, 'signup_hash_parameters')]
+    accesses = []
+    for assignment in method.body:
+        if (not isinstance(assignment, ast.Assign) or len(assignment.targets) != 1
+                or not isinstance(assignment.targets[0], ast.Name)):
+            continue
+        helper = next((name for name in ('signup_email_state', 'signup_hash_parameters')
+                       if name not in members and _self_call(assignment.value, name)), None)
+        if helper is None:
+            continue
+        name = assignment.targets[0].id
+        names = [n for n in ast.walk(method) if isinstance(n, ast.Name) and n.id == name]
+        if sum(isinstance(n.ctx, ast.Store) for n in names) != 1:
+            continue
+        uses = [n for n in names if isinstance(n.ctx, ast.Load)]
+        # Escaping, deleting, mutating, or passing the dict to arbitrary code invalidates the proof.
+        if any(not isinstance(parents.get(id(n)), ast.Subscript)
+               or parents[id(n)].value is not n or not isinstance(parents[id(n)].ctx, ast.Load)
+               for n in uses) or any(isinstance(n.ctx, ast.Del) for n in names):
+            continue
+        for use in uses:
+            subscript = parents[id(use)]
+            if (subscript.lineno <= assignment.lineno or not isinstance(subscript.slice, ast.Constant)
+                    or not isinstance(subscript.slice.value, str)):
+                continue
+            accesses.append({'member': helper, 'assignment': assignment, 'subscript': subscript,
+                             'sourceLine': subscript.lineno,
+                             'firstHashResult': helper == 'signup_hash_parameters' and bool(hash_calls)
+                                 and assignment.value is hash_calls[0]})
+    return accesses
+
+
 def _method_fixture_issues(method, members):
     """Prove only known API misuse; never infer a product verdict from Source."""
     if method.decorator_list or not method.args.args or method.args.args[0].arg != 'self':
@@ -729,6 +774,15 @@ def _method_fixture_issues(method, members):
                     and node.slice.value not in properties):
                 issues.append({'reasonCode': 'TEST_HOST_RESULT_KEY_UNKNOWN', 'sourceLine': node.lineno,
                                'member': helper, 'assignment': assignment, 'subscript': node})
+    # A first hash observation cannot compare two accounts. Later calls do not mutate its return.
+    # Unknown custom helpers can establish earlier observations; leave those methods to runtime.
+    known_calls = all(not isinstance(n, ast.Call) or not isinstance(n.func, ast.Attribute)
+                      or not isinstance(n.func.value, ast.Name) or n.func.value.id != 'self'
+                      or n.func.attr in APP_FIXTURE_METHODS or n.func.attr.startswith('assert') for n in local)
+    if known_calls:
+        for item in _fixture_result_accesses(method, members):
+            if item['firstHashResult'] and item['subscript'].slice.value == 'distinctSalts':
+                issues.append({**item, 'reasonCode': 'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE'})
     # Intentionally narrow: adjacent, straight-line unpack + numeric unittest assertion.
     # Iterating dictionary keys intentionally is valid, as are custom helper return types.
     for assignment, assertion in zip(method.body, method.body[1:]):
@@ -844,7 +898,12 @@ def _fixture_usage_reason(test, err):
         lines, first = inspect.getsourcelines(method)
         node = ast.parse(textwrap.dedent(''.join(lines))).body[0]
         members = set(vars(test)) | {key for cls in type(test).__mro__ if cls not in fixture.__mro__ for key in vars(cls)}
-        for item in _method_fixture_issues(node, members):
+        candidates = _method_fixture_issues(node, members)
+        candidates += [{**item, 'reasonCode': 'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE'}
+                       for item in _fixture_result_accesses(node, members)
+                       if item['subscript'].slice.value in
+                       APP_FIXTURE_METHODS[item['member']]['returns'].get('optional', {})]
+        for item in candidates:
             if frame.tb_lineno != first + item['sourceLine'] - 1:
                 continue
             if item['reasonCode'] == 'TEST_HOST_MEMBER_MISSING':
@@ -852,12 +911,13 @@ def _fixture_usage_reason(test, err):
                         and getattr(err[1], 'name', None) == item['member'] and frame.tb_next is None):
                     return 'NOT_RUN_FIXTURE_MEMBER_MISSING'
                 continue
-            if item['reasonCode'] == 'TEST_HOST_RESULT_KEY_UNKNOWN':
+            if item['reasonCode'] in ('TEST_HOST_RESULT_KEY_UNKNOWN', 'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE'):
                 helper = item['member']
                 owner = frame.tb_frame.f_locals.get(item['assignment'].targets[0].id)
                 properties = APP_FIXTURE_METHODS[helper]['returns']['properties']
                 if (err[0] is KeyError and err[1].args == (item['subscript'].slice.value,)
                         and frame.tb_next is None and type(owner) is dict and set(owner) <= set(properties)
+                        and item['subscript'].slice.value not in owner
                         and inspect.getattr_static(test, helper) is getattr(fixture, helper)):
                     return 'NOT_RUN_FIXTURE_RETURN_MISUSED'
                 continue

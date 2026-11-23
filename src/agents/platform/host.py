@@ -316,6 +316,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from agents.llm import engine as llm_engine, budget as llm_budget, tool_wire
         from agents.llm import development_rejection, developer_continuation, recovery
         from mcp_tools.tools import files as file_tools
+        from mcp_tools.tools import file_io
+        from mcp_tools.core import catalog as tool_catalog
         from orchestrator.domain import developer_artifacts, recovery_causes, repair_progress, validation_feedback, protected_feedback
         from agents.runtime import generated_revalidation, qa_services, security_services, security_test_scope, requirement_scope, protected_scopes
         from orchestrator.application import dispatch as validation_dispatch, validation_output
@@ -330,11 +332,13 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             'productPreconditionRecoveryPolicy': recovery_causes.POLICY,
             'hostAppFixturePolicy': unit_runner.APP_FIXTURE_POLICY,
             'partialEditPolicy': 'HOST_READ_BOUND_CAS_UNIQUE_FRAGMENT_V2',
+            'sourceWritePolicy': 'HASH_FOR_REPLACE_ATOMIC_ABSENCE_FOR_CREATE_V1',
             'boundaryReportPolicy': 'IMMUTABLE_AUTOMATIC_BOUNDARY_V1',
             'recoveryImplementationSha256': {name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
                 for name, module in (('baseline', repair_baseline), ('causes', recovery_causes), ('repairProgress', repair_progress),
                                      ('developmentFailure', development_failure), ('rejection', development_rejection),
-                                     ('fileTools', file_tools), ('developerInput', developer_input),
+                                     ('fileTools', file_tools), ('fileIo', file_io), ('toolCatalog', tool_catalog),
+                                     ('developerInput', developer_input),
                                      ('startupPreservation', startup_preservation),
                                      ('startPrecheck', start_precheck),
                                      ('emailNormalization', email_normalization),

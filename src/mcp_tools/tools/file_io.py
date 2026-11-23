@@ -555,15 +555,18 @@ def _apply(workspace, changes, expected_hashes, *, failure_code):
 
 def write_working(
     workspace: BoundWorkspace, path: str, content: bytes, expected_sha256: str | None = None,
+    *, require_absent: bool = False,
 ) -> dict:
     """Atomically replace/create a product file, optionally comparing its hash.
 
     expected_sha256=None means the optional CAS was omitted. To explicitly
-    require a missing file, use apply_changes with expected_hashes[path]=None.
+    require a missing file, use require_absent=True (or apply_changes with expected_hashes[path]=None).
+    The absence check and creation share the same locked transaction; an intervening file is never overwritten.
     """
-    if type(content) is not bytes:
+    if (type(content) is not bytes or type(require_absent) is not bool
+            or require_absent and expected_sha256 is not None):
         raise FileOperationError("PATH_DENIED")
-    expected = {} if expected_sha256 is None else {path: expected_sha256}
+    expected = {path: None} if require_absent else ({} if expected_sha256 is None else {path: expected_sha256})
     result = _apply(workspace, {path: content}, expected, failure_code="WRITE_FAILED")
     return {
         "path": path, "sha256": result["newHashes"][path],

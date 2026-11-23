@@ -128,7 +128,9 @@ class _FixHarness:
             version = self.developer_version
             return tool_response(ToolCall(call_id=f"developer-write-candidate-{version}", name="write_source_file",
                 arguments_json=json.dumps({"workspaceId": data["workspaceId"], "path": "source/signup.py",
-                    "content": f"def signup():\n    return 'inert-candidate-{version}'\n"})))
+                    "content": f"def signup():\n    return 'inert-candidate-{version}'\n",
+                    "expectedSha256": pipeline_fixture.hashlib.sha256((self.base.directory / 'workspaces'
+                        / data['workspaceId'] / 'source/signup.py').read_bytes()).hexdigest()})))
 
         developer_ready = lambda _request: text_response(json.dumps({"rejection": None,
             "kind": "READY", "summary": "동결 기준에 대한 실제 변경 후보입니다.", "questions": []}, ensure_ascii=False))

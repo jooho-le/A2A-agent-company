@@ -163,7 +163,12 @@ INSTRUCTIONS = {
         'Keep short/missing-password negative cases using self.client.post and their normal response/DB '
         'assertions; do not remove them. TEST_HOST_RESULT_KEY_UNKNOWN: use only the helper result keys in '
         'testTargets.appFixture.methods; hash parameters expose argon2id/verified/memoryKiB/iterations/'
-        'parallelism and optional distinctSalts, not algorithm or memory_cost. Keep all assigned expectations. '
+        'parallelism and optional distinctSalts, not algorithm or memory_cost. '
+        'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE: each hash result is a snapshot. The first return has no '
+        'distinctSalts and does not update after a later observation. Observe two different committed accounts '
+        'in one test and assert second_params["distinctSalts"] on the SECOND return, never first_params. '
+        'Do not use a default True, skip, constant or removed assertion. Check numeric hash settings with >= '
+        'the public minimums, not exact equality. Keep all assigned expectations. '
         'Then return READY.'),
     'CODE_REFERENCE_INVALID': (
         'A code reference in your review cannot be anchored yet. REFERENCE_FILE_NOT_READ: read that file with '
@@ -841,7 +846,7 @@ RETURNABLE_WRITE_ERRORS = frozenset({'WRITE_CONFLICT'})
 RETURNABLE_EDIT_ERRORS = frozenset({'EDIT_READ_REQUIRED', 'EDIT_STALE_READ',
                                     'EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS'})
 # Recorded in the Host policy: settled read errors and a known WRITE_CONFLICT go back to the model.
-TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_AND_BOUND_EDIT_ERRORS_V5'
+TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_BOUND_EDIT_AND_ATOMIC_CREATE_V6'
 RETURNABLE_TOOL_ERRORS = frozenset({'FILE_NOT_FOUND', 'REPORT_NOT_FOUND', 'FILE_TOO_LARGE', 'FILE_ENCODING_ERROR',
                                     'PATH_TRAVERSAL'})
 _TOOL_ERROR_HINTS = {
@@ -849,7 +854,10 @@ _TOOL_ERROR_HINTS = {
     'EDIT_STALE_READ': 'Nothing was written. The edit is not bound to the current Host-observed read. Read the file again and use that returned sha256 and current content; do not guess hashes or reuse a rejected candidate.',
     'EDIT_TARGET_MISSING': 'Nothing was written. The Host now requires read_project_file for this file, then write_source_file with the complete current file plus your correction and that read sha256. Partial edit_source_file is not offered on this recovery turn. Preserve unrelated code and whitespace; never guess another oldText or omit expectedSha256.',
     'EDIT_TARGET_AMBIGUOUS': 'Nothing was written. oldText is not unique. The Host now requires a fresh read followed by write_source_file with the complete current file plus your correction and that read sha256. Partial edits are not offered on this recovery turn; preserve all unrelated code.',
-    'FILE_NOT_FOUND': 'That file does not exist. Read only files listed in fileAccess or files you wrote in this step.',
+    'FILE_NOT_FOUND': ('That file does not exist; do not repeat the same read. Use fileAccess for existing files. '
+                       'If this is an intended NEW source file and write_source_file is offered to your role, '
+                       'create it with complete content and omit expectedSha256 (wire null). The Tool atomically '
+                       'requires absence. Existing files require their current read sha256; never guess one.'),
     'REPORT_NOT_FOUND': 'That report does not exist. Use a report reference exactly as given in the task input.',
     'FILE_TOO_LARGE': 'That file is too large to read with this tool.',
     'FILE_ENCODING_ERROR': 'That file is not UTF-8 text.',

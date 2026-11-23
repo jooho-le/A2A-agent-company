@@ -59,6 +59,17 @@ def test_concurrent_return_is_a_pair_of_integers_not_containers():
                             '        self.assertIn(201, statuses)\n'))
 
 
+def test_optional_salt_fact_is_read_from_second_result_not_stale_first_snapshot():
+    calls = ('        first = self.signup_hash_parameters(email1, password=sample)\n'
+             '        second = self.signup_hash_parameters(email2, password=sample)\n'
+             '        self.assertTrue(first["verified"])\n')
+    assert codes(source(calls + '        self.assertTrue(first["distinctSalts"])\n')) == {
+        'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE'}
+    assert not codes(source(calls + '        self.assertTrue(second["distinctSalts"])\n'))
+    assert not codes(source(calls + '        alias = first\n        self.assertTrue(first["distinctSalts"])\n'))
+    assert not codes(source(calls + '        first["distinctSalts"] = True\n        self.assertTrue(first["distinctSalts"])\n'))
+
+
 def test_user_helpers_aliases_and_unknown_dynamic_cases_are_preserved():
     good = source('        self.fresh_email()\n', helpers='    def fresh_email(self):\n        return None\n')
     assert not codes(good)
@@ -128,6 +139,34 @@ def cases(tmp_path):
                 state = self.signup_hash_parameters('sample@example.org', password=self.sample)
                 self.assertEqual(state['algorithm'], 'argon2id')
 
+            def test_optional_hash_result_key(self):
+                first = self.signup_hash_parameters('one@example.org', password=self.sample)
+                second = self.signup_hash_parameters('two@example.org', password=self.sample)
+                self.assertTrue(first['verified'])
+                self.assertTrue(first['distinctSalts'])
+
+            def test_optional_hash_same_account(self):
+                first = self.signup_hash_parameters('one@example.org', password=self.sample)
+                second = self.signup_hash_parameters('one@example.org', password=self.sample)
+                self.assertTrue(second['distinctSalts'])
+
+            def test_correct_hash_pair(self):
+                first = self.signup_hash_parameters('one@example.org', password=self.sample)
+                second = self.signup_hash_parameters('two@example.org', password=self.sample)
+                self.assertTrue(first['verified'])
+                self.assertTrue(second['distinctSalts'])
+
+            def test_reused_salt_is_product_failure(self):
+                first = self.signup_hash_parameters('one@example.org', password=self.sample)
+                second = self.signup_hash_parameters('copy@example.org', password=self.sample)
+                self.assertTrue(second['distinctSalts'])
+
+            def test_mutated_hash_result_stays_fail(self):
+                first = self.signup_hash_parameters('one@example.org', password=self.sample)
+                first['distinctSalts'] = True
+                del first['distinctSalts']
+                self.assertTrue(first['distinctSalts'])
+
             def test_forged_guard_text(self):
                 raise ValueError('SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST')
 
@@ -155,15 +194,26 @@ def cases(tmp_path):
                 self.assertEqual(exact, 'someOtherKey')
 
         with Session(engine) as db:
+            counter = 0
             def make(method):
-                case = Cases(method)
+                nonlocal counter
+                counter += 1
+                # Each offline measurement is a different test, like an actual discovery run.
+                # unittest instances with the same class/name compare equal in WeakKeyDictionary.
+                case = type(f'MeasuredCases{counter}', (Cases,), {})(method)
                 case.db, case.User, case.client = db, User, N(status_code=500)
                 case.sample = runner._new_test_password()
                 issued.add(case.sample)
-                if method == 'test_unknown_hash_result_key':
+                if method == 'test_unknown_hash_result_key' or method in {
+                        'test_optional_hash_result_key', 'test_optional_hash_same_account', 'test_correct_hash_pair',
+                        'test_reused_salt_is_product_failure', 'test_mutated_hash_result_stays_fail'}:
                     from argon2 import PasswordHasher
                     db.query(User).delete()
                     db.add(User(email='sample@example.org', password_hash=PasswordHasher().hash(case.sample)))
+                    encoded = PasswordHasher().hash(case.sample)
+                    db.add_all([User(email='one@example.org', password_hash=encoded),
+                                User(email='two@example.org', password_hash=PasswordHasher().hash(case.sample)),
+                                User(email='copy@example.org', password_hash=encoded)])
                     db.commit()
                 return case
             yield make
@@ -196,6 +246,8 @@ def measure(case, *, protected=False, generated=True):
     ('test_invalid_hash_argument', test_not_run.FIXTURE_ARGUMENT_INVALID),
     ('test_short_password_argument', test_not_run.FIXTURE_ARGUMENT_INVALID),
     ('test_unknown_hash_result_key', test_not_run.FIXTURE_RETURN_MISUSED),
+    ('test_optional_hash_result_key', test_not_run.FIXTURE_RETURN_MISUSED),
+    ('test_optional_hash_same_account', test_not_run.FIXTURE_RETURN_MISUSED),
 ])
 def test_proven_errors_get_same_case_repair_with_safe_feedback(cases, method, reason):
     case = cases(method)
@@ -215,10 +267,16 @@ def test_proven_errors_get_same_case_repair_with_safe_feedback(cases, method, re
 
 
 @pytest.mark.parametrize('method', ['test_wrong_product_rows', 'test_wrong_product_status',
-    'test_unrelated_attribute', 'test_unrelated_assertion', 'test_intentional_key_failure', 'test_forged_guard_text'])
+    'test_unrelated_attribute', 'test_unrelated_assertion', 'test_intentional_key_failure', 'test_forged_guard_text',
+    'test_reused_salt_is_product_failure', 'test_mutated_hash_result_stays_fail'])
 def test_real_or_uncertain_failures_remain_fail(cases, method):
     row = measure(cases(method))
     assert row.outcome == 'FAIL' and not technical_reasons([], [row])
+
+
+def test_second_observation_still_measures_real_salt_uniqueness(cases):
+    row = measure(cases('test_correct_hash_pair'))
+    assert row.outcome == 'PASS'
 
 
 def test_overridden_return_shape_is_not_reclassified(cases):

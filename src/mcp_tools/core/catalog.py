@@ -267,7 +267,8 @@ _CONTRACTS = (
     ),
     _contract(
         "write_source_file", "Write Developer Source at a workspace-relative file path under source/, e.g. source/main.py. "
-        "Use Host fileAccess mappings; optionally compare the existing SHA-256 first.",
+        "Use Host fileAccess mappings. To replace a file, pass expectedSha256 from its latest read. "
+        "Omit expectedSha256 (wire null) only to create a new file: the Tool atomically requires absence.",
         {"path": _PATH, "content": _TEXT, "expectedSha256": _HASH},
         {"path": _PATH, "sha256": _HASH, "sizeBytes": _COUNT, "changed": {"type": "boolean"}},
         input_required=("workspaceId", "path", "content"), source_argument_fields=("content",),

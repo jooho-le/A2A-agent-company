@@ -110,7 +110,8 @@ class FileToolTests(unittest.IsolatedAsyncioTestCase):
         conflict = await dispatcher.call_tool("write_source_file", arguments)
         self.assertEqual(conflict.error_code, "WRITE_CONFLICT")
         same = await dispatcher.call_tool("write_source_file", self.arguments(content=value))
-        self.assertFalse(same.data["changed"])
+        self.assertEqual(same.error_code, "WRITE_CONFLICT")
+        self.assertEqual(self.file.read_bytes(), value.encode())
         bound_noop = await dispatcher.call_tool("write_source_file", self.arguments(
             content=value, expectedSha256=first.data["sha256"]))
         self.assertFalse(bound_noop.data["changed"])
@@ -125,6 +126,17 @@ class FileToolTests(unittest.IsolatedAsyncioTestCase):
             path="source/new/nested/main.py", content="raise RuntimeError('must not execute')\n"))
         self.assertIsNone(result.error_code)
         self.assertEqual(target.read_text(), "raise RuntimeError('must not execute')\n")
+
+    async def test_create_only_write_never_overwrites_an_intervening_file(self):
+        dispatcher = self.dispatcher()
+        path = 'source/new_module.py'
+        missing = await dispatcher.call_tool('read_project_file', self.arguments(path=path))
+        self.assertEqual(missing.error_code, 'FILE_NOT_FOUND')
+        target = self.root / path
+        target.write_text('intervening = True\n')
+        rejected = await dispatcher.call_tool('write_source_file', self.arguments(path=path, content='replacement = True\n'))
+        self.assertEqual(rejected.error_code, 'WRITE_CONFLICT')
+        self.assertEqual(target.read_text(), 'intervening = True\n')
 
     async def test_host_mapping_reads_real_file_without_relaxing_path_denials(self):
         (self.root / "source/main.py").write_bytes(self.original)

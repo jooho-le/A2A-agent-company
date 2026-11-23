@@ -42,7 +42,11 @@ APP_FIXTURE_USAGE_GUIDANCE = (
     "the payload. Do not call this output helper with a password shorter than 8 characters or absent from "
     "the body; keep those negative cases using self.client.post and normal response/DB assertions. "
     "signup_hash_parameters returns argon2id/verified/memoryKiB/iterations/parallelism and optional distinctSalts; "
-    "there is no algorithm or memory_cost result key. "
+    "there is no algorithm or memory_cost result key. Each returned dict is an immutable-in-time snapshot: "
+    "the first observation has no distinctSalts key and a later call NEVER fills in that earlier dict. "
+    "Create two different committed accounts in the same test, observe each, then assert "
+    "second_params['distinctSalts'] from the SECOND call only. Check the numeric hash settings with "
+    "assertGreaterEqual against the public minimums; assertEqual wrongly rejects stronger settings. "
     "concurrent_signup_statuses returns two integer HTTP codes, not status containers or row metadata. "
     "Use the success/rejection ranges in the public contract; do not narrow a 2xx/4xx range to only 200/400. "
     "For simultaneous creation use an identity not already created by a preceding request. "
@@ -103,7 +107,7 @@ def unit_test_targets(configuration, role):
                  "and value-free failure coordinates. Exercise success, input rejection, and a real non-duplicate database failure. The last "
                  "requires an observed DB engine error and an app error response; inspect request logs as well. "
                  "A field-name assertion alone does not measure exposure. For the other requirements distinguish "
-                 "DB constraints from sequential duplicate requests. For two distinct committed accounts in one test, use signup_hash_parameters(canonical_email, password=sample) to measure the algorithm, verification result, memoryKiB, iterations, parallelism and distinctSalts, then assert the public policy."}
+                 "DB constraints from sequential duplicate requests. For two distinct committed accounts in one test, use signup_hash_parameters(canonical_email, password=sample) to measure the algorithm, verification result, memoryKiB, iterations, parallelism and distinctSalts. Assert distinctSalts only on the second return; the first return does not update. Assert the public minimums with >=."}
                 if role == "security" else {"outputEvidence":
                     "When an assigned functional test inspects signup output, self.check_signup_output(payload, "
                     "password=sample) records what the response exposed or whether an exception escaped. Use a "

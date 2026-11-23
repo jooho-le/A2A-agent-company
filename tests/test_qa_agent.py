@@ -411,6 +411,10 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
         from orchestrator.domain import test_not_run
         await self._fixture_misuse_stays_unverified(test_not_run.FIXTURE_ARGUMENT_INVALID)
 
+    async def test_verified_optional_result_error_repairs_tests_without_product_failure(self):
+        from orchestrator.domain import test_not_run
+        await self._fixture_misuse_stays_unverified(test_not_run.FIXTURE_RETURN_MISUSED)
+
     async def _fixture_misuse_stays_unverified(self, reason):
         tests = [{'testId': identifier, 'outcome': 'SKIP', 'details': reason} for identifier in self.case_ids]
         report = {'format': 'unittest-v1', 'total': len(tests), 'passed': 0, 'failed': 0,

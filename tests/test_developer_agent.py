@@ -240,6 +240,10 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
                 if kind == "REJECTED" else None, **extra}, ensure_ascii=False))
 
     def write_response(self, *, content="def signup():\n    return 'generated-candidate'\n", path="source/signup.py", call_id="model-write-001", **extra):
+        if 'expectedSha256' not in extra and path in ('source/signup.py', 'source/main.py'):
+            current = self.directory / 'workspaces' / str(self.run.workspace_id) / path
+            if current.is_file():
+                extra['expectedSha256'] = hashlib.sha256(current.read_bytes()).hexdigest()
         return tool_response(ToolCall(call_id=call_id, name="write_source_file",
             arguments_json=json.dumps({"workspaceId": str(self.run.workspace_id), "path": path, "content": content, **extra})))
 

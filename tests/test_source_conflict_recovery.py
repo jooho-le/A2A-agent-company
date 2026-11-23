@@ -30,6 +30,98 @@ class SettledConflict(Exception):
     result_unknown = False
 
 
+class MissingSource(Exception):
+    error_kind = 'FILE_NOT_FOUND'
+    result_unknown = False
+
+
+@pytest.mark.parametrize('single', [False, True], ids=['multi', 'single'])
+@pytest.mark.parametrize('mode', ['create', 'race', 'uncertain', 'denied'])
+@pytest.mark.parametrize('batch', [False, True], ids=['one-write', 'partly-completed-batch'])
+def test_missing_conflict_target_gets_one_bound_atomic_creation_not_repeated_reads(single, mode, batch):
+    f = _RuntimeFixture()
+    f.setUp()
+    path = 'source/new_module.py'
+    first = f.call('wrong-new-hash', name='write_source_file', path=path, content='value = 1\n', expectedSha256='a' * 64)
+    read = f.call('observe-absence', path=path)
+    create = f.call('create-only', name='write_source_file', path=path, content='value = 1\n')
+    ready = {'kind': 'READY', 'summary': 'Ready for validation.', 'questions': [], 'rejection': None}
+    other = f.call('already-applied', name='write_source_file', path='source/other.py', content='other = 1\n',
+                   expectedSha256='b' * 64)
+    provider = FakeProvider(tool_response(*([other, first] if batch else [first])), tool_response(read),
+                            tool_response(create), text_response(json.dumps(ready)))
+    missing = MissingSource()
+    if mode == 'uncertain':
+        missing.result_unknown = True
+    if mode == 'denied':
+        missing.error_kind = 'PATH_DENIED'
+    writes = {'changed': True, 'path': path, 'sha256': sha256(b'value = 1\n').hexdigest()}
+    executor = FakeToolExecutor(*([{'changed': True, 'path': 'source/other.py', 'sha256': 'c' * 64}] if batch else []),
+                               SettledConflict(), missing, SettledConflict() if mode == 'race' else writes)
+    tools = (f.tool('read_project_file', output_schema=object_schema({
+        'sha256': {'type': 'string'}, 'content': {'type': 'string'}}), source_output_fields=('content',)),
+        f.tool('write_source_file', input_schema=object_schema({k: {'type': 'string'} for k in
+            ('workspaceId', 'path', 'content', 'expectedSha256')}, required=['workspaceId', 'path', 'content']),
+            output_schema=object_schema({'changed': {'type': 'boolean'}, 'path': {'type': 'string'},
+                                         'sha256': {'type': 'string'}}), source_argument_fields=('content',)))
+    if single:
+        phase, role = SinglePhase.FIXING, SingleAgentIdentity.SINGLE_AGENT
+        draft = build_single_draft_contract(phase, scenario=get_scenario(SCN_001_ID))
+        prompt = PreparedSinglePrompt(phase, draft, build_single_system_prompt(), json.dumps({
+            'trusted': {'phase': phase.value}, 'contextId': 'offline', 'history': [], 'taskInput': {}}), 'offline')
+        output = draft.output
+    else:
+        phase, role, prompt, output = None, f.role, f.prompt, build_developer_output_contract()
+    engine = LLMEngine(role=role, single_phase=phase, provider=provider, tools=tools, tool_executor=executor)
+    operation = engine.run(prompt=prompt, model=f.model, output=output, workspace_id=f.workspace_id,
+        source_progress_check=lambda: mode == 'create' and len(executor.calls) >= 3 + batch,
+        budget=f.budget(max_output_corrections=2, max_model_calls=4, max_tool_calls=3 + batch))
+    if mode == 'create':
+        assert asyncio.run(operation).data == ready
+        assert len(executor.calls) == 3 + batch and len(provider.requests) == 4
+        assert provider.requests[2].required_tool == 'write_source_file'
+        schema = provider.requests[2].tools[0].input_schema.to_dict()
+        assert schema['properties']['path']['enum'] == [path]
+        assert 'expectedSha256' not in schema['properties']
+        assert 'RECOVERY_SOURCE_CONFIRMED_ABSENT' in provider.requests[2].input_items_json
+        assert 'expectedSha256' not in executor.calls[2 + batch][1]
+        assert sum(call.call_id == 'already-applied' for call, _args, _context in executor.calls) == batch
+    else:
+        with pytest.raises(LLMRuntimeError) as raised:
+            asyncio.run(operation)
+        assert raised.value.code is LLMErrorCode.TOOL_FAILED
+        assert len(executor.calls) == (3 if mode == 'race' else 2) + batch
+
+
+def test_multiple_settled_conflicts_are_recovered_in_order_without_replaying_the_batch():
+    f = _RuntimeFixture()
+    f.setUp()
+    paths = ['source/one.py', 'source/two.py']
+    starts = [f.call(f'old-{i}', name='write_source_file', path=p, content='fixed = 1\n', expectedSha256='a' * 64)
+              for i, p in enumerate(paths)]
+    steps = [tool_response(*starts)]
+    results = [SettledConflict(), SettledConflict()]
+    for i, path in enumerate(paths):
+        steps += [tool_response(f.call(f'read-{i}', path=path)), tool_response(f.call(f'write-{i}',
+            name='write_source_file', path=path, content='fixed = 1\n', expectedSha256='b' * 64))]
+        results += [{'sha256': 'b' * 64, 'content': 'old = 1\n'}, {'changed': True}]
+    ready = {'kind': 'READY', 'summary': 'Ready.', 'questions': [], 'rejection': None}
+    provider = FakeProvider(*steps, text_response(json.dumps(ready)))
+    executor = FakeToolExecutor(*results)
+    tools = (f.tool('read_project_file', output_schema=object_schema({
+        'sha256': {'type': 'string'}, 'content': {'type': 'string'}}), source_output_fields=('content',)),
+        f.tool('write_source_file', input_schema=object_schema({k: {'type': 'string'} for k in
+            ('workspaceId', 'path', 'content', 'expectedSha256')}),
+            output_schema=object_schema({'changed': {'type': 'boolean'}}), source_argument_fields=('content',)))
+    engine = LLMEngine(role=f.role, provider=provider, tools=tools, tool_executor=executor)
+    result = asyncio.run(engine.run(prompt=f.prompt, model=f.model, output=build_developer_output_contract(),
+        workspace_id=f.workspace_id, source_progress_check=lambda: len(executor.calls) >= 4,
+        budget=f.budget(max_output_corrections=2, max_model_calls=6, max_tool_calls=6)))
+    assert result.data == ready
+    assert [args['path'] for _call, args, _context in executor.calls] == [*paths, paths[0], paths[0], paths[1], paths[1]]
+    assert len(provider.requests) == 6
+
+
 def test_conflict_refresh_resends_content_instead_of_an_old_read_pointer():
     history = RepairReadHistory({})
     path = 'source/main.py'

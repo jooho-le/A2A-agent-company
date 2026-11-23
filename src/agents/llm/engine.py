@@ -115,7 +115,9 @@ class LLMEngine:
         source_repair_path = source_repair_sha256 = None
         source_repair_full_write = False
         source_repair_conflict = False
+        source_repair_absent = False
         source_review_pending = []
+        source_repair_queue = []
         sequence = operation_sequence = None
         decided_sequence = None
         recovery_sink_failed = False
@@ -405,7 +407,8 @@ class LLMEngine:
                                        if tool.name in (required_tool, *required_alternatives))
                 if source_repair_path is not None:
                     from agents.llm.tool_wire import pin_source_repair
-                    wire_tools = tuple(pin_source_repair(tool, source_repair_path, source_repair_sha256)
+                    wire_tools = tuple(pin_source_repair(tool, source_repair_path, source_repair_sha256,
+                                                        expected_absent=source_repair_absent)
                                        for tool in wire_tools if tool.name in (required_tool, *required_alternatives))
                 if len(history.encode("utf-8")) + len(prompt.system_prompt.encode("utf-8")) > limit:
                     raise LLMRuntimeError(LLMErrorCode.BUDGET)
@@ -773,6 +776,7 @@ class LLMEngine:
                     required_tool_succeeded = False
                     recovery_source_changed = False
                     recovery_content_current = False
+                    pending_source_repair = None
                     check_written_paths = set()
                     changed_source_paths = set()
                     for call, definition, arguments in prepared:
@@ -801,19 +805,32 @@ class LLMEngine:
                             items.append({"type": "function_call_output", "call_id": call.call_id,
                                           "output": json_text(correction_rules.tool_error_output(
                                               call.name, code, tool_errors.remaining), max_bytes=limit)})
+                            if (len(prepared) == 1 and call.name == 'read_project_file'
+                                    and required_tool == 'read_project_file' and source_repair_conflict
+                                    and arguments.get('path') == source_repair_path and code == 'FILE_NOT_FOUND'):
+                                source_repair_absent = True
+                                source_repair_full_write = True
+                                items.append({'role': 'user', 'content': json_text({'hostSourceRecovery': {
+                                    'code': 'RECOVERY_SOURCE_CONFIRMED_ABSENT', 'path': source_repair_path,
+                                    'instruction': 'The bound read proved this source file does not exist. '
+                                    'Do not read it again. The next offered operation creates exactly this file '
+                                    'with write_source_file. Supply its complete intended content and omit '
+                                    'expectedSha256 (wire null only when offered). The Tool atomically requires '
+                                    'absence and refuses to overwrite any intervening file. This does not '
+                                    'approve a different path or repeat an uncertain write.'}})})
                             # A known, rejected write changed nothing. Bind the
                             # next read and write to this exact file; never replay
                             # an uncertain write or an entire partly completed batch.
-                            if (len(prepared) == 1 and call.name in ('write_source_file', 'edit_source_file')
+                            if (call.name in ('write_source_file', 'edit_source_file')
                                     and code in correction_rules.RETURNABLE_EDIT_ERRORS | {'WRITE_CONFLICT'}
                                     and isinstance(arguments.get('path'), str) and arguments['path'].startswith('source/')
                                     and {'read_project_file', 'write_source_file'} <= self._definitions.keys()):
-                                source_repair_path, source_repair_sha256 = arguments['path'], None
-                                source_repair_conflict = code == 'WRITE_CONFLICT'
-                                source_repair_full_write |= code in ('EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS')
-                                required_tool, required_alternatives = 'read_project_file', ()
-                                if read_history is not None:
-                                    read_history.require_fresh_content(source_repair_path)
+                                repair = (arguments['path'], code == 'WRITE_CONFLICT',
+                                          code in ('EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS'))
+                                if pending_source_repair is None:
+                                    pending_source_repair = repair
+                                elif repair[0] != pending_source_repair[0] and repair not in source_repair_queue:
+                                    source_repair_queue.append(repair)
                             continue
                         budget.account_tool_call(tool_sequence)
                         executed += 1
@@ -869,6 +886,16 @@ class LLMEngine:
                                                                  tool_output, call.call_id)
                         items.append({"type": "function_call_output", "call_id": call.call_id, "output": tool_output})
                         required_tool_succeeded |= call.name in (required_tool, *required_alternatives)
+                    if pending_source_repair is not None:
+                        # Finish the current batch once; only its rejected paths enter recovery.
+                        # A later successful read of another file must not satisfy this fresh-read gate.
+                        source_repair_path, source_repair_conflict, full_write = pending_source_repair
+                        source_repair_full_write |= full_write
+                        source_repair_sha256, source_repair_absent = None, False
+                        required_tool, required_alternatives = 'read_project_file', ()
+                        required_tool_succeeded = False
+                        if read_history is not None:
+                            read_history.require_fresh_content(source_repair_path)
                     notices = (correction_rules.source_write_notice(source_write_precheck, check_written_paths),
                                source_preservation_check(tuple(sorted(changed_source_paths)))
                                    if source_preservation_check is not None and changed_source_paths else None,
@@ -890,7 +917,9 @@ class LLMEngine:
                             required_test_paths = ()
                     elif required_tool == 'read_project_file':
                         # A failed read must not count as having refreshed the file.
-                        if required_tool_succeeded:
+                        if source_repair_absent:
+                            required_tool, required_alternatives = 'write_source_file', ()
+                        elif required_tool_succeeded:
                             required_tool = 'write_source_file'
                             required_alternatives = (('edit_source_file',) if not source_repair_full_write and 'edit_source_file' in self._definitions
                                                      else ())
@@ -914,7 +943,13 @@ class LLMEngine:
                         source_repair_path = source_repair_sha256 = None
                         source_repair_full_write = False
                         source_repair_conflict = False
-                        if source_review_pending:
+                        source_repair_absent = False
+                        if source_repair_queue:
+                            source_repair_path, source_repair_conflict, source_repair_full_write = source_repair_queue.pop(0)
+                            required_tool, required_alternatives = 'read_project_file', ()
+                            if read_history is not None:
+                                read_history.require_fresh_content(source_repair_path)
+                        elif source_review_pending:
                             source_repair_path = source_review_pending.pop(0)
                             required_tool, required_alternatives = 'read_project_file', ()
                             if read_history is not None:

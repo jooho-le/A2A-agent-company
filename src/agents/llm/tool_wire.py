@@ -50,7 +50,7 @@ def pin_test_write_paths(tool, paths):
     return replace(tool, input_schema=JsonSchema.from_dict(schema))
 
 
-def pin_source_repair(tool, path, expected_sha256=None):
+def pin_source_repair(tool, path, expected_sha256=None, *, expected_absent=False):
     """Pin an already offered source operation to a settled-conflict recovery."""
     from dataclasses import replace
     if tool.name not in ('read_project_file', 'write_source_file', 'edit_source_file'):
@@ -60,6 +60,12 @@ def pin_source_repair(tool, path, expected_sha256=None):
     if 'path' not in properties:
         raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
     properties['path']['enum'] = [path]
+    if expected_absent and tool.name == 'write_source_file':
+        # Existing optional field omission now means a create-only CAS at the actual file Tool.
+        # The narrowed wire must not let the model guess a hash or replace another file.
+        properties.pop('expectedSha256', None)
+        schema['required'] = [name for name in schema['required'] if name != 'expectedSha256']
+        return replace(tool, input_schema=JsonSchema.from_dict(schema))
     if expected_sha256 is not None and tool.name != 'read_project_file':
         if 'expectedSha256' not in properties:
             raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)

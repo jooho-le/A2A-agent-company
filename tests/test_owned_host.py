@@ -229,6 +229,8 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
         from orchestrator.application import validation_output
         from orchestrator.infrastructure import validation_stop
         from orchestrator.sandbox import docker_cli
+        from mcp_tools.tools import file_io
+        from mcp_tools.core import catalog as tool_catalog
         original = self.inspect().policy_sha256
         altered = self.directory / 'alternate-validation-policy.py'
         altered.write_text('# alternate policy bytes\n')
@@ -236,7 +238,7 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
                        validation_output, validation_stop, docker_cli, ready_library_types, developer,
                        developer_services, single_runtime, recovery, repair_input_failures,
                        output_safety_precheck, start_precheck, generated_tests_precheck, test_fix, test_write_precheck, work_rules,
-                       failure_diagnostics, llm_contracts, openai_responses):
+                       failure_diagnostics, llm_contracts, openai_responses, file_io, tool_catalog):
             with self.subTest(module=module.__name__), patch.object(module, '__file__', str(altered)):
                 self.assertNotEqual(self.inspect().policy_sha256, original)
 
