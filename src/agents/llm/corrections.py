@@ -32,14 +32,17 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V7'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V8'
 
 VALIDATION_ERROR_GUIDANCE = (
     'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
     'the signup endpoint runs. Import RequestValidationError from fastapi.exceptions and register its '
     'handler on the approved FastAPI application in repairSourcePath. Keep the existing HTTPException '
     'handler and its business rejection behavior. Changing only that handler, catching inside signup, '
-    'or adding Pydantic field validators does not protect this earlier error path. '
+    'or adding Pydantic field validators does not protect this earlier error path. A broad Exception handler '
+    'does not replace the framework-specific RequestValidationError handler either. A parameter annotated '
+    'dict/list, a Body parameter, and a SecretStr request model still require this protection: a malformed '
+    'whole body can be echoed before any endpoint code or field validation runs. '
     'Return a value-free response using the approved validation rejection status and schema. '
     'Do not serialize unfiltered exc.errors(), exc.body, str(exc), or a request body containing credentials, '
     'and do not log those values. Do not import main.app into a router or from main itself. '
@@ -56,7 +59,9 @@ INSTRUCTIONS = {
         'do not import main.app back into a router or import main from itself. The Host requires a fresh '
         'read and a changed source write at each repair target before accepting another READY. '
         'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS / VALIDATION_ERRORS_FORWARD_INPUT: protect request validation '
-        'errors before the endpoint runs. Do not return exc.errors() with its input fields or raw request bodies. '
+        'errors before the endpoint runs, including dict/list or Body parameters and SecretStr models. '
+        'HTTPException or a broad Exception handler alone does not override RequestValidationError. '
+        'Do not return exc.errors() with its input fields, exc.body, or raw request bodies. '
         'RAW_EXCEPTION_IN_ERROR_RESPONSE / EXCEPTION_LOG_MAY_EXPOSE_DB_PARAMETERS: inspect database exceptions, '
         'SQL parameters and exc_info/tracebacks in responses and logs. Use value-free error codes/exception types '
         'rather than exception strings or credential values. A registered logging filter alone does not prove '
@@ -227,6 +232,10 @@ INSTRUCTIONS = {
         'main.app, the synchronous database.get_db dependency and the SQLAlchemy model models.User with a primary '
         'key column; rewrite an existing starting file only together with what it already provides. '
         'READY_ROUTE_MISSING: keep the starting code\'s ready route (GET / answering 2xx) on main.app. '
+        'READY_ROUTE_SHADOWED: an earlier mount at / captures the ready request before its handler and the '
+        'known child application has no GET / route. Preserve the ready handler before the catch-all mount, '
+        'or include a compatible APIRouter on the main application; keep all existing signup routes, startup '
+        'initialization and error handling. A ready decorator hidden behind the mount is not sufficient. '
         'DEPENDS_TARGET_INVALID: pass the dependency function itself, e.g. Depends(get_db), never a string. '
         'SIGNUP_ROUTE_MISSING: implement the signupApi route (method and path in externalContract) on main.app or '
         'on a router included in it.'),
@@ -302,7 +311,7 @@ def _issue(item, *, start_precheck=False) -> dict | None:
     revision = item.get('reviewRevision')
     if isinstance(revision, str) and re.fullmatch('[a-f0-9]{64}', revision):
         issue['reviewRevision'] = revision
-    if code == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS':
+    if code in ('DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS', 'VALIDATION_ERRORS_FORWARD_INPUT'):
         context = _validation_error_context(item.get('validationErrorContext'))
         if context is not None:
             issue['validationErrorContext'] = context
@@ -352,7 +361,7 @@ def _validation_error_context(value):
 def validation_error_repair_targets(issues):
     targets = []
     for row in issues:
-        if row.get('reasonCode') != 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS':
+        if row.get('reasonCode') not in ('DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS', 'VALIDATION_ERRORS_FORWARD_INPUT'):
             continue
         context = _validation_error_context(row.get('validationErrorContext'))
         path = row.get('repairSourcePath')
@@ -832,7 +841,7 @@ RETURNABLE_WRITE_ERRORS = frozenset({'WRITE_CONFLICT'})
 RETURNABLE_EDIT_ERRORS = frozenset({'EDIT_READ_REQUIRED', 'EDIT_STALE_READ',
                                     'EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS'})
 # Recorded in the Host policy: settled read errors and a known WRITE_CONFLICT go back to the model.
-TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_AND_BOUND_EDIT_ERRORS_V4'
+TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_AND_BOUND_EDIT_ERRORS_V5'
 RETURNABLE_TOOL_ERRORS = frozenset({'FILE_NOT_FOUND', 'REPORT_NOT_FOUND', 'FILE_TOO_LARGE', 'FILE_ENCODING_ERROR',
                                     'PATH_TRAVERSAL'})
 _TOOL_ERROR_HINTS = {
@@ -846,7 +855,10 @@ _TOOL_ERROR_HINTS = {
     'FILE_ENCODING_ERROR': 'That file is not UTF-8 text.',
     'PATH_TRAVERSAL': 'That path is not readable for your role. Use the workspace paths in fileAccess.',
     'WRITE_CONFLICT': ('Nothing was written: expectedSha256 did not match the file as it is now. Read the file again '
-                       'and pass its current sha256. Never bypass the conflict by omitting expectedSha256.'),
+                       'and pass its current sha256. Never bypass the conflict by omitting expectedSha256. '
+                       'If an earlier edit in this step already applied the intended bytes, preserve them and '
+                       'submit the complete current content with write_source_file and the fresh sha256; do '
+                       'not undo that edit or invent a cosmetic change. Source progress and READY checks still apply.'),
 }
 
 

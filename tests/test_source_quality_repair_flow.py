@@ -28,13 +28,16 @@ from test_signup_quality_precheck import APP, SAFE_HANDLER
 @pytest.mark.parametrize('phase', [None, SinglePhase.IMPLEMENTING, SinglePhase.FIXING],
                          ids=['multi', 'single-implementing', 'single-fixing'])
 @pytest.mark.parametrize('mode', ['fixed', 'partial_then_fixed', 'noop', 'wrong_path', 'budget', 'uncertain'])
-def test_warning_requires_read_hash_bound_edit_and_real_recheck(tmp_path, phase, mode):
+@pytest.mark.parametrize('body_shape', ['model', 'dictionary'])
+def test_warning_requires_read_hash_bound_edit_and_real_recheck(tmp_path, phase, mode, body_shape):
     f = runtime_fixtures.LLMRuntimeTests()
     f.setUp()
     path = tmp_path / 'main.py'
-    path.write_text(APP)
+    original = APP if body_shape == 'model' else APP.replace('payload: Payload', 'payload: dict')
+    path.write_text(original)
     ready = {'kind': 'READY', 'summary': 'Candidate for measured validation.', 'rejection': None, 'questions': []}
-    changes = [APP + '\nmarker = 1\n', APP + SAFE_HANDLER] if mode == 'partial_then_fixed' else [APP + SAFE_HANDLER]
+    changes = ([original + '\nmarker = 1\n', original + SAFE_HANDLER]
+               if mode == 'partial_then_fixed' else [original + SAFE_HANDLER])
     actions = [text_response(json.dumps(ready))]
     for index, content in enumerate(changes):
         def read_response(_request, index=index):
@@ -85,7 +88,7 @@ def test_warning_requires_read_hash_bound_edit_and_real_recheck(tmp_path, phase,
         recovery_sink=events.append, budget=budget)
     if mode in ('fixed', 'partial_then_fixed'):
         assert asyncio.run(operation).data == ready
-        assert path.read_text() == APP + SAFE_HANDLER
+        assert path.read_text() == original + SAFE_HANDLER
         assert probe() == []
         for offset in range(len(changes)):
             request = provider.requests[1 + 3 * offset]

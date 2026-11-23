@@ -4,16 +4,20 @@ Never executes Source, restores files, creates a table, or declares readiness.
 An advisory observation is deliberately not another output-correction gate.
 """
 import ast
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 
-POLICY = 'IMMUTABLE_STARTUP_FACTS_AND_BOUND_DATABASE_REPAIR_V1'
+POLICY = 'IMMUTABLE_STARTUP_FACTS_AND_BOUND_DATABASE_REPAIR_V2'
 MAX_BYTES, MAX_NODES = 128_000, 10_000
 _INSTRUCTION = (
     'Before rewriting the app, read the application, database and model modules. Preserve existing features '
     'and public entrypoints. Register the mapped User model on its actual Base before application-owned '
     'initialization runs. Preserve or restore a connected lifespan/startup hook (or equivalent initialization) '
     'using the same engine/database that the original get_db supplies. Keep DATABASE_URL configuration; '
+    'keep the approved GET readiness path on the actual entrypoint app. A catch-all mount at / registered '
+    'before that handler takes the request first; preserve the readiness handler before such a mount, or '
+    'include a compatible APIRouter while preserving its routes and application lifecycle. '
     'do not hardcode another database, create tables in QA/test fixtures, or ask the Host to create them. '
     'AST sites describe starting code, not proof of execution. Only the actual Host build and subsequent '
     'QA/Security can establish recovery; alternative correct initialization is allowed.')
@@ -61,9 +65,9 @@ def _name(node):
     return None
 
 
-def _facts(files, bindings):
+def _facts(files, bindings, ready_path=None):
     """Only identifiers, coordinates and fixed field names leave the AST reader."""
-    calls, hooks, module_initializers = [], [], 0
+    calls, hooks, module_initializers, ready_sites, root_mounts = [], [], 0, [], []
     for tool_path in dict.fromkeys(b['toolPath'] for b in bindings.values()):
         path = tool_path.removeprefix('source/')
         # Support either a Python module or its package __init__, with no filesystem access.
@@ -99,6 +103,16 @@ def _facts(files, bindings):
                     calls.append(row)
             if tool_path != bindings['application']['toolPath']:
                 continue
+            if (ready_path is not None and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == bindings['application']['attribute']):
+                arg = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == 'path'), None)
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    site = {'toolPath': 'source/' + actual_path, 'lineNumber': node.lineno}
+                    if node.func.attr == 'get' and arg.value == ready_path and len(ready_sites) < 8:
+                        ready_sites.append(site)
+                    elif node.func.attr == 'mount' and arg.value in ('', '/') and len(root_mounts) < 8:
+                        root_mounts.append(site)
             parent = parents.get(node)
             targets = parent.targets if isinstance(parent, ast.Assign) else (
                 [parent.target] if isinstance(parent, ast.AnnAssign) else [])
@@ -112,7 +126,10 @@ def _facts(files, bindings):
                     and isinstance(node.args[0], ast.Constant) and node.args[0].value == 'startup' and len(hooks) < 8):
                 hooks.append({'toolPath': 'source/' + actual_path, 'lineNumber': node.lineno, 'event': 'startup'})
     return {'metadataInitializationSites': calls, 'applicationLifecycleSites': hooks,
-            'moduleInitializationObserved': bool(module_initializers)}
+            'moduleInitializationObserved': bool(module_initializers),
+            'readyRouteSites': ready_sites, 'rootMountSites': root_mounts,
+            'rootMountBeforeReadyRoute': bool(ready_sites and root_mounts and min(s['lineNumber'] for s in root_mounts)
+                                              < min(s['lineNumber'] for s in ready_sites))}
 
 
 def _starting(checkpoint, contract):
@@ -126,10 +143,13 @@ def _starting(checkpoint, contract):
         package = path[:-3] + '/__init__.py'
         if path not in files and package in files:
             binding['toolPath'] = 'source/' + package
-    facts = _facts(files, bindings)
+    ready_check = contract.get('externalContract', {}).get('app', {}).get('readyCheck')
+    ready = re.match(r'GET\s+(/\S*)', ready_check) if isinstance(ready_check, str) else None
+    facts = _facts(files, bindings, ready.group(1) if ready else None)
     if facts is None:
         return None
-    return {'policy': POLICY, 'bindings': bindings, 'observedStartingSource': facts,
+    return {'policy': POLICY, 'bindings': bindings, 'readyCheck': 'GET ' + ready.group(1) if ready else None,
+            'observedStartingSource': facts,
             'instruction': _INSTRUCTION}
 
 
@@ -149,13 +169,19 @@ def with_startup_context(task_input, checkpoint, contract):
         if not isinstance(issue, dict) or issue.get('issueId') not in selected:
             continue
         measured = _build_failure(issue, fix.get('inputArtifacts', []))
-        if measured is None or not any(d.get('ruleId') == 'SCN001_USER_TABLE_REQUIRED'
-                                      for d in measured['buildDiagnostics']):
+        rules = [] if measured is None else [d.get('ruleId') for d in measured['buildDiagnostics']
+                 if d.get('ruleId') in ('SCN001_USER_TABLE_REQUIRED', 'SCN001_READY_ENDPOINT_REQUIRED')]
+        if not rules:
             continue
-        targets.append({'issueId': issue['issueId'], 'ruleId': 'SCN001_USER_TABLE_REQUIRED',
-            **{k: measured[k] for k in ('codeVersion', 'sourceArtifactId', 'reportArtifactId')},
-            'bindings': context['bindings'], 'readBeforeEditing': [b['toolPath'] for b in context['bindings'].values()],
-            'instruction': 'The actual Host build observed no mapped user table through get_db after startup. ' + _INSTRUCTION})
+        for rule in dict.fromkeys(rules):
+            observation = ('The actual Host build observed no mapped user table through get_db after startup. '
+                           if rule == 'SCN001_USER_TABLE_REQUIRED' else
+                           'The actual Host build observed a non-2xx readiness response. Inspect the entrypoint app '
+                           'and route registration order, including an earlier mount at / and the mounted app. ')
+            targets.append({'issueId': issue['issueId'], 'ruleId': rule,
+                **{k: measured[k] for k in ('codeVersion', 'sourceArtifactId', 'reportArtifactId')},
+                'bindings': context['bindings'], 'readBeforeEditing': [b['toolPath'] for b in context['bindings'].values()],
+                'instruction': observation + _INSTRUCTION})
     if targets:
         value['activeRepairFocus'] = {**task_input['activeRepairFocus'],
             'brief': {**brief, 'startupRepairTargets': targets}}
@@ -165,7 +191,8 @@ def with_startup_context(task_input, checkpoint, contract):
 def preservation_notice_for(checkpoint, contract, *, deadline_monotonic=None):
     context = _starting(checkpoint, contract)
     reader = getattr(checkpoint, 'review_source_files', None)
-    if context is None or not callable(reader) or not context['observedStartingSource']['metadataInitializationSites']:
+    if context is None or not callable(reader) or not (
+            context['observedStartingSource']['metadataInitializationSites'] or context['observedStartingSource']['readyRouteSites']):
         return None
     watched = {b['toolPath'] for b in context['bindings'].values()}
 
@@ -173,18 +200,24 @@ def preservation_notice_for(checkpoint, contract, *, deadline_monotonic=None):
         if not watched.intersection(changed_paths):
             return None
         try:
-            current = _facts(reader(deadline_monotonic=deadline_monotonic), context['bindings'])
+            ready = context['readyCheck']
+            current = _facts(reader(deadline_monotonic=deadline_monotonic), context['bindings'],
+                             ready[4:] if ready else None)
         except Exception:
             # Optional advice cannot hide a build failure or become an independent retry.
             # Checkpoint and actual build still validate files/budget/identity.
             return None
         if current is None:
             return None
-        if not current['metadataInitializationSites']:
+        if context['observedStartingSource']['metadataInitializationSites'] and not current['metadataInitializationSites']:
             reason = 'STARTING_DATABASE_INITIALIZATION_NOT_OBSERVED'
         elif (context['observedStartingSource']['applicationLifecycleSites']
                 and not current['applicationLifecycleSites'] and not current['moduleInitializationObserved']):
             reason = 'STARTING_LIFECYCLE_CONNECTION_NOT_OBSERVED'
+        elif context['observedStartingSource']['readyRouteSites'] and not current['readyRouteSites']:
+            reason = 'STARTING_READY_ROUTE_NOT_OBSERVED'
+        elif current['rootMountBeforeReadyRoute']:
+            reason = 'STARTING_READY_ROUTE_MAY_BE_SHADOWED'
         else:
             return None
         return {'startupPreservationNotice': {'policy': POLICY, 'reasonCode': reason, 'verdict': 'NOT_EVALUATED',

@@ -12,7 +12,7 @@ from agents.runtime.output_safety_precheck import inspect_output_safety
 from agents.runtime import email_normalization
 from orchestrator.core.security import redact_text
 
-POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V5'
+POLICY = 'SIGNUP_PUBLIC_CONTRACT_SOURCE_REVIEW_V6'
 MAX_FILES, MAX_BYTES, MAX_TOTAL_BYTES, MAX_NODES = 64, 128_000, 1_048_576, 50_000
 
 
@@ -117,6 +117,9 @@ def _raw_exception(node, variable):
     """Direct exception rendering; filtered comprehensions/helpers are unknown."""
     if isinstance(node, ast.Name):
         return node.id == variable
+    if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and node.value.id == variable and node.attr in ('body', 'args')):
+        return True
     if isinstance(node, (ast.Dict, ast.List, ast.Tuple, ast.JoinedStr, ast.FormattedValue, ast.BinOp)):
         return any(_raw_exception(child, variable) for child in ast.iter_child_nodes(node))
     if isinstance(node, ast.Call):
@@ -134,6 +137,31 @@ def _response_values(call):
     if _name(call.func) == 'HTTPException' and len(call.args) > 1:
         values.append(call.args[1])
     return values
+
+
+def _request_body_parameter(fn, model_names):
+    """Known FastAPI body bindings, including a dictionary rejected before the endpoint.
+
+    RequestValidationError can contain the entire malformed body even when a
+    password field uses SecretStr. Catching HTTPException/Exception inside the
+    endpoint does not handle that framework response. Unknown custom dependency
+    or parameter markers remain a measured-validation concern.
+    """
+    positional = (*fn.args.posonlyargs, *fn.args.args)
+    defaults = dict(zip((a.arg for a in positional[-len(fn.args.defaults):]), fn.args.defaults)) if fn.args.defaults else {}
+    defaults.update((a.arg, value) for a, value in zip(fn.args.kwonlyargs, fn.args.kw_defaults) if value is not None)
+    for argument in (*positional, *fn.args.kwonlyargs):
+        default, annotation = defaults.get(argument.arg), argument.annotation
+        if isinstance(default, ast.Call):
+            if _name(default.func) == 'Body':
+                return True
+            # Depends/Query/etc. do not establish a request-body binding.
+            continue
+        if isinstance(annotation, ast.Subscript):
+            annotation = annotation.value
+        if _name(annotation) in model_names | {'dict', 'Dict', 'list', 'List'}:
+            return True
+    return False
 
 
 def inspect_signup_quality(source_root, contract):
@@ -178,7 +206,7 @@ def inspect_signup_quality(source_root, contract):
             digest.update(reviewed.relative_to(root).as_posix().encode())
             digest.update(ast.dump(next(t for p, t in modules.values() if p == reviewed)).encode())
         row['reviewRevision'] = digest.hexdigest()
-        if code == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' and validation_context is not None:
+        if code in ('DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS', 'VALIDATION_ERRORS_FORWARD_INPUT') and validation_context is not None:
             row['validationErrorContext'] = dict(validation_context)
         if row not in issues and len(issues) < 16:
             issues.append(row)
@@ -239,24 +267,23 @@ def inspect_signup_quality(source_root, contract):
                               'requestValidationHandlerDetected': validation_handler,
                               'httpExceptionHandlerLines': sorted(set(http_handler_lines))[:8]}
 
-    plain_models = set()
+    request_models = set()
     for module, (_path, tree) in modules.items():
         bases = _imported(tree, 'pydantic', 'BaseModel')
         for n in tree.body:
             if (isinstance(n, ast.ClassDef) and any(_name(b) in bases for b in n.bases)
-                    and any(isinstance(f, ast.AnnAssign) and _name(f.target) == 'password'
-                            and _name(f.annotation) == 'str' for f in n.body)):
-                plain_models.add((module, n.name))
+                    and any(isinstance(f, ast.AnnAssign) and _name(f.target) == 'password' for f in n.body)):
+                request_models.add((module, n.name))
 
     for module, (path, tree) in modules.items():
         conflict_types = {'IntegrityError', 'DBAPIError', 'DatabaseError', 'SQLAlchemyError', 'Exception'}
         for exception in tuple(conflict_types - {'Exception'}):
             conflict_types.update(_imported(tree, 'sqlalchemy.exc', exception))
-        model_names = {name for m, name in plain_models if m == module}
+        model_names = {name for m, name in request_models if m == module}
         for n in tree.body:
             if isinstance(n, ast.ImportFrom):
                 origin = _import_module(module, path, n)
-                model_names.update(a.asname or a.name for a in n.names if (origin, a.name) in plain_models)
+                model_names.update(a.asname or a.name for a in n.names if (origin, a.name) in request_models)
         log_modules = {a.asname or a.name for n in tree.body if isinstance(n, ast.Import)
                        for a in n.names if a.name == 'logging'}
         log_calls = _imported(tree, 'logging', 'error') | _imported(tree, 'logging', 'exception')
@@ -274,7 +301,7 @@ def inspect_signup_quality(source_root, contract):
                             and contract.get('externalContract', {}).get('signupApi', {}).get('path', '').endswith(d.args[0].value)
                             for d in fn.decorator_list)
             if (is_signup and 'REQ-006' in keys and simple_app and not validation_handler and not middleware
-                    and any(_name(a.annotation) in model_names for a in (*fn.args.posonlyargs, *fn.args.args))):
+                    and _request_body_parameter(fn, model_names)):
                 issues[:] = [r for r in issues if not (r['reasonCode'] == 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS'
                                                        and 'sourcePath' not in r)]
                 # The handler belongs to the application entrypoint. Asking a

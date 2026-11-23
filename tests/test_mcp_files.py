@@ -111,6 +111,11 @@ class FileToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conflict.error_code, "WRITE_CONFLICT")
         same = await dispatcher.call_tool("write_source_file", self.arguments(content=value))
         self.assertFalse(same.data["changed"])
+        bound_noop = await dispatcher.call_tool("write_source_file", self.arguments(
+            content=value, expectedSha256=first.data["sha256"]))
+        self.assertFalse(bound_noop.data["changed"])
+        self.assertEqual(bound_noop.data["sha256"], first.data["sha256"])
+        self.assertEqual(bound_noop.data["path"], self.arguments()["path"])
         read = await dispatcher.call_tool("read_project_file", self.arguments())
         self.assertEqual(read.data["content"], value)
 

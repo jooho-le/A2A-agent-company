@@ -221,7 +221,7 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
     def test_generated_validation_and_terminal_policy_bytes_change_the_run_fingerprint(self):
         from agents.llm import recovery
         from agents.runtime import developer, developer_services, qa_services, ready_library_types
-        from agents.runtime import output_safety_precheck, generated_tests_precheck, test_fix, test_write_precheck
+        from agents.runtime import output_safety_precheck, start_precheck, generated_tests_precheck, test_fix, test_write_precheck
         from agents.roles import work_rules
         from agents.runtime import repair_input_failures, requirement_scope, security_services, security_test_scope
         from agents.single import runtime as single_runtime
@@ -234,7 +234,7 @@ class OwnedHostInspectionTests(_HostFixture, unittest.TestCase):
         for module in (qa_services, requirement_scope, security_services, security_test_scope,
                        validation_output, validation_stop, docker_cli, ready_library_types, developer,
                        developer_services, single_runtime, recovery, repair_input_failures,
-                       output_safety_precheck, generated_tests_precheck, test_fix, test_write_precheck, work_rules):
+                       output_safety_precheck, start_precheck, generated_tests_precheck, test_fix, test_write_precheck, work_rules):
             with self.subTest(module=module.__name__), patch.object(module, '__file__', str(altered)):
                 self.assertNotEqual(self.inspect().policy_sha256, original)
 

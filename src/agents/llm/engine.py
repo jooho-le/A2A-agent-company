@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from hashlib import sha256
 from dataclasses import replace
 from collections.abc import Callable
 from time import monotonic
@@ -105,12 +106,14 @@ class LLMEngine:
         executed = 0
         executed_names = []
         source_changed = False
+        source_written_paths = set()
         source_notices = set()
         required_tool = None
         required_alternatives = ()  # e.g. edit_source_file beside a forced write_source_file
         required_test_paths = ()
         source_repair_path = source_repair_sha256 = None
         source_repair_full_write = False
+        source_repair_conflict = False
         source_review_pending = []
         sequence = operation_sequence = None
         decided_sequence = None
@@ -758,6 +761,7 @@ class LLMEngine:
                     items.extend(continuation)
                     required_tool_succeeded = False
                     recovery_source_changed = False
+                    recovery_content_current = False
                     check_written_paths = set()
                     changed_source_paths = set()
                     for call, definition, arguments in prepared:
@@ -793,6 +797,7 @@ class LLMEngine:
                                     and isinstance(arguments.get('path'), str) and arguments['path'].startswith('source/')
                                     and {'read_project_file', 'write_source_file'} <= self._definitions.keys()):
                                 source_repair_path, source_repair_sha256 = arguments['path'], None
+                                source_repair_conflict = code == 'WRITE_CONFLICT'
                                 source_repair_full_write |= code in ('EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS')
                                 required_tool, required_alternatives = 'read_project_file', ()
                                 if read_history is not None:
@@ -813,7 +818,24 @@ class LLMEngine:
                         source_changed |= changed_now
                         if changed_now and call.name in {'write_source_file', 'edit_source_file'}:
                             changed_source_paths.add(arguments['path'])
+                            source_written_paths.add(arguments['path'])
                         recovery_source_changed |= changed_now
+                        # A settled CAS conflict may follow an earlier successful edit of
+                        # this same file. A fresh read and successful CAS no-op prove the
+                        # requested bytes are already current; never demand a cosmetic edit.
+                        # No prior write, different path/hash, missing receipt, uncertain
+                        # result or a true unchanged baseline cannot use this acknowledgement.
+                        if (source_repair_conflict and call.name == 'write_source_file'
+                                and arguments.get('path') == source_repair_path
+                                and source_repair_path in source_written_paths
+                                and isinstance(source_repair_sha256, str)
+                                and arguments.get('expectedSha256') == source_repair_sha256
+                                and tool_result.get('changed') is False
+                                and tool_result.get('path') == source_repair_path
+                                and tool_result.get('sha256') == source_repair_sha256
+                                and isinstance(arguments.get('content'), str)
+                                and sha256(arguments['content'].encode('utf-8')).hexdigest() == source_repair_sha256):
+                            recovery_content_current = True
                         if changed_now and restricted_paths:
                             refresh_path_output = True
                         # Transcript copy is redacted, evidence assembly uses host data later.
@@ -862,15 +884,24 @@ class LLMEngine:
                                                      else ())
                     elif required_tool is not None:
                         if (source_status() is not SourceEditStatus.CHANGED
-                                or source_repair_path is not None and not recovery_source_changed):
+                                or source_repair_path is not None and not (
+                                    recovery_source_changed or recovery_content_current)):
                             decide_correction(sequence, 'READY_WITHOUT_CHANGES', False, 'REPEATED',
                                 observation=observed(response_kind='TOOL_CALLS',
                                                      requested=[call.name for call, _d, _a in prepared],
                                                      executed=True, refusal='NO_NET_SOURCE_CHANGE'))
                             raise LLMRuntimeError(LLMErrorCode.NO_PROGRESS)
+                        if recovery_content_current:
+                            items.append({'role': 'user', 'content': json_text({'hostSourceRecovery': {
+                                'code': 'RECOVERY_CONTENT_ALREADY_CURRENT',
+                                'instruction': 'The fresh read and successful compare-and-swap no-op confirm the '
+                                'requested bytes already match this file edited earlier in this step. No new '
+                                'source change is claimed. Submit the actual candidate when ready; all READY '
+                                'source checks, Build and QA/Security remain required.'}})})
                         required_tool = None
                         source_repair_path = source_repair_sha256 = None
                         source_repair_full_write = False
+                        source_repair_conflict = False
                         if source_review_pending:
                             source_repair_path = source_review_pending.pop(0)
                             required_tool, required_alternatives = 'read_project_file', ()
@@ -959,6 +990,7 @@ class LLMEngine:
                             if paths and {'read_project_file', 'write_source_file'} <= self._definitions.keys():
                                 source_repair_path, *source_review_pending = paths
                                 source_repair_sha256 = None
+                                source_repair_conflict = False
                                 required_tool, required_alternatives = 'read_project_file', ()
                                 if read_history is not None:
                                     read_history.require_fresh_content(source_repair_path)
