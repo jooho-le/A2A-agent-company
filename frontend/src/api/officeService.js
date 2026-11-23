@@ -62,6 +62,21 @@ export async function lookupOfficeWork(key) {
   return validateReceipt(data, key, status)
 }
 
+export async function retireOfficeRequest(key, { confirmed = false } = {}) {
+  if (!runUuid.test(key) || confirmed !== true) {
+    throw new ProductRunRequestError('이전 요청 정리 버튼을 눌러 확인해 주세요.', 'INVALID_ARGUMENT')
+  }
+  const { data, status } = await json('/api/v1/submissions/' + key + '/retire', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  })
+  if (status !== 200 || data?.requestId !== key || !['RETIRED', 'EXISTING'].includes(data.outcome)) {
+    throw new Error('이전 요청의 처리 상태를 확인하지 못했어요. 접수 상태를 다시 확인해 주세요.')
+  }
+  return data.outcome === 'EXISTING'
+    ? { outcome: data.outcome, submission: validateReceipt(data.submission, key, 200) }
+    : { outcome: data.outcome }
+}
+
 const sourceDownloads = new Set()
 const maxSourceBytes = 20 * 1024 * 1024
 

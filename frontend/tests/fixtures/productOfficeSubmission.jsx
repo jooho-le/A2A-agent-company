@@ -36,6 +36,14 @@ globalThis.fetch = async (url, options = {}) => {
       if (mode === 'not-accepted') headers.set('X-Submission-Status', 'NOT_ACCEPTED')
     }
     if (mode === 'network') throw new Error('private-mock-error-must-not-display')
+  } else if (path.endsWith('/retire') && options.method === 'POST') {
+    const requestId = path.split('/').at(-2)
+    data = mode === 'cleanup-missing' ? { requestId, outcome: 'RETIRED' }
+      : { requestId, outcome: 'EXISTING', submission: { requestId, projectId,
+          submissionStatus: mode === 'cleanup-existing' ? 'CREATED' : 'UNKNOWN',
+          run, firstStep: { runId }, dispatchStatus: 'SCHEDULED' } }
+  } else if (path.startsWith('/api/v1/submissions/')) {
+    status = 404; data = { detail: '접수 기록을 찾을 수 없습니다.' }
   } else if (path === '/api/projects/' + projectId) data = project
   else if (path === '/api/projects') data = { projects: [] }
   else if (path === '/api/v1/runs/' + runId) data = run
@@ -124,8 +132,39 @@ async function verify() {
       check(loginCount === 1, 'expired JWT returns to existing login')
     }
   }
+  const pendingKey = 'ai-company.pending-office-submission.1'
+  for (const next of ['cleanup-missing', 'cleanup-existing', 'cleanup-unknown']) {
+    await mount(next)
+    const key = id(77)
+    sessionStorage.setItem(pendingKey, key)
+    await mount(next, { preserveStorage: true })
+    fill()
+    await submit()
+    check(posts().length === 0, 'restored pending key still blocks new creation')
+    const click = label => act(async () => Array.from(document.querySelectorAll('.composer-feedback button')).find(b => b.textContent === label).click())
+    await click('접수 상태 확인')
+    check(feedback().includes('접수 기록') && !feedback().includes('Run을 찾을'), 'submission 404 is not a Run error')
+    check(sessionStorage.getItem(pendingKey) === key && posts().length === 0, '404 alone never unlocks or posts')
+    await click('이전 요청 확인하고 다시 입력')
+    check(posts().length === 1 && posts()[0].url === '/api/v1/submissions/' + key + '/retire', 'explicit cleanup only retires the original key')
+    check(sessionStorage.getItem('access_token') === token, 'JWT preserved')
+    if (next === 'cleanup-missing') {
+      check(!sessionStorage.getItem(pendingKey), 'confirmed retirement releases only the pending marker')
+      check(!document.querySelector('#request-name').disabled && !document.querySelector('#request-text').disabled, 'inputs re-enabled')
+      check(document.querySelector('#request-name').value === '회원가입 프로젝트', 'input draft preserved')
+      check(!document.querySelector('.composer-bottom button').disabled, 'start button ready')
+      check(!posts().some(call => call.url === '/api/v1/runs'), 'cleanup never automatically creates a new Run')
+      await submit()
+      check(posts().filter(call => call.url === '/api/v1/runs').length === 1, 'next explicit click creates once')
+    } else if (next === 'cleanup-existing') {
+      check(globalThis.__officeProps.runDisplayState.runId === runId, 'existing Run restored instead of discarded')
+    } else {
+      check(sessionStorage.getItem(pendingKey) === key && feedback().includes('서버에 접수된 요청'), 'unknown server receipt remains locked')
+      noRun()
+    }
+  }
   await act(async () => root.unmount())
-  return { success: true, failures: true }
+  return { success: true, failures: true, retirement: true }
 }
 verify().then(report => {
   document.body.innerHTML = ''

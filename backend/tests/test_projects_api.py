@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 import project_scenarios
 from database import Base, get_db
-from models import Document, Project, ProjectRun, RunSubmission, User
+from models import Document, Project, ProjectRun, RetiredSubmissionKey, RunSubmission, User
 from project_schema import create_project_tables
 from security import create_access_token
 
@@ -215,6 +215,7 @@ class ProjectAPITests(unittest.TestCase):
 
     def test_unapplied_schema_returns_safe_error_without_creating_tables(self):
         # 이 테스트의 임시 DB에만 legacy-only 상태를 재현합니다.
+        RetiredSubmissionKey.__table__.drop(self.engine)
         RunSubmission.__table__.drop(self.engine)
         ProjectRun.__table__.drop(self.engine)
         Project.__table__.drop(self.engine)

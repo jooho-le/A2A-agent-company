@@ -106,6 +106,7 @@ export function RequestForm({ mode = 'multi', onMode, modal = false, onCreate, o
       {needsStatus && !submission.finished && <p role="status">{submission.notice}</p>}
       {problem && <p role="alert">{problem}</p>}
       {submission.uncertain && <button type="button" className="button" disabled={submission.busy} onClick={submission.recover}>접수 상태 확인</button>}
+      {submission.uncertain && submission.retire && <button type="button" className="button" disabled={submission.busy} onClick={submission.retire}>이전 요청 확인하고 다시 입력</button>}
       {submission.configurationError && <button type="button" className="button" onClick={submission.refreshApproval}>다시 연결</button>}
       {submission.workflowStatus && <p role="status">{submission.workflowStatus}</p>}
     </div>}

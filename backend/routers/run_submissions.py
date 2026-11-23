@@ -17,7 +17,7 @@ from database import get_db
 from approved_configuration import public_approved_configuration
 from host_reads import HOST_KEY, HostReadClient, HostRunNotFound, HostRejected, HostUnavailable, get_host_read_client
 from host_reads import HostAuthenticationFailed, HostResponse, require_host_reads_enabled
-from models import Project, ProjectRun, RunSubmission, User
+from models import Project, ProjectRun, RetiredSubmissionKey, RunSubmission, User
 from project_scenarios import ScenarioRegistryUnavailable, is_supported_project_scenario
 from routers.auth import read_current_user
 from routers.projects import owned_project, project_storage
@@ -108,6 +108,17 @@ def existing(db, user_id, key):
                                                  RunSubmission.client_key == str(key)))
 
 
+def lock_submission_keys(db):
+    # SQLite writer lock BEFORE checking a receipt/key. No row is updated.
+    # Both submit and retire use this transaction so an in-flight POST cannot
+    # create a receipt after retirement has certified that the key is unused.
+    if db.get_bind().dialect.name != "sqlite":
+        raise unavailable()
+    db.execute(update(RetiredSubmissionKey).where(False)
+               .values(client_key=RetiredSubmissionKey.client_key)
+               .execution_options(synchronize_session=False))
+
+
 def receipt(row, response=None):
     data = json.loads(row.response_json) if row.response_json else {}
     if response is not None and row.state == "REJECTED" and data.get("detail") == "IDEMPOTENCY_KEY_CONFLICT":
@@ -192,11 +203,14 @@ def submit(payload: RunRequest, request: Request, response: Response,
         raise HTTPException(422, "요청 식별자는 한 개여야 합니다.")
     request_hash = digest(payload.model_dump(mode="json"))
     with project_storage(db):
+        lock_submission_keys(db)
         row = existing(db, user.id, idempotency_key)
         if row:
             if row.request_sha256 != request_hash:
                 raise HTTPException(409, "같은 요청 식별자로 다른 업무를 접수할 수 없습니다.")
             return receipt(row, response)
+        if db.get(RetiredSubmissionKey, (user.id, str(idempotency_key))) is not None:
+            raise HTTPException(409, "SUBMISSION_KEY_RETIRED")
         # 타 사용자 프로젝트는 Host I/O 전에 404입니다.
         project = owned_project(db, payload.projectId, user.id) if payload.projectId else None
         if project and project.scenario_id != str(payload.scenarioId):
@@ -313,6 +327,26 @@ def lookup(requestId: UUID4, response: Response, user: User = Depends(read_curre
 class ManualRetryRequest(BaseModel):
     # 본문·설정·키 교체를 받지 않고 사용자의 명시적 재시도만 나타냅니다.
     model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/submissions/{requestId}/retire")
+def retire_unrecorded_submission(requestId: UUID4, payload: ManualRetryRequest, response: Response,
+                                user: User = Depends(read_current_user), db: Session = Depends(get_db)):
+    """사용자 클릭으로만 미접수 키를 폐기합니다. Host 호출·기존 Run 취소는 없습니다."""
+    response.headers["Cache-Control"] = "no-store"
+    with project_storage(db):
+        lock_submission_keys(db)
+        row = existing(db, user.id, requestId)
+        if row is not None:
+            owned_project(db, row.project_id, user.id)
+            result = {"requestId": str(requestId), "outcome": "EXISTING", "submission": receipt(row)}
+            db.rollback()  # Release the writer lock; keep the existing receipt unchanged.
+            return result
+        identity = (user.id, str(requestId))
+        if db.get(RetiredSubmissionKey, identity) is None:
+            db.add(RetiredSubmissionKey(owner_user_id=user.id, client_key=str(requestId)))
+        db.commit()  # Permanently fence this client key before the browser releases it.
+        return {"requestId": str(requestId), "outcome": "RETIRED"}
 
 
 def require_manual_retry_enabled():
