@@ -9,6 +9,7 @@ import { addOfficeOrchestrator, managementDisplay, updateOfficeBadges, orchestra
 import { createOfficeTraceController, isTraceActionCurrent } from './officeTraceEvents'
 import { tidyOfficeHair } from './office3dAppearance'
 import { buildOfficeRunPopups, popupResultNotice, renderOfficeRunPopups } from './officeRunPopups'
+import { createOfficeHandoff } from './officeHandoffVisual'
 
 // 실제 Run·Trace 표시와 카메라의 수명 주기를 관리합니다.
 export function mountAgentOffice(root, {
@@ -143,33 +144,28 @@ export function mountAgentOffice(root, {
     let traceUiKey = '';
     let actualPopupKey = '';
     let previousPopups = null;
-    const fromPoint = new P(), toPoint = new P();
     function updateActualHandoffs(delta, enabled) {
       const actions = handoffs.advance(delta, enabled);
-      const flights = actions.filter(item => item.from !== null || item.kind === 'artifact');
+      const flights = actions.filter(item => item.from !== null && item.progress < 1);
       const visible = new Set(flights.map(item => item.eventId));
-      for (const [id, paper] of actualPapers) if (!visible.has(id)) {
-        office.workspace.remove(paper); actualPapers.delete(id);
+      for (const [id, visual] of actualPapers) if (!visible.has(id)) {
+        visual.dispose(); actualPapers.delete(id);
       }
       for (const item of flights) {
-        let paper = actualPapers.get(item.eventId);
-        if (!paper) { paper = engine.Bx(office.workspace, `actual_handoff_${item.eventId}`); actualPapers.set(item.eventId, paper); }
-        paper.userData.eventId = item.eventId; paper.userData.from = item.from; paper.userData.to = item.to;
-        const from = office.agents[item.from ?? item.agent], to = office.agents[item.to], t = item.progress;
+        let visual = actualPapers.get(item.eventId);
+        const from = office.agents[item.from ?? item.agent], to = office.agents[item.to];
+        if (!visual) {
+          const origin = office.workspace.worldToLocal(from.arms[1].hand.getWorldPosition(new P()));
+          const target = office.workspace.worldToLocal(to.arms[0].hand.getWorldPosition(new P()));
+          visual = createOfficeHandoff(office.workspace, `actual_handoff_${item.eventId}`, origin, target, engine, item.to === 3 ? 1 : 0);
+          actualPapers.set(item.eventId, visual);
+          Object.assign(visual.paper.userData, { eventId: item.eventId, from: item.from, to: item.to });
+        }
+        const t = item.progress * item.progress * (3 - 2 * item.progress);
         const amount = Math.sin(Math.PI * t);
         from.arms[1].shoulder.rotation.x -= amount * .45;
         from.arms[1].shoulder.rotation.z += amount * .35;
-        office.root.updateMatrixWorld(true);
-        from.arms[1].hand.getWorldPosition(fromPoint);
-        office.workspace.worldToLocal(fromPoint);
-        if (to) {
-          to.arms[0].hand.getWorldPosition(toPoint); office.workspace.worldToLocal(toPoint);
-          paper.position.copy(fromPoint).lerp(toPoint, t); paper.position.y += amount * 2;
-        } else {
-          // 산출물 등록은 해당 자리의 문서 표시이며, 확인되지 않은 다음 수신자를 만들지 않습니다.
-          paper.position.copy(fromPoint); paper.position.y += .4 + amount * .6;
-        }
-        paper.scale.setScalar(.75); paper.rotation.set(t * 2, t * 3, Math.sin(Math.PI * t) * .4);
+        visual.update(item.progress, camera);
       }
       for (const item of actions) {
         if (item.agent === null || item.kind === 'log') continue;
@@ -192,13 +188,18 @@ export function mountAgentOffice(root, {
       }
       stage.dataset.handoffCount = String(flights.length);
       stage.dataset.traceKind = actions.map(item => item.kind).join(',');
-      element('handoff-note').textContent = actions.length ? actions.map(item => `${item.from !== null ? `${humanAgents[item.from].name} → ${humanAgents[item.to].name} · ` : ''}${item.eventType} · ${item.label} · ${item.occurredAt}`).join(' / ')
-        : '새 실제 Trace 이벤트를 기다립니다. 현재 Step과 과거 이벤트 연출은 구분됩니다.';
+      stage.dataset.workflowPhase = [...new Set(actions.map(item => item.phase).filter(Boolean))].join(',');
+      const phaseNames = { planning: '기획', development: '개발·수정', validation: '품질·보안 검증' };
+      const handoffText = actions.length ? [...new Set(actions.map(item => item.phase
+        ? `${phaseNames[item.phase]} · 업무 전달 기록` : '최종 결과 확인'))].join(' / ')
+        : '주요 업무 단계의 전달 흐름을 표시합니다.';
+      if (element('handoff-note').textContent !== handoffText) element('handoff-note').textContent = handoffText;
       const info = handoffs.info(), feed = runDisplayState?.trace;
       element('trace-notice').textContent = runDisplayState?.errors?.trace ? '신규 Trace 수집 실패 · 커서와 대기 큐를 보존하고 재시도합니다.'
         : `Trace ${feed?.cursor ?? '-'} / ${feed?.total ?? '-'}행 확인 · 연출 대기 ${info.pending} · 처리 ${info.completed}`
           + (!info.ready ? ' · 조회 완료 대기' : !enabled ? ' · 모션 일시정지' : '');
-      const shown = [...info.recent, ...info.current].slice(-8);
+      const shown = [...new Map([...info.recent, ...info.current].map(item => [item.eventId, item])).values()]
+        .sort((a, b) => a.offset - b.offset).slice(-8);
       const key = shown.map(item => item.eventId).join('|');
       if (key !== traceUiKey) {
         traceUiKey = key;
@@ -222,7 +223,7 @@ export function mountAgentOffice(root, {
       if (manager.refreshing && lastManagement) manager = { ...lastManagement, refreshing: true };
       else if (manager.displayState !== 'unknown') lastManagement = manager;
       if (enabled && manager.displayState === 'working') managementTime += delta;
-      return [...runController.advance(delta, enabled), { ...manager, motionTime: managementTime, poseTime: managementTime }];
+      return [...runController.advance(delta, enabled, handoffs.awaitingDelivery), { ...manager, motionTime: managementTime, poseTime: managementTime * .45 }];
     }
     let actualAgents = actualRows();
     let actualPlayback = null;
@@ -446,7 +447,8 @@ export function mountAgentOffice(root, {
           target.dataset.expression = agent.expression;
         }
         liveRows[index].textContent = `${displayRole(index)} · ${agent.label}${suffix}`;
-        label.querySelector('small').textContent = agent.label + suffix;
+        // 폴링마다 명찰의 길이가 바뀌지 않게 갱신 안내는 상세 상태에만 둡니다.
+        if (label.querySelector('small').textContent !== agent.label) label.querySelector('small').textContent = agent.label;
         label.classList.toggle('selected', selectedAgent === index);
         label.setAttribute('aria-pressed', String(selectedAgent === index));
         stepButtons[index].classList.toggle('current', agent.displayState === 'working');
@@ -483,7 +485,7 @@ export function mountAgentOffice(root, {
         actualPlayback = successCeremony.advance(e * tr, { ready, motionEnabled: enabled, duration: bn - En });
         actualAgents = actualRows(e, enabled);
         if (actualPlayback) {
-          actualPapers.forEach(paper => { paper.visible = false; });
+          actualPapers.forEach(visual => { visual.paper.visible = false; visual.update(1, camera); });
           const performanceTime = En + actualPlayback.elapsed;
           updateOfficePose(performanceTime);
           acting.update(performanceTime, actualPlayback.pose, null, enabled);
@@ -526,7 +528,7 @@ export function mountAgentOffice(root, {
       handoffs.observe(snapshot, mode);
       actualAgents = actualRows();
       if (changed) {
-        actualPapers.forEach(paper => office.workspace.remove(paper));
+        actualPapers.forEach(visual => visual.dispose());
         actualPapers.clear();
         traceUiKey = '';
         actualPopupKey = '';

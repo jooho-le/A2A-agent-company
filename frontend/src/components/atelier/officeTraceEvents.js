@@ -1,5 +1,12 @@
 const roles = ['PLANNER', 'DEVELOPER', 'QA', 'SECURITY']
-const durations = { handoff: 1.3, artifact: 1, issue: 1, receive: .65, state: .55, manage: .75, verdict: .8, log: .2 }
+// 실제 기록은 모두 수집하되 큰 업무 단계만 연출합니다.
+const durations = { handoff: 5, artifact: 0, issue: 0, receive: 0, state: 0, manage: 0, verdict: 5, log: 0 }
+const phaseSeconds = 12
+const groupingSeconds = 2
+
+function phaseOf(action) {
+  return action.kind === 'handoff' ? ['planning', 'development', 'validation', 'validation'][action.agent] : null
+}
 
 // API에는 from/to 역할이 없습니다. 같은 Run의 유일한 Step으로만 연결합니다.
 export function traceAction(event, steps, runId) {
@@ -49,8 +56,7 @@ function parallel(a, b) {
   return a?.kind === 'handoff' && b.kind === 'handoff' && a.agent !== b.agent
     && [2, 3].includes(a.agent) && [2, 3].includes(b.agent)
     && Number.isInteger(a.codeVersion) && a.codeVersion === b.codeVersion
-    && a.step?.inputArtifactIds?.some(id => b.step?.inputArtifactIds?.includes(id))
-    && Math.abs(Date.parse(a.occurredAt) - Date.parse(b.occurredAt)) <= 500
+    && Math.abs(Date.parse(a.occurredAt) - Date.parse(b.occurredAt)) <= groupingSeconds * 1000
 }
 
 export function isTraceActionCurrent(item, selected) {
@@ -61,8 +67,9 @@ export function isTraceActionCurrent(item, selected) {
 
 export function createOfficeTraceController() {
   let run = null, epoch = null, seen = new Set(), queue = [], clock = 0, tail = 0, last = null
-  let recent = [], completed = 0, ready = false
-  const reset = () => { run = null; epoch = null; seen = new Set(); queue = []; clock = 0; tail = 0; last = null; recent = []; completed = 0; ready = false }
+  let recent = [], completed = 0, ready = false, playbackReady = false
+  let phases = new Set(), notices = new Map()
+  const reset = () => { run = null; epoch = null; seen = new Set(); queue = []; clock = 0; tail = 0; last = null; recent = []; completed = 0; ready = false; playbackReady = false; phases = new Set(); notices = new Map() }
   function observe(snapshot, mode) {
     if (mode !== 'actual' || !snapshot?.runId) { reset(); return }
     if (run !== snapshot.runId) { reset(); run = snapshot.runId }
@@ -73,31 +80,47 @@ export function createOfficeTraceController() {
       && snapshot.queryStatus?.run === 'success' && ['success', 'empty'].includes(snapshot.queryStatus?.steps)
       && snapshot.queryStatus?.trace === 'success' && feed?.runId === run && feed.initialized
       && !Object.values(snapshot.errors ?? {}).some(Boolean)
+    const refreshing = ['run', 'steps', 'trace'].some(key => snapshot.queryStatus?.[key] === 'loading')
+    const failed = Object.values(snapshot.errors ?? {}).some(Boolean)
+      || Object.values(snapshot.queryStatus ?? {}).some(value => ['error', 'cancelled'].includes(value))
+    // 정기 조회 중에는 이미 시작한 문서를 멈추지 않습니다.
+    playbackReady = ready || (playbackReady && refreshing && !failed && snapshot.availability !== 'unavailable')
     if (!ready) return
     for (const entry of feed.entries) {
       const event = entry.event
       if (seen.has(event.eventId)) continue
       seen.add(event.eventId)
       const action = traceAction(event, snapshot.traceSteps ?? snapshot.agents.map(item => item.step).filter(Boolean), run)
-      let startsAt = Math.max(clock, tail)
-      if (parallel(last, action) && last.endsAt > clock) startsAt = last.startsAt
-      else if (last) {
-        const gap = (Date.parse(action.occurredAt) - Date.parse(last.occurredAt)) / 1000
-        if (Number.isFinite(gap)) startsAt += Math.min(.35, Math.max(0, gap))
+      const phase = phaseOf(action)
+      const phaseKey = JSON.stringify([phase ?? action.kind, action.codeVersion, action.agent])
+      // 중요한 문제/수정 안내는 연출 대기열을 기다리지 않고 팝업으로 표시합니다.
+      if (action.kind === 'issue' || action.kind === 'manage' && action.eventType === 'FIX_REQUESTED') {
+        notices.set(action.agent, { ...action, offset: entry.offset, endsAt: clock + phaseSeconds })
       }
-      const item = { ...action, offset: entry.offset, startsAt, endsAt: startsAt + durations[action.kind] }
+      if (!durations[action.kind] || phases.has(phaseKey)) {
+        completed++
+        recent = [...recent, { ...action, offset: entry.offset }].sort((a, b) => a.offset - b.offset).slice(-8)
+        continue
+      }
+      phases.add(phaseKey)
+      const paired = parallel(last, action) && clock < last.startsAt + durations.handoff
+      const startsAt = paired ? Math.max(clock, last.startsAt) : Math.max(tail, clock + (phase ? groupingSeconds : 0))
+      const item = { ...action, phase, offset: entry.offset, startsAt, duration: durations[action.kind], endsAt: startsAt + phaseSeconds }
       queue.push(item); tail = Math.max(tail, item.endsAt); last = item
     }
   }
   function advance(delta, enabled = true) {
-    if (ready && enabled) clock += Math.min(.1, Math.max(0, Number.isFinite(delta) ? delta : 0))
+    if (playbackReady && enabled) clock += Math.min(.1, Math.max(0, Number.isFinite(delta) ? delta : 0))
     const finished = queue.filter(item => clock >= item.endsAt)
     if (finished.length) {
-      completed += finished.length; recent = [...recent, ...finished].slice(-8)
+      completed += finished.length; recent = [...recent, ...finished].sort((a, b) => a.offset - b.offset).slice(-8)
       queue = queue.filter(item => clock < item.endsAt)
     }
-    return queue.filter(item => item.startsAt <= clock).map(item => ({ ...item, progress: (clock - item.startsAt) / durations[item.kind] }))
+    return queue.filter(item => item.startsAt <= clock).map(item => ({ ...item, progress: Math.min(1, (clock - item.startsAt) / durations[item.kind]) }))
   }
-  return { observe, advance, reset, busy: () => queue.length > 0,
-    info: () => ({ ready, pending: queue.length, completed, recent, current: queue.filter(item => item.startsAt <= clock) }) }
+  const awaitingDelivery = row => queue.some(item => item.kind === 'handoff' && item.step?.agentRole === row.agentRole
+    && isTraceActionCurrent(item, row) && clock < item.startsAt + item.duration)
+  return { observe, advance, reset, awaitingDelivery, busy: () => queue.length > 0,
+    info: () => ({ ready, pending: queue.length, completed, recent,
+      current: [...queue.filter(item => item.startsAt <= clock), ...[...notices.values()].filter(item => clock < item.endsAt)] }) }
 }
