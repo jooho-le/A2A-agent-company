@@ -18,6 +18,7 @@ from agents.api.validation import parse_workflow_metadata
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
 from agents.llm.corrections import contract_check, development_check
 from agents.runtime.start_precheck import start_precheck_for
+from agents.runtime.signup_quality_precheck import signup_quality_precheck_for
 from agents.llm.engine import LLMEngine
 from agents.llm.development_rejection import rejection_check
 from agents.roles.developer_contract import (
@@ -56,7 +57,7 @@ _PROTECTED = frozenset({
     "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion", "fixRequest",
     "fix_attempt", "fixAttempt", "previous_source", "previousSource", "previous_artifacts",
     "repairBaseline", "previousArtifacts", "fix_issues", "fixIssues", "startingCommitHash", "parentCommitHash",
-    "requirementAuthority", "requirementScope", "runtimeInstructions", "clarifications", "fileAccess", "plannerValidation", "llmValidation",
+    "requirementAuthority", "requirementScope", "runtimeInstructions", "clarifications", "fileAccess", "plannerValidation", "llmValidation", "llmFailure",
 })
 
 
@@ -166,8 +167,11 @@ class DeveloperAgentExecutor(AgentExecutor):
         return TaskUpdater(queue, context.task_id, context.context_id)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None, development_rejection=None):
+    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None, development_rejection=None,
+                      llm_failure=None):
         data = {"code": code}
+        if llm_failure is not None:
+            data['llmFailure'] = llm_failure
         if development_rejection is not None:
             data["developmentRejection"] = development_rejection
         if llm_validation is not None:
@@ -225,6 +229,8 @@ class DeveloperAgentExecutor(AgentExecutor):
             read_failure = failure_reader(services, execution)
             from agents.runtime.repair_baseline import with_repair_baseline
             task_input = with_repair_baseline(task_input, checkpoint)
+            from agents.runtime.startup_preservation import with_startup_context, preservation_notice_for
+            task_input = with_startup_context(task_input, checkpoint, execution.configuration.scenario_contract)
             paths = ready_report_paths(task_input)
             brief = task_input.get('activeRepairFocus', {}).get('brief', {})
             checkpoint.configure_path_review(paths, execution.configuration.scenario_contract,
@@ -276,10 +282,15 @@ class DeveloperAgentExecutor(AgentExecutor):
                     source_progress_check=None if text_only else (lambda: checkpoint.source_edit_status(
                         deadline_monotonic=execution.budget.deadline_monotonic)),
                     source_write_precheck=None if text_only else precheck,
+                    source_preservation_check=None if text_only else preservation_notice_for(
+                        checkpoint, execution.configuration.scenario_contract,
+                        deadline_monotonic=execution.budget.deadline_monotonic),
                     correction_candidates=checkpoint.correction_candidates if paths and not text_only else None,
                     output_check=contract_check(validate) if text_only else development_check(
                         validate, precheck=precheck, path_check=checkpoint.ready_path_issues if paths else None,
                         library_type_check=checkpoint.library_type_issues,
+                        signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
+                            if execution.budget.limits.max_output_corrections else None,
                         priority_check=checkpoint.pending_priority_paths if paths else None))
                 result = await run_model(task_input)
                 decision = validate(result.data)
@@ -313,7 +324,7 @@ class DeveloperAgentExecutor(AgentExecutor):
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
             await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation(),
-                               development_rejection=error.development_rejection)
+                               development_rejection=error.development_rejection, llm_failure=error.public_failure())
             return
         except (DeveloperContractError, DeveloperCheckpointError, DeveloperServicesError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)

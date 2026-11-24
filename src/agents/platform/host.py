@@ -291,6 +291,7 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from agents.runtime.qa_catalog import QA_DRAFT_POLICY, SECURITY_ID_POLICY
         from agents.llm.corrections import TOOL_ERROR_RETURN_POLICY, DRAFT_PRECHECK_POLICY
         from agents.llm import corrections as correction_rules
+        from agents.llm import failure_diagnostics, contracts as llm_contracts, openai_responses
         from agents.llm.engine import UNKNOWN_USAGE_POLICY
         from agents.llm.tool_wire import WORKSPACE_ARGUMENT_POLICY
         from agents.runtime.start_precheck import START_PRECHECK_POLICY
@@ -299,19 +300,24 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from orchestrator.infrastructure.automatic_stop import POLICY as AUTOMATIC_STOP_POLICY
         from agents.platform import package_service
         from agents.roles import prompts as role_prompts
+        from agents.roles import work_rules
         from agents.single import prompts as single_prompts
         from mcp_tools.tools import generated_recheck, unit, unit_runner, unit_store
         from orchestrator.sandbox import docker_cli
         from agents.runtime import (repair_baseline, development_failure, developer_input, repair_locations, normal_request_repair,
                                     developer_workspace, test_guidance, unused_rewrite, ready_path_diff, repair_dependencies)
         from agents.runtime import developer, developer_services, library_contracts, ready_library_types, repair_call_history
-        from agents.runtime import repair_input_failures, repair_progress as candidate_repair_history
+        from agents.runtime import (output_safety_precheck, signup_quality_precheck, start_precheck, generated_tests_precheck,
+                                    generated_test_inventory, qa_catalog, test_fix, test_write_precheck)
+        from agents.runtime import repair_input_failures, startup_preservation, email_normalization, repair_progress as candidate_repair_history
         from agents.single import runtime as single_runtime
         from agents.roles import developer_contract
         from agents.llm.engine import INPUT_RESERVATION_POLICY
-        from agents.llm import engine as llm_engine, budget as llm_budget
+        from agents.llm import engine as llm_engine, budget as llm_budget, tool_wire
         from agents.llm import development_rejection, developer_continuation, recovery
         from mcp_tools.tools import files as file_tools
+        from mcp_tools.tools import file_io
+        from mcp_tools.core import catalog as tool_catalog
         from orchestrator.domain import developer_artifacts, recovery_causes, repair_progress, validation_feedback, protected_feedback
         from agents.runtime import generated_revalidation, qa_services, security_services, security_test_scope, requirement_scope, protected_scopes
         from orchestrator.application import dispatch as validation_dispatch, validation_output
@@ -319,20 +325,33 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         policy = {
             'developerReadyReportPolicy': 'REPORTED_PATH_EDITS_CHECKED_AGAINST_FROZEN_DIFF_V7',
             'repairBaselinePolicy': repair_baseline.POLICY,
+            'startingSourceStartupPolicy': startup_preservation.POLICY,
+            'emailNormalizationRepairPolicy': email_normalization.POLICY,
             'developerInputProjectionPolicy': developer_input.POLICY,
             'inputTokenReservationPolicy': INPUT_RESERVATION_POLICY,
             'productPreconditionRecoveryPolicy': recovery_causes.POLICY,
             'hostAppFixturePolicy': unit_runner.APP_FIXTURE_POLICY,
             'partialEditPolicy': 'HOST_READ_BOUND_CAS_UNIQUE_FRAGMENT_V2',
+            'sourceWritePolicy': 'HASH_FOR_REPLACE_ATOMIC_ABSENCE_FOR_CREATE_V1',
             'boundaryReportPolicy': 'IMMUTABLE_AUTOMATIC_BOUNDARY_V1',
             'recoveryImplementationSha256': {name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
                 for name, module in (('baseline', repair_baseline), ('causes', recovery_causes), ('repairProgress', repair_progress),
                                      ('developmentFailure', development_failure), ('rejection', development_rejection),
-                                     ('fileTools', file_tools), ('developerInput', developer_input),
+                                     ('fileTools', file_tools), ('fileIo', file_io), ('toolCatalog', tool_catalog),
+                                     ('developerInput', developer_input),
+                                     ('startupPreservation', startup_preservation),
+                                     ('startPrecheck', start_precheck),
+                                     ('emailNormalization', email_normalization),
                                      ('repairLocations', repair_locations), ('normalRequestRepair', normal_request_repair),
                                      ('invalidInputEvidence', repair_input_failures),
                                      ('candidateRepairHistory', candidate_repair_history), ('repairCallHistory', repair_call_history),
                                      ('libraryContracts', library_contracts), ('readyLibraryTypes', ready_library_types),
+                                     ('outputSafetyPrecheck', output_safety_precheck),
+                                     ('signupQualityPrecheck', signup_quality_precheck),
+                                     ('generatedTestInventory', generated_test_inventory), ('qaIdCatalog', qa_catalog),
+                                     ('toolWire', tool_wire),
+                                     ('generatedTestsPrecheck', generated_tests_precheck), ('generatedTestRepair', test_fix),
+                                     ('generatedTestWritePrecheck', test_write_precheck),
                                      ('developerRuntime', developer), ('developerServices', developer_services),
                                      ('singleRuntime', single_runtime), ('recoveryRouting', recovery),
                                      ('readyPathDiff', ready_path_diff), ('repairDependencies', repair_dependencies),
@@ -351,6 +370,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                      ('readySourceCheck', developer_workspace), ('unusedRewrite', unused_rewrite),
                                      ('developerDecision', developer_contract),
                                      ('llmEngine', llm_engine), ('llmBudget', llm_budget),
+                                     ('llmFailureDiagnostics', failure_diagnostics), ('llmContracts', llm_contracts),
+                                     ('openaiResponses', openai_responses),
                                      ('developerContinuation', developer_continuation))},
             "developmentProgressPolicy": DEVELOPMENT_PROGRESS_POLICY,
             "developmentRejectionPolicy": DEVELOPMENT_REJECTION_POLICY,
@@ -362,15 +383,18 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
             "securityTestIdPolicy": SECURITY_ID_POLICY,
             "workspaceArgumentPolicy": WORKSPACE_ARGUMENT_POLICY,
             "providerUnknownUsagePolicy": UNKNOWN_USAGE_POLICY,
+            "providerFailurePolicy": failure_diagnostics.POLICY,
             "toolErrorReturnPolicy": TOOL_ERROR_RETURN_POLICY,
             "draftPrecheckPolicy": DRAFT_PRECHECK_POLICY,
             "startPrecheckPolicy": START_PRECHECK_POLICY,
+            "outputSafetyPrecheckPolicy": output_safety_precheck.POLICY,
+            "signupQualityPrecheckPolicy": signup_quality_precheck.POLICY,
             "semanticRevisionPolicy": SEMANTIC_REVISION_POLICY,
             "repeatedIssuePolicy": REPEATED_ISSUE_POLICY,
             "developmentStopPolicy": DEVELOPMENT_STOP_POLICY,
             "automaticStopPolicy": AUTOMATIC_STOP_POLICY,  # docs/live-api/05 22절
             "instructionSha256": {name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
-                                  for name, module in (("roles", role_prompts), ("single", single_prompts),
+                                  for name, module in (("roles", role_prompts), ("roleWorkRules", work_rules), ("single", single_prompts),
                                                        ("corrections", correction_rules))},
             "testDataPolicy": {"version": unit_runner.TEST_DATA_POLICY,
                                "runnerSha256": hashlib.sha256(Path(unit_runner.__file__).read_bytes()).hexdigest()},

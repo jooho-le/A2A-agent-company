@@ -38,7 +38,7 @@ import re
 
 MAX_FILES = 400
 # Recorded in the Host policy for both Single and Multi.
-START_PRECHECK_POLICY = 'STATIC_START_PRECHECK_V4'
+START_PRECHECK_POLICY = 'STATIC_START_PRECHECK_V6'
 _ROUTE_METHODS = frozenset({'get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'api_route', 'route'})
 _READY_CHECK = re.compile(r'GET\s+(/\S*)')
 MAX_FILE_BYTES = 1_048_576
@@ -184,6 +184,173 @@ def _ready_route_missing(trees, ready_path) -> bool:
                     if path is None or path in (ready_path, ready_path.rstrip('/')):
                         return False
     return True
+
+
+def _literal_path(call):
+    node = call.args[0] if call.args else next((k.value for k in call.keywords if k.arg == 'path'), None)
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _standard_factory(tree, name, exported):
+    """One direct, unmodified FastAPI/APIRouter binding; unknown wiring is not judged."""
+    bound, dynamic = _bindings(tree)
+    node = bound.get(name)
+    definitions = [n for n in _top_level(tree.body) if isinstance(n, (ast.Assign, ast.AnnAssign))
+                   and any(name in set(_names(t)) for t in (n.targets if isinstance(n, ast.Assign) else [n.target]))]
+    if (dynamic or len(definitions) != 1 or node not in tree.body or not isinstance(node, ast.Assign)
+            or not isinstance(node.value, ast.Call) or not isinstance(node.value.func, ast.Name)):
+        return None
+    origin = bound.get(node.value.func.id)
+    if not (isinstance(origin, ast.ImportFrom) and origin.module == 'fastapi' and not origin.level
+            and any(a.name == exported and (a.asname or a.name) == node.value.func.id for a in origin.names)):
+        return None
+    return node.value
+
+
+def _uncertain_route_wiring(tree, name):
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, (ast.Attribute, ast.Subscript)) and any(
+                    isinstance(n, ast.Name) and n.id == name for n in ast.walk(t)) for t in targets):
+                return True
+            if isinstance(getattr(node, 'value', None), ast.Name) and node.value.id == name:
+                return True  # mutation through a second application alias is unknown
+            value = getattr(node, 'value', None)
+            if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                    and isinstance(value.func.value, ast.Name) and value.func.value.id == name
+                    and value.func.attr in _ROUTE_METHODS):
+                return True  # a saved route decorator may be applied under another name
+        if not isinstance(node, ast.Call):
+            continue
+        inner = node.func if isinstance(node.func, ast.Call) else None
+        if (inner is not None and isinstance(inner.func, ast.Attribute)
+                and isinstance(inner.func.value, ast.Name) and inner.func.value.id == name
+                and inner.func.attr in _ROUTE_METHODS):
+            return True
+        if any(isinstance(a, ast.Name) and a.id == name for a in (*node.args, *(k.value for k in node.keywords))):
+            return True
+        receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
+        if isinstance(receiver, ast.Name) and receiver.id == name and node.func.attr in (
+                'middleware', 'add_middleware', 'on_event', 'add_event_handler'):
+            return True
+        while isinstance(receiver, (ast.Attribute, ast.Subscript)):
+            receiver = receiver.value
+            if isinstance(receiver, ast.Name) and receiver.id == name:
+                return True
+    return False
+
+
+def _known_no_root_get(tree, name):
+    """Prove absence only in a simple mounted FastAPI; never import the app.
+
+    Looking at every declared route is conservative: even an unconnected GET /
+    makes this unknown/non-missing. Imported routers, middleware, custom error
+    responses and dynamic app mutation are left to the real Host build.
+    """
+    constructor = _standard_factory(tree, name, 'FastAPI')
+    if (constructor is None or _uncertain_route_wiring(tree, name)
+            or any(k.arg not in ('title', 'description', 'version') for k in constructor.keywords)):
+        return False
+    bound, _ = _bindings(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, (ast.Attribute, ast.Subscript)) and any(
+                    isinstance(n, ast.Name) and n.id == name for n in ast.walk(t)) for t in targets):
+                return False
+        if not isinstance(node, ast.Call):
+            continue
+        if any(isinstance(a, ast.Name) and a.id == name for a in node.args):
+            return False
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        method, receiver = node.func.attr, getattr(node.func.value, 'id', None)
+        if method in _ROUTE_METHODS | {'add_api_route', 'add_route'}:
+            path = _literal_path(node)
+            if path is None or '{' in path:
+                return False
+            if path in ('', '/') and method not in ('post', 'put', 'patch', 'delete', 'head', 'options'):
+                return False
+        elif method == 'include_router':
+            router = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == 'router'), None)
+            if not isinstance(router, ast.Name) or _standard_factory(tree, router.id, 'APIRouter') is None:
+                return False
+        elif method == 'mount' and _literal_path(node) in (None, '', '/'):
+            return False
+        elif receiver == name and method not in ('mount',):
+            # A validation-error handler cannot make a missing GET route return
+            # 2xx. Other custom 404/HTTP handlers or route wiring might do so.
+            error_name = getattr(node.args[0], 'id', None) if node.args else None
+            origin = bound.get(error_name)
+            validation_error = (isinstance(origin, ast.ImportFrom) and not origin.level
+                and origin.module in ('fastapi.exceptions', 'fastapi.exception_handlers')
+                and any(a.name == 'RequestValidationError' and (a.asname or a.name) == error_name for a in origin.names))
+            if not (method in ('exception_handler', 'add_exception_handler') and validation_error):
+                return False
+    return True
+
+
+def _shadowed_ready_route(root, trees, app_found, ready_path):
+    if ready_path != '/' or app_found is None or app_found[2] not in trees:
+        return None
+    _module, name, path, _binding, _dynamic = app_found
+    tree = trees[path]
+    constructor = _standard_factory(tree, name, 'FastAPI')
+    if (constructor is None or _uncertain_route_wiring(tree, name)
+            or any(k.arg not in ('title', 'description', 'version', 'lifespan') for k in constructor.keywords)):
+        return None
+    bound, _ = _bindings(tree)
+    for kw in constructor.keywords:
+        if kw.arg != 'lifespan' or isinstance(kw.value, ast.Constant) and kw.value.value is None:
+            continue
+        hook = bound.get(getattr(kw.value, 'id', None))
+        if (not isinstance(hook, (ast.FunctionDef, ast.AsyncFunctionDef)) or any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr in _ROUTE_METHODS | {'mount', 'include_router', 'add_api_route', 'add_route'}
+                for statement in hook.body for n in ast.walk(statement))):
+            return None
+    ready_lines = [node.lineno for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                   and isinstance(d.func.value, ast.Name) and d.func.value.id == name and d.func.attr == 'get'
+                   and _literal_path(d) == ready_path]
+    if not ready_lines:
+        return None
+    decorators = [d for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                  and isinstance(d.func.value, ast.Name) and d.func.value.id == name and d.func.attr in _ROUTE_METHODS]
+    for statement in tree.body:
+        call = statement.value if isinstance(statement, ast.Expr) else None
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name) and call.func.value.id == name):
+            continue
+        if call.lineno >= min(ready_lines):
+            continue
+        if call.func.attr in ('include_router', 'add_api_route', 'add_route'):
+            return None  # an earlier registration might already serve GET /
+        if call.func.attr != 'mount':
+            continue
+        mount_path = _literal_path(call)
+        if mount_path is None:
+            return None
+        if mount_path not in ('', '/'):
+            continue
+        if any(d.lineno < call.lineno and (_literal_path(d) in (None, '', '/') or '{' in _literal_path(d))
+               for d in decorators):
+            return None  # an earlier api_route/custom path may already answer the ready request
+        child = call.args[1] if len(call.args) > 1 else next((k.value for k in call.keywords if k.arg == 'app'), None)
+        child_name = child.id if isinstance(child, ast.Name) else None
+        child_tree = tree
+        origin = bound.get(child_name)
+        if isinstance(origin, ast.ImportFrom) and origin.module and not origin.level:
+            imported = next((a.name for a in origin.names if (a.asname or a.name) == child_name), None)
+            child_tree = trees.get(_module_file(root, origin.module))
+            child_name = imported
+        if child_tree is not None and child_name and _known_no_root_get(child_tree, child_name):
+            return {'fieldPath': path.relative_to(root).as_posix(), 'reasonCode': 'READY_ROUTE_SHADOWED',
+                    'sourcePath': path.relative_to(root).as_posix(), 'lineNumber': call.lineno}
+        return None  # the first root mount owns the path; never skip an unknown child
+    return None
 
 
 def _signup_route_missing(trees, path, method) -> bool:
@@ -380,6 +547,18 @@ def inspect(source_root, external_contract) -> list[dict]:
             issues.append({'fieldPath': module.replace('.', '/') + '.py', 'reasonCode': code})
         elif node is None and not dynamic:
             issues.append({'fieldPath': path.relative_to(root).as_posix(), 'reasonCode': code})
+        elif (isinstance(node, ast.ImportFrom) and not node.level and node.module == module
+              and not dynamic and node in trees[path].body):
+            # An import binding alone does not create app. In the failed frozen
+            # Source, main.py imported main.app before defining it. Never import
+            # the generated module on the Host to find this out.
+            before = ast.Module(body=trees[path].body[:trees[path].body.index(node)], type_ignores=[])
+            previous, uncertain = _bindings(before)
+            imported = next((a.name for a in node.names if (a.asname or a.name) == name), None)
+            if imported and imported not in previous and not uncertain:
+                issues.append({'fieldPath': path.relative_to(root).as_posix(),
+                               'reasonCode': 'ENTRYPOINT_SELF_IMPORT', 'sourcePath': path.relative_to(root).as_posix(),
+                               'lineNumber': node.lineno})
     # Keep going: report every certain problem at once so one correction can fix them all
     # (live Run 8b49bebd v1 had both main.py without app and a User without a primary key).
 
@@ -416,6 +595,10 @@ def inspect(source_root, external_contract) -> list[dict]:
     if (ready is not None and trees and not app_missing and app_found is not None and app_found[2] is not None
             and _ready_route_missing(trees, ready.group(1))):
         issues.append({'fieldPath': app_found[2].relative_to(root).as_posix(), 'reasonCode': 'READY_ROUTE_MISSING'})
+    elif ready is not None and not app_missing:
+        shadowed = _shadowed_ready_route(root, trees, app_found, ready.group(1))
+        if shadowed is not None:
+            issues.append(shadowed)
     signup = external_contract.get('signupApi')
     if (isinstance(signup, dict) and isinstance(signup.get('path'), str) and signup['path'].startswith('/')
             and isinstance(signup.get('method'), str) and signup['method'].isalpha()

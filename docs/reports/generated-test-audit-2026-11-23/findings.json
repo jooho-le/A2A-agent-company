@@ -1,0 +1,287 @@
+{
+  "date": "2026-11-23",
+  "task": 103,
+  "kind": "READ_ONLY_EXISTING_RECEIPT_AUDIT",
+  "paidModelCalls": 0,
+  "newRunsSubmitted": 0,
+  "implementationChanged": false,
+  "scopeCount": 4,
+  "totalGeneratedFailures": 16,
+  "failureCategories": {
+    "UNDEFINED_HOST_FIXTURE_MEMBER": 14,
+    "DICT_RETURN_UNPACKED_AS_VALUES": 2
+  },
+  "scopes": [
+    {
+      "architecture": "SINGLE_AGENT",
+      "runId": "443d9b83-c29a-479e-9c8f-de6dd4a24bca",
+      "role": "QA",
+      "executionId": "862a19b7-6207-4bdb-9878-9d1110d4f44c",
+      "executionManifestId": "b133967b-423f-4c9a-89b7-2129442382f7",
+      "sourceArtifactId": "f171fd8b-449c-4644-933f-890a8f8b55c1",
+      "inputTestSha256": "f2767c7d0350db2b45797db1f88daf098e58eca533c3595e9f0f38acf2e11d35",
+      "inputMatchesCurrentFile": true,
+      "scope": "qa-unit",
+      "total": 5,
+      "passed": 0,
+      "failed": 5,
+      "failureCategories": {
+        "UNDEFINED_HOST_FIXTURE_MEMBER": 4,
+        "DICT_RETURN_UNPACKED_AS_VALUES": 1
+      },
+      "failures": [
+        {
+          "testId": "test_signup.SignupTests.test_signup_duplicate_email_rejected",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_signup_invalid_email_rejected",
+          "category": "DICT_RETURN_UNPACKED_AS_VALUES",
+          "runnerOrigin": "TEST",
+          "details": "AssertionError: 'exactEmailRows' != 0 : Expected no user created for invalid email [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_signup_password_length_boundary",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_signup_response_matches_db_effect",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_signup_valid_email_password",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        }
+      ],
+      "undefinedMemberSites": [
+        {
+          "attribute": "fresh_email",
+          "line": 10
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 45
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 65
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 72
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 89
+        }
+      ],
+      "containsRedactedIdentifier": true
+    },
+    {
+      "architecture": "SINGLE_AGENT",
+      "runId": "443d9b83-c29a-479e-9c8f-de6dd4a24bca",
+      "role": "SECURITY",
+      "executionId": "abc248e7-a94a-49a5-bb69-b52b3d07ac55",
+      "executionManifestId": "6241a743-ddd8-4eda-a838-e8febd47fb00",
+      "sourceArtifactId": "f171fd8b-449c-4644-933f-890a8f8b55c1",
+      "inputTestSha256": "d4d962aaa2d968ee59dd517c8af6731cb86b243c9631824a0a86025c5ad526ea",
+      "inputMatchesCurrentFile": true,
+      "scope": "security-tests",
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "failureCategories": {
+        "UNDEFINED_HOST_FIXTURE_MEMBER": 3
+      },
+      "failures": [
+        {
+          "testId": "test_signup.SecurityTests.test_password_hash_policy",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SecurityTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SecurityTests.test_password_not_exposed_in_outputs",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SecurityTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SecurityTests.test_unique_email_db_constraint",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SecurityTests' object has no attribute 'fresh_email' [origin=TEST]"
+        }
+      ],
+      "undefinedMemberSites": [
+        {
+          "attribute": "fresh_email",
+          "line": 6
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 24
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 36
+        },
+        {
+          "attribute": "new_password",
+          "line": 7
+        },
+        {
+          "attribute": "new_password",
+          "line": 25
+        },
+        {
+          "attribute": "new_password",
+          "line": 37
+        },
+        {
+          "attribute": "new_password",
+          "line": 49
+        }
+      ],
+      "containsRedactedIdentifier": false
+    },
+    {
+      "architecture": "MULTI_AGENT",
+      "runId": "cf2d0a10-7f51-4af6-a436-8c33075b6478",
+      "role": "QA",
+      "executionId": "2ed85c5f-1713-420d-a6f7-b5ad3a8c8b81",
+      "executionManifestId": "320f96e7-aa5e-4b35-bb1c-b85422da7279",
+      "sourceArtifactId": "7a78f5c1-ef59-4ee3-9d81-614e1db94090",
+      "inputTestSha256": "2d8749af117d190ddd8ae7dfd563ff5e9124d55f236faee5a8787aabd2780629",
+      "inputMatchesCurrentFile": true,
+      "scope": "qa-unit",
+      "total": 5,
+      "passed": 0,
+      "failed": 5,
+      "failureCategories": {
+        "UNDEFINED_HOST_FIXTURE_MEMBER": 4,
+        "DICT_RETURN_UNPACKED_AS_VALUES": 1
+      },
+      "failures": [
+        {
+          "testId": "test_signup.SignupTests.test_duplicate_email_rejected_due_to_db_unique_constraint",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_invalid_email_rejected_and_not_stored",
+          "category": "DICT_RETURN_UNPACKED_AS_VALUES",
+          "runnerOrigin": "TEST",
+          "details": "AssertionError: 'totalRows' != 0 : Expected no user created in DB for invalid email [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_password_length_boundary",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_response_matches_signup_outcome",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupTests.test_valid_signup_creates_user_and_returns_success",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupTests' object has no attribute 'fresh_email' [origin=TEST]"
+        }
+      ],
+      "undefinedMemberSites": [
+        {
+          "attribute": "fresh_email",
+          "line": 8
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 31
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 56
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 62
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 70
+        }
+      ],
+      "containsRedactedIdentifier": false
+    },
+    {
+      "architecture": "MULTI_AGENT",
+      "runId": "cf2d0a10-7f51-4af6-a436-8c33075b6478",
+      "role": "SECURITY",
+      "executionId": "73372dc1-5e2d-42e0-8ba9-60e3e31357cf",
+      "executionManifestId": "efc4d33a-3d2a-459c-943c-f2eccc57eb84",
+      "sourceArtifactId": "7a78f5c1-ef59-4ee3-9d81-614e1db94090",
+      "inputTestSha256": "e05e0defd1fae73ae2d0f593b2fac2774b8b4bdec3e7207705a39fe32cc78294",
+      "inputMatchesCurrentFile": true,
+      "scope": "security-tests",
+      "total": 3,
+      "passed": 0,
+      "failed": 3,
+      "failureCategories": {
+        "UNDEFINED_HOST_FIXTURE_MEMBER": 3
+      },
+      "failures": [
+        {
+          "testId": "test_signup.SignupSecurityTests.test_password_and_hash_not_exposed",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupSecurityTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupSecurityTests.test_password_hash_policy",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupSecurityTests' object has no attribute 'fresh_email' [origin=TEST]"
+        },
+        {
+          "testId": "test_signup.SignupSecurityTests.test_unique_email_db_constraint",
+          "category": "UNDEFINED_HOST_FIXTURE_MEMBER",
+          "runnerOrigin": "TEST",
+          "details": "AttributeError: 'SignupSecurityTests' object has no attribute 'fresh_email' [origin=TEST]"
+        }
+      ],
+      "undefinedMemberSites": [
+        {
+          "attribute": "fresh_email",
+          "line": 7
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 27
+        },
+        {
+          "attribute": "fresh_email",
+          "line": 40
+        }
+      ],
+      "containsRedactedIdentifier": false
+    }
+  ],
+  "limitations": [
+    "No new model or Docker execution.",
+    "Additional defects in unreachable test statements are static observations, not newly reproduced failures.",
+    "The origin of a REDACTED identifier is not established from retained wire records."
+  ]
+}

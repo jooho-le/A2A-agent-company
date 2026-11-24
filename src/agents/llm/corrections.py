@@ -32,9 +32,58 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'COLLECT_ALL_DRAFT_ISSUES_BEFORE_REFERENCE_ADMISSION_V1'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V8'
+
+VALIDATION_ERROR_GUIDANCE = (
+    'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
+    'the signup endpoint runs. Import RequestValidationError from fastapi.exceptions and register its '
+    'handler on the approved FastAPI application in repairSourcePath. Keep the existing HTTPException '
+    'handler and its business rejection behavior. Changing only that handler, catching inside signup, '
+    'or adding Pydantic field validators does not protect this earlier error path. A broad Exception handler '
+    'does not replace the framework-specific RequestValidationError handler either. A parameter annotated '
+    'dict/list, a Body parameter, and a SecretStr request model still require this protection: a malformed '
+    'whole body can be echoed before any endpoint code or field validation runs. '
+    'Return a value-free response using the approved validation rejection status and schema. '
+    'Do not serialize unfiltered exc.errors(), exc.body, str(exc), or a request body containing credentials, '
+    'and do not log those values. Do not import main.app into a router or from main itself. '
+    'This is public framework API guidance, not a measured finding, hidden test or permission to change requirements.')
 
 INSTRUCTIONS = {
+    'READY_SIGNUP_QUALITY_REVIEW': (
+        'The Host found reviewable source paths against the public signup contract; these are static warnings, '
+        'not measured security findings or proof of product success. Read the listed sourcePath and lineNumber. '
+        'sourcePath is repository-relative; read it using fileAccess coordinates such as source/<sourcePath>, '
+        'never a Host absolute path. '
+        'repairSourcePath is the file to edit; it may differ from sourcePath where the risk was observed. '
+        'For default request validation, install protection on the FastAPI app in that entrypoint; '
+        'do not import main.app back into a router or import main from itself. The Host requires a fresh '
+        'read and a changed source write at each repair target before accepting another READY. '
+        'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS / VALIDATION_ERRORS_FORWARD_INPUT: protect request validation '
+        'errors before the endpoint runs, including dict/list or Body parameters and SecretStr models. '
+        'HTTPException or a broad Exception handler alone does not override RequestValidationError. '
+        'Do not return exc.errors() with its input fields, exc.body, or raw request bodies. '
+        'RAW_EXCEPTION_IN_ERROR_RESPONSE / EXCEPTION_LOG_MAY_EXPOSE_DB_PARAMETERS: inspect database exceptions, '
+        'SQL parameters and exc_info/tracebacks in responses and logs. Use value-free error codes/exception types '
+        'rather than exception strings or credential values. A registered logging filter alone does not prove '
+        'traceback or cached exception text is scrubbed. DB_ERROR_PATH_NOT_HANDLED: an IntegrityError handler '
+        'covers duplicates, not other SQLAlchemy failures. Keep its duplicate rejection, add rollback and a '
+        'value-free server-error response for other SQLAlchemy errors at the commit boundary, and prevent '
+        'uncaught database exceptions from reaching framework traceback logs. Configure create_engine with '
+        'hide_parameters=True as defense in depth; it does not replace safe error handling. Do not disable '
+        'all logging, suppress real failures, or change test criteria. Register handlers on the application, not APIRouter. '
+        'EMAIL_VALIDATED_BEFORE_CANONICAL_TRIM: apply the approved emailPolicy before validating; use the same '
+        'canonical value for lookup, insert and UNIQUE enforcement. Do not invent dot/plus alias removal. '
+        'COMMIT_CONFLICT_MAPPED_TO_SERVER_ERROR: a duplicate may occur after the initial lookup during commit. '
+        'Handle the database uniqueness conflict with rollback and a public-contract rejection, not 500; preserve '
+        'genuine unrelated storage errors and do not label every exception a duplicate. Keep the source/build '
+        'contract and all test criteria. Inspect all listed paths and make the necessary source changes before READY.'),
+    'READY_OUTPUT_SAFETY_REVIEW': (
+        'The Host found a simple FastAPI signup request model that can use default validation errors containing '
+        'the submitted input. Review the frozen non-exposure criterion before READY. Protect errors raised before '
+        'the signup function, as well as normal responses and database errors. Use an appropriate application-level '
+        'validation handler or equivalent safe request handling; never serialize the full exception, exc.errors() '
+        'with input values, or the submitted body. Preserve approved error behavior and the signup interface. '
+        'This is a source-risk correction, not a proven product verdict or permission to change tests or requirements.'),
     'DEVELOPER_REJECTION_RECOVERABLE': (
         'For NO_CHANGE_REQUIRED the Host found unchanged source with a still-measured failure on that same candidate. '
         'Use the active fixRequest, not rejectedCandidateFixRequest history. Repair the measured issue with a minimal edit; '
@@ -81,11 +130,17 @@ INSTRUCTIONS = {
     'GENERATED_TESTS_INVALID': (
         'Your generated tests do not match your cases yet; nothing has run. GENERATED_TEST_FILE_MISSING: write '
         'the test file for each generated test scope with write_test_file (use testTargets) before READY. '
+        'This includes every required browser suite JSON, even when all signup cases use unit tests. '
+        'BROWSER_SUITE_INVALID: write valid browser-suite-v1 JSON using only testTargets.allowedActions. '
+        'Declare every browser testId under its exact run_browser_tests selector. '
+        'BROWSER_SUITE_PATH_INVALID: use only the approved testTargets path inside your QA scratch; never symlinks. '
         'TEST_IN_FILE_NOT_DECLARED: every test method in your test files is run and must be declared as one case '
         'whose testId is module.Class.method exactly; declare it or remove the extra method. '
         'DECLARED_TEST_NOT_IN_FILE: choose a matching selector and exact testId from hostTestIdCatalog; '
         'never guess or add a tests. prefix. Do not remove required coverage. '
-        'GENERATED_TEST_SYNTAX_INVALID: a test file is not valid Python; rewrite it. GENERATED_TEST_NONE: the '
+        'GENERATED_TEST_SYNTAX_INVALID: a test file is not valid Python; rewrite it. Never place an actual '
+        'NUL byte in source. Construct control-character request data at execution time, for example chr(0), '
+        'while preserving the negative test. GENERATED_TEST_NONE: the '
         'scope has no test method; write the declared tests. TEST_CLIENT_NOT_STARTED: open the app only as '
         '"with TestClient(app) as client:" so its lifespan creates the tables, as tests/test_health.py does; a '
         'TestClient made without with fails even on a correct product. ASYNC_TEST_IN_SYNC_CASE: a unittest.TestCase '
@@ -94,7 +149,27 @@ INSTRUCTIONS = {
         'module that defines it. TEST_HOST_FIXTURE_REQUIRED: for SCN-001 subclass the Host AppTestCase '
         'from _host_app_test, use self.client/self.db/self.User in test methods, and remove product imports '
         'at module level and custom setup/teardown. The Host handles isolated DB and lifespan; it does not '
-        'create missing product tables. Then return READY.'),
+        'create missing product tables. TEST_HOST_MEMBER_MISSING: self.fresh_email and self.new_password are not '
+        'Host members; create a local fresh_email (for example with uuid4) and import new_password from '
+        '_host_test_data. Respect explicitly defined custom helpers. TEST_HOST_RETURN_MISUSED: '
+        'signup_email_state returns a dict; read totalRows/exactEmailRows/hasDirectEmailUniqueKey by key, '
+        'never as unpacked numeric row values. Use testTargets.appFixture.methods for actual signatures '
+        'and return types. concurrent_signup_statuses returns two integer HTTP codes; an individual code '
+        'cannot be the container argument of assertIn. TEST_HOST_ARGUMENT_INVALID: use the exact parameter '
+        'names and keywordOnly arguments in appFixture.methods; do not pass keyword-only values positionally. '
+        'The password keyword requires the '
+        'runtime synthetic string itself, not [sample], a tuple or a dict. check_signup_output requires '
+        'a string of at least 8 characters generated inside the current test body and present in the body. '
+        'Keep short/missing-password negative cases using self.client.post and their normal response/DB '
+        'assertions; do not remove them. TEST_HOST_RESULT_KEY_UNKNOWN: use only the helper result keys in '
+        'testTargets.appFixture.methods; hash parameters expose argon2id/verified/memoryKiB/iterations/'
+        'parallelism and optional distinctSalts, not algorithm or memory_cost. '
+        'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE: each hash result is a snapshot. The first return has no '
+        'distinctSalts and does not update after a later observation. Observe two different committed accounts '
+        'in one test and assert second_params["distinctSalts"] on the SECOND return, never first_params. '
+        'Do not use a default True, skip, constant or removed assertion. Check numeric hash settings with >= '
+        'the public minimums, not exact equality. Keep all assigned expectations. '
+        'Then return READY.'),
     'CODE_REFERENCE_INVALID': (
         'A code reference in your review cannot be anchored yet. REFERENCE_FILE_NOT_READ: read that file with '
         'read_project_file in this step before citing it. When sourceReferenceCatalog is present, find the '
@@ -162,6 +237,10 @@ INSTRUCTIONS = {
         'main.app, the synchronous database.get_db dependency and the SQLAlchemy model models.User with a primary '
         'key column; rewrite an existing starting file only together with what it already provides. '
         'READY_ROUTE_MISSING: keep the starting code\'s ready route (GET / answering 2xx) on main.app. '
+        'READY_ROUTE_SHADOWED: an earlier mount at / captures the ready request before its handler and the '
+        'known child application has no GET / route. Preserve the ready handler before the catch-all mount, '
+        'or include a compatible APIRouter on the main application; keep all existing signup routes, startup '
+        'initialization and error handling. A ready decorator hidden behind the mount is not sufficient. '
         'DEPENDS_TARGET_INVALID: pass the dependency function itself, e.g. Depends(get_db), never a string. '
         'SIGNUP_ROUTE_MISSING: implement the signupApi route (method and path in externalContract) on main.app or '
         'on a router included in it.'),
@@ -225,10 +304,83 @@ def _issue(item, *, start_precheck=False) -> dict | None:
             issue.update(lineNumber=line, sourceExpression=expression)
         if item.get('handlerReturnShape') == 'ERRORS_CALL_IN_JSONRESPONSE_CONTENT':
             issue['handlerReturnShape'] = 'ERRORS_CALL_IN_JSONRESPONSE_CONTENT'
+    source_path, line = item.get('sourcePath'), item.get('lineNumber')
+    if (isinstance(source_path, str) and 0 < len(source_path) <= 256
+            and re.fullmatch(r'[A-Za-z0-9_./-]+\.py', source_path)
+            and not source_path.startswith('/') and all(p not in ('', '.', '..') for p in source_path.split('/'))
+            and redact_text(source_path) == source_path and type(line) is int and 0 < line <= 1048576):
+        issue.update(sourcePath=source_path, lineNumber=line)
+    repair_path = item.get('repairSourcePath')
+    if _safe_review_file(repair_path):
+        issue['repairSourcePath'] = repair_path
+    revision = item.get('reviewRevision')
+    if isinstance(revision, str) and re.fullmatch('[a-f0-9]{64}', revision):
+        issue['reviewRevision'] = revision
+    if code in ('DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS', 'VALIDATION_ERRORS_FORWARD_INPUT'):
+        context = _validation_error_context(item.get('validationErrorContext'))
+        if context is not None:
+            issue['validationErrorContext'] = context
+    if code == 'EMAIL_VALIDATED_BEFORE_CANONICAL_TRIM':
+        from agents.runtime.email_normalization import valid_context
+        context = item.get('emailNormalizationContext')
+        if valid_context(context):
+            issue['emailNormalizationContext'] = {k: context[k] for k in (
+                'sourceRef', 'parser', 'trimBeforeValidationObserved')}
     key = item.get('requirementKey')
     if isinstance(key, str) and _REQUIREMENT_KEY.match(key):
         issue['requirementKey'] = key
     return issue
+
+
+def _safe_review_file(path):
+    return (isinstance(path, str) and 0 < len(path) <= 256
+            and re.fullmatch(r'[A-Za-z0-9_./-]+\.py', path) is not None
+            and not path.startswith('/') and all(p not in ('', '.', '..') for p in path.split('/'))
+            and redact_text(path) == path)
+
+
+def source_review_paths(issues):
+    """Only files from the trusted checker, still subject to MCP ACL and CAS."""
+    return tuple(dict.fromkeys('source/' + path for row in issues
+                              if _safe_review_file(path := row.get('repairSourcePath', row.get('sourcePath')))))
+
+
+def _validation_error_context(value):
+    """Closed Host observations only; no model explanations or source body."""
+    if not isinstance(value, dict):
+        return None
+    name = value.get('applicationAttribute')
+    lines = value.get('httpExceptionHandlerLines')
+    if (not isinstance(name, str) or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', name) is None
+            or redact_text(name) != name
+            or type(value.get('httpExceptionHandlerDetected')) is not bool
+            or type(value.get('requestValidationHandlerDetected')) is not bool
+            or not isinstance(lines, list) or len(lines) > 8
+            or any(type(line) is not int or not 0 < line <= 1048576 for line in lines)):
+        return None
+    return {'applicationAttribute': name, 'httpExceptionHandlerDetected': value['httpExceptionHandlerDetected'],
+            'requestValidationHandlerDetected': value['requestValidationHandlerDetected'],
+            'httpExceptionHandlerLines': sorted(set(lines))}
+
+
+def validation_error_repair_targets(issues):
+    targets = []
+    for row in issues:
+        if row.get('reasonCode') not in ('DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS', 'VALIDATION_ERRORS_FORWARD_INPUT'):
+            continue
+        context = _validation_error_context(row.get('validationErrorContext'))
+        path = row.get('repairSourcePath')
+        if context is None or not _safe_review_file(path):
+            continue
+        target = {'toolPath': 'source/' + path, 'applicationAttribute': context['applicationAttribute'],
+                  'exceptionType': 'fastapi.exceptions.RequestValidationError',
+                  'importExample': 'from fastapi.exceptions import RequestValidationError',
+                  'registrationExample': '@' + context['applicationAttribute'] + '.exception_handler(RequestValidationError)',
+                  'preserveExistingHttpExceptionHandler': context['httpExceptionHandlerDetected'],
+                  'observed': context}
+        if target not in targets:
+            targets.append(target)
+    return targets[:MAX_ISSUES]
 
 
 def report_issues(report) -> list[dict]:
@@ -326,6 +478,13 @@ def ready_path_trace(feedback):
 def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_name=None, repair_brief=None) -> dict:
     reasons = {item['reasonCode'] for item in issues}
     instruction = INSTRUCTIONS[kind]
+    if kind == 'GENERATED_TESTS_INVALID' and stage == 'TOOL_ARGUMENTS':
+        instruction += (' No tool call in this rejected batch was executed. Previously successful writes remain. '
+                        'Fix all listed source issues together and reissue only the still-needed calls. '
+                        'Source has not been automatically escaped, normalized or modified by the Host.')
+    if (kind in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_OUTPUT_SAFETY_REVIEW')
+            and 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' in reasons):
+        instruction += ' ' + VALIDATION_ERROR_GUIDANCE
     if kind in ('READY_PATH_EVIDENCE_MISMATCH', 'READY_RUNTIME_REPAIR_REQUIRED'):
         issues = [dict(row) for row in issues]
         for row in issues:
@@ -367,6 +526,10 @@ def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_
                        'is never returned or logged. The handler still produces the same response. ' + instruction)
     if kind == 'START_CONTRACT_PRECHECK_FAILED' and 'APIROUTER_EXCEPTION_HANDLER_UNAVAILABLE' in reasons:
         instruction += ' ' + _router_handler_guidance(issues)
+    if kind == 'START_CONTRACT_PRECHECK_FAILED' and 'ENTRYPOINT_SELF_IMPORT' in reasons:
+        instruction += (' The entry module imports its own not-yet-defined binding. Preserve the existing '
+                        'FastAPI app in the entrypoint; do not import main.app from main itself or introduce '
+                        'a router-to-entrypoint circular import. Host Build will actually import and start the app.')
     # One bounded correction may contain independent draft defects. Explain
     # every included class without copying model text or adding retry budgets.
     supplements = []
@@ -382,6 +545,11 @@ def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_
             instruction += ' Also address these independent Host checks: ' + INSTRUCTIONS[supplement]
     body = {'code': kind, 'executed': False, 'issues': issues[:MAX_ISSUES], 'correctionsRemaining': remaining,
             'instruction': instruction}
+    if kind == 'READY_SIGNUP_QUALITY_REVIEW':
+        from agents.runtime.email_normalization import repair_targets as email_targets
+        targets = validation_error_repair_targets(issues) + email_targets(issues)
+        if targets:
+            body['sourceRepairTargets'] = targets
     if stage is not None:
         body['stage'] = stage
     if tool_name is not None:
@@ -429,7 +597,8 @@ def checked_rejection(value) -> dict | None:
     if code not in ('OUTPUT_CONTRACT_INVALID', 'SEMANTIC_REVIEW_FORMAT_INVALID', 'QUESTIONS_NOT_ANSWERED',
                     'READY_WITHOUT_CHANGES', 'START_CONTRACT_PRECHECK_FAILED', 'CASE_EXPECTATION_INVALID',
                     'GENERATED_TESTS_INVALID', 'CODE_REFERENCE_INVALID', 'READY_PATH_EVIDENCE_MISMATCH', 'READY_PRIORITY_REPAIR_NEEDED',
-                    'READY_RUNTIME_REPAIR_REQUIRED', 'READY_LIBRARY_TYPE_MISMATCH'):
+                    'READY_RUNTIME_REPAIR_REQUIRED', 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW',
+                    'READY_SIGNUP_QUALITY_REVIEW'):
         return None
     raw = value.get('issues') or []
     issues = []
@@ -609,7 +778,8 @@ def case_expectation_check(validate, expectation_issues=None, *, explain=None, e
     return check
 
 
-def development_check(validate, precheck=None, path_check=None, priority_check=None, library_type_check=None):
+def development_check(validate, precheck=None, path_check=None, priority_check=None, library_type_check=None,
+                      output_safety_check=None, signup_quality_check=None):
     """``source_change_check`` plus the Host's read-only start-contract precheck for READY.
 
     ``precheck`` returns closed issues for start failures that the Host build would
@@ -650,6 +820,14 @@ def development_check(validate, precheck=None, path_check=None, priority_check=N
                 issues = []
             if issues:
                 return {'code': 'START_CONTRACT_PRECHECK_FAILED', 'issues': issues}
+        if output_safety_check is not None:
+            issues = output_safety_check()
+            if issues:
+                return {'code': 'READY_OUTPUT_SAFETY_REVIEW', 'issues': issues}
+        if signup_quality_check is not None:
+            issues = signup_quality_check()
+            if issues:
+                return {'code': 'READY_SIGNUP_QUALITY_REVIEW', 'issues': issues}
         if priority_check is not None:
             pending = priority_check()
             if pending:
@@ -668,21 +846,27 @@ RETURNABLE_WRITE_ERRORS = frozenset({'WRITE_CONFLICT'})
 RETURNABLE_EDIT_ERRORS = frozenset({'EDIT_READ_REQUIRED', 'EDIT_STALE_READ',
                                     'EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS'})
 # Recorded in the Host policy: settled read errors and a known WRITE_CONFLICT go back to the model.
-TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_AND_BOUND_EDIT_ERRORS_V2'
+TOOL_ERROR_RETURN_POLICY = 'SETTLED_READ_ERRORS_BOUND_EDIT_AND_ATOMIC_CREATE_V6'
 RETURNABLE_TOOL_ERRORS = frozenset({'FILE_NOT_FOUND', 'REPORT_NOT_FOUND', 'FILE_TOO_LARGE', 'FILE_ENCODING_ERROR',
                                     'PATH_TRAVERSAL'})
 _TOOL_ERROR_HINTS = {
     'EDIT_READ_REQUIRED': 'Nothing was written. Read this source file with read_project_file in this step before editing it. Use the returned sha256 and a unique fragment from that content.',
     'EDIT_STALE_READ': 'Nothing was written. The edit is not bound to the current Host-observed read. Read the file again and use that returned sha256 and current content; do not guess hashes or reuse a rejected candidate.',
-    'EDIT_TARGET_MISSING': 'Nothing was written. oldText is absent from the file you read. Choose an exact nonempty fragment from that content; preserve whitespace and escapes.',
-    'EDIT_TARGET_AMBIGUOUS': 'Nothing was written. oldText occurs more than once. Include more surrounding lines from the file you read so the fragment occurs exactly once.',
-    'FILE_NOT_FOUND': 'That file does not exist. Read only files listed in fileAccess or files you wrote in this step.',
+    'EDIT_TARGET_MISSING': 'Nothing was written. The Host now requires read_project_file for this file, then write_source_file with the complete current file plus your correction and that read sha256. Partial edit_source_file is not offered on this recovery turn. Preserve unrelated code and whitespace; never guess another oldText or omit expectedSha256.',
+    'EDIT_TARGET_AMBIGUOUS': 'Nothing was written. oldText is not unique. The Host now requires a fresh read followed by write_source_file with the complete current file plus your correction and that read sha256. Partial edits are not offered on this recovery turn; preserve all unrelated code.',
+    'FILE_NOT_FOUND': ('That file does not exist; do not repeat the same read. Use fileAccess for existing files. '
+                       'If this is an intended NEW source file and write_source_file is offered to your role, '
+                       'create it with complete content and omit expectedSha256 (wire null). The Tool atomically '
+                       'requires absence. Existing files require their current read sha256; never guess one.'),
     'REPORT_NOT_FOUND': 'That report does not exist. Use a report reference exactly as given in the task input.',
     'FILE_TOO_LARGE': 'That file is too large to read with this tool.',
     'FILE_ENCODING_ERROR': 'That file is not UTF-8 text.',
     'PATH_TRAVERSAL': 'That path is not readable for your role. Use the workspace paths in fileAccess.',
     'WRITE_CONFLICT': ('Nothing was written: expectedSha256 did not match the file as it is now. Read the file again '
-                       'and pass its current sha256, or omit expectedSha256 to replace the whole file.'),
+                       'and pass its current sha256. Never bypass the conflict by omitting expectedSha256. '
+                       'If an earlier edit in this step already applied the intended bytes, preserve them and '
+                       'submit the complete current content with write_source_file and the fresh sha256; do '
+                       'not undo that edit or invent a cosmetic change. Source progress and READY checks still apply.'),
 }
 
 

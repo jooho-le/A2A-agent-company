@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from orchestrator.domain.run_configuration import ModelConfiguration
 from orchestrator.domain.states import AgentRole
 from agents.core.identity import AgentServiceIdentity
+from agents.llm.failure_diagnostics import FailureDiagnostic, PERMANENT_REASONS, checked_diagnostic
 
 
 class SourceEditStatus(Enum):
@@ -29,6 +30,7 @@ class LLMErrorCode(str, Enum):
     REFUSAL = "LLM_REFUSED"
     INCOMPLETE = "LLM_RESPONSE_INCOMPLETE"
     SCHEMA = "LLM_SCHEMA_INVALID"
+    SOURCE_REPAIR = "LLM_SOURCE_REPAIR_EXHAUSTED"
     BUDGET = "LLM_BUDGET_EXHAUSTED"
     TIMEOUT = "LLM_EXECUTION_TIMEOUT"
     TOOL_POLICY = "LLM_TOOL_POLICY_VIOLATION"
@@ -43,7 +45,8 @@ class LLMRuntimeError(RuntimeError):
     """Stable code and closed diagnostics; no prompt, value or exception body."""
 
     def __init__(self, code: LLMErrorCode, *, records: tuple = (), usage=None,
-                 validation=None, validation_recorded=False, transient=False, development_rejection=None):
+                 validation=None, validation_recorded=False, transient=False, development_rejection=None,
+                 failure_diagnostic=None):
         self.development_rejection = None
         if development_rejection is not None:
             from agents.llm.development_rejection import RejectionAssessment
@@ -52,12 +55,17 @@ class LLMRuntimeError(RuntimeError):
             except ValueError:
                 pass  # Invalid diagnostics must not replace or disclose the original failure.
         self.code = LLMErrorCode(code)
+        try:
+            self.failure_diagnostic = checked_diagnostic(failure_diagnostic, code=self.code.value)
+        except Exception:
+            self.failure_diagnostic = None
         self.records = tuple(records)
         self.usage = usage
         # Provider adapters set this only when the request certainly produced no
         # model response (connection never made, HTTP 429/5xx). Whether to call
         # again is the engine's decision under llmLimits.max_provider_retries.
-        self.transient = transient is True and self.code in (LLMErrorCode.PROVIDER, LLMErrorCode.TIMEOUT)
+        self.transient = (transient is True and self.code in (LLMErrorCode.PROVIDER, LLMErrorCode.TIMEOUT)
+            and not (self.failure_diagnostic is not None and self.failure_diagnostic.reason in PERMANENT_REASONS))
         self.validation = None
         if validation is not None:
             from agents.llm.validation import LLMValidationReport, LLMPolicyReport
@@ -75,6 +83,13 @@ class LLMRuntimeError(RuntimeError):
         if type(self.validation) not in (LLMValidationReport, LLMPolicyReport):
             return None
         return {**self.validation.public(), 'traceRecorded': self.validation_recorded is True}
+
+    def public_failure(self):
+        try:
+            checked = checked_diagnostic(self.failure_diagnostic, code=self.code.value)
+            return None if checked is None else checked.public()
+        except Exception:
+            return None
 
 
 REPORTED_SERVICE_TIERS = frozenset({"default", "flex", "priority", "scale", "fast", "ultrafast"})
@@ -369,10 +384,16 @@ class UsageRecord:
     cost_usd: None = None
     reported_service_tier: str | None = None
     billing_context: str | None = None
+    failure_diagnostic: FailureDiagnostic | None = None
 
     def __post_init__(self):
         # Legacy cost authority remains with Host storage/pricing admission.
         validate_billing_metadata(self.reported_service_tier, self.billing_context)
+        try:
+            checked = checked_diagnostic(self.failure_diagnostic, code=self.outcome)
+        except Exception:
+            raise LLMRuntimeError(LLMErrorCode.RESPONSE) from None
+        object.__setattr__(self, 'failure_diagnostic', checked)
 
 
 @dataclass(frozen=True)

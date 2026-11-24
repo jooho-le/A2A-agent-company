@@ -363,7 +363,8 @@ class SingleModelTransportTests(unittest.IsolatedAsyncioTestCase):
         async with open_single_model_client(host, SinglePhase.IMPLEMENTING, open_mcp_client) as view:
             self.assertIs(view.principal_configuration.binding.role, SingleAgentIdentity.SINGLE_AGENT)
             tracked = TrackedMCPExecutor(view, ToolExecutionStore(f.repository), workflow_step_id=f.step.workflow_step_id)
-            await tracked.invoke("write_source_file", f.arguments(content="# real Single stdio fixture\n"),
+            await tracked.invoke("write_source_file", f.arguments(content="# real Single stdio fixture\n",
+                                 expectedSha256=fixtures.hashlib.sha256(f.file.read_bytes()).hexdigest()),
                                  deadline_monotonic=time.monotonic() + 10)
             self.assertEqual(f.file.read_text(), "# real Single stdio fixture\n")
             self.assertEqual(len(tracked.logical_call_ids), 1)

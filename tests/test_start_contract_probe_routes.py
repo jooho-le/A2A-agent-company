@@ -87,6 +87,18 @@ def test_probe_judges_the_served_path_not_the_route_table(name):
     assert code == (0 if expected == 'SCN001_START_CONTRACT_OK' else 1)
 
 
+@pytest.mark.parametrize('ready_first', [False, True])
+def test_root_mount_registration_order_is_verified_by_the_unchanged_build_probe(ready_first):
+    """Trusted fixture: preserving GET / first also preserves the mounted signup route."""
+    head, ready = MAIN_HEAD.split('@app.get("/")', 1)
+    ready = '@app.get("/")' + ready
+    mounted = ('child = FastAPI()\n@child.post("/api/auth/signup")\ndef signup(): return {}\n'
+               'app.mount("/", child)\n')
+    tail = ready + mounted if ready_first else mounted + ready
+    result = run_probe(tail, main_head=head)
+    assert result == ((0, 'SCN001_START_CONTRACT_OK') if ready_first else (1, 'SCN001_READY_ENDPOINT_REQUIRED'))
+
+
 def test_a_model_without_a_primary_key_gets_its_own_code_and_location():
     tail = VARIANTS['route_on_app'][0]
     code, marker = run_probe(tail, models=MODELS_WITHOUT_PRIMARY_KEY)

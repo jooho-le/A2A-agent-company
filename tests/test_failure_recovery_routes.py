@@ -11,6 +11,13 @@ from agents.llm.engine import LLMEngine
 import test_llm_runtime as fixture
 
 
+def test_source_review_exhaustion_is_execution_failure_not_json_format():
+    from agents.llm.recovery import failure_route
+    route = failure_route(LLMRuntimeError(LLMErrorCode.SOURCE_REPAIR), sequence=1, operation_sequence=1)
+    assert route.code == 'LLM_SOURCE_REPAIR_EXHAUSTED'
+    assert route.category == 'MODEL_EXECUTION' and route.action == 'STOP'
+
+
 class FailureRecoveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.f = fixture.LLMRuntimeTests('runTest')

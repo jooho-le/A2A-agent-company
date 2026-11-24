@@ -84,7 +84,7 @@ def test_runtime_claim_focus_and_its_measured_exit(outcome, single):
     elif outcome in ('repeat', 'no_budget'):
         with pytest.raises(LLMRuntimeError) as exc:
             asyncio.run(task)
-        assert exc.value.code == LLMErrorCode.SCHEMA
+        assert exc.value.code == LLMErrorCode.SOURCE_REPAIR
         assert events[-1].public()['action'] == 'STOP'
         assert events[-1].public()['reason'] == ('REPEATED' if outcome == 'repeat' else 'LIMIT_REACHED')
     else:

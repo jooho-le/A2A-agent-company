@@ -8,6 +8,7 @@ CAUSE_TEXT = {
     'MODEL_API_FAILURE': '모델 API 장애', 'MODEL_AUTH_FAILURE': '모델 인증 문제',
     'MODEL_CONFIGURATION_FAILURE': '모델 설정 문제', 'MODEL_CALL_TIMEOUT': '모델 호출 시간 초과',
     'BUDGET_EXHAUSTED': '호출·토큰 한도 초과', 'MODEL_OUTPUT_INVALID': '모델 출력 형식 오류',
+    'SOURCE_REPAIR_EXHAUSTED': '코드 검토·수정 기회 소진',
     'MODEL_REFUSED': '모델 거절', 'TOOL_POLICY_VIOLATION': '도구 권한 위반', 'TOOL_FAILURE': '도구 실행 실패',
     'ABORTED': '중단', 'DISPATCH_REVIEW': '전달 실패 검토', 'UNKNOWN_HOLD': '원인 기록 없음',
     'AGENT_STOPPED': '알 수 없는 코드로 멈춤', 'IN_PROGRESS': '진행 중',

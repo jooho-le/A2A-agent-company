@@ -99,3 +99,7 @@ test('200·201: 기존 CLI·Run 선택 연결, 생성/재사용 구분, 중복 �
 test('202·409·401·502/503·승인 실패: 안전한 안내와 자동 재전송 차단', { timeout: 45000 }, async () => {
   assert.equal((await uiReport()).failures, true)
 })
+
+test('복원된 미접수 키: 명시 정리 후 입력 복귀·기존 Run 보존·자동 생성 없음', { timeout: 45000 }, async () => {
+  assert.equal((await uiReport()).retirement, true)
+})

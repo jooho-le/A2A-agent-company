@@ -75,3 +75,12 @@ class RunSubmission(Base):
     # 동일 접수의 수동 POST는 한 번만 허용합니다. 응답 유실/재시작 후에도 해제하지 않습니다.
     manual_retry_claimed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class RetiredSubmissionKey(Base):
+    """미접수 키를 명시적으로 폐기한 기록. 지연된 동일 키 POST도 차단합니다."""
+
+    __tablename__ = "retired_submission_keys"
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True)
+    client_key = Column(String(36), primary_key=True)
+    retired_at = Column(DateTime, nullable=False, server_default=func.now())

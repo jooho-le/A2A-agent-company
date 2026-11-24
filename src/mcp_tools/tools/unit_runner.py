@@ -33,9 +33,59 @@ TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V1"
 TEST_DATA_MODULE = "_host_test_data"
 TEST_DATA_EXPORTS = ("new_password",)
 MAX_TEST_PASSWORD_LENGTH = 4096
-APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V5'
+APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V8'
 APP_FIXTURE_MODULE = '_host_app_test'
 APP_FIXTURE_EXPORTS = ('AppTestCase',)
+
+# Public fixture shapes only. No hidden test cases, acceptance thresholds or verdicts.
+APP_FIXTURE_ATTRIBUTES = ('client', 'db', 'User', 'app')
+APP_FIXTURE_METHODS = {
+    'concurrent_signup_statuses': {
+        'parameters': ['first', 'second'], 'keywordOnly': [],
+        'arguments': [{'name': 'first', 'type': 'json'}, {'name': 'second', 'type': 'json'}],
+        'returns': {'type': 'tuple', 'items': ['int', 'int'], 'order': 'payload order'},
+    },
+    'signup_email_state': {
+        'parameters': ['canonical_email'], 'keywordOnly': [],
+        'arguments': [{'name': 'canonical_email', 'type': 'str'}],
+        'returns': {'type': 'dict', 'properties': {
+            'totalRows': 'int', 'exactEmailRows': 'int', 'hasDirectEmailUniqueKey': 'bool'}},
+    },
+    'signup_hash_parameters': {
+        'parameters': ['canonical_email'], 'keywordOnly': ['password'],
+        'arguments': [{'name': 'canonical_email', 'type': 'str'},
+                      {'name': 'password', 'type': 'str', 'runtimeFactory': '_host_test_data.new_password'}],
+        'returns': {'type': 'dict', 'properties': {
+            'argon2id': 'bool', 'verified': 'bool', 'memoryKiB': 'int',
+            'iterations': 'int', 'parallelism': 'int', 'distinctSalts': 'bool (after two accounts)'},
+            'required': ['argon2id', 'verified', 'memoryKiB', 'iterations', 'parallelism'],
+            'optional': {'distinctSalts': 'Present only in the current return after observing another distinct '
+                         'committed account in this test. Earlier return dictionaries are snapshots and never update.'},
+            'usage': 'first = self.signup_hash_parameters(email1, password=sample); '
+                     'second = self.signup_hash_parameters(email2, password=sample); '
+                     'self.assertTrue(second["distinctSalts"]). Never read first["distinctSalts"]. '
+                     'Check each account with its own synthetic password. Public numeric hash parameters are minimums.'},
+    },
+    'check_signup_output': {
+        'parameters': ['payload'], 'keywordOnly': ['password'],
+        'arguments': [{'name': 'payload', 'type': 'json', 'contains': 'the same synthetic password string'},
+                      {'name': 'password', 'type': 'str', 'minimumLength': 8,
+                       'runtimeFactory': '_host_test_data.new_password', 'createdInside': 'current test body'}],
+        'returns': {'type': 'httpx.Response', 'records': 'value-free channel observations'},
+    },
+}
+
+
+def app_fixture_contract():
+    """Fresh JSON-shaped public API metadata; importing this runner executes no Source."""
+    return {'module': APP_FIXTURE_MODULE, 'class': APP_FIXTURE_EXPORTS[0],
+            'contract': 'SCN-001', 'policy': APP_FIXTURE_POLICY,
+            'attributes': list(APP_FIXTURE_ATTRIBUTES),
+            'methods': json.loads(json.dumps(APP_FIXTURE_METHODS)),
+            'inherits': 'unittest.TestCase', 'createsProductTables': False,
+            'testDataFactory': {'module': TEST_DATA_MODULE, 'function': 'new_password'},
+            'notProvided': ['fresh_email', 'new_password'],
+            'customHelpers': 'Define your own helpers explicitly; undeclared members are not supplied by the Host.'}
 
 
 class _CaptureBytes(io.BytesIO):
@@ -612,6 +662,288 @@ def _bounded(value, limit):
     return value.encode("utf-8", errors="replace")[:limit].decode("utf-8", errors="ignore")
 
 
+def _self_call(node, name):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == name and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == 'self')
+
+
+def _fixture_result_accesses(method, members):
+    """Direct, unmodified Host dict results only; do not follow aliases or dynamic flow."""
+    if any(not isinstance(stmt, (ast.Assign, ast.Expr)) for stmt in method.body):
+        return []
+    parents = {id(child): parent for parent in ast.walk(method) for child in ast.iter_child_nodes(parent)}
+    hash_calls = [n for stmt in method.body for n in ast.walk(stmt)
+                  if _self_call(n, 'signup_hash_parameters')]
+    accesses = []
+    for assignment in method.body:
+        if (not isinstance(assignment, ast.Assign) or len(assignment.targets) != 1
+                or not isinstance(assignment.targets[0], ast.Name)):
+            continue
+        helper = next((name for name in ('signup_email_state', 'signup_hash_parameters')
+                       if name not in members and _self_call(assignment.value, name)), None)
+        if helper is None:
+            continue
+        name = assignment.targets[0].id
+        names = [n for n in ast.walk(method) if isinstance(n, ast.Name) and n.id == name]
+        if sum(isinstance(n.ctx, ast.Store) for n in names) != 1:
+            continue
+        uses = [n for n in names if isinstance(n.ctx, ast.Load)]
+        # Escaping, deleting, mutating, or passing the dict to arbitrary code invalidates the proof.
+        if any(not isinstance(parents.get(id(n)), ast.Subscript)
+               or parents[id(n)].value is not n or not isinstance(parents[id(n)].ctx, ast.Load)
+               for n in uses) or any(isinstance(n.ctx, ast.Del) for n in names):
+            continue
+        for use in uses:
+            subscript = parents[id(use)]
+            if (subscript.lineno <= assignment.lineno or not isinstance(subscript.slice, ast.Constant)
+                    or not isinstance(subscript.slice.value, str)):
+                continue
+            accesses.append({'member': helper, 'assignment': assignment, 'subscript': subscript,
+                             'sourceLine': subscript.lineno,
+                             'firstHashResult': helper == 'signup_hash_parameters' and bool(hash_calls)
+                                 and assignment.value is hash_calls[0]})
+    return accesses
+
+
+def _method_fixture_issues(method, members):
+    """Prove only known API misuse; never infer a product verdict from Source."""
+    if method.decorator_list or not method.args.args or method.args.args[0].arg != 'self':
+        return []
+
+    def nodes(root):
+        yield root
+        for child in ast.iter_child_nodes(root):
+            if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                yield from nodes(child)
+
+    local = list(nodes(method))
+    # Dynamic or user-defined helpers remain authoritative. Do not guess whether a branch ran.
+    if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+           and n.func.id in ('setattr', 'exec') for n in local):
+        return []
+    assigned = {n.attr for n in local if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)
+                and isinstance(n.value, ast.Name) and n.value.id == 'self'}
+    issues = []
+    for node in local:
+        if (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
+                and isinstance(node.value, ast.Name) and node.value.id == 'self'
+                and node.attr in ('fresh_email', 'new_password') and node.attr not in members | assigned):
+            issues.append({'reasonCode': 'TEST_HOST_MEMBER_MISSING', 'sourceLine': node.lineno,
+                           'member': node.attr})
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in APP_FIXTURE_METHODS
+                and node.func.attr not in members and _self_call(node, node.func.attr)):
+            spec = APP_FIXTURE_METHODS[node.func.attr]
+            positional, keyword_only = spec['parameters'], spec['keywordOnly']
+            types = {a['name']: a['type'] for a in spec['arguments']}
+            unpacked = any(isinstance(arg, ast.Starred) for arg in node.args) or any(k.arg is None for k in node.keywords)
+            names = [*positional[:len(node.args)], *(k.arg for k in node.keywords if k.arg is not None)]
+            invalid = not unpacked and (len(node.args) > len(positional) or len(names) != len(set(names))
+                or set(names) != set(positional) | set(keyword_only))
+            values = [*zip(positional, node.args), *((k.arg, k.value) for k in node.keywords)]
+            for parameter, value in values:
+                if types.get(parameter) != 'str':
+                    continue
+                if (isinstance(value, (ast.List, ast.Tuple, ast.Set, ast.Dict))
+                        or isinstance(value, ast.Constant) and not isinstance(value.value, str)):
+                    invalid = True
+            if invalid:
+                issues.append({'reasonCode': 'TEST_HOST_ARGUMENT_INVALID', 'sourceLine': node.lineno,
+                               'member': node.func.attr})
+    # A direct helper assignment followed by a read of an impossible result key.
+    # Do not infer through intervening calls, mutation, aliases or unknown overrides.
+    for assignment, statement in zip(method.body, method.body[1:]):
+        if (not isinstance(assignment, ast.Assign) or len(assignment.targets) != 1
+                or not isinstance(assignment.targets[0], ast.Name) or not isinstance(assignment.value, ast.Call)):
+            continue
+        helper = next((name for name in ('signup_email_state', 'signup_hash_parameters')
+                       if name not in members and _self_call(assignment.value, name)), None)
+        if helper is None:
+            continue
+        if any(isinstance(n, ast.Call) and not any(
+                _self_call(n, name) and name not in members for name in
+                ('assertEqual', 'assertTrue', 'assertFalse', 'assertGreater', 'assertGreaterEqual', 'assertLess', 'assertLessEqual'))
+               for n in ast.walk(statement)):
+            continue
+        properties = APP_FIXTURE_METHODS[helper]['returns']['properties']
+        for node in ast.walk(statement):
+            if (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
+                    and isinstance(node.value, ast.Name) and node.value.id == assignment.targets[0].id
+                    and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)
+                    and node.slice.value not in properties):
+                issues.append({'reasonCode': 'TEST_HOST_RESULT_KEY_UNKNOWN', 'sourceLine': node.lineno,
+                               'member': helper, 'assignment': assignment, 'subscript': node})
+    # A first hash observation cannot compare two accounts. Later calls do not mutate its return.
+    # Unknown custom helpers can establish earlier observations; leave those methods to runtime.
+    known_calls = all(not isinstance(n, ast.Call) or not isinstance(n.func, ast.Attribute)
+                      or not isinstance(n.func.value, ast.Name) or n.func.value.id != 'self'
+                      or n.func.attr in APP_FIXTURE_METHODS or n.func.attr.startswith('assert') for n in local)
+    if known_calls:
+        for item in _fixture_result_accesses(method, members):
+            if item['firstHashResult'] and item['subscript'].slice.value == 'distinctSalts':
+                issues.append({**item, 'reasonCode': 'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE'})
+    # Intentionally narrow: adjacent, straight-line unpack + numeric unittest assertion.
+    # Iterating dictionary keys intentionally is valid, as are custom helper return types.
+    for assignment, assertion in zip(method.body, method.body[1:]):
+        if (not isinstance(assignment, ast.Assign) or len(assignment.targets) != 1
+                or not isinstance(assertion, ast.Expr)):
+            continue
+        unpack, check = assignment.targets[0], assertion.value
+        if (_self_call(assignment.value, 'concurrent_signup_statuses')
+                and 'concurrent_signup_statuses' not in members and 'assertIn' not in members
+                and isinstance(unpack, (ast.Tuple, ast.List)) and len(unpack.elts) == 2
+                and all(isinstance(var, ast.Name) for var in unpack.elts)
+                and _self_call(check, 'assertIn') and len(check.args) == 2 and not check.keywords
+                and isinstance(check.args[1], ast.Name) and check.args[1].id in {var.id for var in unpack.elts}):
+            issues.append({'reasonCode': 'TEST_HOST_RETURN_MISUSED', 'sourceLine': assertion.lineno,
+                           'member': 'concurrent_signup_statuses'})
+        if not _self_call(assignment.value, 'signup_email_state') or 'signup_email_state' in members:
+            continue
+        if (not isinstance(unpack, (ast.Tuple, ast.List)) or len(unpack.elts) != 3
+                or not all(isinstance(var, ast.Name) for var in unpack.elts)
+                or len({var.id for var in unpack.elts}) != 3
+                or not isinstance(check, ast.Call) or len(check.args) < 2
+                or not isinstance(check.func, ast.Attribute)
+                or check.func.attr not in ('assertEqual', 'assertGreater', 'assertGreaterEqual',
+                                           'assertLess', 'assertLessEqual')
+                or check.func.attr in members or not _self_call(check, check.func.attr)):
+            continue
+        if any(isinstance(var, ast.Name) and var.id in {n.id for n in unpack.elts}
+               and isinstance(number, ast.Constant) and type(number.value) in (int, float, bool)
+               for var, number in (check.args[:2], check.args[:2][::-1])):
+            issues.append({'reasonCode': 'TEST_HOST_RETURN_MISUSED', 'sourceLine': assertion.lineno,
+                           'member': 'signup_email_state', 'assignment': assignment,
+                           'assertion': check})
+    return issues
+
+
+def app_fixture_source_issues(source):
+    """AST only; unknown inheritance, rebinding and dynamic members get no speculative finding."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, TypeError, RecursionError):
+        return []
+    aliases = {alias.asname or alias.name for node in tree.body
+               if isinstance(node, ast.ImportFrom) and node.module == APP_FIXTURE_MODULE and not node.level
+               for alias in node.names if alias.name == 'AppTestCase'}
+    if not aliases:
+        return []
+    # Anything binding the imported name a second time makes its identity uncertain.
+    bindings = [n.id for node in tree.body for n in ast.walk(node)
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)]
+    other_bindings = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    imports = [alias.asname or alias.name.split('.')[0] for n in tree.body
+               if isinstance(n, (ast.Import, ast.ImportFrom)) for alias in n.names]
+    if any(name in bindings or name in other_bindings or imports.count(name) != 1 for name in aliases):
+        return []
+    if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ('setattr', 'exec')
+           for n in ast.walk(tree)):
+        return []
+    class_names = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    if any(isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)
+           and isinstance(n.value, ast.Name) and n.value.id in aliases | class_names for n in ast.walk(tree)):
+        return []
+    classes, issues = {}, []
+    for case in tree.body:
+        if (not isinstance(case, ast.ClassDef) or case.decorator_list or case.keywords or len(case.bases) != 1
+                or not isinstance(case.bases[0], ast.Name) or case.name in bindings):
+            continue
+        base = case.bases[0].id
+        if base not in aliases and base not in classes:
+            continue
+        members = set(classes.get(base, ()))
+        members.update(n.name for n in case.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+        members.update(n.id for node in case.body if isinstance(node, (ast.Assign, ast.AnnAssign))
+                       for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store))
+        members.update(n.attr for n in ast.walk(case) if isinstance(n, ast.Attribute)
+                       and isinstance(n.ctx, ast.Store) and isinstance(n.value, ast.Name) and n.value.id == 'self')
+        if members & {'__getattr__', '__getattribute__', '__init_subclass__'}:
+            continue
+        classes[case.name] = members
+        for method in case.body:
+            if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                issues.extend({k: v for k, v in item.items() if k in ('reasonCode', 'sourceLine', 'member')}
+                              for item in _method_fixture_issues(method, members))
+    return issues[:32]
+
+
+def _fixture_usage_reason(test, err):
+    """Bind a closed repair code to the actual failing frame and the unchanged Host API."""
+    fixture = getattr(sys.modules.get(APP_FIXTURE_MODULE), 'AppTestCase', None)
+    if fixture is None or not isinstance(test, fixture) or err[0] not in (AttributeError, AssertionError, TypeError, ValueError, KeyError):
+        return None
+    try:
+        if (inspect.getattr_static(type(test), '__getattribute__') is not object.__getattribute__
+                or any('__getattr__' in vars(cls) for cls in type(test).__mro__)):
+            return None
+        method = inspect.getattr_static(type(test), test._testMethodName)
+        frame = err[2]
+        while frame and frame.tb_frame.f_code is not method.__code__:
+            frame = frame.tb_next
+        if frame is None:
+            return None
+        terminal = frame
+        while terminal.tb_next:
+            terminal = terminal.tb_next
+        for name, marker in (('check_signup_output', 'SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST'),
+                             ('signup_hash_parameters', 'SUPPLY_SYNTHETIC_SIGNUP_ACCOUNT')):
+            original = getattr(fixture, name)
+            if (inspect.getattr_static(test, name) is original and terminal.tb_frame.f_code is original.__code__
+                    and terminal.tb_frame.f_locals.get('self') is test
+                    and (err[0] is ValueError and err[1].args == (marker,)
+                         or err[0] is TypeError and name == 'signup_hash_parameters'
+                         and type(terminal.tb_frame.f_locals.get('password')) is not str)):
+                return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+        lines, first = inspect.getsourcelines(method)
+        node = ast.parse(textwrap.dedent(''.join(lines))).body[0]
+        members = set(vars(test)) | {key for cls in type(test).__mro__ if cls not in fixture.__mro__ for key in vars(cls)}
+        candidates = _method_fixture_issues(node, members)
+        candidates += [{**item, 'reasonCode': 'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE'}
+                       for item in _fixture_result_accesses(node, members)
+                       if item['subscript'].slice.value in
+                       APP_FIXTURE_METHODS[item['member']]['returns'].get('optional', {})]
+        for item in candidates:
+            if frame.tb_lineno != first + item['sourceLine'] - 1:
+                continue
+            if item['reasonCode'] == 'TEST_HOST_MEMBER_MISSING':
+                if (err[0] is AttributeError and getattr(err[1], 'obj', None) is test
+                        and getattr(err[1], 'name', None) == item['member'] and frame.tb_next is None):
+                    return 'NOT_RUN_FIXTURE_MEMBER_MISSING'
+                continue
+            if item['reasonCode'] in ('TEST_HOST_RESULT_KEY_UNKNOWN', 'TEST_HOST_OPTIONAL_RESULT_UNAVAILABLE'):
+                helper = item['member']
+                owner = frame.tb_frame.f_locals.get(item['assignment'].targets[0].id)
+                properties = APP_FIXTURE_METHODS[helper]['returns']['properties']
+                if (err[0] is KeyError and err[1].args == (item['subscript'].slice.value,)
+                        and frame.tb_next is None and type(owner) is dict and set(owner) <= set(properties)
+                        and item['subscript'].slice.value not in owner
+                        and inspect.getattr_static(test, helper) is getattr(fixture, helper)):
+                    return 'NOT_RUN_FIXTURE_RETURN_MISUSED'
+                continue
+            if item['member'] != 'signup_email_state':
+                continue  # the existing integer-container runtime classifier handles concurrency
+            if (inspect.getattr_static(test, 'signup_email_state') is not fixture.signup_email_state
+                    or inspect.getattr_static(test, '_signup_email_state') is not fixture._signup_email_state):
+                continue
+            check = item['assertion']
+            if inspect.getattr_static(test, check.func.attr) is not getattr(unittest.TestCase, check.func.attr):
+                continue
+            allowed = {getattr(unittest.TestCase, name).__code__ for name in
+                       (check.func.attr, '_baseAssertEqual', 'fail')}
+            trace, valid = frame.tb_next, frame.tb_next is not None
+            while trace:
+                valid = valid and trace.tb_frame.f_code in allowed and trace.tb_frame.f_locals.get('self') is test
+                trace = trace.tb_next
+            keys = tuple(APP_FIXTURE_METHODS['signup_email_state']['returns']['properties'])
+            values = [frame.tb_frame.f_locals.get(var.id) for var in item['assignment'].targets[0].elts]
+            if valid and all(type(v) is str and v == key for v, key in zip(values, keys)):
+                return 'NOT_RUN_FIXTURE_RETURN_MISUSED'
+    except (AttributeError, OSError, TypeError, IndexError, ValueError, SyntaxError, RecursionError):
+        pass
+    return None
+
+
 def _status_used_as_container(test, err):
     """Prove the failing assertIn directly followed unpacking the Host helper's two integers."""
     if err[0] is not TypeError:
@@ -660,7 +992,7 @@ def _status_used_as_container(test, err):
 class _Result(unittest.TestResult):
     """Aggregate failed subtests into their parent, count class callbacks too."""
 
-    def __init__(self, expected, capture_observations=False, roots=(), exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None):
+    def __init__(self, expected, capture_observations=False, roots=(), exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False):
         super().__init__()
         self.diagnostics = diagnostics
         self.expected = expected
@@ -678,6 +1010,7 @@ class _Result(unittest.TestResult):
         self.finished = 0
         self.invalid = False
         self.capture_observations = capture_observations
+        self.fixture_usage_repair = fixture_usage_repair and not capture_observations
         self.signup_checks = signup_checks
         self.exposure_checks = exposure_checks
         self.issued_passwords = issued_passwords
@@ -848,20 +1181,23 @@ class _Result(unittest.TestResult):
 
     def addFailure(self, test, err):
         if not self._setup_error(test, err):
-            self._outcome(test, "FAIL", self._error(err))
+            reason = _fixture_usage_reason(test, err) if self.fixture_usage_repair else None
+            self._outcome(test, 'SKIP' if reason else 'FAIL', reason or self._error(err))
 
     def addError(self, test, err):
         if not self.capture_observations and _status_used_as_container(test, err):
             self._outcome(test, 'SKIP', 'NOT_RUN_HELPER_ASSERTION')
         elif not self._setup_error(test, err):
-            self._outcome(test, "FAIL", self._error(err))
+            reason = _fixture_usage_reason(test, err) if self.fixture_usage_repair else None
+            self._outcome(test, 'SKIP' if reason else 'FAIL', reason or self._error(err))
 
     def addSkip(self, test, reason):
         parent = getattr(test, "test_case", None)
         # A test-authored skip cannot claim that the trusted runner verified a helper misuse.
         details = str(reason)
         self._outcome(parent if parent is not None else test, "SKIP",
-                      'test skipped' if details == 'NOT_RUN_HELPER_ASSERTION' else details)
+                      'test skipped' if details in ('NOT_RUN_HELPER_ASSERTION', 'NOT_RUN_FIXTURE_ARGUMENT_INVALID', 'NOT_RUN_FIXTURE_MEMBER_MISSING',
+                                                    'NOT_RUN_FIXTURE_RETURN_MISUSED') else details)
 
     def addExpectedFailure(self, test, err):
         self._outcome(test, "SKIP", "expected failure")
@@ -920,7 +1256,7 @@ def _expected_cases(suite):
     return expected
 
 
-def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, capture_output_checks=False):
+def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, capture_output_checks=False, fixture_usage_repair=False):
     # The implementation lives in the immutable runner input, already covered
     # by input receipts and QA/Security policy hashes. Never amend test source.
     checks = {} if capture_output_checks else None
@@ -928,10 +1264,10 @@ def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observatio
     diagnostics = {} if capture_output_checks else None
     signup_checks = {} if capture_output_checks else None
     with _test_data_api(issued), _app_test_api(source_root, checks, issued, diagnostics, signup_checks):
-        return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks)
+        return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair)
 
 
-def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None):
+def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False):
     """Run explicit trusted-fixture tests or, in the Container, mounted tests.
 
     Return (report, exit_code), where report is None and exit is 2 for empty,
@@ -956,7 +1292,7 @@ def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observati
         if loader.errors or not 1 <= suite.countTestCases() <= MAX_CASES or budget[1]:
             raise _HarnessError()
         result = _Result(_expected_cases(suite), capture_observations,
-                         roots=(("TEST", str(root.resolve())), ("PRODUCT", str(source.resolve()))), exposure_checks=exposure_checks, issued_passwords=issued_passwords, diagnostics=diagnostics, signup_checks=signup_checks)
+                         roots=(("TEST", str(root.resolve())), ("PRODUCT", str(source.resolve()))), exposure_checks=exposure_checks, issued_passwords=issued_passwords, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair)
         suite.run(result)
         if loader.errors or result.shouldStop or budget[1] or result.testsRun != result.started:
             raise _HarnessError()
@@ -1007,7 +1343,8 @@ def main(argv=None):
         test_root = Path("/snapshot" if options.kind == "SNAPSHOT" else "/inputs") / options.directory
         with _discard_file_descriptors():
             report, exit_code = run_tests(test_root, Path("/snapshot"), options.pattern,
-                                          capture_observations=options.kind == 'PROTECTED', capture_output_checks=options.kind == 'QA_TESTS' and options.security_output_checks)
+                                          capture_observations=options.kind == 'PROTECTED', capture_output_checks=options.kind == 'QA_TESTS' and options.security_output_checks,
+                                          fixture_usage_repair=options.kind == 'QA_TESTS')
     except BaseException:
         report, exit_code = None, 2
     payload = report if report is not None else {"error": "TEST_RUNNER_ERROR"}

@@ -73,10 +73,22 @@ test('카드 상세 선택: 제품 JWT GET, 여러 Run 공개 이력과 서버 �
   assert.equal(selected, project.projectId)
   const data = await getProject(selected)
   assert.deepEqual(data, { ...project, runs })
-  const html = view({ status: 'success', project: data })
-  for (const value of [project.name, project.projectId, project.scenarioId, project.createdAt,
-    ...runs.flatMap(run => [run.runId, run.hostKey, run.configurationId, run.linkedAt])]) assert.ok(html.includes(value), value)
-  assert.ok(html.indexOf(runs[0].runId) < html.indexOf(runs[1].runId))
+  const opened = []
+  const onOpenRun = (selectedProject, run) => opened.push([selectedProject.projectId, run.runId])
+  const html = view({ status: 'success', project: data, onOpenRun })
+  for (const value of [project.name, '기타 시나리오', '작업 1', '작업 2',
+    ...[project.createdAt, ...runs.map(run => run.linkedAt)].map(value => value.replace('T', ' '))]) {
+    assert.ok(html.includes(value), value)
+  }
+  const content = SavedProjectDetailContent({ status: 'success', project: data, onOpenRun })
+  const history = findElement(content, node => node.type === 'ol' && node.props['aria-label'] === '저장된 Run 연결 이력')
+  for (const row of history.props.children) {
+    findElement(row, node => node.type === 'button').props.onClick()
+  }
+  assert.deepEqual(opened, runs.map(run => [project.projectId, run.runId]), 'server history order and Run identity preserved')
+  for (const raw of [project.projectId, project.scenarioId, ...runs.flatMap(run => [run.runId, run.configurationId])]) {
+    assert.ok(!html.includes(raw), 'technical IDs stay out of the simplified display')
+  }
   assert.ok(!html.includes(token) && !html.includes('FAKE_SUCCESS') && !html.includes('owner_user_id'))
   assert.equal(calls, 1)
 })

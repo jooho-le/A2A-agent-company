@@ -17,7 +17,8 @@ test('통합 업무 입력창: 단일 UI·승인 차단·자동 Run/Trace 연결
   try {
     const build = await rolldown({
       input: fileURLToPath(new URL('./fixtures/officeRequestUi.jsx', import.meta.url)),
-      transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': '"development"' } },
+      transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': '"development"',
+        'import.meta.env': '{"VITE_PRODUCT_RUN_SUBMISSION_ENABLED":"true"}' } },
       plugins: [{ name: 'isolated-office', resolveId(source) {
         if (source === 'react') return fileURLToPath(import.meta.resolve('react'))
         if (source.endsWith('.css')) return '\0style'

@@ -102,8 +102,10 @@ class SecurityExhaustionPaths(unittest.IsolatedAsyncioTestCase):
             return result
         providers[AgentRole.SECURITY].script = [write, prefixed_ids(ready), checked]
         run = await helper.submit(f, providers)
+        diagnostic = {'steps': [(s.agent_role.value, s.status.value) for s in f.repository.list_steps(run.run_id)],
+                      'lastEvents': [(e.actor, e.event_type) for e in helper.events(f, run)[-10:]]}
         self.assertEqual((run.status, run.verdict.value if run.verdict else None),
-                         (WorkflowStatus.FINISHED, 'SUCCESS'), run)
+                         (WorkflowStatus.FINISHED, 'SUCCESS'), diagnostic)
         self.assertEqual(packages.complete(run.run_id)['status'], 'COMPLETED')
         events = helper.events(f, run)
         self.assertFalse(any(e.event_type == 'SECURITY_DRAFT_CORRECTIONS_EXHAUSTED' for e in events))

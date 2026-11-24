@@ -16,6 +16,7 @@ from agents.llm.contracts import (
     TokenUsage, ToolCall, json_text, parse_json,
 )
 from agents.llm.tool_wire import strict_tool_schema, STRICT_TOOL_ARGUMENTS
+from agents.llm.failure_diagnostics import FailureDiagnostic, PERMANENT_REASONS, http_diagnostic
 from orchestrator.domain.run_configuration import ModelConfiguration
 
 
@@ -196,22 +197,31 @@ class OpenAIResponsesProvider:
                 headers={"Authorization": "Bearer " + self._api_key.get_secret_value()},
                 timeout=request.timeout_seconds,
             )
-        except (httpx.ConnectTimeout, httpx.PoolTimeout):
+        except (httpx.ConnectTimeout, httpx.PoolTimeout) as error:
             # The request never reached the provider: no response, no generation,
             # so the usage is known to be zero (not an assumed zero).
-            raise LLMRuntimeError(LLMErrorCode.TIMEOUT, transient=True, usage=_NOT_SENT_USAGE) from None
-        except httpx.TimeoutException:
-            raise LLMRuntimeError(LLMErrorCode.TIMEOUT) from None
+            diagnostic = FailureDiagnostic(boundary='TRANSPORT', reason=(
+                'CONNECT_TIMEOUT' if isinstance(error, httpx.ConnectTimeout) else 'POOL_TIMEOUT'))
+            raise LLMRuntimeError(LLMErrorCode.TIMEOUT, transient=True, usage=_NOT_SENT_USAGE,
+                                  failure_diagnostic=diagnostic) from None
+        except httpx.TimeoutException as error:
+            diagnostic = FailureDiagnostic(boundary='TRANSPORT', reason=(
+                'READ_TIMEOUT' if isinstance(error, httpx.ReadTimeout) else
+                'WRITE_TIMEOUT' if isinstance(error, httpx.WriteTimeout) else 'NETWORK_TIMEOUT'))
+            raise LLMRuntimeError(LLMErrorCode.TIMEOUT, failure_diagnostic=diagnostic) from None
         except httpx.ConnectError:
-            raise LLMRuntimeError(LLMErrorCode.PROVIDER, transient=True, usage=_NOT_SENT_USAGE) from None
+            raise LLMRuntimeError(LLMErrorCode.PROVIDER, transient=True, usage=_NOT_SENT_USAGE,
+                failure_diagnostic=FailureDiagnostic(boundary='TRANSPORT', reason='CONNECT_ERROR')) from None
         except Exception:
-            raise LLMRuntimeError(LLMErrorCode.PROVIDER) from None
-        if response.status_code in (401, 403):
-            raise LLMRuntimeError(LLMErrorCode.AUTH)
+            raise LLMRuntimeError(LLMErrorCode.PROVIDER,
+                failure_diagnostic=FailureDiagnostic(boundary='TRANSPORT', reason='TRANSPORT_ERROR')) from None
         if not 200 <= response.status_code < 300:
-            # Includes redirects, rate limits and unsupported model options.
-            # No automatic retry and no response-body exception messages.
-            raise LLMRuntimeError(LLMErrorCode.PROVIDER, transient=response.status_code in _TRANSIENT_STATUS)
+            diagnostic = http_diagnostic(response.status_code, response.content, response.headers.get('retry-after'))
+            code = LLMErrorCode.AUTH if response.status_code in (401, 403) else LLMErrorCode.PROVIDER
+            # Quota/billing errors require human action; a 429 alone is not proof
+            # of a temporary rate limit. The engine still owns the bounded retry.
+            raise LLMRuntimeError(code, failure_diagnostic=diagnostic,
+                transient=response.status_code in _TRANSIENT_STATUS and diagnostic.reason not in PERMANENT_REASONS)
         usage = None
         try:
             payload = parse_json(response.text)
@@ -224,7 +234,8 @@ class OpenAIResponsesProvider:
                 and _text_only_items(body["input"])) else None
             return self._parse_response(payload, request.model, usage=usage, billing_context=context)
         except Exception:
-            raise LLMRuntimeError(LLMErrorCode.RESPONSE, usage=usage) from None
+            raise LLMRuntimeError(LLMErrorCode.RESPONSE, usage=usage,
+                failure_diagnostic=FailureDiagnostic(boundary='RESPONSE', reason='INVALID_RESPONSE')) from None
 
     @staticmethod
     def _parse_usage(payload: object) -> TokenUsage | None:

@@ -403,6 +403,38 @@ class QAAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(task.get("artifacts"))
         del cases
 
+    async def test_verified_fixture_misuse_gets_one_repair_then_stays_unverified(self):
+        from orchestrator.domain import test_not_run
+        await self._fixture_misuse_stays_unverified(test_not_run.FIXTURE_MEMBER_MISSING)
+
+    async def test_verified_fixture_argument_error_keeps_source_cases_and_one_repair(self):
+        from orchestrator.domain import test_not_run
+        await self._fixture_misuse_stays_unverified(test_not_run.FIXTURE_ARGUMENT_INVALID)
+
+    async def test_verified_optional_result_error_repairs_tests_without_product_failure(self):
+        from orchestrator.domain import test_not_run
+        await self._fixture_misuse_stays_unverified(test_not_run.FIXTURE_RETURN_MISUSED)
+
+    async def _fixture_misuse_stays_unverified(self, reason):
+        tests = [{'testId': identifier, 'outcome': 'SKIP', 'details': reason} for identifier in self.case_ids]
+        report = {'format': 'unittest-v1', 'total': len(tests), 'passed': 0, 'failed': 0,
+                  'skipped': len(tests), 'tests': tests}
+        self.docker.exit_code = 0
+        self.docker.start_result = CLIResult(returncode=0, stdout=json.dumps(report).encode(), stderr=b'')
+        provider = FakeProvider(self.write_response(), self.draft_response(),
+                                self.write_response(call_id='qa-write-fix'), self.draft_response())
+        task, _ = await self.run_to(provider, 'TASK_STATE_COMPLETED')
+        measured = self.parse_completed(task)
+        self.assertEqual(len(provider.requests), 4)  # initial write + READY, one repair write + READY
+        self.assertEqual(len(self.docker.commands('start')), 2)
+        self.assertTrue(all(case.outcome is ValidationOutcome.UNVERIFIED for case in measured.tests))
+        self.assertTrue(all(case.actual_result == reason for case in measured.tests))
+        self.assertEqual({case.test_id.rsplit(':', 1)[-1] for case in measured.tests}, set(self.case_ids))
+        feedback = json.loads(json.loads(provider.requests[2].input_items_json)[0]['content'])['taskInput']['testRunFeedback']
+        self.assertEqual(feedback['reasonCodes'], [reason])
+        self.assertTrue(all(row['reasonCode'] == reason for row in feedback['observedCases']))
+        self.assertEqual(measured.execution_manifest, self.source.execution_manifest())
+
     async def test_model_cannot_submit_outcomes_as_truth(self):
         cases = self.cases()
         cases[0]["outcome"] = "PASS"

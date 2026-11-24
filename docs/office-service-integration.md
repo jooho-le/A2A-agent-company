@@ -18,6 +18,7 @@ Vite의 /api 전체를 제품 서버로 전달한다. 브라우저에는 Host/Ag
 | GET /api/v1/host/approved-configuration?scenarioId=… | 승인된 공개 설정과 식별자 |
 | POST /api/v1/runs | 자연어 원문·프로젝트명을 분리해 접수, 프로젝트와 Run 연결 저장 |
 | GET /api/v1/submissions/{requestId} | 동일 요청의 접수 결과 조회·복구 |
+| POST /api/v1/submissions/{requestId}/retire | 명시 클릭으로 미접수 키를 영속 폐기하거나, 이미 존재하는 접수를 그대로 반환 |
 | GET /api/v1/runs/{runId} 및 /steps, /events, /issues, /artifacts, /configuration | 소유권 확인 후 Host 조회 |
 
 현재 등록된 **SCN-001 회원가입** 시나리오만 실행한다. 임의의 자연어를 다른 시나리오로 승인한 것처럼 처리하지 않는다.
@@ -31,6 +32,7 @@ Vite의 /api 전체를 제품 서버로 전달한다. 브라우저에는 Host/Ag
 - POST 타임아웃·응답 유실은 UNKNOWN이다. **접수 상태 확인**은 GET만 사용하며 새 POST를 자동 전송하지 않는다. Host의 내부 키·원문 해시를 대조한 경우만 ProjectRun을 복구한다. 404도 미생성 확정으로 취급하지 않는다.
 - 승인 설정 조회 등 **Host POST 이전**의 실패는 제품 서버가 503과 X-Submission-Status: NOT_ACCEPTED를 함께 반환한다. 이 경우만 미접수로 확정하고 승인 설정 재확인 후 명시적 재요청을 허용한다. 일반 503은 UNKNOWN으로 유지한다. 409로 승인 설정이 바뀐 경우도 재조회 버튼을 표시한다.
 - 미확인 접수 ID는 브라우저 세션에 계정별로 분리해 보관하여 새로고침·재로그인 후 GET 복구한다. 다른 계정에 이전 접수나 본문을 넘기지 않는다. JWT의 sub는 복원 후보 키를 나누는 데만 사용하며 실제 인증·소유권은 제품 서버가 검증한다.
+- 접수 행을 만들기 전 DB 장애 등으로 키만 브라우저에 남았을 때는 **이전 요청 확인하고 다시 입력**을 사용한다. 서버가 접수 생성과 같은 SQLite 쓰기 잠금 아래 미접수 키를 영속 폐기한 경우만 입력으로 돌아간다. 기존 접수가 있으면 그대로 반환하며, 늦은 동일 키 POST도 차단한다. GET 404만으로 해제하거나 새 Run을 자동 생성하지 않는다.
 - SCHEDULED는 실행 예약이며 완료가 아니다. 승인 설정 부재·서버 장애 시 차단하고 이유를 표시한다.
 
 ## 로컬 실행
@@ -38,15 +40,19 @@ Vite의 /api 전체를 제품 서버로 전달한다. 브라우저에는 Host/Ag
 저장소 루트에서 각각 별도 터미널을 사용한다.
 
 ~~~bash
-.venv/bin/python scripts/run_local_service.py product
+A2A_HOST_READS_ENABLED=true .venv/bin/python scripts/run_local_service.py product
 .venv/bin/python scripts/run_local_service.py host
 cd frontend
-npm run dev
+VITE_PRODUCT_RUN_SUBMISSION_ENABLED=true npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ~~~
 
 실행 스크립트는 루트 .env를 읽되 프로세스 환경을 우선한다. Host 설정의 API 키 변수에 값이 없으면 기존 OPENAI_API_KEY를 프로세스 안에서 연결한다. 키를 다른 파일에 복사하거나 출력하지 않는다.
 
+실제 로컬 서비스 연결에는 제품 서버의 `A2A_HOST_READS_ENABLED`와 Vite의 `VITE_PRODUCT_RUN_SUBMISSION_ENABLED`가 모두 필요하다. 위 명령은 해당 실행 프로세스에서만 활성화하며, JWT·Host Bearer·승인 Configuration·멱등성 검사는 유지한다. 프론트 주소는 `http://127.0.0.1:5173/`이다. 서버 기동만으로 새 Run이나 OpenAI 호출을 시작하지 않는다.
+
 제품 실행 스크립트의 명시적인 초기화 단계에서 backend/project_schema.py가 프로젝트·Run·접수 테이블을 추가한다. 기존 사용자·문서 데이터와 일반 FastAPI의 기본 lifespan은 유지했다.
+
+기존 접수 테이블에 `manual_retry_claimed_at` 또는 미접수 키 기록 테이블이 없는 경우, 이 초기화 CLI가 SQLite 백업을 만든 뒤 누락된 구조만 추가한다. 재시작 시 기존 재시도 기록을 초기화하지 않는다. 적용 내용과 복구 버튼의 동작은 [접수 DB 업그레이드 기록](product-submission-schema-upgrade.md)을 참고한다.
 
 로컬 준비에서 누락된 JWT·Host·역할별 인증값을 서로 다르게 발급했다. 기존 .env는 /private/tmp/a2a-service-config-backup-7wiqs39h/.env에 권한 600으로 백업했다. 제품과 겹치던 로컬 Host 포트만 8000→8002로 바꾸었으며 원본 runtime JSON도 같은 비공개 디렉터리에 백업했다. 실제 키와 local 설정·DB·가상환경은 Git 제외 대상이다.
 

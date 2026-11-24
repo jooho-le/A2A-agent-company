@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, UUID4, field_validator
 
 from agents.llm.budget import BudgetSnapshot
 from agents.llm.contracts import UsageRecord
+from agents.llm.failure_diagnostics import FailureDiagnostic, checked_diagnostic
 from agents.core.identity import AgentServiceIdentity, SingleAgentIdentity
 from agents.platform.pricing import ApprovedPriceBook
 from agents.platform.pricing_store import RunPricingLedger
@@ -89,6 +90,12 @@ class UsageDetail(BaseModel):
     reported_service_tier: str | None = Field(default=None, alias="reportedServiceTier")
     billing_context: str | None = Field(default=None, alias="billingContext")
     cost_usd: None = Field(default=None, alias="costUsd")
+    failure_diagnostic: FailureDiagnostic | None = Field(default=None, alias='failureDiagnostic')
+
+    @field_validator('failure_diagnostic')
+    @classmethod
+    def closed_failure(cls, value, info):
+        return checked_diagnostic(value, code=info.data.get('outcome'))
 
 
 class EventDetail(BaseModel):
@@ -344,6 +351,7 @@ class AgentTelemetryStore:
             bound = binding if type(binding) is TelemetryBinding else TelemetryBinding.model_validate(binding)
             if type(record) is not UsageRecord or record.role != bound.role or record.cost_usd is not None:
                 raise ValueError()
+            diagnostic = checked_diagnostic(record.failure_diagnostic, code=record.outcome)
             usage = record.usage
             if usage is not None:
                 from agents.llm.contracts import TokenUsage
@@ -374,6 +382,7 @@ class AgentTelemetryStore:
                 cacheWriteInputTokens=usage.cache_write_input_tokens if usage else None,
                 reportedServiceTier=record.reported_service_tier,
                 billingContext=record.billing_context,
+                failureDiagnostic=diagnostic,
             )
             event = TraceEvent(runId=bound.run_id, workflowStepId=bound.workflow_step_id,
                 a2aTaskId=bound.a2a_task_id, agentContextId=bound.agent_context_id,
@@ -382,8 +391,10 @@ class AgentTelemetryStore:
                 inputArtifactIds=list(bound.input_artifact_ids), codeVersion=bound.code_version,
                 snapshotSha256=bound.snapshot_sha256, durationMs=record.duration_ms)
             data = detail.model_dump(mode="json", by_alias=True)
+            if diagnostic is not None:
+                data['failureDiagnostic'] = diagnostic.public()
             # Preserve canonical legacy payloads when no new metadata exists.
-            for name in ("cacheWriteInputTokens", "reportedServiceTier", "billingContext"):
+            for name in ("cacheWriteInputTokens", "reportedServiceTier", "billingContext", "failureDiagnostic"):
                 if data[name] is None:
                     data.pop(name)
             return self._append(event, bound.model_dump(mode="json", by_alias=True),

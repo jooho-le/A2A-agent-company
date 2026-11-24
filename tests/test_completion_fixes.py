@@ -48,6 +48,16 @@ ROUTER_ONLY_MAIN = ('from fastapi import APIRouter\nimport models  # noqa: F401\
                     '@router.post("/api/auth/signup")\ndef signup():\n    return {}\n')
 APPLICATION = GOOD_MAIN  # a valid app module that main.py may re-export
 
+
+def test_self_import_cannot_substitute_for_creating_the_app(tmp_path):
+    for name, text in {'main.py': ROUTER_ONLY_MAIN + '\nfrom main import app\n',
+                       'database.py': DATABASE, 'models.py': MODELS}.items():
+        (tmp_path / name).write_text(text)
+    found = inspect(tmp_path, CONTRACT)
+    assert any(i['reasonCode'] == 'ENTRYPOINT_SELF_IMPORT' for i in found)
+    packet = feedback('START_CONTRACT_PRECHECK_FAILED', issues=found, remaining=0)
+    assert 'imports its own not-yet-defined binding' in packet['hostCorrection']['instruction']
+
 # variant -> (files overriding the good app, precheck issues). Flagged variants must fail the probe;
 # variants with no issues are valid apps that the probe accepts and the precheck must not block.
 VARIANTS = {

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from hashlib import sha256
 from dataclasses import replace
 from collections.abc import Callable
 from time import monotonic
@@ -9,6 +10,7 @@ from time import monotonic
 from agents.llm import corrections as correction_rules
 from agents.llm import raw_capture
 from agents.llm.developer_continuation import MeasuredInput, RepairReadHistory
+from agents.llm.failure_diagnostics import safe_diagnostic, provider_retry_delay, timeout_diagnostic
 from agents.llm.recovery import CallRoute, CorrectionObservation, FailureRoute, correction_route, failure_route
 from agents.llm.budget import ExecutionBudget
 from agents.llm.content import sanitize_content, validate_source_fields
@@ -93,6 +95,7 @@ class LLMEngine:
         recovery_sink: Callable | None = None,
         output_check: Callable[[dict, tuple], dict | None] | None = None,
         source_write_precheck: Callable[[], list[dict]] | None = None,
+        source_preservation_check: Callable | None = None,
         source_progress_check: Callable[[], bool | SourceEditStatus] | None = None,
         correction_candidates: Callable | None = None,
         output_refresh: Callable | None = None,
@@ -104,15 +107,24 @@ class LLMEngine:
         executed = 0
         executed_names = []
         source_changed = False
+        source_written_paths = set()
         source_notices = set()
         required_tool = None
         required_alternatives = ()  # e.g. edit_source_file beside a forced write_source_file
+        required_test_paths = ()
+        source_repair_path = source_repair_sha256 = None
+        source_repair_full_write = False
+        source_repair_conflict = False
+        source_repair_absent = False
+        source_review_pending = []
+        source_repair_queue = []
         sequence = operation_sequence = None
         decided_sequence = None
         recovery_sink_failed = False
         pending_correction = None
         correction_attempt = 0
         base_output, catalog_json = output, None
+        catalog = {}
         restricted_paths = set()
         refresh_path_output = False
         last_development_rejection = None
@@ -172,13 +184,15 @@ class LLMEngine:
                 return None
 
         def decide_correction(sequence, kind, allowed, reason, *, qa_exhausted=False, draft_issue=None,
-                              development_rejection=None, observation=None, unlinked_paths=(), path_evidence=()):
+                              development_rejection=None, observation=None, unlinked_paths=(), path_evidence=(),
+                              failure_diagnostic=None):
             nonlocal pending_correction, decided_sequence, correction_attempt
             route = (FailureRoute(sequence=sequence, operationSequence=operation_sequence,
                 code=LLMErrorCode.VALIDATION_DRAFT.value, category='MODEL_FORMAT', action='STOP', reason=reason)
                 if qa_exhausted else correction_route(kind, sequence=sequence, operation_sequence=operation_sequence,
                                                      allowed=allowed, reason=reason,
-                                                     development_rejection=development_rejection))
+                                                     development_rejection=development_rejection,
+                                                     failure_diagnostic=failure_diagnostic))
             if draft_issue is not None:
                 route = route.model_copy(update={'draft_issue': draft_issue})
             if observation is not None:
@@ -274,6 +288,10 @@ class LLMEngine:
                 fallback = (correction_rules.output_digest(output_text)
                             if kind in correction_rules.UNEXPLAINED_KINDS else None)
                 signature = correction_rules.signature(kind, stage, tool_name, issues, fallback=fallback)
+                if kind == 'GENERATED_TESTS_INVALID' and catalog.get('filesSha256'):
+                    # A real file change may expose the next defect; it is not
+                    # the same unchanged draft. The total correction cap stays fixed.
+                    signature = (*signature, catalog['filesSha256'])
                 normal_correction = kind == 'READY_RUNTIME_REPAIR_REQUIRED' or (
                     kind == 'READY_PRIORITY_REPAIR_NEEDED' and any(
                         i['fieldPath'] == '/repairPaths/NORMAL_REQUEST_RUNTIME_FAILURE' for i in issues))
@@ -281,9 +299,15 @@ class LLMEngine:
                     # Switching from an overclaim to an honest partial (or changing other cited paths)
                     # must not buy a second repair opportunity for the same measured prerequisite.
                     signature = ('NORMAL_REQUEST_RUNTIME_FAILURE',)
-                if kind == 'READY_LIBRARY_TYPE_MISMATCH':
+                if kind in ('READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW'):
                     # One source correction per stage, even if the next READY changes file, line or type.
                     signature = (kind,)
+                if kind == 'READY_SIGNUP_QUALITY_REVIEW':
+                    # A resolved path and a newly exposed risk may use the
+                    # remaining shared allowance; moving a line or rewording
+                    # READY does not buy another correction for the same risks.
+                    signature = (kind, tuple(sorted({(r.get('sourcePath', ''), r['reasonCode'],
+                                                       r.get('reviewRevision', '')) for r in issues})))
                 allowed = budget_for.take(signature)
                 reason = budget_for.last_reason
                 repair_input = task_input.get('taskInput')
@@ -292,20 +316,31 @@ class LLMEngine:
                     repair_brief = repair_input.get('activeRepairFocus', {}).get('brief')
                 feedback = correction_rules.feedback(kind, issues=issues, remaining=budget_for.remaining,
                                                      stage=stage, tool_name=tool_name, repair_brief=repair_brief)
+                if kind == 'GENERATED_TESTS_INVALID':
+                    feedback['hostCorrection']['testRepairTargets'] = {
+                        'missingRequiredWritePaths': catalog.get('missingRequiredWritePaths', [])[:16],
+                        'catalogFilesSha256': catalog.get('filesSha256'),
+                        'instruction': 'Use exact IDs from the latest hostTestIdCatalog already supplied. '
+                                       'Write the missing paths, not an unrelated unit file.'}
                 if allowed and normal_correction:
                     from agents.runtime.normal_request_repair import priority_repair_evidence
                     evidence = priority_repair_evidence(task_input['taskInput'])
                     if evidence:
                         feedback['hostCorrection']['measuredFailure'] = evidence
                 if allowed and kind in ('READY_PRIORITY_REPAIR_NEEDED', 'READY_RUNTIME_REPAIR_REQUIRED',
-                                        'READY_LIBRARY_TYPE_MISMATCH'):
+                                        'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'):
                     # Source work and a subsequent truthful report share the existing Run budget.
                     messages = [*items, {'role': 'user', 'content': json_text(feedback, max_bytes=limit)}]
                     history = json.dumps(messages, ensure_ascii=False, separators=(',', ':'))
+                    review_paths = (correction_rules.source_review_paths(issues)
+                                    if kind == 'READY_SIGNUP_QUALITY_REVIEW'
+                                    and {'read_project_file', 'write_source_file'} <= self._definitions.keys() else ())
+                    required_calls = 2 * len(review_paths) + 1 if review_paths else 2
+                    required_tools = 2 * len(review_paths) if review_paths else 1
                     if (len(history.encode()) + len(prompt.system_prompt.encode()) > limit
-                            or budget.tool_calls >= budget.limits.max_tool_calls
-                            or kind == 'READY_LIBRARY_TYPE_MISMATCH' and
-                            budget.limits.max_model_calls - budget.model_calls < 2):
+                            or budget.limits.max_tool_calls - budget.tool_calls < required_tools
+                            or kind in ('READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW') and
+                            budget.limits.max_model_calls - budget.model_calls < required_calls):
                         # Fixing the incompatible call requires a source tool turn and a later READY turn.
                         allowed, reason = False, 'LIMIT_REACHED'
                     else:
@@ -363,9 +398,18 @@ class LLMEngine:
                 # With alternative edit tools the provider requires any one of the offered tools.
                 # Offer exactly the operations the Host will execute on this corrective turn.
                 wire_tools = available_tools
+                if required_tool == 'write_test_file' and required_test_paths:
+                    from agents.llm.tool_wire import pin_test_write_paths
+                    wire_tools = tuple(pin_test_write_paths(tool, required_test_paths)
+                                       for tool in available_tools if tool.name == 'write_test_file')
                 if required_tool and required_alternatives:
                     wire_tools = tuple(tool for tool in available_tools
                                        if tool.name in (required_tool, *required_alternatives))
+                if source_repair_path is not None:
+                    from agents.llm.tool_wire import pin_source_repair
+                    wire_tools = tuple(pin_source_repair(tool, source_repair_path, source_repair_sha256,
+                                                        expected_absent=source_repair_absent)
+                                       for tool in wire_tools if tool.name in (required_tool, *required_alternatives))
                 if len(history.encode("utf-8")) + len(prompt.system_prompt.encode("utf-8")) > limit:
                     raise LLMRuntimeError(LLMErrorCode.BUDGET)
                 input_reserve = reserve_for(history, items, wire_tools)
@@ -448,6 +492,9 @@ class LLMEngine:
                     code = error.code if isinstance(error, LLMRuntimeError) else (
                         LLMErrorCode.TIMEOUT if isinstance(error, asyncio.TimeoutError) else LLMErrorCode.PROVIDER
                     )
+                    diagnostic = (safe_diagnostic(error.failure_diagnostic, code=code.value)
+                                  if isinstance(error, LLMRuntimeError) else
+                                  timeout_diagnostic('MODEL_CALL', timeout) if isinstance(error, asyncio.TimeoutError) else None)
                     known_usage = error.usage if isinstance(error, LLMRuntimeError) else None
                     if known_usage is not None:
                         try:
@@ -470,7 +517,8 @@ class LLMEngine:
                             estimate = self._usage_upper_bound(prompt, history, wire_tools, output, output_cap)
                             bound = None if estimate is None else estimate.total_tokens
                     budget.account_usage(known_usage, sequence=sequence, bound=bound)
-                    record = UsageRecord(sequence, self._role, model, None, code.value, self._duration(started), known_usage)
+                    record = UsageRecord(sequence, self._role, model, None, code.value, self._duration(started), known_usage,
+                                         failure_diagnostic=diagnostic)
                     records.append(record)
                     if usage_sink is not None:
                         self._publish_usage(usage_sink, record, budget)
@@ -480,14 +528,18 @@ class LLMEngine:
                     # A refused retry keeps the original failure record below.
                     # Codex review 2026-11-18 #1: wait like a normal call while only another role's
                     # pending reservation blocks the re-send; spend the retry only once it can be sent.
+                    delay = provider_retry_delay(diagnostic, PROVIDER_RETRY_DELAY_SECONDS)
                     if (isinstance(error, LLMRuntimeError) and error.transient and provider_retries.enabled
+                            and delay is not None
                             and await self._budget_allows_another_call(budget, input_reserve)
+                            and delay < budget.remaining_seconds()
                             and provider_retries.take(('PROVIDER_TRANSIENT_RETRY',))):
-                        decide_correction(sequence, 'PROVIDER_TRANSIENT_RETRY', True, provider_retries.last_reason)
-                        await asyncio.sleep(min(PROVIDER_RETRY_DELAY_SECONDS, max(0.0, budget.remaining_seconds())))
+                        decide_correction(sequence, 'PROVIDER_TRANSIENT_RETRY', True, provider_retries.last_reason,
+                                          failure_diagnostic=diagnostic)
+                        await asyncio.sleep(delay)
                         budget.check()
                         continue
-                    raise LLMRuntimeError(code) from None
+                    raise LLMRuntimeError(code, failure_diagnostic=diagnostic) from None
                 budget.account_usage(response.usage, sequence=sequence)
                 if developer_repair and input_reserve and not any(item.get('type') == 'reasoning' for item in items):
                     measured_input = MeasuredInput.from_receipt(request, response, len(items))
@@ -594,6 +646,17 @@ class LLMEngine:
                             if "workspaceId" in arguments and arguments["workspaceId"] != workspace_id:
                                 raise policy_error('WORKSPACE_MISMATCH', sequence=sequence, tool_name=call.name,
                                                    field_path='/workspaceId')
+                            if (required_tool == 'write_test_file' and required_test_paths
+                                    and call.name == 'write_test_file'
+                                    and arguments.get('path') not in required_test_paths):
+                                raise policy_error('TOOL_NOT_OFFERED', sequence=sequence, tool_name=call.name,
+                                                   field_path='/path')
+                            if source_repair_path is not None:
+                                narrowed = next((t for t in wire_tools if t.name == call.name), None)
+                                if narrowed is None:
+                                    raise policy_error('TOOL_NOT_OFFERED', sequence=sequence, tool_name=call.name)
+                                validate_schema(narrowed.input_schema, arguments, stage='TOOL_ARGUMENTS',
+                                                sequence=sequence, tool_name=call.name)
                             # Never pass recognized secrets from model output into Tools.
                             try:
                                 sanitize_content(arguments, source_fields=definition.source_argument_fields, reject_secrets=True,
@@ -655,6 +718,24 @@ class LLMEngine:
                                         'instruction': instruction}})})
                                 correct_test_source = True
                                 break
+                            if (call.name == 'write_test_file'
+                                    and (self._role in (AgentRole.QA, AgentRole.SECURITY)
+                                         or self._role is SingleAgentIdentity.SINGLE_AGENT
+                                         and self._single_phase in (SinglePhase.QA, SinglePhase.SECURITY))):
+                                from agents.runtime.test_write_precheck import inspect_test_write
+                                issues = correction_rules.checked_rejection({
+                                    'code': 'GENERATED_TESTS_INVALID', 'issues': inspect_test_write(arguments)})
+                                if issues is not None and issues['issues']:
+                                    failure = policy_error('TEST_SOURCE_INVALID', sequence=sequence,
+                                                           tool_name=call.name, field_path='/content')
+                                    if correct(sequence, 'GENERATED_TESTS_INVALID', issues=issues['issues'],
+                                            report=failure.validation, stage='TOOL_ARGUMENTS',
+                                            tool_name=call.name, tool_calls=response.tool_calls):
+                                        seen_calls.update(item.call_id for item in response.tool_calls
+                                                          if isinstance(item.call_id, str) and item.call_id.strip())
+                                        correct_test_source = True
+                                        break
+                                    exhausted_qa_draft(failure.validation)
                             prepared.append((execution_call, definition, arguments))
                             batch_ids.add(call.call_id)
                     except LLMRuntimeError as rejected:
@@ -693,7 +774,11 @@ class LLMEngine:
                     self._validate_continuation(continuation, response.tool_calls)
                     items.extend(continuation)
                     required_tool_succeeded = False
+                    recovery_source_changed = False
+                    recovery_content_current = False
+                    pending_source_repair = None
                     check_written_paths = set()
+                    changed_source_paths = set()
                     for call, definition, arguments in prepared:
                         tool_sequence, timeout = budget.reserve_tracked_tool_call()
                         seen_calls.add(call.call_id)
@@ -703,7 +788,8 @@ class LLMEngine:
                                 self._executor.execute(call, arguments, context), timeout=timeout,
                             )
                         except asyncio.TimeoutError:
-                            raise LLMRuntimeError(LLMErrorCode.TIMEOUT) from None
+                            raise LLMRuntimeError(LLMErrorCode.TIMEOUT,
+                                failure_diagnostic=timeout_diagnostic('TOOL_CALL', timeout)) from None
                         except Exception as failure:
                             # A read-only Tool that settled with a known rejection (file not
                             # found, report not found, ...) changed nothing. When corrections
@@ -719,6 +805,32 @@ class LLMEngine:
                             items.append({"type": "function_call_output", "call_id": call.call_id,
                                           "output": json_text(correction_rules.tool_error_output(
                                               call.name, code, tool_errors.remaining), max_bytes=limit)})
+                            if (len(prepared) == 1 and call.name == 'read_project_file'
+                                    and required_tool == 'read_project_file' and source_repair_conflict
+                                    and arguments.get('path') == source_repair_path and code == 'FILE_NOT_FOUND'):
+                                source_repair_absent = True
+                                source_repair_full_write = True
+                                items.append({'role': 'user', 'content': json_text({'hostSourceRecovery': {
+                                    'code': 'RECOVERY_SOURCE_CONFIRMED_ABSENT', 'path': source_repair_path,
+                                    'instruction': 'The bound read proved this source file does not exist. '
+                                    'Do not read it again. The next offered operation creates exactly this file '
+                                    'with write_source_file. Supply its complete intended content and omit '
+                                    'expectedSha256 (wire null only when offered). The Tool atomically requires '
+                                    'absence and refuses to overwrite any intervening file. This does not '
+                                    'approve a different path or repeat an uncertain write.'}})})
+                            # A known, rejected write changed nothing. Bind the
+                            # next read and write to this exact file; never replay
+                            # an uncertain write or an entire partly completed batch.
+                            if (call.name in ('write_source_file', 'edit_source_file')
+                                    and code in correction_rules.RETURNABLE_EDIT_ERRORS | {'WRITE_CONFLICT'}
+                                    and isinstance(arguments.get('path'), str) and arguments['path'].startswith('source/')
+                                    and {'read_project_file', 'write_source_file'} <= self._definitions.keys()):
+                                repair = (arguments['path'], code == 'WRITE_CONFLICT',
+                                          code in ('EDIT_TARGET_MISSING', 'EDIT_TARGET_AMBIGUOUS'))
+                                if pending_source_repair is None:
+                                    pending_source_repair = repair
+                                elif repair[0] != pending_source_repair[0] and repair not in source_repair_queue:
+                                    source_repair_queue.append(repair)
                             continue
                         budget.account_tool_call(tool_sequence)
                         executed += 1
@@ -733,6 +845,26 @@ class LLMEngine:
                             call.name in {'write_source_file', 'edit_source_file'} and tool_result.get('changed') is True
                             or call.name == 'apply_patch' and bool(tool_result.get('changedFiles')))
                         source_changed |= changed_now
+                        if changed_now and call.name in {'write_source_file', 'edit_source_file'}:
+                            changed_source_paths.add(arguments['path'])
+                            source_written_paths.add(arguments['path'])
+                        recovery_source_changed |= changed_now
+                        # A settled CAS conflict may follow an earlier successful edit of
+                        # this same file. A fresh read and successful CAS no-op prove the
+                        # requested bytes are already current; never demand a cosmetic edit.
+                        # No prior write, different path/hash, missing receipt, uncertain
+                        # result or a true unchanged baseline cannot use this acknowledgement.
+                        if (source_repair_conflict and call.name == 'write_source_file'
+                                and arguments.get('path') == source_repair_path
+                                and source_repair_path in source_written_paths
+                                and isinstance(source_repair_sha256, str)
+                                and arguments.get('expectedSha256') == source_repair_sha256
+                                and tool_result.get('changed') is False
+                                and tool_result.get('path') == source_repair_path
+                                and tool_result.get('sha256') == source_repair_sha256
+                                and isinstance(arguments.get('content'), str)
+                                and sha256(arguments['content'].encode('utf-8')).hexdigest() == source_repair_sha256):
+                            recovery_content_current = True
                         if changed_now and restricted_paths:
                             refresh_path_output = True
                         # Transcript copy is redacted, evidence assembly uses host data later.
@@ -743,12 +875,30 @@ class LLMEngine:
                         sanitized_result = parse_json(tool_output, max_bytes=limit)
                         validate_schema(definition.output_schema, sanitized_result,
                             stage='TOOL_RESULT_REDACTED', sequence=sequence, tool_name=definition.name)
+                        if call.name == 'read_project_file' and arguments.get('path') == source_repair_path:
+                            digest = sanitized_result.get('sha256')
+                            if (not isinstance(digest, str) or len(digest) != 64
+                                    or any(c not in '0123456789abcdef' for c in digest)):
+                                raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
+                            source_repair_sha256 = digest
                         if read_history is not None:
                             tool_output = read_history.for_model(call.name, arguments, sanitized_result,
                                                                  tool_output, call.call_id)
                         items.append({"type": "function_call_output", "call_id": call.call_id, "output": tool_output})
                         required_tool_succeeded |= call.name in (required_tool, *required_alternatives)
+                    if pending_source_repair is not None:
+                        # Finish the current batch once; only its rejected paths enter recovery.
+                        # A later successful read of another file must not satisfy this fresh-read gate.
+                        source_repair_path, source_repair_conflict, full_write = pending_source_repair
+                        source_repair_full_write |= full_write
+                        source_repair_sha256, source_repair_absent = None, False
+                        required_tool, required_alternatives = 'read_project_file', ()
+                        required_tool_succeeded = False
+                        if read_history is not None:
+                            read_history.require_fresh_content(source_repair_path)
                     notices = (correction_rules.source_write_notice(source_write_precheck, check_written_paths),
+                               source_preservation_check(tuple(sorted(changed_source_paths)))
+                                   if source_preservation_check is not None and changed_source_paths else None,
                                read_history.completed_inspection() if read_history is not None else None)
                     for notice in filter(None, notices):
                         message = json_text(notice)
@@ -764,19 +914,46 @@ class LLMEngine:
                         # successful write, READY rechecks actual files and bindings, not a call count.
                         if required_tool_succeeded:
                             required_tool = None
+                            required_test_paths = ()
                     elif required_tool == 'read_project_file':
-                        # The bounded read turn is spent; the same correction now requires the change.
-                        required_tool = 'write_source_file'
-                        required_alternatives = (('edit_source_file',) if 'edit_source_file' in self._definitions
-                                                 else ())
+                        # A failed read must not count as having refreshed the file.
+                        if source_repair_absent:
+                            required_tool, required_alternatives = 'write_source_file', ()
+                        elif required_tool_succeeded:
+                            required_tool = 'write_source_file'
+                            required_alternatives = (('edit_source_file',) if not source_repair_full_write and 'edit_source_file' in self._definitions
+                                                     else ())
                     elif required_tool is not None:
-                        if source_status() is not SourceEditStatus.CHANGED:
+                        if (source_status() is not SourceEditStatus.CHANGED
+                                or source_repair_path is not None and not (
+                                    recovery_source_changed or recovery_content_current)):
                             decide_correction(sequence, 'READY_WITHOUT_CHANGES', False, 'REPEATED',
                                 observation=observed(response_kind='TOOL_CALLS',
                                                      requested=[call.name for call, _d, _a in prepared],
                                                      executed=True, refusal='NO_NET_SOURCE_CHANGE'))
                             raise LLMRuntimeError(LLMErrorCode.NO_PROGRESS)
+                        if recovery_content_current:
+                            items.append({'role': 'user', 'content': json_text({'hostSourceRecovery': {
+                                'code': 'RECOVERY_CONTENT_ALREADY_CURRENT',
+                                'instruction': 'The fresh read and successful compare-and-swap no-op confirm the '
+                                'requested bytes already match this file edited earlier in this step. No new '
+                                'source change is claimed. Submit the actual candidate when ready; all READY '
+                                'source checks, Build and QA/Security remain required.'}})})
                         required_tool = None
+                        source_repair_path = source_repair_sha256 = None
+                        source_repair_full_write = False
+                        source_repair_conflict = False
+                        source_repair_absent = False
+                        if source_repair_queue:
+                            source_repair_path, source_repair_conflict, source_repair_full_write = source_repair_queue.pop(0)
+                            required_tool, required_alternatives = 'read_project_file', ()
+                            if read_history is not None:
+                                read_history.require_fresh_content(source_repair_path)
+                        elif source_review_pending:
+                            source_repair_path = source_review_pending.pop(0)
+                            required_tool, required_alternatives = 'read_project_file', ()
+                            if read_history is not None:
+                                read_history.require_fresh_content(source_repair_path)
                     continue
                 if response.output_text is None:
                     raise LLMRuntimeError(LLMErrorCode.RESPONSE)
@@ -853,8 +1030,17 @@ class LLMEngine:
                                                     if issue['reasonCode'] == 'NO_LINKED_CODE_CHANGE')
                             refresh_path_output = bool(restricted_paths)
                         if not allowed and rejection['code'] in ('READY_PATH_EVIDENCE_MISMATCH', 'READY_RUNTIME_REPAIR_REQUIRED',
-                                                                 'READY_LIBRARY_TYPE_MISMATCH'):
-                            raise LLMRuntimeError(LLMErrorCode.SCHEMA)
+                                                                 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'):
+                            raise LLMRuntimeError(LLMErrorCode.SOURCE_REPAIR)
+                        if allowed and rejection['code'] == 'READY_SIGNUP_QUALITY_REVIEW':
+                            paths = correction_rules.source_review_paths(rejection['issues'])
+                            if paths and {'read_project_file', 'write_source_file'} <= self._definitions.keys():
+                                source_repair_path, *source_review_pending = paths
+                                source_repair_sha256 = None
+                                source_repair_conflict = False
+                                required_tool, required_alternatives = 'read_project_file', ()
+                                if read_history is not None:
+                                    read_history.require_fresh_content(source_repair_path)
                         if rejection['code'] == 'READY_WITHOUT_CHANGES':
                             if not allowed:
                                 raise LLMRuntimeError(LLMErrorCode.NO_PROGRESS)
@@ -877,6 +1063,7 @@ class LLMEngine:
                                 raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
                             required_tool = 'write_test_file'
                             required_alternatives = ()
+                            required_test_paths = tuple(catalog.get('missingRequiredWritePaths', ()))
                         if not allowed and qa_draft_rejection(rejection['code'], rejection['issues']):
                             exhausted_qa_draft()
                         if rejection['code'] == 'CODE_REFERENCE_INVALID' and not allowed:
@@ -893,13 +1080,15 @@ class LLMEngine:
                 return LLMResult(json_text(sanitized, max_bytes=limit), tuple(records), executed, tuple(executed_names))
         except LLMRuntimeError as error:
             code, validation = error.code, error.validation
+            diagnostic = safe_diagnostic(error.failure_diagnostic, code=code.value)
         except asyncio.CancelledError:
             raise
         except Exception:
             code, validation = LLMErrorCode.RESPONSE, None
+            diagnostic = None
         if (sequence is not None and operation_sequence is not None and decided_sequence != sequence
                 and not recovery_sink_failed):
-            publish_route(failure_route(LLMRuntimeError(code, validation=validation),
+            publish_route(failure_route(LLMRuntimeError(code, validation=validation, failure_diagnostic=diagnostic),
                                        sequence=sequence, operation_sequence=operation_sequence))
         recorded = False
         if validation is not None and validation_failed_sink is not None:
@@ -909,6 +1098,7 @@ class LLMEngine:
                 pass  # Preserve the original rejection and its A2A report.
         # Do not retain raw validation exceptions in __context__ or __cause__.
         raise LLMRuntimeError(code, records=tuple(records), validation=validation,
+                              failure_diagnostic=diagnostic,
                               validation_recorded=recorded,
                               development_rejection=last_development_rejection
                               if code is LLMErrorCode.DEVELOPMENT_BLOCKED else None) from None

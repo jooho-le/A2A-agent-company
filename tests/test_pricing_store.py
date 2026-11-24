@@ -106,6 +106,21 @@ class PricingStoreTests(unittest.TestCase):
         self.telemetry.append_usage(self.binding, record)
         return sequence
 
+    def test_failure_diagnostic_roundtrip_keeps_unknown_cost_and_the_pinned_price_authority(self):
+        from agents.llm.failure_diagnostics import FailureDiagnostic
+        self.pin()
+        sequence, _, _ = self.budget.reserve_model_call()
+        self.budget.account_usage(None, sequence=sequence)
+        diagnostic = FailureDiagnostic(boundary='HTTP', reason='SERVER_ERROR', httpStatus=500)
+        record = UsageRecord(sequence, AgentRole.PLANNER, self.model, None, 'LLM_PROVIDER_ERROR', 3, None,
+                            failure_diagnostic=diagnostic)
+        self.telemetry.append_usage(self.binding, record)
+        receipt = self.call('get', sequence)
+        self.assertEqual(receipt['costStatus'], 'USAGE_UNKNOWN')
+        self.assertIsNone(receipt['costUsd'])
+        row = self.telemetry.list_usage(self.run.run_id)[0][0]
+        self.assertEqual(row['failureDiagnostic'], diagnostic.public())
+
     def rejected(self, method, *arguments, write=False):
         with self.assertRaises(PricingStoreError) as caught:
             self.call(method, *arguments, write=write)

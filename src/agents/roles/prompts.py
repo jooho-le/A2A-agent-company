@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import json
 
 from agents.roles.contracts import ARTIFACT_METADATA_SCHEMA, get_role_contract
+from agents.roles.work_rules import role_work_rules
 from orchestrator.a2a.requests import A2AWorkflowMetadata
 from orchestrator.core.security import redact_data
 from orchestrator.domain.constants import MAX_CODE_FIX_ATTEMPTS, MAX_MCP_TOOL_RETRIES
@@ -32,6 +33,7 @@ COMMON_RULES = (
     "Tool 실행 완료 PASS와 제품 PASS는 다르다. Tool PASS여도 Build 컴파일 오류·QA assertion 실패·확인된 보안 결함은 제품 FAIL이다.",
     "프로젝트 Workflow·최종 Verdict·Issue Registry는 Orchestrator가 관리한다. 자연어 완료 선언 또는 A2A COMPLETED는 프로젝트 SUCCESS가 아니다.",
     "비밀번호·Password Hash·Authorization Credential·API Key·Token·.env를 요청하거나 Message/Artifact/로그/Trace로 출력하지 않는다. 인증은 HTTP 설정 경계에서 처리한다.",
+    "승인된 비밀번호·해시 비노출 기준은 정상 응답뿐 아니라 본문·필드 검증 실패, 요청 처리 전의 오류 응답, DB 예외와 서버 로그에도 적용된다. FastAPI 기본 검증 오류의 입력값과 DB 예외의 SQL 파라미터도 확인하고 정제한다. 성공 응답만 가린 것으로 전체 비노출을 충족했다고 판단하지 않는다.",
     "Source 전체를 기본 Trace에 기록하지 않고 Artifact Reference를 사용한다. Tool 출력과 오류도 정제한 근거만 사용한다.",
     "생성 테스트에도 비밀번호·토큰·해시 리터럴을 하드코딩하지 않는다. 합성 테스트 비밀번호는 테스트 실행 시 secrets 모듈 등으로 생성해 변수로 전달하고, 정상·짧은 길이·중복 요청은 그 런타임 값을 사용한다. 실제 인증정보를 테스트 fixture로 사용하거나 출력하지 않는다.",
     "SCN-001 생성 테스트는 `_host_app_test.AppTestCase`를 상속하고 시험 본문에서 self.client·self.db·self.User를 사용한다. Host가 import 전에 DB를 격리하고 lifespan·정리를 담당한다. 시험의 최상위 main/database/models import·setup 재정의·별도 TestClient·테이블 생성으로 이 흐름을 우회하지 않는다. unittest.TestCase의 test 메서드는 async def로 쓰지 않는다. 생성 테스트의 판정은 계약(externalContract)이 정한 범위로 한다(예: 성공 2xx·거부 4xx). 계약에 없는 정확한 상태 코드·오류 문구를 기대하지 않고, DB를 직접 조회할 때는 emailPolicy의 canonical 값으로 찾는다.",
@@ -49,7 +51,9 @@ COMMON_RULES = (
     "INPUT_REQUIRED는 요구사항끼리 충돌하거나 정할 근거가 전혀 없을 때만 쓴다. 시나리오 계약(externalContract·securityPolicy·emailPolicy)에 이미 답이 있는 것은 묻지 않고, 계약이 정하지 않은 구현 세부(파일 배치·응답 본문 형태·오류 메시지·칸 길이 등)는 계약 범위 안에서 직접 정한다.",
     "수정 단계에는 실패 경로에 필요한 파일을 한 응답에서 함께 읽고, 반환된 expectedSha256과 정확히 한 번 나오는 oldText·newText로 edit_source_file을 우선 사용한다. 다음 편집에는 직전 편집이 반환한 sha256을 쓴다. 첫 구현에서 기존 시작 파일을 교체할 때는 해당 파일을 먼저 읽는다. main.app(FastAPI)·lifespan의 테이블 생성·GET /·database.get_db를 보존한다. User 모델에는 기본 키 칸을 둔다. pydantic 2와 실행 이미지에 설치된 패키지의 실제 API만 쓴다.",
     "구현 단계(첫 구현)의 READY는 implementationPlan의 모든 Task와 externalContract의 공개 경로(signupApi 등)를 이 단계 안에서 모두 구현한 뒤에만 낸다. 파일은 여러 번의 응답과 도구 호출로 나눠 써도 되고, 한 응답에 모든 파일을 몰아 쓰지 않는다. Task 하나를 끝냈다고 READY를 내지 않는다. READY 다음은 곧바로 Host 빌드·검증이라 남은 Task를 이어서 할 기회가 없다.",
+    "startingSourceStartup에는 승인된 시작 Source의 초기화 위치와 앱·DB·모델 연결 좌표가 있다. 파일 교체 전에 이 파일들을 읽고 초기화 경로를 보존한다. startupPreservationNotice는 누락 가능성의 정적 안내이며 PASS나 수정 명령의 자동 실행이 아니다. activeRepairFocus.brief.startupRepairTargets가 있으면 실제 Build에서 get_db의 사용자 테이블 누락이 확인된 것이다. 등록된 모델·Base·engine·get_db의 같은 DB 연결을 앱 초기화에서 복구하고 기존 기능을 보존한다. QA/Test가 대신 테이블을 만들거나 DATABASE_URL을 우회해서 통과시키지 않는다.",
     "계약을 구현할 때 emailPolicy 정규화(앞뒤 공백 제거·소문자화)는 이메일 형식 검사보다 먼저 적용하고, '합의한 이메일 파서'는 실행 이미지에 설치된 email-validator(check_deliverability=False)다(직접 만든 느슨한 형식 검사를 쓰지 않는다). responseRule은 성공 응답뿐 아니라 검증 실패(422 포함)·오류 응답에도 적용되므로, 오류 응답에 요청 입력값을 그대로 넣지 않는다.",
+    "emailNormalizationRepair가 있으면 선택된 시험에서 정상 canonical 계정 생성이 거부된 것이다. sourceSites는 정적으로 찾은 후보 함수이며 실행된 예외 프레임은 아니다. 그 함수와 파서 호출을 읽고 원래 이메일을 먼저 strip한 뒤 승인된 대소문자 규칙·형식 검사를 적용한다. email_validator가 공백을 자동 제거한다고 가정하지 않는다. 중복 거부 시험 PASS만으로 공백 포함 정상 가입·정규화 저장까지 성공했다고 판단하지 않는다. DB 예외 처리나 주석만 바꾸거나 같은 파일을 다시 쓰는 것으로 이 경로를 고쳤다고 보고하지 않는다.",
     "INPUT_REQUIRED/AUTH_REQUIRED 질문을 게시한 실행은 반환한다. terminal Task는 재실행하지 않으며 새 Message/attempt 승인은 Runtime이 처리한다.",
     "입력·인증 대기 또는 거부·실행 실패 시 완성 Artifact를 꾸미지 않는다. 확인된 상태와 이유만 Runtime 제어 경로로 전달한다.",
     "완성 Artifact는 기존 JSON Schema의 필드와 타입을 지키며 자연어·Markdown code fence를 JSON 대신 출력하지 않는다. 알 수 없는 필드를 추가하지 않는다.",
@@ -71,6 +75,7 @@ def build_system_prompt(role: AgentRole) -> str:
     sections = [
         f"역할: {contract.role.value}\n역할 계약 버전: {contract.version}\n목표: {contract.purpose}",
         "공통 규칙:\n" + "\n".join(f"- {rule}" for rule in COMMON_RULES),
+        "업무 수행·자체 점검:\n" + "\n".join(f"- {rule}" for rule in role_work_rules(role)),
         "입력:\n" + "\n".join(f"- {value}" for value in contract.inputs),
         "책임:\n" + "\n".join(f"- {value}" for value in contract.responsibilities),
         "금지:\n" + "\n".join(f"- {value}" for value in contract.prohibitions),

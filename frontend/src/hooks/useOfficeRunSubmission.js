@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { hasStoredAccessToken, loginRequired } from '../api/productRunRequest'
-import { loadOfficeApproval, lookupOfficeWork, submitOfficeWork } from '../api/officeService'
+import { loadOfficeApproval, lookupOfficeWork, retireOfficeRequest, submitOfficeWork } from '../api/officeService'
 import { pendingOfficeSubmissionKey } from './pendingOfficeSubmission.js'
 import { dispatchMessage, runUuid } from '../api/agentRunSubmission.js'
 
@@ -111,12 +111,35 @@ export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
         error: error.message, authenticationRequired: error.status === 401 }))
     } finally { pending.current = false }
   }
+  async function retire() {
+    if (pending.current || !requestId.current) return
+    pending.current = true
+    const sequence = ++lifecycle.current.sequence
+    setState(value => ({ ...value, busy: true, error: '' }))
+    try {
+      const result = await retireOfficeRequest(requestId.current, { confirmed: true })
+      if (!lifecycle.current.mounted || sequence !== lifecycle.current.sequence) return
+      if (result.outcome === 'RETIRED') {
+        remember(null); blocked.current = false
+        setState(value => ({ ...empty, name: value.name, requestText: value.requestText,
+          message: '이전 요청이 접수되지 않은 것을 확인했어요. 입력 내용을 확인하고 만들기 시작을 눌러 주세요.' }))
+      } else {
+        accept(result.submission, state.name, state.requestText)
+        if (['PENDING', 'UNKNOWN'].includes(result.submission.submissionStatus)) {
+          setState(value => ({ ...value, error: '서버에 접수된 요청이 있어요. 접수 상태 확인으로 기존 작업을 이어가 주세요.' }))
+        }
+      }
+    } catch (error) {
+      if (lifecycle.current.mounted && sequence === lifecycle.current.sequence) setState(value => ({ ...value,
+        busy: false, error: error.message, authenticationRequired: error.status === 401 }))
+    } finally { pending.current = false }
+  }
   function reset() {
     if (pending.current || state.uncertain) return false
     remember(null); blocked.current = false; lifecycle.current.sequence++; setState(empty)
     return true
   }
-  return { ...state, submit, recover, reset, refreshApproval: () => refreshApproval(value => value + 1),
+  return { ...state, submit, recover, retire, reset, refreshApproval: () => refreshApproval(value => value + 1),
     authenticationRequired: state.authenticationRequired || configuration.authenticationRequired,
     configurationLoading: configuration.loading, configurationError: configuration.error,
     disabled: !hasToken || !configuration.value || state.busy || state.locked,

@@ -135,7 +135,7 @@ class FileTools:
     async def read_project_file(self, context, arguments):
         return await _run_file_operation(self._read, context, arguments["path"])
 
-    def _write(self, context, path, content, expected_sha256, role):
+    def _write(self, context, path, content, expected_sha256, role, *, require_absent=False):
         self._context(context)
         if context.binding.role is not role:
             raise MCPToolExecutionError("PERMISSION_DENIED")
@@ -145,10 +145,13 @@ class FileTools:
             parts = relative_parts(path)
             if len(parts) < 4 or parts[:3] != ("outputs", "qa" if role is AgentRole.QA else "security", "tests"):
                 raise MCPToolExecutionError("PATH_DENIED")
-        return write_working(context.workspace, path, content.encode("utf-8"), expected_sha256)
+        return write_working(context.workspace, path, content.encode("utf-8"), expected_sha256,
+                             require_absent=require_absent)
 
     def _write_source(self, context, path, content, expected_sha256):
-        result = self._write(context, path, content, expected_sha256, AgentRole.DEVELOPER)
+        # No hash authorizes creation only. Replacing an existing file always needs its current hash.
+        result = self._write(context, path, content, expected_sha256, AgentRole.DEVELOPER,
+                             require_absent=expected_sha256 is None)
         # Codex review 2026-11-18: a follow-up edit of the file just written needs no extra read.
         if relative_parts(path)[0] == 'source':
             self._remember(context, path, result['sha256'])

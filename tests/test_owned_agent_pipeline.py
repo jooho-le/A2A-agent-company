@@ -156,7 +156,9 @@ class OwnedAgentPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn({"repositoryPath": "main.py", "toolPath": "source/main.py"}, guide["startingFilePaths"])
             return tool_response(ToolCall(call_id="developer-write", name="write_source_file",
                 arguments_json=json.dumps({"workspaceId": _workspace_id(request), "path": "source/signup.py",
-                    "content": "def signup():\n    return 'generated-inert-candidate'\n"})))
+                    "content": "def signup():\n    return 'generated-inert-candidate'\n",
+                    "expectedSha256": hashlib.sha256((self.directory / 'workspaces' / _workspace_id(request)
+                        / 'source/signup.py').read_bytes()).hexdigest()})))
 
         def qa_write(request):
             data = _task_input(request)

@@ -302,7 +302,11 @@ class GeneratedTestsTests(unittest.TestCase):
                          [{'fieldPath': '/cases', 'reasonCode': 'GENERATED_TEST_FILE_MISSING'}])
         nested = self.tree({'test_signup.py': PLAIN})
         (nested / 'pkg').mkdir()
-        self.assertEqual(inspect_generated_tests(nested, scopes, declared[:1], 'cases'), [])   # package layout: unsure
+        # A non-package folder must not hide an undeclared top-level test.
+        self.assertEqual(inspect_generated_tests(nested, scopes, declared[:1], 'cases'),
+                         [{'fieldPath': '/cases', 'reasonCode': 'TEST_IN_FILE_NOT_DECLARED'}])
+        (nested / 'pkg/__init__.py').write_text('def load_tests(*args): pass\n')
+        self.assertEqual(inspect_generated_tests(nested, scopes, declared[:1], 'cases'), [])  # dynamic package: unresolved
 
 
 # ------------------------------------------------- generated test defects (Run 42f131fe, Codex offline review)
@@ -654,9 +658,24 @@ class RealExecutorWriteConflictTests(RealExecutorMissingFileTests):
         set_up_borrowed(self, base)
         providers = base.providers()
         developer = providers[multi_fixture.AgentRole.DEVELOPER]
-        developer.script.insert(0, lambda request: tool_response(ToolCall('write-stale', 'write_source_file',
+        original_write, rest = developer.script[0], developer.script[1:]
+
+        def read_current(request):
+            self.assertEqual(request.required_tool, 'read_project_file')
+            return tool_response(ToolCall('read-current', 'read_project_file', json.dumps({
+                'workspaceId': multi_fixture._workspace_id(request), 'path': 'source/signup.py'})))
+
+        def write_current(request):
+            response = original_write(request)
+            call = response.tool_calls[0]
+            args = json.loads(call.arguments_json)
+            wire = next(t for t in request.tools if t.name == 'write_source_file').input_schema.to_dict()
+            args['expectedSha256'] = wire['properties']['expectedSha256']['enum'][0]
+            return tool_response(ToolCall(call.call_id, call.name, json.dumps(args)))
+
+        developer.script = [lambda request: tool_response(ToolCall('write-stale', 'write_source_file',
             json.dumps({'workspaceId': multi_fixture._workspace_id(request), 'path': 'source/signup.py',
-                        'content': 'stale\n', 'expectedSha256': '0' * 64}))))
+                        'content': 'stale\n', 'expectedSha256': '0' * 64}))), read_current, write_current, *rest]
         async with base.running_platform(providers, model_cap=32, corrections=corrections) as (client, _):
             response = await client.post('/api/v1/runs', json=base.submission())
             run = base.repository.get_run(UUID(response.json()['run']['runId']))

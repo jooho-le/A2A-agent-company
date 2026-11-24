@@ -118,3 +118,19 @@ def test_terminal_cause_uses_bound_failure_boundary_not_just_generic_error_code(
     result = classify_run(bundle, trace, a2a)
     assert (result['cause'], result['comparisonValidity']) == (cause, validity)
     assert result['details']['failureCategory'] == category
+
+
+@pytest.mark.parametrize('verified', [True, False])
+def test_legacy_source_review_stop_is_not_reported_as_json_failure(verified):
+    bundle, trace = exported(execute_retry=False)
+    bundle['run'].update(status='HUMAN_REVIEW', verdict=None)
+    row = next(row for row in trace['telemetry'] if row['binding']['eventType'] == 'LLM_RECOVERY_DECIDED')
+    row['detail']['recovery'] = correction_route('READY_SIGNUP_QUALITY_REVIEW', sequence=1,
+        operation_sequence=1, allowed=False, reason='REPEATED').public()
+    if not verified:
+        bundle['snapshotConsistent'] = False
+    a2a = {'roles': {'DEVELOPER': {'events': [{'eventType': 'TaskStatusUpdateEvent', 'taskId': 'task', 'version': 1,
+        'event': {'status': {'state': 'TASK_STATE_FAILED', 'message': {
+            'parts': [{'data': {'code': 'LLM_SCHEMA_INVALID'}}]}}}}]}}}
+    result = classify_run(bundle, trace, a2a)
+    assert result['cause'] == ('SOURCE_REPAIR_EXHAUSTED' if verified else 'MODEL_OUTPUT_INVALID')

@@ -1,0 +1,1016 @@
+{
+  "date": "2026-11-23",
+  "task": 105,
+  "experimentId": "286fccaa-f5f6-4551-ba4a-4f67bb3ea659",
+  "requestedRuns": 4,
+  "submittedRuns": 4,
+  "repetitionsPerCondition": 1,
+  "automaticResubmission": false,
+  "model": {
+    "provider": "openai",
+    "modelId": "gpt-4.1-mini-2025-04-14",
+    "modelRevision": null,
+    "temperature": 0,
+    "seed": null
+  },
+  "llmLimits": {
+    "max_model_calls": 200,
+    "max_tool_calls": 200,
+    "max_output_tokens": 8192,
+    "max_total_tokens": 2000000,
+    "model_timeout_seconds": 120,
+    "tool_timeout_seconds": 120,
+    "max_json_bytes": 1048576,
+    "max_output_corrections": 2,
+    "max_question_reminders": 1,
+    "max_provider_retries": 1
+  },
+  "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "rows": [
+    {
+      "condition": "multi-ver1",
+      "runId": "1be23dd0-0785-4078-8946-e0fe34523fbd",
+      "runStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "codeVersion": 1,
+      "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+      "evaluationAvailable": true,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 7,
+        "failedRequirements": 0,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 1.0,
+        "fullSatisfactionUpper": 1.0,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 0,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "PASS"
+          }
+        ],
+        "productPass": true,
+        "reason": null
+      },
+      "finalChecks": [
+        {
+          "testId": "28f5b695-2d40-4c9d-acb2-7ef682cfacf8",
+          "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "dbc502d9-5e40-4a03-9ea1-a38924a3a2ce",
+          "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "d15c2dfa-81ec-4d71-873f-a87ec68c77fb",
+          "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "720c082c-a1f5-4147-ad53-14a27a60deaf",
+          "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "cc579a2d-11d4-4d79-b4a5-169a99ef90b3",
+          "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+          "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+          "title": "SEC-SIGNUP-002 비밀번호 저장값",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        },
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        }
+      ],
+      "metrics": {
+        "verdictMs": null,
+        "totalMs": 159643,
+        "firstBuildPassMs": 62895,
+        "fixAttempts": 0,
+        "modelCalls": 29,
+        "toolCalls": 26,
+        "inputTokens": 387902,
+        "outputTokens": 17514,
+        "totalTokens": 405416,
+        "knownInputTokens": 387902,
+        "knownOutputTokens": 17514,
+        "knownTotalTokens": 405416,
+        "costUsd": "0.1375256",
+        "knownCostUsd": "0.1375256",
+        "costComplete": true,
+        "tokenBreakdownComplete": true,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "PAUSED"
+      },
+      "agentServerRoles": [
+        "DEVELOPER",
+        "PLANNER",
+        "QA",
+        "SECURITY"
+      ],
+      "failedAgentTasks": [
+        {
+          "server": "security",
+          "codes": [
+            "SECURITY_TEST_INPUT_INVALID"
+          ]
+        }
+      ],
+      "generatedTestExecutions": [
+        {
+          "manifestId": "a91f15e6-e42e-4fb3-bcc1-3a73754c8044",
+          "role": "QA",
+          "total": 6,
+          "passed": 1,
+          "failed": 5,
+          "skipped": 0,
+          "closedDiagnostics": [
+            {
+              "testId": "test_signup.SignupTests.test_signup_reject_duplicate_email",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            },
+            {
+              "testId": "test_signup.SignupTests.test_signup_reject_invalid_email",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            },
+            {
+              "testId": "test_signup.SignupTests.test_signup_reject_short_password",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            },
+            {
+              "testId": "test_signup.SignupTests.test_signup_response_consistency",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            },
+            {
+              "testId": "test_signup.SignupTests.test_signup_success_creates_user",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            }
+          ]
+        },
+        {
+          "manifestId": "dbb06083-5496-47d4-badf-2e150f0ee7d2",
+          "role": "SECURITY",
+          "total": 3,
+          "passed": 2,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnostics": []
+        }
+      ],
+      "modelErrorEvents": [],
+      "toolErrorEvents": [
+        {
+          "toolName": "write_source_file",
+          "errorKind": "WRITE_CONFLICT",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        }
+      ],
+      "sourceDirectory": "/Users/leejooho/Desktop/a2a/.data/experiments/scn001-four-post104-20261123/01-multi-ver1-r01",
+      "evaluationVerdict": "PASS",
+      "manifestCheck": {
+        "errorCode": null,
+        "mismatchedFields": [],
+        "metadataMatches": true
+      },
+      "failedDetailedChecks": [],
+      "securityTestSourceWithNul": [
+        "test_signup.py"
+      ]
+    },
+    {
+      "condition": "single-ver1",
+      "runId": "0b79fa0e-d227-4313-8714-1ef911a5901f",
+      "runStatus": "FINISHED",
+      "hostVerdict": "SUCCESS",
+      "codeVersion": 1,
+      "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+      "evaluationAvailable": true,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 7,
+        "failedRequirements": 0,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 1.0,
+        "fullSatisfactionUpper": 1.0,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 0,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "PASS"
+          }
+        ],
+        "productPass": true,
+        "reason": null
+      },
+      "finalChecks": [
+        {
+          "testId": "28f5b695-2d40-4c9d-acb2-7ef682cfacf8",
+          "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "dbc502d9-5e40-4a03-9ea1-a38924a3a2ce",
+          "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "d15c2dfa-81ec-4d71-873f-a87ec68c77fb",
+          "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "720c082c-a1f5-4147-ad53-14a27a60deaf",
+          "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "cc579a2d-11d4-4d79-b4a5-169a99ef90b3",
+          "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+          "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+          "title": "SEC-SIGNUP-002 비밀번호 저장값",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        },
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        }
+      ],
+      "metrics": {
+        "verdictMs": 175983,
+        "totalMs": 175983,
+        "firstBuildPassMs": 67894,
+        "fixAttempts": 0,
+        "modelCalls": 25,
+        "toolCalls": 26,
+        "inputTokens": 424923,
+        "outputTokens": 14671,
+        "totalTokens": 439594,
+        "knownInputTokens": 424923,
+        "knownOutputTokens": 14671,
+        "knownTotalTokens": 439594,
+        "costUsd": "0.1456348",
+        "knownCostUsd": "0.1456348",
+        "costComplete": true,
+        "tokenBreakdownComplete": true,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "ENDED"
+      },
+      "agentServerRoles": [
+        "SINGLE_AGENT"
+      ],
+      "failedAgentTasks": [],
+      "generatedTestExecutions": [
+        {
+          "manifestId": "10e1e778-0519-42b2-a5b9-91f04f803721",
+          "role": "QA",
+          "total": 5,
+          "passed": 3,
+          "failed": 2,
+          "skipped": 0,
+          "closedDiagnostics": [
+            {
+              "testId": "test_signup.test_signup.test_password_length_boundary",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            }
+          ]
+        },
+        {
+          "manifestId": "f79d3b94-5171-4b1d-b241-5a199017a295",
+          "role": "SECURITY",
+          "total": 3,
+          "passed": 2,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnostics": []
+        },
+        {
+          "manifestId": "e0672ae4-957c-4559-9d60-ad2f8f1dedfb",
+          "role": "SECURITY",
+          "total": 3,
+          "passed": 1,
+          "failed": 2,
+          "skipped": 0,
+          "closedDiagnostics": [
+            {
+              "testId": "test_security.SecurityTests.test_password_and_hash_not_exposed",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            }
+          ]
+        }
+      ],
+      "modelErrorEvents": [],
+      "toolErrorEvents": [
+        {
+          "toolName": "edit_source_file",
+          "errorKind": "EDIT_TARGET_MISSING",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        }
+      ],
+      "sourceDirectory": "/Users/leejooho/Desktop/a2a/.data/experiments/scn001-four-post104-20261123/02-single-ver1-r01",
+      "evaluationVerdict": "PASS",
+      "manifestCheck": {
+        "errorCode": null,
+        "mismatchedFields": [],
+        "metadataMatches": true
+      },
+      "failedDetailedChecks": [],
+      "securityTestSourceWithNul": []
+    },
+    {
+      "condition": "single-ver2",
+      "runId": "b6332065-b492-4fdc-bf7b-f1508ef1d606",
+      "runStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "codeVersion": 2,
+      "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+      "evaluationAvailable": true,
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 6,
+        "failedRequirements": 1,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.8571428571428571,
+        "fullSatisfactionUpper": 0.8571428571428571,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 1,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "FAIL"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "finalChecks": [
+        {
+          "testId": "28f5b695-2d40-4c9d-acb2-7ef682cfacf8",
+          "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "dbc502d9-5e40-4a03-9ea1-a38924a3a2ce",
+          "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "d15c2dfa-81ec-4d71-873f-a87ec68c77fb",
+          "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "720c082c-a1f5-4147-ad53-14a27a60deaf",
+          "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "cc579a2d-11d4-4d79-b4a5-169a99ef90b3",
+          "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+          "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+          "perspective": "QA",
+          "status": "PASS"
+        },
+        {
+          "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+          "title": "SEC-SIGNUP-002 비밀번호 저장값",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        },
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "perspective": "SECURITY",
+          "status": "PASS"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "perspective": "SECURITY",
+          "status": "FAIL"
+        }
+      ],
+      "metrics": {
+        "verdictMs": null,
+        "totalMs": 280048,
+        "firstBuildPassMs": 179178,
+        "fixAttempts": 1,
+        "modelCalls": 33,
+        "toolCalls": 29,
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "knownInputTokens": 598267,
+        "knownOutputTokens": 22145,
+        "knownTotalTokens": 620412,
+        "costUsd": null,
+        "knownCostUsd": "0.1965564",
+        "costComplete": false,
+        "tokenBreakdownComplete": false,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "PAUSED"
+      },
+      "agentServerRoles": [
+        "SINGLE_AGENT"
+      ],
+      "failedAgentTasks": [
+        {
+          "server": "single_agent",
+          "codes": [
+            "SECURITY_TEST_INPUT_INVALID"
+          ]
+        }
+      ],
+      "generatedTestExecutions": [
+        {
+          "manifestId": "f7d6f7a3-4420-4204-a53c-2953abb284a8",
+          "role": "QA",
+          "total": 5,
+          "passed": 3,
+          "failed": 2,
+          "skipped": 0,
+          "closedDiagnostics": [
+            {
+              "testId": "test_signup.SignupTests.test_signup_password_length_boundary",
+              "code": "SUPPLY_SYNTHETIC_PASSWORD_PRESENT_IN_REQUEST"
+            }
+          ]
+        },
+        {
+          "manifestId": "96192a58-fe14-4012-8324-f6c9e3624f95",
+          "role": "SECURITY",
+          "total": 3,
+          "passed": 1,
+          "failed": 2,
+          "skipped": 0,
+          "closedDiagnostics": []
+        }
+      ],
+      "modelErrorEvents": [
+        {
+          "sequence": 16,
+          "outcome": "LLM_PROVIDER_ERROR"
+        }
+      ],
+      "toolErrorEvents": [
+        {
+          "toolName": "edit_source_file",
+          "errorKind": "EDIT_TARGET_MISSING",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        }
+      ],
+      "sourceDirectory": "/Users/leejooho/Desktop/a2a/.data/experiments/scn001-four-post104-20261123/03-single-ver2-r01",
+      "evaluationVerdict": "FAIL",
+      "manifestCheck": {
+        "errorCode": null,
+        "mismatchedFields": [],
+        "metadataMatches": true
+      },
+      "failedDetailedChecks": [
+        {
+          "caseId": "application_logs",
+          "itemId": "hash_exposed",
+          "kind": "assertion",
+          "status": "FAIL",
+          "reason": "EXPECTATION_MISMATCH"
+        },
+        {
+          "caseId": "application_logs",
+          "itemId": "hash_in_crash",
+          "kind": "assertion",
+          "status": "FAIL",
+          "reason": "EXPECTATION_MISMATCH"
+        }
+      ],
+      "securityTestSourceWithNul": [
+        "test_security.py"
+      ]
+    },
+    {
+      "condition": "multi-ver2",
+      "runId": "a27b76d3-d7f8-40c2-9009-bb97b0fcd8f6",
+      "runStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "codeVersion": null,
+      "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+      "evaluationAvailable": false,
+      "accuracy": null,
+      "finalChecks": [],
+      "metrics": {
+        "verdictMs": null,
+        "totalMs": 78106,
+        "firstBuildPassMs": null,
+        "fixAttempts": 0,
+        "modelCalls": 15,
+        "toolCalls": 13,
+        "inputTokens": 250438,
+        "outputTokens": 7452,
+        "totalTokens": 257890,
+        "knownInputTokens": 250438,
+        "knownOutputTokens": 7452,
+        "knownTotalTokens": 257890,
+        "costUsd": "0.0777688",
+        "knownCostUsd": "0.0777688",
+        "costComplete": true,
+        "tokenBreakdownComplete": true,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "PAUSED"
+      },
+      "agentServerRoles": [
+        "DEVELOPER",
+        "PLANNER",
+        "QA",
+        "SECURITY"
+      ],
+      "failedAgentTasks": [
+        {
+          "server": "developer",
+          "codes": [
+            "LLM_TOOL_EXECUTION_FAILED"
+          ]
+        }
+      ],
+      "generatedTestExecutions": [],
+      "modelErrorEvents": [],
+      "toolErrorEvents": [
+        {
+          "toolName": "edit_source_file",
+          "errorKind": "EDIT_TARGET_MISSING",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        },
+        {
+          "toolName": "edit_source_file",
+          "errorKind": "EDIT_TARGET_MISSING",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        },
+        {
+          "toolName": "edit_source_file",
+          "errorKind": "EDIT_TARGET_MISSING",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        }
+      ],
+      "sourceDirectory": "/Users/leejooho/Desktop/a2a/.data/experiments/scn001-four-post104-20261123/04-multi-ver2-r01",
+      "evaluationVerdict": null,
+      "evaluationUnavailableReason": "NO_REGISTERED_SOURCE_SNAPSHOT",
+      "securityTestSourceWithNul": []
+    }
+  ],
+  "knownCostUsd": "0.5574856",
+  "costComplete": false,
+  "parity": {
+    "ver1-architecture": {
+      "schemaVersion": 1,
+      "groupBy": "architecture",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "staticToolUnion",
+          "status": "PASS",
+          "missingInSingle": [],
+          "extraInSingle": [],
+          "phaseToolsBeyondSingle": [],
+          "phaseDifferences": {
+            "IMPLEMENTING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            },
+            "FIXING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            }
+          }
+        },
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "0b79fa0e-d227-4313-8714-1ef911a5901f"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "1be23dd0-0785-4078-8946-e0fe34523fbd"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    },
+    "ver2-architecture": {
+      "schemaVersion": 1,
+      "groupBy": "architecture",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "staticToolUnion",
+          "status": "PASS",
+          "missingInSingle": [],
+          "extraInSingle": [],
+          "phaseToolsBeyondSingle": [],
+          "phaseDifferences": {
+            "IMPLEMENTING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            },
+            "FIXING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            }
+          }
+        },
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "note": "BOTH_ABSENT"
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "b6332065-b492-4fdc-bf7b-f1508ef1d606"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "a27b76d3-d7f8-40c2-9009-bb97b0fcd8f6"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    },
+    "single-versions": {
+      "schemaVersion": 1,
+      "groupBy": "loopPolicy",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedScopes",
+          "status": "PASS",
+          "ver1": [
+            "protected-signup-qa",
+            "protected-signup-security"
+          ],
+          "ver2": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "ver1Present": true,
+          "ver2Present": false
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "0b79fa0e-d227-4313-8714-1ef911a5901f"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "b6332065-b492-4fdc-bf7b-f1508ef1d606"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "architecture": "SINGLE_AGENT",
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    },
+    "multi-versions": {
+      "schemaVersion": 1,
+      "groupBy": "loopPolicy",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedScopes",
+          "status": "PASS",
+          "ver1": [
+            "protected-signup-qa",
+            "protected-signup-security"
+          ],
+          "ver2": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "ver1Present": true,
+          "ver2Present": false
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "1be23dd0-0785-4078-8946-e0fe34523fbd"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "a27b76d3-d7f8-40c2-9009-bb97b0fcd8f6"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "architecture": "MULTI_AGENT",
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    }
+  },
+  "verification": {
+    "implementationUnchanged": true,
+    "maximumNewRuns": 4,
+    "repetitionsPerCondition": 1,
+    "automaticResubmission": false,
+    "manuallyRepairedGeneratedSource": false,
+    "listeningExperimentPorts": {
+      "18002": false,
+      "18101": false,
+      "18102": false,
+      "18103": false,
+      "18104": false
+    }
+  },
+  "limitations": [
+    "One sample per condition; not a repeated average or general success-rate estimate.",
+    "Multi Ver2 has no registered Source; quality scores are unavailable, not zero.",
+    "Paused-run elapsed time is not time to successful verdict.",
+    "Single Ver2 has one provider-error call with unconfirmed usage; known cost is a lower bound.",
+    "Prior implementation results are not pooled with this cohort."
+  ],
+  "originalResultsDirectory": "/Users/leejooho/Desktop/a2a/.data/experiments/scn001-four-post104-20261123"
+}

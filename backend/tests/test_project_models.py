@@ -1,6 +1,7 @@
 """프로젝트 모델만 임시 SQLite에서 검증합니다. 실제 app.db/Host/API는 사용하지 않습니다."""
 
 import asyncio
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -17,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import main
 from database import Base
-from models import Document, Project, ProjectRun, User
-from project_schema import create_project_tables
+from models import Document, Project, ProjectRun, RetiredSubmissionKey, RunSubmission, User
+from project_schema import create_project_tables, upgrade_project_tables
 
 
 class ProjectModelTests(unittest.TestCase):
@@ -84,7 +85,7 @@ class ProjectModelTests(unittest.TestCase):
             self.assertEqual(db.exec_driver_sql("PRAGMA foreign_keys").scalar(), 0)
         create_project_tables(engine)
         create_project_tables(engine)
-        self.assertEqual(set(inspect(engine).get_table_names()), {"users", "documents", "projects", "project_runs", "run_submissions"})
+        self.assertEqual(set(inspect(engine).get_table_names()), {"users", "documents", "projects", "project_runs", "run_submissions", "retired_submission_keys"})
         with engine.connect() as db:
             after = db.exec_driver_sql("SELECT type, name, sql FROM sqlite_master ORDER BY name").all()
             self.assertTrue(all(row in after for row in schema))
@@ -109,6 +110,72 @@ class ProjectModelTests(unittest.TestCase):
             with self.assertRaises(IntegrityError):
                 db.execute(delete(User).where(User.id == 2))
             db.rollback()
+
+    def prepare_legacy_submission(self):
+        Base.metadata.create_all(self.engine, tables=[Project.__table__, ProjectRun.__table__])
+        project_id = self.insert_project()
+        key = str(uuid4())
+        with self.engine.begin() as db:
+            db.exec_driver_sql("""CREATE TABLE run_submissions (
+                internal_key VARCHAR(36) PRIMARY KEY,
+                owner_user_id INTEGER NOT NULL REFERENCES users(id),
+                client_key VARCHAR(36) NOT NULL,
+                project_id VARCHAR(36) NOT NULL REFERENCES projects(project_id),
+                request_sha256 VARCHAR(64) NOT NULL,
+                host_request_sha256 VARCHAR(64) NOT NULL,
+                host_request_json TEXT NOT NULL,
+                configuration_id VARCHAR(64) NOT NULL,
+                state VARCHAR(16) NOT NULL,
+                response_json TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(owner_user_id, client_key)
+            )""")
+            db.exec_driver_sql("""INSERT INTO run_submissions
+                (internal_key, owner_user_id, client_key, project_id, request_sha256,
+                 host_request_sha256, host_request_json, configuration_id, state)
+                VALUES (?, 1, ?, ?, ?, ?, ?, ?, 'UNKNOWN')""",
+                (key, str(uuid4()), project_id, "a" * 64, "b" * 64, "{}", "c" * 64))
+        return key
+
+    def test_upgrade_backs_up_legacy_database_and_preserves_receipts_and_claims(self):
+        key = self.prepare_legacy_submission()
+        with self.engine.connect() as db:
+            before = db.exec_driver_sql("SELECT * FROM run_submissions").all()
+            users = db.exec_driver_sql("SELECT * FROM users").all()
+            documents = db.exec_driver_sql("SELECT * FROM documents").all()
+        directory = Path(self.directory.name) / "backups"
+        backup = upgrade_project_tables(self.engine, backup_directory=directory)
+        self.assertTrue(backup.is_file())
+        self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+        with sqlite3.connect(backup) as db:
+            self.assertNotIn("manual_retry_claimed_at",
+                             [row[1] for row in db.execute("PRAGMA table_info(run_submissions)")])
+            self.assertEqual(db.execute("SELECT * FROM run_submissions").fetchall(), [tuple(r) for r in before])
+        with self.engine.connect() as db:
+            self.assertEqual([tuple(row)[:-1] for row in db.exec_driver_sql("SELECT * FROM run_submissions")],
+                             [tuple(row) for row in before])
+            self.assertEqual(db.exec_driver_sql("SELECT * FROM users").all(), users)
+            self.assertEqual(db.exec_driver_sql("SELECT * FROM documents").all(), documents)
+        claimed = datetime(2026, 1, 1)
+        with Session(self.engine) as db:
+            row = db.get(RunSubmission, key)
+            self.assertIsNone(row.manual_retry_claimed_at)
+            row.manual_retry_claimed_at = claimed
+            db.commit()
+        self.assertIsNone(upgrade_project_tables(self.engine, backup_directory=directory))
+        self.assertEqual(len(list(directory.iterdir())), 1)
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(RunSubmission, key).manual_retry_claimed_at, claimed)
+
+    def test_failed_backup_does_not_alter_existing_receipts_or_schema(self):
+        key = self.prepare_legacy_submission()
+        with patch("project_schema._backup_sqlite_database", side_effect=OSError("backup unavailable")):
+            with self.assertRaises(OSError):
+                upgrade_project_tables(self.engine)
+        self.assertNotIn("manual_retry_claimed_at",
+                         {column["name"] for column in inspect(self.engine).get_columns("run_submissions")})
+        with self.engine.connect() as db:
+            self.assertEqual(db.exec_driver_sql("SELECT internal_key FROM run_submissions").scalar(), key)
 
     def test_project_has_multiple_runs_and_foreign_key_rejects_orphan(self):
         create_project_tables(self.engine)

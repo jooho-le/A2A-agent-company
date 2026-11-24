@@ -14,8 +14,49 @@ the role gets exactly one chance, in the same step, to fix only its test files:
 Protected scopes never trigger it: they are Host tests, not the model's.
 """
 from agents.llm.contracts import json_text, parse_json
-from agents.runtime.test_guidance import CONCURRENT_SIGNUP_GUIDANCE
+from agents.runtime.test_guidance import CONCURRENT_SIGNUP_GUIDANCE, APP_FIXTURE_USAGE_GUIDANCE, PASSWORD_FIXTURE_GUIDANCE
 from orchestrator.domain import test_not_run
+
+
+def generated_test_feedback(measured, allowed_scopes):
+    """Bounded facts from existing generated-test receipts, never protected inputs or raw output."""
+    import json
+    allowed = set(allowed_scopes)
+    rows = []
+    for key, value in measured.items():
+        pair = key if isinstance(key, tuple) else ("run_unit_tests", key)
+        if pair not in allowed:
+            continue
+        receipt, _evidence = value
+        for actual in receipt.report.tests:
+            if len(rows) >= 32:
+                return rows
+            row = {"toolName": pair[0], "selector": pair[1], "testId": actual.test_id,
+                   "caseOutcome": actual.outcome if actual.outcome in ("PASS", "FAIL") else "UNVERIFIED"}
+            reason = test_not_run.runner_reason(actual)
+            if reason in test_not_run.TECHNICAL:
+                row["reasonCode"] = reason
+            reference = getattr(receipt, "report_ref", None)
+            if isinstance(reference, str) and reference:
+                row["reportRef"] = reference
+            marks = getattr(actual, "output_checks", ())
+            if marks:
+                row["outputChecks"] = dict(marks)
+            encoded = getattr(actual, "signup_checks_json", None)
+            if encoded:
+                facts = json.loads(encoded)
+                safe = {}
+                if type(facts.get("canonicalEmailUniqueKey")) is bool:
+                    safe["canonicalEmailUniqueKey"] = facts["canonicalEmailUniqueKey"]
+                parameters = facts.get("storedHashParameters")
+                if isinstance(parameters, dict):
+                    safe["storedHashParameters"] = {k: v for k, v in parameters.items()
+                        if k in ("argon2id", "verified", "memoryKiB", "iterations", "parallelism", "distinctSalts")
+                        and type(v) in (bool, int)}
+                if safe:
+                    row["signupChecks"] = safe
+            rows.append(row)
+    return rows
 
 INSTRUCTION = (
     "The Host ran your READY tests on the unchanged product Snapshot. Some generated tests could not run or lacked evidence for an assigned requirement "
@@ -27,7 +68,15 @@ INSTRUCTION = (
     "TestClient lifespan before database setup and register cleanup; entering it only in the test body is too late. "
     "This does not prove the product is correct: preserve its startup behavior, and do not create missing product "
     "tables in the test to hide a startup defect. NOT_RUN_ASYNC_NOT_AWAITED: an async def test in a plain TestCase never "
-    "ran; use def. Fix only your test files with write_test_file. Keep every declared case exactly as it was (same "
+    "ran; use def. NOT_RUN_FIXTURE_MEMBER_MISSING: a missing Host member was used in the failing test frame. "
+    "NOT_RUN_FIXTURE_RETURN_MISUSED: the test used the Host return shape or a result key incorrectly. "
+    "For distinctSalts, first_params never updates: observe two distinct committed accounts and assert "
+    "second_params['distinctSalts'] only on the SECOND return. Do not replace the check with .get(..., True), "
+    "a constant, skipTest, or remove it. Numeric hash settings are public minimums, checked with >=. "
+    "NOT_RUN_FIXTURE_ARGUMENT_INVALID: the trusted helper rejected its arguments before any product request; "
+    "use the exact argument types and synthetic data lifetime in testTargets.appFixture.methods. "
+    "These are narrowly verified test-writing errors, not proof that the product passed. "
+    "Fix only your test files with write_test_file. Keep every declared case exactly as it was (same "
     "testId, requirementId, title and expectedResult); do not remove or weaken a check. Then return the same READY JSON.")
 
 
@@ -36,14 +85,17 @@ class TestFixRequired(Exception):
 
     __test__ = False  # not a unittest class
 
-    def __init__(self, reasons, selectors):
+    def __init__(self, reasons, selectors, *, observed_cases=()):
         self.reasons = tuple(sorted(set(reasons)))
         self.selectors = tuple(sorted(set(selectors)))
+        self.observed_cases = tuple(parse_json(json_text(list(observed_cases)[:32])))
         super().__init__("TEST_FIX_REQUIRED")
 
     def task_input(self, task_input, previous_ready):
         """The same task input plus the fixed feedback and the model's own previous READY draft."""
         guidance = []
+        if set(self.reasons) & test_not_run.FIXTURE_USAGE:
+            guidance.extend((APP_FIXTURE_USAGE_GUIDANCE, PASSWORD_FIXTURE_GUIDANCE))
         if any(r.startswith('OUTPUT_NOT_OBSERVED_') for r in self.reasons):
             guidance.append('Exercise the missing output channels with check_signup_output on your own cases.')
         if 'DB_CONSTRAINT_NOT_OBSERVED' in self.reasons:
@@ -56,6 +108,9 @@ class TestFixRequired(Exception):
         return {**dict(task_input), "testRunFeedback": {
             "code": "GENERATED_OUTPUT_COVERAGE_INCOMPLETE" if set(self.reasons) - test_not_run.TECHNICAL else "GENERATED_TESTS_NOT_RUN",
             "reasonCodes": list(self.reasons), "scopes": list(self.selectors),
+            "observedCases": parse_json(json_text(list(self.observed_cases))),
+            "observationScope": "CURRENT_SOURCE_GENERATED_TESTS_ONLY",
+            "casePassIsRequirementPass": False,
             "instruction": " ".join([INSTRUCTION, *guidance]),
             "previousReady": parse_json(json_text(previous_ready))}}
 

@@ -269,7 +269,7 @@ class SecurityRuntimeServices:
         binding = self.configuration.binding
         workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.SECURITY)
         unit = self.configuration.unit_test_configuration
-        scopes = [(s.name, s.pattern) for s in (() if unit is None else unit.scopes)
+        scopes = [(s.name, s.pattern, getattr(s, 'source_directory', 'tests')) for s in (() if unit is None else unit.scopes)
                   if s.kind == 'QA_TESTS' and s.name in self._test_selectors]
         return refresh_qa_output(output, Path(workspace.record.root_path) / 'outputs' / 'security' / 'tests',
             scopes, snapshot_sha256=self.configuration.frozen_source.snapshot_sha256, unit_only=True,
@@ -282,9 +282,9 @@ class SecurityRuntimeServices:
             return []
         binding = self.configuration.binding
         workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.SECURITY)
-        patterns = {scope.name: scope.pattern for scope in self.configuration.unit_test_configuration.scopes
+        patterns = {scope.name: (scope.pattern, getattr(scope, 'source_directory', 'tests')) for scope in self.configuration.unit_test_configuration.scopes
                     if getattr(scope, "kind", None) == "QA_TESTS"}
-        scopes = [(name, patterns[name]) for name in self._test_selectors if name in patterns]
+        scopes = [(name, *patterns[name]) for name in self._test_selectors if name in patterns]
         rows = [row for row in (data.get("testCases") or []) if isinstance(row, dict)] if isinstance(data, dict) else []
         source = Path(workspace.record.root_path) / "source"
         from orchestrator.domain import SCN_001_ID
@@ -871,7 +871,10 @@ class SecurityRuntimeServices:
             decided[requirement_id] = (value, evidence, cases_measured,
                 tuple({str(row[1].execution_id): row[1] for row in items}.values()), coverage, gaps)
         if test_fix_available and correction_reasons:
-            raise TestFixRequired(correction_reasons, self._test_selectors)
+            from agents.runtime.test_fix import generated_test_feedback
+            raise TestFixRequired(correction_reasons, self._test_selectors,
+                observed_cases=generated_test_feedback(measured,
+                    (("run_unit_tests", selector) for selector in self._test_selectors)))
         return decided
 
     def _assemble(self, execution, decision, measured, anchors, proof, task_id, context_id, tests=None):

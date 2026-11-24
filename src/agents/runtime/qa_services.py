@@ -180,10 +180,13 @@ class QARuntimeServices:
         binding = self.configuration.binding
         workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.QA)
         unit = self.configuration.unit_test_configuration
-        scopes = [(s.name, s.pattern) for s in (() if unit is None else unit.scopes) if s.kind == 'QA_TESTS']
+        scopes = [(s.name, s.pattern, getattr(s, 'source_directory', 'tests')) for s in (() if unit is None else unit.scopes) if s.kind == 'QA_TESTS']
+        browser = self.configuration.browser_test_configuration
         return refresh_qa_output(output, Path(workspace.record.root_path) / 'outputs' / 'qa' / 'tests',
             scopes, snapshot_sha256=self.configuration.frozen_source.snapshot_sha256,
-            unit_only=set(self.selectors) == {'run_unit_tests'})
+            unit_only=set(self.selectors) == {'run_unit_tests'},
+            browser_suites=[(s.name, s.suite_path) for s in (() if browser is None else browser.suites)
+                            if s.kind == 'QA_TESTS'])
 
     def generated_test_issues(self, data):
         """Read-only pre-READY check of the files ``finalize`` will collect (handoff P5, points 4·6).
@@ -191,21 +194,30 @@ class QARuntimeServices:
         Names a missing generated test file or a test the runner would report but
         the draft did not declare; never imports or runs the files.
         """
-        from agents.runtime.generated_tests_precheck import inspect_generated_tests
+        from agents.runtime.generated_tests_precheck import inspect_generated_browser_tests, inspect_generated_tests
         binding = self.configuration.binding
         workspace = self._workspaces.bind(binding.workspace_id, run_id=binding.run_id, role=AgentRole.QA)
         unit = self.configuration.unit_test_configuration
-        patterns = {scope.name: scope.pattern for scope in (() if unit is None else unit.scopes)
+        patterns = {scope.name: (scope.pattern, getattr(scope, 'source_directory', 'tests')) for scope in (() if unit is None else unit.scopes)
                     if getattr(scope, "kind", None) == "QA_TESTS"}
-        scopes = [(name, patterns[name]) for name in self._selectors.get("run_unit_tests", ()) if name in patterns]
+        scopes = [(name, *patterns[name]) for name in self._selectors.get("run_unit_tests", ()) if name in patterns]
         rows = [row for row in (data.get("cases") or []) if isinstance(row, dict)
                 and row.get("toolName") == "run_unit_tests"] if isinstance(data, dict) else []
         source = Path(workspace.record.root_path) / "source"
         from orchestrator.domain import SCN_001_ID
         run = self._repository.get_run(binding.run_id)
-        return inspect_generated_tests(Path(workspace.record.root_path) / "outputs" / "qa" / "tests",
-                                       scopes, rows, "cases", source_root=source if source.is_dir() else None,
-                                       host_app_fixture=run is not None and run.scenario_id == SCN_001_ID)
+        output_root = Path(workspace.record.root_path) / "outputs" / "qa"
+        issues = inspect_generated_tests(output_root / "tests", scopes, rows, "cases",
+                                        source_root=source if source.is_dir() else None,
+                                        host_app_fixture=run is not None and run.scenario_id == SCN_001_ID)
+        browser = self.configuration.browser_test_configuration
+        suites = [(suite.name, suite.suite_path) for suite in (() if browser is None else browser.suites)
+                  if suite.kind == "QA_TESTS" and suite.name in self._selectors.get("run_browser_tests", ())]
+        cases = (data.get("cases") or []) if isinstance(data, dict) else []
+        for item in inspect_generated_browser_tests(output_root, suites, cases, "cases"):
+            if item not in issues:
+                issues.append(item)
+        return issues
 
     async def prepare(self, execution):
         execution.budget.check()
@@ -380,7 +392,9 @@ class QARuntimeServices:
             if any(tool == 'run_unit_tests' for tool, _selector, _test in incomplete):
                 reasons.add('CONCURRENT_SIGNUPS_NOT_OBSERVED')
             if reasons:
-                raise TestFixRequired(reasons, [selector for _tool, selector in generated])
+                from agents.runtime.test_fix import generated_test_feedback
+                raise TestFixRequired(reasons, [selector for _tool, selector in generated],
+                                      observed_cases=generated_test_feedback(measured_results, generated))
         return await _run_file_operation(self._assemble, execution, cases, measured_results, task_id, context_id,
                                          not_run, incomplete)
 

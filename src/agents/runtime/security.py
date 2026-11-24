@@ -63,7 +63,7 @@ _PROTECTED = frozenset({
     "fixRequest", "scannerProfiles", "measuredSecurity", "securityRequirements", "userRequest", "sourcePaths",
     "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest", "sourceAccess",
     "testSelectors", "testTargets", "sourceReferenceCatalog",
-    "requirementAuthority", "requirementScope", "clarifications", "fileAccess", "plannerValidation", "llmValidation",
+    "requirementAuthority", "requirementScope", "clarifications", "fileAccess", "plannerValidation", "llmValidation", "llmFailure",
 })
 
 
@@ -210,8 +210,10 @@ class SecurityAgentExecutor(AgentExecutor):
         return TaskUpdater(queue, context.task_id, context.context_id)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None):
+    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None, llm_failure=None):
         data = {"code": code}
+        if llm_failure is not None:
+            data['llmFailure'] = llm_failure
         if llm_validation is not None:
             data["llmValidation"] = llm_validation
         if questions is not None:
@@ -396,7 +398,8 @@ class SecurityAgentExecutor(AgentExecutor):
         except LLMRuntimeError as error:
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
-            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation())
+            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation(),
+                               llm_failure=error.public_failure())
             return
         except (SecurityContractError, SecurityServicesError, RequirementScopeError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)

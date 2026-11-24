@@ -63,6 +63,14 @@ class RepairReadHistory:
                         all(isinstance(path, str) and path.startswith('source/') for path in inspection)
                         else frozenset())
 
+    def require_fresh_content(self, path):
+        """A rejected fragment edit needs the bytes again, not a cached-read pointer.
+
+        This only changes the next model transcript; the MCP read and its
+        original evidence remain authoritative and are never skipped.
+        """
+        self.sent.pop(path, None)
+
     def completed_inspection(self):
         if self.waiting and self.waiting.issubset(self.sent):
             self.waiting = frozenset()

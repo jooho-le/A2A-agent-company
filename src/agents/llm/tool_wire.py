@@ -36,6 +36,45 @@ def pin_workspace_argument(tool, workspace_id):
     return replace(tool, input_schema=JsonSchema.from_dict(schema))
 
 
+def pin_test_write_paths(tool, paths):
+    """Narrow an existing scratch write capability; never add paths or tools."""
+    from dataclasses import replace
+    if tool.name != 'write_test_file' or not paths:
+        return tool
+    schema = tool.input_schema.to_dict()
+    field = schema.get('properties', {}).get('path')
+    if not isinstance(field, dict) or field.get('type') != 'string':
+        raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
+    # Keep existing prefix/pattern constraints as well as the narrower enum.
+    field['enum'] = list(paths)
+    return replace(tool, input_schema=JsonSchema.from_dict(schema))
+
+
+def pin_source_repair(tool, path, expected_sha256=None, *, expected_absent=False):
+    """Pin an already offered source operation to a settled-conflict recovery."""
+    from dataclasses import replace
+    if tool.name not in ('read_project_file', 'write_source_file', 'edit_source_file'):
+        return tool
+    schema = tool.input_schema.to_dict()
+    properties = schema.get('properties', {})
+    if 'path' not in properties:
+        raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
+    properties['path']['enum'] = [path]
+    if expected_absent and tool.name == 'write_source_file':
+        # Existing optional field omission now means a create-only CAS at the actual file Tool.
+        # The narrowed wire must not let the model guess a hash or replace another file.
+        properties.pop('expectedSha256', None)
+        schema['required'] = [name for name in schema['required'] if name != 'expectedSha256']
+        return replace(tool, input_schema=JsonSchema.from_dict(schema))
+    if expected_sha256 is not None and tool.name != 'read_project_file':
+        if 'expectedSha256' not in properties:
+            raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
+        properties['expectedSha256']['enum'] = [expected_sha256]
+        if 'expectedSha256' not in schema['required']:
+            schema['required'].append('expectedSha256')
+    return replace(tool, input_schema=JsonSchema.from_dict(schema))
+
+
 def strict_tool_schema(project: JsonSchema) -> JsonSchema:
     schema = project.to_dict()
     properties = schema.get('properties', {})

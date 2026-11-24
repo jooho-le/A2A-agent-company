@@ -60,7 +60,7 @@ _PROTECTED = frozenset({
     "projectArtifactIds", "projectArtifactId", "artifactVersion", "model", "limits", "codeVersion",
     "fixRequest", "testSelectors", "testTargets", "qaRequirements", "userRequest", "protectedCases",
     "runtimeInstructions", "securityPolicy", "emailPolicy", "executionManifest", "sourceAccess",
-    "requirementAuthority", "requirementScope", "clarifications", "fileAccess", "plannerValidation", "llmValidation",
+    "requirementAuthority", "requirementScope", "clarifications", "fileAccess", "plannerValidation", "llmValidation", "llmFailure",
 })
 
 
@@ -138,9 +138,9 @@ def _test_targets(services):
     if browser is not None:
         targets.extend({"toolName": "run_browser_tests", "selector": suite.name,
                         "path": "outputs/qa/" + suite.suite_path, "format": "browser-suite-v1", "required": True,
-                        "example": {"format": "browser-suite-v1", "tests": [{
-                            "testId": "signup.visible", "steps": [{"action": "goto", "path": "/"},
-                            {"action": "assert_visible", "selector": "#signup"}]}]},
+                        "instruction": "Use the approved UI contract and actual product DOM. This target does not imply a signup page or a DOM selector.",
+                        "suiteContract": {"requiredFields": ["format", "tests"], "formatValue": "browser-suite-v1",
+                                          "testFields": ["testId", "steps"], "minimumTests": 1, "minimumSteps": 1},
                         "allowedActions": {"goto": ["action", "path"],
                             "fill": ["action", "selector", "value"], "click": ["action", "selector"],
                             "assert_text": ["action", "selector", "text"],
@@ -176,8 +176,10 @@ class QAAgentExecutor(AgentExecutor):
         return TaskUpdater(queue, context.task_id, context.context_id)
 
     @staticmethod
-    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None):
+    async def _status(updater, metadata, state, code, *, questions=None, llm_validation=None, llm_failure=None):
         data = {"code": code}
+        if llm_failure is not None:
+            data['llmFailure'] = llm_failure
         if llm_validation is not None:
             data["llmValidation"] = llm_validation
         if questions is not None:
@@ -322,7 +324,8 @@ class QAAgentExecutor(AgentExecutor):
         except LLMRuntimeError as error:
             state = (TaskState.TASK_STATE_AUTH_REQUIRED if error.code is LLMErrorCode.AUTH else
                      TaskState.TASK_STATE_REJECTED if error.code is LLMErrorCode.REFUSAL else TaskState.TASK_STATE_FAILED)
-            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation())
+            await self._status(updater, metadata, state, error.code.value, llm_validation=error.public_validation(),
+                               llm_failure=error.public_failure())
             return
         except (QAContractError, QAServicesError, RequirementScopeError) as error:
             await self._status(updater, metadata, TaskState.TASK_STATE_FAILED, error.code)

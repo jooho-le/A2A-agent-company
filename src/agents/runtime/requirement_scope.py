@@ -26,12 +26,22 @@ def signup_observation_plan(contract, scope=None):
     if contract.get('scenarioKey') != 'SCN-001':
         return {}
     criteria = {
-        'REQ-003': {'QA': ['concurrent signup outcomes and committed canonical row count'],
+        'REQ-001': {'QA': ['successful response and exactly one committed account from the same request']},
+        'REQ-002': {'QA': ['invalid email is rejected and leaves both new and existing stored rows unchanged']},
+        'REQ-003': {'QA': ['same canonical address is rejected after case and whitespace normalization',
+                           'concurrent signup outcomes and committed canonical row count'],
                     'SECURITY': ['deployed unique key on the canonical email']},
+        'REQ-004': {'QA': ['approved password length boundary rejects shorter input without storing an account',
+                           'approved length is accepted without inventing extra complexity requirements']},
         'REQ-005': {'SECURITY': ['stored credential verifies against the supplied synthetic password',
                                  'observed algorithm, memory, iterations, parallelism and per-account salts meet the approved policy']},
-        'REQ-006': {'SECURITY': ['success response', 'input rejection response', 'storage error response',
+        'REQ-006': {'SECURITY': ['success response', 'input rejection response',
+                                 'framework validation response before the signup handler',
+                                 'missing fields, wrong field types and non-object request bodies', 'storage error response',
                                  'request logs', 'storage error request logs']},
+        'REQ-007': {'QA': ['response agrees with committed database effects for accepted and rejected input',
+                           'a rejected attempt does not block a later valid signup']},
+        'REQ-008': {'ORCHESTRATOR': ['requirement, source version, validation, issue, fix and revalidation lineage']},
     }
     assigned = {str(r.requirement_id) for r in scope.requirements} if scope else None
     plan = {}
@@ -44,7 +54,9 @@ def signup_observation_plan(contract, scope=None):
         if scope and scope.role.value in ('QA', 'SECURITY'):
             observations = {scope.role.value: observations[scope.role.value]} if scope.role.value in observations else {}
         if observations:
-            plan[identifier] = {'observationsByRole': observations}
+            plan[identifier] = {'observationsByRole': observations,
+                                'acceptanceCriteria': list(requirement['acceptanceCriteria']),
+                                'purpose': 'PUBLIC_REQUIREMENT_IMPLEMENTATION_GUIDANCE_NOT_TEST_RESULTS'}
             if tasks:
                 plan[identifier]['implementationTaskIds'] = tasks
     return plan

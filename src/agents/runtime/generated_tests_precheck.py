@@ -10,9 +10,10 @@ with no chance to fix them (handoff P5, expected points 4 and 6):
   ``QA_REPORT_BINDING_INVALID`` / ``SECURITY_TEST_BINDING_INVALID``.
 
 This module parses (never imports or runs) the files and mirrors discovery for
-the plain layout the prompts ask for: top-level ``test_*.py`` files with
-``unittest.TestCase`` classes. Whenever it cannot be sure what the runner will
-report (sub-directories, ``load_tests``, unknown base classes, dynamic test
+top-level files and inert Python packages with ``unittest.TestCase`` classes.
+Non-package directories such as browser JSON never disable Python inspection.
+Whenever it cannot be sure what the runner will
+report (executable package initializers, ``load_tests``, unknown base classes, dynamic test
 attributes, unreadable files) it reports nothing and leaves the decision to the
 Host run, so it is never stricter than the real collection.
 
@@ -43,12 +44,11 @@ model returns still goes to the Host run, so these never fail a step:
   judged; wildcard or dynamic modules are left to the Host run.
 """
 import ast
-import fnmatch
 from pathlib import Path
 
+from agents.runtime.generated_test_inventory import MAX_FILES, MAX_FILE_BYTES, unit_inventory, scope_root
+
 TESTCASE_BASES = frozenset({'TestCase', 'IsolatedAsyncioTestCase', 'AppTestCase'})
-MAX_FILES = 64
-MAX_FILE_BYTES = 1_048_576
 
 
 def _base_name(node):
@@ -76,13 +76,13 @@ def _starts_test_client(tree) -> bool:
     return all(id(call) in in_with for call in made)
 
 
-def _analyze(path: Path):
+def _analyze(path: Path, module=None):
     """``(ids or None when unsure, reason codes, shows test code)`` for one generated test file."""
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
             return None, set(), False
-        module = path.stem
-        if not module.isidentifier():
+        module = module or path.stem
+        if not all(part.isidentifier() for part in module.split('.')):
             return None, set(), False
         text = path.read_text(encoding='utf-8')
     except (OSError, ValueError, UnicodeDecodeError):
@@ -176,6 +176,16 @@ def _fixture_issues(path, source_root):
     return set()
 
 
+def _fixture_api_issues(path):
+    from mcp_tools.tools.unit_runner import app_fixture_source_issues
+    try:
+        if path.is_symlink() or path.stat().st_size > MAX_FILE_BYTES:
+            return set()
+        return {item['reasonCode'] for item in app_fixture_source_issues(path.read_text(encoding='utf-8'))}
+    except (OSError, ValueError, UnicodeDecodeError):
+        return set()
+
+
 def _import_issues(path: Path, source_root, tests_root: Path) -> set:
     """``TEST_IMPORT_NAME_MISSING`` when a product-module import certainly fails at collection."""
     from agents.runtime.start_precheck import _bindings, _module_file, _parse
@@ -218,14 +228,15 @@ def _import_issues(path: Path, source_root, tests_root: Path) -> set:
     return set()
 
 
-def test_ids(path: Path) -> set[str] | None:
+def test_ids(path: Path, module=None) -> set[str] | None:
     """``module.Class.method`` ids unittest would report for this file, or None when unsure."""
-    return _analyze(path)[0]
+    return _analyze(path, module)[0]
 
 
 def inspect_generated_tests(tests_dir, scopes, rows, field, source_root=None, *, host_app_fixture=False) -> list[dict]:
     """Closed issues for generated scopes ``[(selector, pattern)]`` against declared case rows."""
-    scopes = [(selector, pattern) for selector, pattern in scopes if isinstance(selector, str) and isinstance(pattern, str)]
+    scopes = [(s[0], s[1], s[2] if len(s) == 3 else 'tests') for s in scopes
+              if len(s) in (2, 3) and isinstance(s[0], str) and isinstance(s[1], str)]
     if not scopes:
         return []
     root = Path(tests_dir)
@@ -233,21 +244,24 @@ def inspect_generated_tests(tests_dir, scopes, rows, field, source_root=None, *,
         return []
     if not root.is_dir():
         return [{'fieldPath': '/' + field, 'reasonCode': 'GENERATED_TEST_FILE_MISSING'}]
-    entries = sorted(root.iterdir())[:MAX_FILES + 1]
-    if len(entries) > MAX_FILES or any(entry.is_dir() and entry.name != '__pycache__' for entry in entries):
-        return []  # package layouts: let the Host collection decide
     issues = []
-    for selector, pattern in scopes:
-        files = [entry for entry in entries if entry.suffix == '.py' and fnmatch.fnmatchcase(entry.name, pattern)]
-        if not files:
+    for selector, pattern, directory in scopes:
+        selected_root = scope_root(root, directory)
+        if not selected_root.is_dir():
+            issues.append({'fieldPath': '/' + field, 'reasonCode': 'GENERATED_TEST_FILE_MISSING'})
+            continue
+        inventory = unit_inventory(selected_root, pattern)
+        if not inventory.complete:
+            continue  # dynamic packages remain authoritative only at isolated collection
+        if not inventory.files:
             issues.append({'fieldPath': '/' + field, 'reasonCode': 'GENERATED_TEST_FILE_MISSING'})
             continue
         found, codes, shows_tests = set(), set(), False
-        for path in files:
-            ids, file_codes, file_shows_tests = _analyze(path)
-            codes |= file_codes | _import_issues(path, source_root, root)
+        for path, module in inventory.files:
+            ids, file_codes, file_shows_tests = _analyze(path, module)
+            codes |= file_codes | _import_issues(path, source_root, selected_root)
             if host_app_fixture:
-                codes |= _fixture_issues(path, source_root)
+                codes |= _fixture_issues(path, source_root) | _fixture_api_issues(path)
             shows_tests = shows_tests or file_shows_tests
             found = None if found is None or ids is None else found | ids
         for code in sorted(codes):
@@ -264,4 +278,60 @@ def inspect_generated_tests(tests_dir, scopes, rows, field, source_root=None, *,
             issues.append({'fieldPath': '/' + field, 'reasonCode': 'TEST_IN_FILE_NOT_DECLARED'})
         if declared - found:
             issues.append({'fieldPath': '/' + field, 'reasonCode': 'DECLARED_TEST_NOT_IN_FILE'})
+    return issues
+
+
+def inspect_generated_browser_tests(output_root, suites, rows, field) -> list[dict]:
+    """Inspect every configured generated browser suite before accepting READY.
+
+    Finalization runs all configured suites, including a suite absent from the
+    model's case declarations. Match that obligation here, without running
+    product code, relaxing coverage or exposing test contents in corrections.
+    """
+    from pathlib import PurePosixPath
+    from mcp_tools.tools.browser_contract import BrowserContractError, parse_browser_suite
+
+    root = Path(output_root)
+    if not root.is_absolute():
+        return []
+    issues = []
+
+    def add(code):
+        item = {"fieldPath": "/" + field, "reasonCode": code}
+        if item not in issues:
+            issues.append(item)
+
+    for selector, suite_path in suites:
+        relative = PurePosixPath(suite_path)
+        if (relative.is_absolute() or not relative.parts or relative.parts[0] != "tests"
+                or any(part in (".", "..") for part in relative.parts) or "\\" in suite_path):
+            add("BROWSER_SUITE_PATH_INVALID")
+            continue
+        target = root
+        unsafe = root.is_symlink()
+        for part in relative.parts:
+            target = target / part
+            unsafe = unsafe or target.is_symlink()
+        if unsafe:
+            add("BROWSER_SUITE_PATH_INVALID")
+            continue
+        if not target.is_file():
+            add("GENERATED_TEST_FILE_MISSING")
+            continue
+        try:
+            with target.open("rb") as stream:
+                raw = stream.read(MAX_FILE_BYTES + 1)
+            if len(raw) > MAX_FILE_BYTES:
+                raise ValueError
+            suite = parse_browser_suite(raw.decode("utf-8"), selector)
+        except (OSError, UnicodeError, ValueError, BrowserContractError):
+            add("BROWSER_SUITE_INVALID")
+            continue
+        actual = {case["testId"] for case in suite["tests"]}
+        declared = {row.get("testId") for row in rows if isinstance(row, dict)
+                    and row.get("toolName") == "run_browser_tests" and row.get("selector") == selector}
+        if actual - declared:
+            add("TEST_IN_FILE_NOT_DECLARED")
+        if declared - actual:
+            add("DECLARED_TEST_NOT_IN_FILE")
     return issues

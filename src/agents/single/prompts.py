@@ -11,6 +11,7 @@ from agents.api.sqlite_task_store import AgentContextLimitError, SQLiteAgentTask
 from agents.core.identity import SingleAgentIdentity
 from agents.llm.contracts import json_text
 from agents.roles.prompts import COMMON_RULES
+from agents.roles.work_rules import all_role_work_rules
 from agents.single.contracts import SingleDraftContract, SinglePhase, scenario_contract_sha256
 from orchestrator.a2a.requests import A2AWorkflowMetadata
 from orchestrator.core.security import redact_data
@@ -18,7 +19,7 @@ from orchestrator.domain.scenario_registry import ScenarioDefinition
 from orchestrator.domain.validation_feedback import without_expectations
 
 
-SINGLE_PROMPT_VERSION = "4"
+SINGLE_PROMPT_VERSION = "9"
 MAX_SINGLE_PROMPT_BYTES = 1_048_576
 
 
@@ -47,6 +48,7 @@ def build_single_system_prompt() -> str:
         "자체 테스트 결과는 수정에 활용하지만 최종 공통 평가 시험지·채점 결과·평가 코드를 요청하거나 변경하지 않는다.",
         "history의 예전 PASS를 새 Snapshot에 재사용하지 않는다. 입력/인증 대기·수정·재개 시에도 같은 Context와 Run 한도를 유지한다.",
     )
+    rules = (*rules, *all_role_work_rules())
     return (f"정체성: SINGLE_AGENT\n계약 버전: {SINGLE_PROMPT_VERSION}\n\n"
             + "\n".join(f"- {rule}" for rule in (*COMMON_RULES, *rules)))
 
