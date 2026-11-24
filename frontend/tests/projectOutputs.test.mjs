@@ -18,7 +18,8 @@ test('프로젝트·보관함: 현재 Run 연결, 실제 목록, 빈 상태와 �
   try {
     const build = await rolldown({
       input: fileURLToPath(new URL('./fixtures/projectOutputsUi.jsx', import.meta.url)),
-      transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': '"development"' } },
+      transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': '"development"',
+        'import.meta.env': '{"VITE_PRODUCT_RUN_SUBMISSION_ENABLED":"true"}' } },
       plugins: [{ name: 'isolated-office', resolveId(source) {
         if (source === 'react') return fileURLToPath(import.meta.resolve('react'))
         if (source.endsWith('.css')) return '\0style'

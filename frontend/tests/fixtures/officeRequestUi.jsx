@@ -4,7 +4,7 @@ import Dashboard from '../../src/pages/AtelierDashboard.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const id = n => '70000000-0000-4000-8000-' + String(n).padStart(12, '0')
-const scenarioId = id(1), runId = id(2), stepId = id(3), projectId = id(5)
+const scenarioId = 'f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76', runId = id(2), stepId = id(3), projectId = id(5)
 const configurationId = 'c'.repeat(64)
 const productToken = user => 'test.' + btoa(JSON.stringify({ sub: user })) + '.test'
 const run = { runId, scenarioId, status: 'PLANNING', verdict: null, codeVersion: null, fixAttempt: 0 }
@@ -20,18 +20,23 @@ globalThis.fetch = async (url, options = {}) => {
   if (path === '/api/v1/scenarios') {
     if (scenario === 'offline') { status = 503; data = { detail: 'Host unavailable' } }
     else data = { scenarios: [{ scenarioId }] }
-  } else if (path === '/api/v1/host/approved-configuration') data = { scenarioId, configurationId, configuration: { architecture: 'MULTI_AGENT' } }
+  } else if (path === '/api/v1/host/approved-configuration') {
+    status = scenario === 'offline' ? 503 : 200
+    data = status === 503 ? { detail: 'Host unavailable' }
+      : { scenarioId, configurationId, configuration: { architecture: 'MULTI_AGENT' } }
+  }
   else if (path === '/api/v1/runs' && options.method === 'POST') {
     if (scenario === 'pending') await new Promise(resolve => { releasePost = resolve })
     const key = new Headers(options.headers).get('Idempotency-Key')
     receipt = { run, firstStep: step, dispatchStatus: 'SCHEDULED', submissionStatus: 'CREATED', requestId: key, projectId }
     data = scenario === 'unknown' ? { submissionStatus: 'UNKNOWN', projectId, requestId: key } : receipt
+    status = scenario === 'unknown' ? 202 : 201
     if (scenario === 'not-accepted' || scenario === 'ambiguous-503') {
       status = 503; data = { detail: 'Host unavailable' }
       if (scenario === 'not-accepted') headers.set('X-Submission-Status', 'NOT_ACCEPTED')
     }
-    if (scenario === 'stale-configuration') { status = 409; data = { detail: 'Configuration changed' } }
-    if (scenario === 'rejected') data = { submissionStatus: 'REJECTED', projectId, requestId: key }
+    if (scenario === 'stale-configuration') { status = 409; data = { detail: 'CONFIGURATION_CHANGED' } }
+    if (scenario === 'rejected') { status = 202; data = { submissionStatus: 'REJECTED', projectId, requestId: key } }
   } else if (path.startsWith('/api/v1/submissions/')) data = receipt
   else if (path === '/api/projects/' + projectId) data = project
   else if (path === '/api/projects') data = { projects: [project] }
@@ -45,7 +50,7 @@ globalThis.fetch = async (url, options = {}) => {
   } else if (path.endsWith('/issues')) data = { runId, issues: [] }
   else if (path.endsWith('/artifacts')) data = { runId, artifacts: [] }
   else throw new Error('Unexpected local test request: ' + path)
-  return { ok: status === 200, status, headers, json: async () => data }
+  return { ok: status >= 200 && status < 300, status, headers, json: async () => data }
 }
 async function mount(authenticated = true, { preserveStorage = false, user = '1' } = {}) {
   if (root) { await act(async () => root.unmount()); host.remove() }
@@ -73,7 +78,7 @@ async function verify() {
   await mount(false)
   check(document.querySelectorAll('#request-form').length === 1, 'one composer')
   check(!document.querySelector('[data-office3d=timeline]') && !document.querySelector('[data-office3d=error-mode]'), 'no presentation controls')
-  check(document.querySelector('#request-form button[type=submit]').disabled, 'login required')
+  check(document.querySelector('#request-form .composer-bottom button').textContent.includes('로그인'), 'guest is directed to login')
   fill(); await submit(); check(postCount() === 0, 'no guest POST')
   checks.push('guest cannot submit; no mock presentation controls')
 

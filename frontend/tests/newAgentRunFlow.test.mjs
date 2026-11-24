@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createAgentRun, getAgentRunScenarios } from '../src/api/agentRuns.js'
 import { createRunSubmission, dispatchMessage, publicRunConfiguration } from '../src/api/agentRunSubmission.js'
+import { runApiTransport } from '../src/api/productRunRequest.js'
 import { initialRunSelection, runQueryReducer } from '../src/hooks/agentRunSelection.js'
 import { createRunEventFeed } from '../src/hooks/agentRunEventFeed.js'
 import { createOfficeTraceController } from '../src/components/atelier/officeTraceEvents.js'
@@ -41,6 +42,10 @@ test('Mock POST: 승인·등록 시나리오 확인 후 자동 Run 선택, 중�
     assert.equal(url, '/api/v1/runs'); assert.equal(options.method, 'POST')
     return new Promise(resolve => { releasePost = () => resolve(json(response('SCHEDULED'))) })
   })
+  // Legacy Host-shape submission/selection unit test: inject only this test's
+  // Mock transport. Product JWT, feature flags and explicit-click guards are
+  // covered by productRunAuth/productOfficeSubmission; no live fetch is used.
+  t.mock.method(runApiTransport, 'fetch', (...args) => globalThis.fetch(...args))
   let selection = initialRunSelection, connected = 0
   const submitter = createRunSubmission({ listScenarios: getAgentRunScenarios, postRun: createAgentRun,
     onCreated: value => { connected++; selection = runQueryReducer(selection, { type: 'created', runId: value.run.runId }) } })
@@ -50,7 +55,10 @@ test('Mock POST: 승인·등록 시나리오 확인 후 자동 Run 선택, 중�
   assert.equal(calls.length, 0)
   const first = submitter.submit(request), duplicate = submitter.submit(request)
   assert.strictEqual(first, duplicate)
-  while (!releasePost) await new Promise(resolve => setImmediate(resolve))
+  for (let attempt = 0; !releasePost && attempt < 100; attempt++) {
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  assert.equal(typeof releasePost, 'function', 'Mock POST must start without an unbounded wait')
   assert.deepEqual(JSON.parse(calls[1].options.body), { scenarioId, requestText: '테스트용 업무 요청', configuration })
   releasePost(); const created = await first
   assert.equal(connected, 1); assert.equal(selection.runId, runId); assert.equal(selection.traceFromStart, true)
@@ -143,6 +151,7 @@ test('생성 거절·미등록 시나리오·민감 설정은 기존 선택 유�
     if (mode === 'invalid') return json({ run: { runId: 'invalid' } })
     return json(response('NOT_CONFIGURED'))
   })
+  t.mock.method(runApiTransport, 'fetch', (...args) => globalThis.fetch(...args))
   const make = () => createRunSubmission({ listScenarios: getAgentRunScenarios, postRun: createAgentRun,
     onCreated: value => { selected = value.run.runId } })
   for (const cfg of [{ ...configuration, apiKey: 'synthetic' }, { ...configuration, model: { ...configuration.model, apiKey: 'synthetic' } },

@@ -406,3 +406,77 @@
 .atelier-dashboard.workspace-shell.ux-simple :is(.output-card > p, .studio-banner-label) {
   font-size: 14px; line-height: 1.7; overflow-wrap: anywhere;
 }
+
+/* 양쪽 기능 패널: 루트 글자 크기에 맞춰 메뉴·입력·작업 정보를 함께 확대합니다. */
+.atelier-dashboard.workspace-shell.ux-simple {
+  --office-rail: 17.5rem;
+  --office-console: 28rem;
+}
+.atelier-dashboard.workspace-shell.ux-simple .sidebar { padding-inline: 1rem; }
+.atelier-dashboard.workspace-shell.ux-simple .sidebar .company-name {
+  font-size: 1.2rem; line-height: 1.5; overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple .company-monogram {
+  width: 2.75rem; height: 2.75rem; font-size: 1.4rem;
+}
+.atelier-dashboard.workspace-shell.ux-simple .nav-caption { font-size: 1rem; color: #c3ccda; }
+.atelier-dashboard.workspace-shell.ux-simple .nav-button {
+  min-height: 3.75rem; padding: .9rem 1rem; gap: .85rem;
+  font-size: 1.2rem; line-height: 1.5; white-space: normal; overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple .nav-button svg { width: 1.5rem; height: 1.5rem; flex-shrink: 0; }
+.atelier-dashboard.workspace-shell.ux-simple .nav-count { font-size: 1.05rem; }
+.atelier-dashboard.workspace-shell.ux-simple .owner-profile {
+  margin-inline: 0; min-height: 4rem; gap: .85rem;
+}
+.atelier-dashboard.workspace-shell.ux-simple .owner-profile strong { font-size: 1.15rem; }
+.atelier-dashboard.workspace-shell.ux-simple .owner-avatar { width: 2.75rem; height: 2.75rem; font-size: 1.2rem; }
+.atelier-dashboard.workspace-shell.ux-simple .atelier-account-menu p { font-size: 1rem; }
+.atelier-dashboard.workspace-shell.ux-simple .atelier-account-menu button {
+  min-height: 3.25rem; padding: .75rem; font-size: 1.1rem; line-height: 1.5;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console {
+  padding: 1.75rem 1.5rem; font-size: 1.1rem;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console :is(.composer-top label, .run-work-panel h3) {
+  font-size: 1.65rem; line-height: 1.45;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console :is(.request-name, .request-text, .run-reply textarea) {
+  font-size: 1.15rem; line-height: 1.7; padding: .9rem 1rem;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console .request-name { min-height: 3.5rem; }
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console .request-text { min-height: 10rem; }
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console :is(.request-scope, .composer-feedback,
+  .composer-feedback p, .composer-bottom p, .office3d-disclaimer, .run-person-heading > span,
+  .run-person-purpose, .run-person-result p, .run-person-result summary, .run-question > strong,
+  .run-question ul, .run-question > p, .run-waiting-work, .run-reply label, .run-draft-hint,
+  .run-command-notice, .run-control-error, .run-attention button) {
+  font-size: 1.1rem; line-height: 1.7; overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console :is(.office3d-request > summary,
+  .office3d-inspector > summary, .office3d-advanced > summary, .run-person-heading strong, .run-person-result h4) {
+  font-size: 1.15rem; line-height: 1.6;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console .run-employee-picker button {
+  font-size: 1rem; line-height: 1.5; padding: .5rem .2rem .75rem;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console .run-employee-picker img { height: 4.5rem; }
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console :is(.button, .run-header-stop, .composer-bottom .start) {
+  min-height: 3.25rem; padding: .75rem 1rem; font-size: 1.1rem; line-height: 1.5;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console .run-work-panel > header { flex-wrap: wrap; }
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console .run-header-actions { margin-left: auto; }
+.atelier-dashboard.workspace-shell.ux-simple .office3d-console .run-refresh { width: 3rem; height: 3rem; }
+.atelier-dashboard.workspace-shell.ux-simple :is(.office3d-panel-toggle, .office3d-view-options > summary) {
+  min-height: 3.25rem; padding: .75rem 1rem; font-size: 1.1rem; line-height: 1.5;
+}
+@media (min-width: 761px) and (max-width: 1100px) {
+  .atelier-dashboard.workspace-shell.ux-simple { --office-rail: 16rem; --office-console: 26rem; }
+}
+@media (max-width: 760px) {
+  .atelier-dashboard.workspace-shell.ux-simple .sidebar { width: min(20rem, calc(100vw - 2rem)); }
+  .atelier-dashboard.workspace-shell.ux-simple .office3d-console {
+    padding: 1.5rem 1.25rem; max-height: calc(100dvh - 230px);
+  }
+}

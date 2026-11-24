@@ -3,9 +3,9 @@ import { createRoot } from 'react-dom/client'
 import Dashboard from '../../src/pages/AtelierDashboard.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
-sessionStorage.setItem('access_token', 'mock-project-outputs-only')
+sessionStorage.setItem('access_token', 'test.' + btoa(JSON.stringify({ sub: '1' })) + '.test')
 const id = n => `70000000-0000-4000-8000-${String(n).padStart(12, '0')}`
-const scenarioId = id(1), runId = id(2), stepId = id(3)
+const scenarioId = 'f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76', runId = id(2), stepId = id(3)
 const approval = { approved: true, scenarioId, configuration: {
   architecture: 'MULTI_AGENT', startingCommitHash: 'a'.repeat(40), startingSnapshotSha256: 'b'.repeat(64),
   model: { provider: 'openai', modelId: 'mock-model', temperature: 0 },
@@ -30,7 +30,7 @@ globalThis.fetch = async (url, options = {}) => {
   else if (path === '/api/projects/' + id(5)) data = { projectId: id(5), name: '테스트 프로젝트', scenarioId, createdAt: '2026-11-16T00:00:00', updatedAt: '2026-11-16T00:00:00', runs: [] }
   else if (path === '/api/v1/runs' && options.method === 'POST') {
     if (scenario === 'failure') { status = 422; data = { detail: 'mock rejection' } }
-    else { data = { run, firstStep: step, dispatchStatus: 'SCHEDULED', projectId: id(5), submissionStatus: 'CREATED', requestId: new Headers(options.headers).get('Idempotency-Key') } }
+    else { status = 201; data = { run, firstStep: step, dispatchStatus: 'SCHEDULED', projectId: id(5), submissionStatus: 'CREATED', requestId: new Headers(options.headers).get('Idempotency-Key') } }
   } else if (path === `/api/v1/runs/${runId}`) data = scenario === 'finished' ? { ...run, status: 'FINISHED', verdict: 'SUCCESS' } : run
   else if (path.endsWith('/steps')) data = { runId, steps: [step] }
   else if (path.endsWith('/configuration')) data = { runId, artifactType: 'RUN_CONFIGURATION', configuration: { architecture: 'MULTI_AGENT' } }
@@ -43,12 +43,13 @@ globalThis.fetch = async (url, options = {}) => {
     else data = { runId, artifacts: scenario === 'empty' ? [] : artifacts }
   }
   else throw new Error('Unexpected mock request')
-  return { ok: status === 200, status, json: async () => data }
+  return { ok: status >= 200 && status < 300, status, headers: new Headers(), json: async () => data }
 }
 async function mount(approved) {
   if (root) { await act(async () => root.unmount()); host.remove() }
   calls = []
   sessionStorage.removeItem('ai-company.selected-project-id'); sessionStorage.removeItem('ai-company.pending-office-submission')
+  sessionStorage.removeItem('ai-company.pending-office-submission.1')
   host = document.createElement('div'); document.body.append(host)
   root = createRoot(host)
   await act(async () => root.render(<StrictMode><Dashboard approvedRunSubmission={approved} /></StrictMode>))
@@ -104,10 +105,12 @@ async function verify() {
   check(output.querySelectorAll('.output-card').length === 4, 'artifact list reused')
   check(output.textContent.includes('source.bundle') && output.textContent.includes('입력 검증 추가'), 'registered names and summary')
   check(output.textContent.includes('src/form.js') && output.textContent.includes('입력 검사 · FAIL'), 'report paths and verdicts')
-  check(!output.querySelector('a') && !output.querySelector('.file-open') && !output.querySelector('.output-actions'), 'no invented content/download action')
+  check(!output.querySelector('a') && !output.querySelector('.file-open'), 'no arbitrary file URL or invented content action')
+  check(output.querySelectorAll('.output-actions button').length === 1
+    && output.querySelector('.output-actions button').textContent.includes('소스 ZIP 다운로드'), 'only registered versioned Source offers ZIP download')
   check(!output.textContent.includes('hidden-test-value') && !output.textContent.includes('/private/mock-only'), 'private data absent')
-  check(output.textContent.includes('파일 다운로드는 아직 지원하지 않아요'), 'unsupported download explained')
-  checks.push('artifact metadata/report summary shown without secrets or fake downloads')
+  check(calls.every(call => !call.url.includes('/download')), 'metadata rendering never triggers a download')
+  checks.push('artifact metadata/report summary shown without secrets or automatic downloads')
 
   scenario = 'artifact-error'; await navigate('home'); await navigate('outputs')
   check(output.querySelector('[role=alert]') && !output.textContent.includes('아직 결과가 없어요'), 'error is not empty result')
