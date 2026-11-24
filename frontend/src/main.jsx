@@ -5,6 +5,7 @@ import App from './App.jsx'
 import StartupExperience from './components/StartupExperience.jsx'
 import './ServiceTheme.css'
 import './StudioEffects.css'
+import './Typography.css'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -4,7 +4,7 @@ function DashboardPage({ onRunScenario, onOpenDocuments, onLogout }) {
       <header className="dashboard-header">
         <div className="product-brand">
           <span className="brand-mark" aria-hidden="true">A</span>
-          <span>A2A Agent Company</span>
+          <span>AIO</span>
         </div>
         <button type="button" className="app-button" onClick={onLogout}>로그아웃</button>
       </header>

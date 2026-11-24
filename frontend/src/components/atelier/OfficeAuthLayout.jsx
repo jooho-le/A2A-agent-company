@@ -51,7 +51,7 @@ export default function OfficeAuthLayout({ children, reviewAccents = false }) {
     <div className="office-auth-shell">
       <header className="office-auth-brand">
         <span className="office-auth-monogram" aria-hidden="true">A</span>
-        <span>AI 에이전트 회사</span>
+        <span>AIO</span>
       </header>
       <div className="office-auth-mobile-team" aria-hidden="true">{[4, 0, 1, 2, 3].map(index =>
         <img key={humanAgents[index].id} src={`/characters/login-${humanAgents[index].id}.png`} alt="" width="768" height="960" draggable="false" />)}</div>
