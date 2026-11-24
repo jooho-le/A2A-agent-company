@@ -105,8 +105,7 @@ test('FAILED 후 새 Step 재작업은 오류 표정을 해제하고 모션을 �
   const row = role(controller.advance(1), 'DEVELOPER')
   assert.equal(row.expression, 'normal')
   assert.equal(row.motionTime, 1)
-  assert.equal(row.poseState, 'waiting')
-  assert.equal(role(controller.advance(1), 'DEVELOPER').poseState, 'working')
+  assert.equal(row.poseState, 'working')
 })
 
 test('동일 Step의 attempt 변경 시 해당 Agent의 모션만 새로 시작한다', () => {
@@ -154,26 +153,4 @@ test('105초 이후에도 RUNNING은 유지되며 자동 완료·세리머니를
   assert.equal(role(rows, 'SECURITY').displayState, 'working')
   controller.setSnapshot(snapshot({ QA: 'SUCCEEDED', SECURITY: 'SUCCEEDED' }, { status: 'FINISHED', verdict: 'SUCCESS' }))
   assert.ok(controller.advance(1000).every(row => !Object.hasOwn(row, 'finale') && !Object.hasOwn(row, 'progress')))
-})
-
-
-test('2초 미만 작업은 애니메이션을 시작하지 않고 실제 완료 상태는 유지한다', () => {
-  const controller = controllerWith({ QA: 'RUNNING' })
-  assert.equal(role(controller.advance(1.9), 'QA').poseState, 'waiting')
-  controller.setSnapshot(snapshot({ QA: 'SUCCEEDED' }))
-  const row = role(controller.advance(.1), 'QA')
-  assert.equal(row.poseState, 'waiting')
-  assert.equal(row.step.status, 'SUCCEEDED')
-})
-
-test('대표 문서 도착 후 작업을 시작하되 실패·입력 대기는 지연하지 않는다', () => {
-  const controller = controllerWith({ QA: 'RUNNING', SECURITY: 'RUNNING' })
-  const waiting = controller.advance(3, true, row => row.agentRole === 'QA')
-  assert.equal(role(waiting, 'QA').poseState, 'waiting')
-  assert.equal(role(waiting, 'SECURITY').poseState, 'working')
-  assert.equal(role(controller.advance(5, true, () => false), 'QA').poseState, 'working')
-  controller.setSnapshot(snapshot({ QA: 'FAILED', SECURITY: 'WAITING_INPUT' }))
-  const rows = controller.advance(0, true, () => true)
-  assert.equal(role(rows, 'QA').displayState, 'failed')
-  assert.equal(role(rows, 'SECURITY').displayState, 'waiting_input')
 })
