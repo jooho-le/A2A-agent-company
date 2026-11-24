@@ -3,12 +3,13 @@ import { addPlannerLeadership } from './office3dLeader'
 import { humanAgents } from './humanAgents'
 import { roleLabel, runLabel } from './roleLabels'
 import { createOfficePerformance, finaleOptions } from './office3dPerformance'
-import { createOfficeRunController } from './office3dRunController'
+import { createOfficeRunController, officeAgentRoles } from './office3dRunController'
 import { createRunSuccessCeremony } from './runSuccessCeremony'
 import { addOfficeOrchestrator, managementDisplay, updateOfficeBadges, orchestratorIndex } from './office3dOrchestrator'
 import { createOfficeTraceController, isTraceActionCurrent } from './officeTraceEvents'
 import { tidyOfficeHair } from './office3dAppearance'
 import { buildOfficeRunPopups, popupResultNotice, renderOfficeRunPopups } from './officeRunPopups'
+import { createOfficeLabelPresentation } from './officeLabelPresentation'
 
 // 실제 Run·Trace 표시와 카메라의 수명 주기를 관리합니다.
 export function mountAgentOffice(root, {
@@ -137,6 +138,14 @@ export function mountAgentOffice(root, {
       }
     }
     const runController = createOfficeRunController();
+    const labelPresentation = createOfficeLabelPresentation();
+    let presentedLabels = [];
+    function updatePresentedLabels(delta = 0) {
+      const rows = [...officeAgentRoles.map(agentRole => runDisplayState?.agents?.find(row => row.agentRole === agentRole)
+        ?? { agentRole, displayState: 'idle', label: '기본 대기' }), managementDisplay(runDisplayState)];
+      presentedLabels = labelPresentation.advance(runDisplayState, rows, delta);
+    }
+    updatePresentedLabels();
     const handoffs = createOfficeTraceController();
     handoffs.observe(runDisplayState, displayMode);
     const actualPapers = new Map();
@@ -237,17 +246,15 @@ export function mountAgentOffice(root, {
     });
     background.colorSpace = ct;
     Ku(office, background);
-    const sceneColor = scene.background;
     function fitPhotoBackground() {
-      const narrow = stage.clientWidth <= 760;
-      scene.background = narrow ? background : sceneColor;
-      office.backdrop.visible = !narrow;
-      // 휴대폰은 인물 전체를 담되 배경 사진은 화면을 계속 채웁니다.
+      scene.background = background;
+      office.backdrop.visible = false;
+      // 모든 화면에서 사진을 cover로 채웁니다. 인물·책상·카메라 크기는 그대로 둡니다.
       const imageAspect = background.image?.width && background.image?.height
         ? background.image.width / background.image.height : 1.8;
       const viewAspect = stage.clientWidth / Math.max(1, stage.clientHeight);
-      const x = narrow ? Math.min(1, viewAspect / imageAspect) : 1;
-      const y = narrow ? Math.min(1, imageAspect / viewAspect) : 1;
+      const x = Math.min(1, viewAspect / imageAspect);
+      const y = Math.min(1, imageAspect / viewAspect);
       background.repeat.set(x, y);
       background.offset.set((1 - x) / 2, (1 - y) / 2);
       background.updateMatrix();
@@ -439,14 +446,16 @@ export function mountAgentOffice(root, {
       actualAgents.forEach((agent, index) => {
         const suffix = agent.refreshing ? agent.hasConfirmedState ? ' · 갱신 중(마지막 확인 상태)' : ' · 갱신 중' : '';
         const label = agentLabels[index];
+        const stable = presentedLabels[index] ?? { displayState: 'idle', label: '기본 대기' };
         for (const target of [label, liveRows[index]]) {
-          target.dataset.state = agent.displayState;
+          target.dataset.state = target === label ? stable.displayState : agent.displayState;
           target.dataset.officeAgentRole = agent.agentRole;
           target.dataset.motionTime = agent.motionTime.toFixed(3);
           target.dataset.expression = agent.expression;
         }
         liveRows[index].textContent = `${displayRole(index)} · ${agent.label}${suffix}`;
-        label.querySelector('small').textContent = agent.label + suffix;
+        // 갱신 안내는 상세 목록에만 표시해 폴링마다 명찰 폭과 문구가 바뀌지 않게 합니다.
+        if (label.querySelector('small').textContent !== stable.label) label.querySelector('small').textContent = stable.label;
         label.classList.toggle('selected', selectedAgent === index);
         label.setAttribute('aria-pressed', String(selectedAgent === index));
         stepButtons[index].classList.toggle('current', agent.displayState === 'working');
@@ -482,6 +491,7 @@ export function mountAgentOffice(root, {
         if (!handoffs.busy() && handoffs.info().ready && successCeremony.start({ ready, motionEnabled: enabled })) { selectedAgent = -1; setAutoCamera(true); }
         actualPlayback = successCeremony.advance(e * tr, { ready, motionEnabled: enabled, duration: bn - En });
         actualAgents = actualRows(e, enabled);
+        updatePresentedLabels(e);
         if (actualPlayback) {
           actualPapers.forEach(paper => { paper.visible = false; });
           const performanceTime = En + actualPlayback.elapsed;
@@ -520,6 +530,7 @@ export function mountAgentOffice(root, {
       const changed = displayMode !== mode || runDisplayState?.runId !== snapshot?.runId;
       mode = 'actual';
       runDisplayState = snapshot;
+      updatePresentedLabels();
       successCeremony.observe(snapshot, mode);
       actualPlayback = successCeremony.info().playback;
       runController.setSnapshot(snapshot);

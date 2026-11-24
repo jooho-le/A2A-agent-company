@@ -6,10 +6,39 @@ import { roleLabel } from './roleLabels'
 import { pendingOfficeSubmissionKey } from '../../hooks/pendingOfficeSubmission'
 import { Icon } from './AtelierArtwork'
 import './RunWorkPanel.css'
+import { minimumOfficeWorkSeconds } from './office3dRunController'
 
 const order = [4, 0, 1, 2, 3]
 const purposes = ['만들 기능과 순서를 정리해요.', '계획에 맞게 기능을 구현해요.',
   '요구한 대로 작동하는지 확인해요.', '정보 보호와 접근 권한을 점검해요.', '직원에게 일을 전달하고 전체 진행을 관리해요.']
+
+function useSustainedWork(row, runId) {
+  const key = JSON.stringify([runId, row?.agentRole, row?.displayState, row?.step?.workflowStepId,
+    row?.step?.attempt, row?.step?.codeVersion])
+  const [confirmed, setConfirmed] = useState({ key, ready: false })
+  if (confirmed.key !== key) setConfirmed({ key, ready: false })
+  const working = row?.displayState === 'working'
+  useEffect(() => {
+    if (!working) return
+    const timer = setTimeout(() => setConfirmed(current => current.key === key ? { key, ready: true } : current), minimumOfficeWorkSeconds * 1000)
+    return () => clearTimeout(timer)
+  }, [key, working])
+  return working && !(confirmed.key === key && confirmed.ready)
+    ? { ...row, displayState: 'pending', label: '작업 확인 중' } : row
+}
+
+function useWorkPresentation(snapshot) {
+  const [last, setLast] = useState(snapshot)
+  const loading = ['run', 'steps'].some(key => snapshot.queryStatus?.[key] === 'loading')
+  const failed = ['run', 'steps'].some(key => ['error', 'cancelled'].includes(snapshot.queryStatus?.[key]) || snapshot.errors?.[key])
+  if (last.runId !== snapshot.runId || ((!loading || failed) && last !== snapshot)) setLast(snapshot)
+  const current = last.runId === snapshot.runId && loading && !failed ? last : snapshot
+  const planner = useSustainedWork(current.agents[0], current.runId)
+  const developer = useSustainedWork(current.agents[1], current.runId)
+  const qa = useSustainedWork(current.agents[2], current.runId)
+  const security = useSustainedWork(current.agents[3], current.runId)
+  return { ...current, agents: [planner, developer, qa, security] }
+}
 
 function StopDialog({ onClose, onConfirm }) {
   const ref = useRef(null)
@@ -49,7 +78,8 @@ function ReplyEditor({ runId, role, target, controls }) {
   </form>
 }
 
-export default function RunWorkPanel({ runId, projectName, displayState, controls, selectedRole, onSelectRole, onResults, onNew }) {
+export default function RunWorkPanel({ runId, projectName, displayState: rawDisplayState, controls, selectedRole, onSelectRole, onResults, onNew }) {
+  const displayState = useWorkPresentation(rawDisplayState)
   const [confirmStop, setConfirmStop] = useState(false)
   const [memoOpen, setMemoOpen] = useState(false)
   const data = controls.data
