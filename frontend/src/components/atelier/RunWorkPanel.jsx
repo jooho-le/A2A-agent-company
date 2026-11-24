@@ -11,17 +11,6 @@ const order = [4, 0, 1, 2, 3]
 const purposes = ['만들 기능과 순서를 정리해요.', '계획에 맞게 기능을 구현해요.',
   '요구한 대로 작동하는지 확인해요.', '정보 보호와 접근 권한을 점검해요.', '직원에게 일을 전달하고 전체 진행을 관리해요.']
 
-// 정기 조회의 loading을 작업 종료로 해석하지 않습니다. 오류·Run 변경은 즉시 반영합니다.
-function useWorkDisplay(runId, snapshot) {
-  const [last, setLast] = useState({ runId, snapshot })
-  const loading = ['run', 'steps'].some(key => snapshot.queryStatus?.[key] === 'loading')
-  const failed = ['run', 'steps'].some(key => ['error', 'cancelled'].includes(snapshot.queryStatus?.[key]) || snapshot.errors?.[key])
-  if (last.runId !== runId || ((!loading || failed) && last.snapshot !== snapshot)) {
-    setLast({ runId, snapshot })
-  }
-  return last.runId === runId && loading && !failed ? last.snapshot : snapshot
-}
-
 function StopDialog({ onClose, onConfirm }) {
   const ref = useRef(null)
   const title = useId()
@@ -63,21 +52,17 @@ function ReplyEditor({ runId, role, target, controls }) {
 export default function RunWorkPanel({ runId, projectName, displayState, controls, selectedRole, onSelectRole, onResults, onNew }) {
   const [confirmStop, setConfirmStop] = useState(false)
   const [memoOpen, setMemoOpen] = useState(false)
-  const workDisplay = useWorkDisplay(runId, displayState)
   const data = controls.data
   const requests = data?.requests || []
-  const working = order.filter(i => i !== 4 && workDisplay.agents[i]?.displayState === 'working')
-  const role = selectedRole || requests[0]?.agentRole || workDisplay.agents[working[0]]?.agentRole || 'ORCHESTRATOR'
+  const role = selectedRole || requests[0]?.agentRole || displayState.agents.find(row => row.displayState === 'working')?.agentRole || 'ORCHESTRATOR'
   const index = humanAgents.findIndex(person => person.id.toUpperCase() === role)
   const safeIndex = index < 0 ? 4 : index
   const person = humanAgents[safeIndex]
-  const rows = [...workDisplay.agents, managementDisplay(workDisplay)]
-  const popups = buildOfficeRunPopups(workDisplay, rows, { ready: false, current: [] })
+  const rows = [...displayState.agents, managementDisplay(displayState)]
+  const popups = buildOfficeRunPopups(displayState, rows, { ready: false, current: [] })
   const row = rows[safeIndex], popup = popups[safeIndex]
   const target = requests.find(item => item.agentRole === role)
-  const parallel = working.length > 1 && !target
-    && (!selectedRole || working.some(i => rows[i].agentRole === selectedRole))
-  const final = ['FINISHED', 'ABORTED'].includes(workDisplay.run?.status)
+  const final = ['FINISHED', 'ABORTED'].includes(displayState.run?.status)
   const command = Object.values(controls.commands).sort((a, b) =>
     String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0]
   const receiptMessage = command?.status === 'SUCCEEDED' ? command.action === 'CANCEL' ? '작업 중단이 확인됐어요.' : '답변 전달 처리가 끝났어요. 최신 작업 내용을 확인해주세요.'
@@ -94,18 +79,13 @@ export default function RunWorkPanel({ runId, projectName, displayState, control
     {!!requests.length && <div className="run-attention" role="status">{requests.map(item => <button type="button" key={item.workflowStepId} onClick={() => onSelectRole(item.agentRole)}>
       <span />{roleLabel(item.agentRole)} 담당이 확인을 기다려요<Icon name="chevron" /></button>)}</div>}
     <div className="run-employee-picker" role="group" aria-label="작업을 살펴볼 직원">{order.map(i => <button key={humanAgents[i].id} type="button"
-      aria-pressed={i === safeIndex && (!parallel || Boolean(selectedRole))} data-agent-role={humanAgents[i].id.toUpperCase()}
-      data-state={rows[i]?.displayState} onClick={() => onSelectRole(humanAgents[i].id.toUpperCase())}>
+      aria-pressed={i === safeIndex} data-state={rows[i]?.displayState} onClick={() => onSelectRole(humanAgents[i].id.toUpperCase())}>
       <img src={humanAgents[i].portrait} alt="" /><span>{roleLabel(humanAgents[i].id)}</span><i aria-hidden="true" />
     </button>)}</div>
-    <article className="run-person-work" data-agent-role={parallel ? 'PARALLEL' : person.id.toUpperCase()} data-state={parallel ? 'working' : row?.displayState}>
-      <div className="run-person-heading"><strong>{parallel ? working.map(i => roleLabel(humanAgents[i].id)).join(' · ') : roleLabel(person.id)}</strong><span>{parallel ? '함께 작업 중' : row?.label || '상태 확인 중'}</span></div>
-      {parallel && <div className="run-parallel-work">{working.map(i => <section key={humanAgents[i].id} aria-label={`${roleLabel(humanAgents[i].id)} 작업`}>
-        <strong>{roleLabel(humanAgents[i].id)}</strong><p>{popups[i]?.title || rows[i].label}</p>
-        {popups[i] && <details><summary>현재 작업 자세히</summary><p>{popups[i].detail}</p></details>}
-      </section>)}</div>}
-      {!target && !parallel && <p className="run-person-purpose">{purposes[safeIndex]}</p>}
-      {popup && !target && !parallel && <div className="run-person-result"><h4>{popup.title}</h4>{popup.source === 'report' ? <p>{popup.detail}</p>
+    <article className="run-person-work" data-state={row?.displayState}>
+      <div className="run-person-heading"><strong>{roleLabel(person.id)}</strong><span>{row?.label || '상태 확인 중'}</span></div>
+      {!target && <p className="run-person-purpose">{purposes[safeIndex]}</p>}
+      {popup && !target && <div className="run-person-result"><h4>{popup.title}</h4>{popup.source === 'report' ? <p>{popup.detail}</p>
         : <details><summary>현재 작업 자세히</summary><p>{popup.detail}</p></details>}</div>}
       {target && <div className="run-question"><strong>{target.reason}</strong><ul>{target.questions.map((question, i) => <li key={i}>{question}</li>)}</ul>
         {target.replyMode === 'NEW_RUN' && <><p>이 작업은 새 요청으로 시작해야 해요.</p><button type="button" className="button" onClick={onNew}>새 작업 만들기<Icon name="arrow" /></button></>}

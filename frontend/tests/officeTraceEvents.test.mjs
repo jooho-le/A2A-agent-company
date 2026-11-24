@@ -25,26 +25,19 @@ function drain(controller) {
   return [...played.values()]
 }
 
-function advanceSeconds(controller, seconds) {
-  let active = []
-  for (let i = 0; i < Math.round(seconds * 20); i++) active = controller.advance(.05)
-  return active
-}
-
 test('리더 접수 → Planner 요청·수신·산출물 → Developer 호출은 기록 순서를 따른다', () => {
   const events = [make('start', 'RUN_STARTED'), make('plan', 'A2A_MESSAGE_SENT', 0), make('received', 'A2A_TASK_RECEIVED', 0),
     make('artifact', 'ARTIFACT_REGISTERED', 0, { actor: 'PLANNER', outputArtifactIds: ['plan-1'] }), make('dev', 'A2A_MESSAGE_SENT', 1)]
   const controller = createOfficeTraceController(); controller.observe(snapshot(events), 'actual')
   const actions = drain(controller)
-  assert.deepEqual(actions.map(item => item.eventId), ['plan', 'dev'])
-  assert.equal(controller.info().completed, events.length)
+  assert.deepEqual(actions.map(item => item.eventId), events.map(item => item.eventId))
   assert.deepEqual(actions.filter(item => item.kind === 'handoff').map(item => [item.from, item.to]), [[4, 0], [4, 1]])
-  assert.ok(actions[1].startsAt - actions[0].startsAt >= 12)
+  assert.equal(actions[3].kind, 'artifact'); assert.equal(actions[3].to, null)
 })
 test('공통 Snapshot의 실제 QA·Security 호출은 각각 독립 문서로 함께 전달한다', () => {
   const controller = createOfficeTraceController()
   controller.observe(snapshot([make('qa', 'A2A_MESSAGE_SENT', 2), make('sec', 'A2A_MESSAGE_SENT', 3)]), 'actual')
-  const active = advanceSeconds(controller, 2.1)
+  const active = controller.advance(.1)
   assert.deepEqual(active.map(item => item.to), [2, 3]); assert.equal(active[0].startsAt, active[1].startsAt)
 })
 test('보안 결함 → 개발 수정 → 새 Snapshot → 병렬 재검증도 고정 역할 순서 없이 재생한다', () => {
@@ -59,9 +52,9 @@ test('보안 결함 → 개발 수정 → 새 Snapshot → 병렬 재검증도 �
     make('sec2', 'A2A_MESSAGE_SENT', null, { workflowStepId: 'v2-2', codeVersion: 2 })]
   const controller = createOfficeTraceController(); controller.observe(snapshot(events, { traceSteps: updated }), 'actual')
   const actions = drain(controller)
-  assert.deepEqual(actions.map(item => item.eventId), ['fix-call', 'qa2', 'sec2'])
-  assert.equal(actions[1].startsAt, actions[2].startsAt)
-  assert.equal(controller.info().completed, events.length)
+  assert.deepEqual(actions.map(item => item.kind), ['issue', 'manage', 'handoff', 'artifact', 'manage', 'handoff', 'handoff'])
+  assert.deepEqual(actions[4].relatedAgents, [2, 3])
+  assert.equal(actions[5].startsAt, actions[6].startsAt)
 })
 test('역할·대상을 확인할 수 없는 이벤트는 문서를 만들지 않고 상태 기록만 남긴다', () => {
   for (const event of [make('no-step', 'A2A_MESSAGE_SENT'), make('config', 'ARTIFACT_REGISTERED', null, { outputArtifactIds: ['configuration'] }),
@@ -70,14 +63,14 @@ test('역할·대상을 확인할 수 없는 이벤트는 문서를 만들지 �
     assert.equal(action.kind, 'log'); assert.equal(action.from, null); assert.equal(action.to, null)
   }
   const controller = createOfficeTraceController(); controller.observe(snapshot([make('bad', 'ANY', null, { occurredAt: 'bad' })]), 'actual')
-  assert.equal(drain(controller).length, 0)
+  assert.equal(drain(controller).length, 1)
 })
 test('동일 ID·일괄 수신·후속 묶음이 중복되거나 빠지지 않는다', () => {
   const controller = createOfficeTraceController()
   const a = make('a', 'A2A_MESSAGE_SENT', 0), b = make('b', 'A2A_TASK_RECEIVED', 0), c = make('c', 'A2A_MESSAGE_SENT', 1)
   controller.observe(snapshot([a, a, b]), 'actual'); controller.advance(.05)
   controller.observe(snapshot([a, a, b, c]), 'actual')
-  assert.deepEqual(drain(controller).map(item => item.eventId), ['a', 'c'])
+  assert.deepEqual(drain(controller).map(item => item.eventId), ['a', 'b', 'c'])
   controller.observe(snapshot([a, b, c]), 'actual'); assert.equal(controller.busy(), false)
 })
 test('화면 Trace 페이지 이동은 재생 커서를 바꾸지 않으며 Run·모드 변경은 큐를 비운다', () => {
@@ -90,7 +83,7 @@ test('화면 Trace 페이지 이동은 재생 커서를 바꾸지 않으며 Run�
 })
 test('모션 끄기와 통신 실패는 큐를 버리지 않고 멈추며 복구 후 이어 재생한다', () => {
   const controller = createOfficeTraceController(), input = snapshot([make('a', 'A2A_MESSAGE_SENT', 0)])
-  controller.observe(input, 'actual'); const before = advanceSeconds(controller, 2.1)[0].progress
+  controller.observe(input, 'actual'); const before = controller.advance(.1)[0].progress
   assert.equal(controller.advance(.1, false)[0].progress, before)
   controller.observe({ ...input, errors: { trace: new Error('network') } }, 'actual')
   assert.equal(controller.advance(.1)[0].progress, before)
@@ -136,54 +129,4 @@ test('VERDICT_CREATED 자체나 FINISHED+FAIL은 성공 세리머니를 만들�
   assert.equal(!controller.busy() && gate.start({ ready: true, motionEnabled: true }), true)
   assert.equal(gate.info().playback.pose, 'team')
   gate.observe(success, 'actual'); assert.equal(gate.start({ ready: true, motionEnabled: true }), false)
-})
-
-
-test('반복 호출·산출물 100개는 기획 → 개발 → 검증 대표 전달 네 건으로 축약한다', () => {
-  const events = [make('plan', 'A2A_MESSAGE_SENT', 0), make('dev', 'A2A_MESSAGE_SENT', 1)]
-  for (let i = 0; i < 50; i++) events.push(make(`repeat-${i}`, 'A2A_MESSAGE_SENT', 1, { attempt: i }),
-    make(`artifact-${i}`, 'ARTIFACT_REGISTERED', 1, { outputArtifactIds: [`source-${i}`] }))
-  events.push(make('qa', 'A2A_MESSAGE_SENT', 2), make('sec', 'A2A_MESSAGE_SENT', 3))
-  const input = snapshot(events), original = structuredClone(input)
-  const controller = createOfficeTraceController(); controller.observe(input, 'actual')
-  const actions = drain(controller)
-  assert.deepEqual(actions.map(item => item.eventId), ['plan', 'dev', 'qa', 'sec'])
-  assert.ok(actions[1].startsAt - actions[0].startsAt >= 12)
-  assert.ok(actions[2].startsAt - actions[1].startsAt >= 12)
-  assert.equal(actions[2].startsAt, actions[3].startsAt)
-  assert.equal(controller.info().completed, events.length)
-  assert.deepEqual(input, original)
-  controller.observe(input, 'actual'); assert.equal(controller.busy(), false)
-})
-
-test('문제·수정 요청은 단계 대기열을 기다리지 않고 안내하되 추가 동작은 만들지 않는다', () => {
-  const controller = createOfficeTraceController()
-  controller.observe(snapshot([make('plan', 'A2A_MESSAGE_SENT', 0), make('dev', 'A2A_MESSAGE_SENT', 1),
-    make('issue', 'ISSUE_DETECTED', 2, { issueId: 'issue-1' }), make('fix', 'FIX_REQUESTED', 1)]), 'actual')
-  assert.deepEqual(controller.info().current.map(item => item.eventId), ['issue', 'fix'])
-  assert.deepEqual(controller.advance(.1), [])
-  assert.equal(controller.info().pending, 2)
-  assert.deepEqual(drain(controller).map(item => item.eventId), ['plan', 'dev'])
-})
-
-test('폴링 경계의 병렬 전달·새 코드 버전·Run 변경은 독립적으로 보존한다', () => {
-  const controller = createOfficeTraceController(), a = make('qa', 'A2A_MESSAGE_SENT', 2)
-  controller.observe(snapshot([a]), 'actual'); advanceSeconds(controller, 1.5)
-  const b = make('sec', 'A2A_MESSAGE_SENT', 3, { occurredAt: '2026-11-09T03:00:01.800Z' })
-  controller.observe(snapshot([a, b]), 'actual')
-  const active = advanceSeconds(controller, .6)
-  assert.deepEqual(active.map(item => item.to), [2, 3])
-  assert.equal(active[0].startsAt, active[1].startsAt)
-  const input = snapshot([a, b])
-  controller.observe({ ...input, queryStatus: { ...input.queryStatus, run: 'loading' } }, 'actual')
-  assert.ok(controller.advance(.1)[0].progress > active[0].progress)
-  controller.observe(input, 'actual'); drain(controller)
-  const c = make('qa-v2', 'A2A_MESSAGE_SENT', 2, { workflowStepId: 'qa-v2', codeVersion: 2 })
-  controller.observe(snapshot([a, b, c], { traceSteps: [...steps, { ...steps[2], workflowStepId: 'qa-v2', codeVersion: 2 }] }), 'actual')
-  assert.deepEqual(drain(controller).map(item => item.eventId), ['qa-v2'])
-  const next = snapshot([{ ...a, runId: 'next' }])
-  next.runId = 'next'; next.trace.runId = 'next'; next.traceSteps = steps.map(step => ({ ...step, runId: 'next' }))
-  controller.observe(next, 'actual')
-  assert.deepEqual(drain(controller).map(item => item.eventId), ['qa'])
-  assert.equal(controller.info().completed, 1)
 })

@@ -9,7 +9,7 @@ export function createOfficeRunController() {
     runId = nextId
     records = officeAgentRoles.map(agentRole => ({
       agentRole, confirmed: null, shown: { agentRole, displayState: 'idle', label: '기본 대기', step: null },
-      identity: null, motionTime: 0, poseState: 'waiting', presentedPose: 'waiting', blocked: false, refreshing: false,
+      identity: null, motionTime: 0, poseState: 'waiting', blocked: false, refreshing: false,
     }))
   }
   reset(null)
@@ -35,7 +35,7 @@ export function createOfficeRunController() {
       }
       // 같은 Run·Step·재시도·상태의 재조회는 작업 모션을 처음부터 시작하지 않습니다.
       const identity = JSON.stringify([agent.step?.workflowStepId, agent.step?.attempt, agent.step?.codeVersion, agent.displayState])
-      if (record.identity !== identity) { record.motionTime = 0; record.presentedPose = 'waiting' }
+      if (record.identity !== identity) record.motionTime = 0
       record.identity = identity
       record.confirmed = { ...agent }
       record.shown = record.confirmed
@@ -44,20 +44,16 @@ export function createOfficeRunController() {
     }
   }
 
-  function advance(delta = 0, motionEnabled = true, awaitingDelivery = () => false) {
+  function advance(delta = 0, motionEnabled = true) {
     const elapsed = Number.isFinite(delta) ? Math.max(0, delta) : 0
     return records.map(record => {
       if (motionEnabled && !record.blocked && record.shown.displayState === 'working') record.motionTime += elapsed
-      const deferred = record.shown.displayState === 'working' && (record.motionTime < 2
-        || record.presentedPose !== 'working' && awaitingDelivery(record.shown))
-      if (!record.blocked) record.presentedPose = deferred ? 'waiting' : record.poseState
       return {
         ...record.shown, refreshing: record.refreshing,
-        ...(deferred ? { displayState: 'pending', label: '작업 확인 중' } : {}),
         hasConfirmedState: record.confirmed !== null,
         motionTime: record.motionTime,
-        poseTime: record.presentedPose === 'working' ? Math.max(0, record.motionTime - 2) * .45 : 0,
-        poseState: record.presentedPose,
+        poseTime: record.poseState === 'working' ? record.motionTime : 0,
+        poseState: record.poseState,
         expression: record.shown.displayState === 'failed' ? 'worried' : 'normal',
       }
     })

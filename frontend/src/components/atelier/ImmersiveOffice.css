@@ -221,14 +221,6 @@
 .atelier-dashboard.office-immersive .office3d-agent-label small { font-size: .85rem; }
 .atelier-dashboard.office-immersive .office3d-lead-tag { font-size: .8rem; }
 .atelier-dashboard.office-immersive .office3d-celebration { border-color: #d4ff2488; }
-@media (prefers-reduced-motion: no-preference) {
-  .atelier-dashboard.office-immersive .agent-office-3d .office3d-agent-label {
-    transition: background-color .8s ease, border-color .8s ease, color .8s ease, box-shadow .8s ease;
-  }
-  .atelier-dashboard.office-immersive .office3d-agent-label .status-dot {
-    transition: background-color .8s ease;
-  }
-}
 @media (max-width: 760px) {
   .atelier-dashboard.office-immersive .agent-office-3d .office3d-agent-label {
     padding-inline: .35rem;
