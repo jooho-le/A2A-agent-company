@@ -17,6 +17,43 @@ function snapshot(states = {}, options = {}) {
   })
 }
 const role = (rows, name) => rows.find(row => row.agentRole === name)
+
+test('같은 작업이 3초 유지된 뒤에만 작업 표시·모션을 함께 시작한다', () => {
+  const controller = controllerWith({ QA: 'RUNNING' })
+  const before = role(controller.advance(2.999), 'QA')
+  assert.equal(before.displayState, 'pending')
+  assert.equal(before.poseState, 'waiting')
+  assert.equal(before.step.status, 'RUNNING')
+  const after = role(controller.advance(.002), 'QA')
+  assert.equal(after.displayState, 'working')
+  assert.equal(after.poseState, 'working')
+})
+
+test('3초 미만 완료·실패·입력 대기는 작업 모션 없이 즉시 표시한다', () => {
+  for (const [status, display] of [['SUCCEEDED', 'succeeded'], ['FAILED', 'failed'], ['WAITING_INPUT', 'waiting_input']]) {
+    const controller = controllerWith({ DEVELOPER: 'RUNNING' })
+    controller.advance(2.9)
+    controller.setSnapshot(snapshot({ DEVELOPER: status }))
+    const row = role(controller.advance(.2), 'DEVELOPER')
+    assert.equal(row.displayState, display)
+    assert.equal(row.poseState, 'waiting')
+  }
+})
+
+test('병렬 직원별 3초를 따로 계산하고 정기 조회는 시간을 초기화하지 않는다', () => {
+  const controller = controllerWith({ QA: 'RUNNING' })
+  controller.advance(2)
+  controller.setSnapshot(snapshot({ QA: 'RUNNING', SECURITY: 'RUNNING' }))
+  let rows = controller.advance(1)
+  assert.equal(role(rows, 'QA').displayState, 'working')
+  assert.equal(role(rows, 'SECURITY').displayState, 'pending')
+  controller.setSnapshot({ runId, queryStatus: { run: 'loading', steps: 'loading' } })
+  rows = controller.advance(2)
+  assert.equal(role(rows, 'SECURITY').displayState, 'working')
+  controller.setSnapshot(snapshot({ QA: 'RUNNING', SECURITY: 'RUNNING' }, { runId: 'new' }))
+  assert.ok(controller.advance(.1).filter(row => row.step).every(row => row.displayState === 'pending'))
+})
+
 function controllerWith(states) {
   const controller = createOfficeRunController()
   controller.setSnapshot(snapshot(states))
@@ -81,7 +118,9 @@ test('조회 실패는 실패 표정이 아닌 확인 불가·마지막 자세 �
   controller.setSnapshot({ runId, queryStatus: { run: 'loading', steps: 'loading' } })
   assert.equal(role(controller.advance(5), 'QA').motionTime, 4)
   controller.setSnapshot(snapshot({ QA: 'RUNNING' }))
-  assert.equal(role(controller.advance(1), 'QA').motionTime, 5)
+  const recovered = role(controller.advance(1), 'QA')
+  assert.equal(recovered.motionTime, 1)
+  assert.equal(recovered.poseState, 'waiting')
 })
 
 test('일부 GET이 조회 중이어도 다른 GET 실패를 감추지 않는다', () => {
@@ -105,7 +144,8 @@ test('FAILED 후 새 Step 재작업은 오류 표정을 해제하고 모션을 �
   const row = role(controller.advance(1), 'DEVELOPER')
   assert.equal(row.expression, 'normal')
   assert.equal(row.motionTime, 1)
-  assert.equal(row.poseState, 'working')
+  assert.equal(row.poseState, 'waiting')
+  assert.equal(role(controller.advance(2), 'DEVELOPER').poseState, 'working')
 })
 
 test('동일 Step의 attempt 변경 시 해당 Agent의 모션만 새로 시작한다', () => {

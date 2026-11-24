@@ -14,7 +14,8 @@
 .run-work-panel .run-employee-picker button { position:relative; min-width:0; padding:5px 2px 10px; border:1px solid transparent; border-radius:15px; background:#ffffff04; color:#bfcbdc; font:inherit; font-size:9px; }
 .run-employee-picker img { display:block; width:100%; height:52px; object-fit:contain; margin-bottom:4px; }
 .run-employee-picker span { white-space:nowrap; }
-.run-work-panel .run-employee-picker button[aria-pressed=true] { border-color:#d4ff2490; background:#d4ff2410; color:#eeffc3; }
+.run-work-panel .run-employee-picker button[aria-pressed=true] { border-color:#b1c5e570; background:#ffffff08; color:#edf2fa; }
+.run-work-panel .run-employee-picker button[data-state=working] { border-color:#d4ff2499; background:#d4ff2410; color:#eeffc3; }
 .run-employee-picker i { display:block; width:4px; height:4px; border-radius:50%; margin:6px auto 0; background:#68768c; }
 .run-employee-picker [data-state=working] i { background:#d4ff24; box-shadow:0 0 0 3px #d4ff2415; }
 .run-employee-picker [data-state=waiting_input] i { background:#e9c982; }
