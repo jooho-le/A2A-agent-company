@@ -73,7 +73,7 @@ export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClos
     }
   }, [open, mobile, onClose])
   return <aside ref={sidebarRef} className="sidebar" id="company-sidebar" aria-label="회사 메뉴" inert={mobile && !open ? true : undefined}>
-    <a className="company-name" href="#/home" onClick={(event) => { event.preventDefault(); onView('home') }} aria-label="AI 에이전트 회사 홈"><span className="company-monogram">A</span><span>AI 에이전트 회사</span></a>
+    <a className="company-name" href="#/home" onClick={(event) => { event.preventDefault(); onView('home') }} aria-label="AIO 홈"><span className="company-monogram">A</span><span>AIO</span></a>
     <span className="nav-caption">내 작업</span>
     <nav className="nav" aria-label="주 메뉴">{[['home', 'grid'], ['projects', 'folder'], ['workflow', 'arrow'], ['outputs', 'file']].map(([name, icon]) => <button key={name} type="button" className="nav-button" data-view={name} aria-current={view === name ? 'page' : undefined} onClick={() => onView(name)}><Icon name={icon} /><span>{viewCopy[name][0]}</span>{name === 'projects' && count > 0 && <span className="nav-count">{String(count).padStart(2, '0')}</span>}{name === 'team' && <span className="nav-count">{mode === 'single' ? '01' : '05'}</span>}</button>)}</nav>
     <button type="button" className="nav-button nav-secondary" data-view="team" aria-current={view === 'team' ? 'page' : undefined} onClick={() => onView('team')}><Icon name="team" />직원 소개</button>

@@ -30,14 +30,14 @@ export default function StartupExperience({ children }) {
       inert={visible ? true : undefined} aria-hidden={visible ? true : undefined}>
       {children}
     </div>
-    {visible && <section className="startup-splash" data-phase={phase} aria-label="AI 에이전트 회사 시작 화면">
+    {visible && <section className="startup-splash" data-phase={phase} aria-label="AIO 시작 화면">
       <div className="startup-backdrop" aria-hidden="true" />
       <div className="startup-light" aria-hidden="true" />
       <div className="startup-door startup-door-left" aria-hidden="true"><span>YOUR</span></div>
       <div className="startup-door startup-door-right" aria-hidden="true"><span>COMPANY.</span></div>
       <div className="startup-seam" aria-hidden="true" />
       <header className="startup-header">
-        <span className="startup-wordmark"><span>A</span>AI 에이전트 회사</span>
+        <span className="startup-wordmark"><span>A</span>AIO</span>
         <span className="startup-header-note">A COMPANY OF YOUR OWN.</span>
         <button type="button" className="startup-skip" onClick={() => setPhase('finished')}>
           건너뛰기 <span aria-hidden="true">↗</span>
@@ -49,7 +49,7 @@ export default function StartupExperience({ children }) {
           <span className="startup-line"><span>아이디어 하나로,</span></span>
           <span className="startup-line startup-line-accent"><span>당신만의 회사.</span></span>
         </h1>
-        <p className="startup-description">혼자 떠올린 가능성이, 한 팀의 일이 되는 곳.</p>
+        <p className="startup-description">ALL IN ONE — 기획부터 개발·검증까지, 하나의 팀으로.</p>
         <div className="startup-signature"><span className="startup-signature-rule" /><span>당신의 다음 시작을 위해.</span></div>
       </div>
       <div className="startup-roster" aria-hidden="true">
