@@ -266,6 +266,8 @@ class SecurityAgentExecutor(AgentExecutor):
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.SECURITY, context, execution, self._usage_sink)
             await services.prepare(execution)
+            from orchestrator.infrastructure.run_feedback import feedback_input
+            task_input.update(await _run_file_operation(feedback_input, services, execution))
             async with services.client_factory(services.configuration) as client:
                 tracked = services.tracked(client, execution)
                 if telemetry is not None:

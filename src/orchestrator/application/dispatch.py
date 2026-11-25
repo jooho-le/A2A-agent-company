@@ -353,6 +353,8 @@ class PlannerRunDispatcher:
             if scenario is None:
                 raise ValueError("Run scenario is not supported by the Scenario Registry")
             scenario.validate_planner_requirements(planner_output.plan.requirements)
+            from orchestrator.domain.service_design import validate_service_plan
+            validate_service_plan(scenario.planner_contract(), planner_output.plan)
         except PlannerOutputValidationError as exc:
             logger.warning(
                 "Planner output requires review for Run %s (error type: %s)",
@@ -634,6 +636,17 @@ class PlannerRunDispatcher:
                     break
         else:
             outcomes = await asyncio.gather(*(dispatch_one(step) for step in steps))
+        question = self._service_validation_question(run, outcomes)
+        if question is not None:
+            # Interactive SERVICE-WEB work must remain resumable. SCN-001's
+            # unattended experiment still uses the existing automatic-stop rule.
+            # Both Task observers have preserved their results; a completed peer
+            # is observed, rather than sent new work, when the user answers.
+            self._move_to_human_review(
+                run.run_id, question.step.workflow_step_id, question.step.attempt,
+                additional_event_types=("VALIDATION_INPUT_REQUIRED",),
+            )
+            return
         if any(
             isinstance(outcome, Exception)
             or outcome.disposition != TaskRunDisposition.COMPLETED
@@ -668,6 +681,19 @@ class PlannerRunDispatcher:
             return
 
         await self.consume_validation_results(run, steps, handoff, outcomes, plan=plan, scenario=scenario)
+
+    @staticmethod
+    def _service_validation_question(run, outcomes):
+        from orchestrator.domain.scenario_registry import SERVICE_WEB_ID
+        from orchestrator.infrastructure.automatic_stop import agent_stop_code
+
+        if run.scenario_id != SERVICE_WEB_ID:
+            return None
+        return next((outcome for outcome in outcomes
+                     if isinstance(outcome, A2ATaskRunResult)
+                     and outcome.disposition == TaskRunDisposition.WAITING_INPUT
+                     and outcome.step.agent_role in (AgentRole.QA, AgentRole.SECURITY)
+                     and agent_stop_code(outcome) == f"{outcome.step.agent_role.value}_INPUT_REQUIRED"), None)
 
     @staticmethod
     def _validation_draft_stop(outcome):

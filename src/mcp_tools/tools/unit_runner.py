@@ -61,10 +61,10 @@ APP_FIXTURE_METHODS = {
             'required': ['argon2id', 'verified', 'memoryKiB', 'iterations', 'parallelism'],
             'optional': {'distinctSalts': 'Present only in the current return after observing another distinct '
                          'committed account in this test. Earlier return dictionaries are snapshots and never update.'},
-            'usage': 'first = self.signup_hash_parameters(email1, password=sample); '
-                     'second = self.signup_hash_parameters(email2, password=sample); '
-                     'self.assertTrue(second["distinctSalts"]). Never read first["distinctSalts"]. '
-                     'Check each account with its own synthetic password. Public numeric hash parameters are minimums.'},
+            'usage': 'Call signup_hash_parameters for two distinct committed accounts, passing each account\'s '
+                     'current-test runtime sample through the password keyword argument. Save separate first '
+                     'and second return snapshots, then assert second["distinctSalts"]. Never read '
+                     'first["distinctSalts"]. Public numeric hash parameters are minimums.'},
     },
     'check_signup_output': {
         'parameters': ['payload'], 'keywordOnly': ['password'],

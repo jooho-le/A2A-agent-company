@@ -29,11 +29,23 @@ export async function getRunInteraction(runId, signal) {
         || row.questions.length > 8 || row.questions.some(text => typeof text !== 'string' || text.length > 2000))) {
     throw new Error('직원의 확인 요청을 읽을 수 없어요.')
   }
+  if ((data.canAnnotate !== undefined && typeof data.canAnnotate !== 'boolean')
+      || (data.continuationUnavailable != null && (typeof data.continuationUnavailable !== 'string'
+        || data.continuationUnavailable.length > 600))
+      || (data.feedback !== undefined && (!Array.isArray(data.feedback) || data.feedback.length > 16
+        || data.feedback.some(note => !note || !runUuid.test(note.feedbackId) || typeof note.text !== 'string'
+          || note.text.length > 4000 || !['QUEUED', 'INCLUDED', 'NOT_APPLIED'].includes(note.status))))
+      || (data.failures !== undefined && (!Array.isArray(data.failures) || data.failures.length > 4
+        || data.failures.some(failure => !failure || !runUuid.test(failure.workflowStepId)
+          || !roles.has(failure.agentRole) || typeof failure.message !== 'string' || failure.message.length > 600
+          || typeof failure.instruction !== 'string' || failure.instruction.length > 600)))) {
+    throw new Error('추가 설명이나 실패 원인을 읽을 수 없어요. 다시 확인해주세요.')
+  }
   return data
 }
 function receipt(data, runId, commandId) {
   if (data?.runId !== runId || data.commandId !== commandId || !commandStates.has(data.status)
-      || !['CANCEL', 'RESUME'].includes(data.action)) throw new Error('요청 접수를 확인하지 못했어요. 처리 상태를 확인해주세요.')
+      || !['CANCEL', 'RESUME', 'ANNOTATE'].includes(data.action)) throw new Error('요청 접수를 확인하지 못했어요. 처리 상태를 확인해주세요.')
   return data
 }
 export async function sendRunCommand(runId, commandId, body) {

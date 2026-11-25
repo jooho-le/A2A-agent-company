@@ -151,6 +151,9 @@ async def prepare_single_prompt(
         if scenario.key == "SERVICE-WEB":
             from agents.runtime.service_scope import service_runtime_instructions
             data["runtimeInstructions"] = service_runtime_instructions(data)
+        if draft_contract.phase in (SinglePhase.QA, SinglePhase.SECURITY) and "testTargets" in data:
+            from agents.runtime.test_guidance import credential_test_instructions
+            data["runtimeInstructions"] = credential_test_instructions(data)
         if draft_contract.phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING):
             data = without_expectations(data)
         history = await store.project_single_context(

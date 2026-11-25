@@ -24,7 +24,7 @@ from orchestrator.domain.states import AgentRole
 
 
 SEMANTIC_PROTECTED_FIELDS = frozenset({'semanticReview', 'semanticReviewResult', 'semanticReviewer',
-    'reviewId', 'reviewRecord', 'reviewDecision', 'semantic_review'})
+    'reviewId', 'reviewRecord', 'reviewDecision', 'semantic_review', 'serviceDesign', 'runtimeCapabilities', 'userFeedback'})
 WRITE_TOOLS = frozenset({'write_source_file', 'edit_source_file', 'write_test_file', 'apply_patch'})
 SEMANTIC_PROMPT_VERSION = 5
 SEMANTIC_OUTPUT_NAME = 'product_semantic_review_v5'
@@ -134,7 +134,10 @@ def draft_fields(candidate):
     allowed = {'title', 'description', 'summary', 'rationale', 'expectedResult'}
     result = {}
     def visit(value, pointer='', key=None):
-        if type(value) is str and key in allowed and value.strip():
+        implementation_choice = (pointer.startswith('/serviceDesign/') and key in {
+            'delivery', 'method', 'path', 'bodyFormat', 'requestFields', 'responseFormat',
+            'storage', 'dataModel', 'implementationDecisions'})
+        if type(value) is str and (key in allowed or implementation_choice) and value.strip():
             result[pointer] = value
         elif type(value) is dict:
             for name, child in value.items():

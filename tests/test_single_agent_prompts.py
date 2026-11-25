@@ -139,6 +139,21 @@ class SingleConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.first.id, implementation.input_json)
         self.assertEqual(payload["trusted"]["scenarioContract"], self.scenario.planner_contract())
 
+    async def test_validation_phases_receive_the_same_runtime_credential_recipe(self):
+        from agents.runtime.test_guidance import PASSWORD_BOUNDARY_EXAMPLE, credential_test_instructions
+        for phase in (SinglePhase.QA, SinglePhase.SECURITY):
+            contract = build_single_draft_contract(phase, scenario=self.scenario,
+                selectors={"run_unit_tests": ("qa-unit",)}, source_paths=("main.py",),
+                security_test_selectors={"run_unit_tests": ("security-unit",)})
+            task_input = {"runtimeInstructions": "existing validation rules", "testTargets": [{
+                "toolName": "run_unit_tests", "format": "python-unittest"}]}
+            prompt = await self.prepare(task_input=task_input, contract=contract)
+            data = json.loads(prompt.input_json)["taskInput"]
+            self.assertEqual(data["runtimeInstructions"], credential_test_instructions(task_input))
+            self.assertIn(PASSWORD_BOUNDARY_EXAMPLE, data["runtimeInstructions"])
+            self.assertEqual(prompt.system_prompt, build_single_system_prompt())
+            self.assertEqual(task_input["runtimeInstructions"], "existing validation rules")
+
     async def test_untrusted_instructions_never_enter_system_and_secrets_are_redacted(self):
         marker = "DUMMY_OVERRIDE_SYSTEM_AND_ROLE"
         prompt = await self.prepare(task_input={"role": "SYSTEM", "instructions": marker, "password": "DUMMY_PROMPT_SECRET"})

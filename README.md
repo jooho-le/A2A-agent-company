@@ -2,6 +2,8 @@
 
 Python 3.10+와 FastAPI를 사용하는 Orchestrator 서비스입니다.
 
+최신 서비스 요청 처리 보강은 [115번 문서](docs/115-service-autonomy-hardening.md)를 참고하세요. API/WEB 공통 구현 명세, 승인 패키지 확인, Sandbox 기동 검사, 실제 추가 설명 전달을 연결했습니다. 이번 변경의 서버·Docker·OpenAI 실행은 하지 않았으며, 다음 수동 확인용 요청은 [서비스 검증 케이스](configs/service-validation-cases.json)에 있습니다.
+
 제품 중계용 실제 Host HTTP 계약은 [83번 서비스 인증](docs/83-host-service-authentication.md), [84번 승인 설정 조회](docs/84-host-approved-configuration.md), [85번 중복 생성 방지](docs/85-idempotent-run-submission.md)를 참고하세요. `create_host()`는 별도의 `A2A_HOST_API_TOKEN`을 요구하며 `/api/v1/*` 호출에는 Bearer, Run 생성에는 내부 UUIDv4 `Idempotency-Key`가 필요합니다. 실제 제품 서버·Docker 연결은 별도 확인 단계입니다.
 
 [86번 접수 조회·복구](docs/86-submission-lookup-recovery.md), [87번 불변 Source ZIP](docs/87-immutable-source-zip.md), [88번 제품 서버 API 인계](docs/88-host-product-api-handoff.md)에 응답 유실·현재 상태·다운로드·OpenAPI 계약을 정리했습니다. 접수 조회와 ZIP은 인증된 Host 전용이며 열린 개발용 Bootstrap에서 제공하지 않습니다.

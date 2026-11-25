@@ -18,6 +18,7 @@ from orchestrator.domain.run_configuration import RunConfigurationArtifact
 from orchestrator.domain.scenario_registry import SERVICE_WEB_ID, ScenarioDefinition, service_request_contract
 from orchestrator.domain.states import AgentRole
 from fixture_cleanup import set_up_borrowed
+from service_test_helpers import service_design
 import test_planner_agent as planner_fixture
 import test_llm_runtime as runtime_fixture
 
@@ -36,6 +37,7 @@ class ServiceAgentExecutionTests(unittest.IsolatedAsyncioTestCase):
         draft = f.draft(tasks=[{'taskId': 'TASK-TODO', 'title': '할 일 화면과 기능 구현',
             'description': '요청된 추가·완료 기능과 연결된 화면을 구현한다.',
             'requirementIds': [str(i) for i in f.scenario.requirement_ids], 'dependsOn': []}])
+        draft['serviceDesign'] = service_design('WEB')
         provider = runtime_fixture.FakeProvider(f.response(draft))
         task, _ = await f.run_to(provider, 'TASK_STATE_COMPLETED')
         payload = task['artifacts'][0]['parts'][0]['data']
@@ -102,7 +104,7 @@ class ServiceAgentExecutionTests(unittest.IsolatedAsyncioTestCase):
         set_up_borrowed(self, runtime)
         draft = {'kind': 'PLAN', 'implementationPlan': [{'taskId': 'TASK-TODO', 'title': '할 일 앱',
             'description': '요청한 UI와 동작 구현', 'requirementIds': [str(i) for i in f.scenario.requirement_ids],
-            'dependsOn': []}], 'questions': [], 'unapprovedAssumptions': []}
+            'dependsOn': []}], 'questions': [], 'unapprovedAssumptions': [], 'serviceDesign': service_design('WEB')}
         provider = runtime_fixture.FakeProvider(runtime_fixture.text_response(json.dumps(draft, ensure_ascii=False)))
         result = await LLMEngine(role=SingleAgentIdentity.SINGLE_AGENT, provider=provider,
             single_phase=SinglePhase.PLANNING).run(prompt=prompt, model=runtime.model, output=draft_contract.output,

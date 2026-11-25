@@ -179,8 +179,31 @@ class HostRuntimeServices:
 
         return bounded
 
+    def require_scenario(self, contract):
+        """Reject mixed experiment/service policy before any model or Source work."""
+        from orchestrator.domain.service_design import service_policy
+        if service_policy(contract) and (self._protected_cases or self._security_cases or any(
+                scope.kind == 'PROTECTED'
+                for role in (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY)
+                for unit in (self._tools.unit_configuration_for(role),) if unit is not None
+                for scope in unit.scopes)):
+            raise PlatformConfigurationError()
+
     def _configuration(self, execution, role):
         binding = self._binding(execution, role)
+        from orchestrator.domain.service_design import service_policy, design_for_execution
+        service = service_policy(execution.configuration.scenario_contract)
+        self.require_scenario(execution.configuration.scenario_contract)
+        design = design_for_execution(execution) if service else None
+        unit = self._tools.unit_configuration_for(role)
+        build = self._tools.build_configuration if role is AgentRole.DEVELOPER else None
+        if service and build is not None:
+            from orchestrator.sandbox.service_start_contract import service_build_argv
+            build = replace(build, profile=replace(build.profile, name="service-start",
+                argv=service_build_argv(design, build.profile.argv[0])))
+        browser = self._tools.browser_configuration if role is AgentRole.QA else None
+        if design is not None and design.delivery == "API":
+            browser = None
         selection = None
         if role in (AgentRole.QA, AgentRole.SECURITY):
             try:
@@ -200,10 +223,9 @@ class HostRuntimeServices:
             binding=binding, database_path=self._repository.database_path,
             workspace_root=self._workspaces.base_path, max_call_seconds=self._tools.max_call_seconds,
             frozen_source=selection,
-            build_configuration=self._tools.build_configuration if role is AgentRole.DEVELOPER else None,
-            unit_test_configuration=self._tools.unit_configuration_for(role)
-                if role in (AgentRole.DEVELOPER, AgentRole.QA, AgentRole.SECURITY) else None,
-            browser_test_configuration=self._tools.browser_configuration if role is AgentRole.QA else None,
+            build_configuration=build,
+            unit_test_configuration=unit,
+            browser_test_configuration=browser,
             security_scan_configuration=self._tools.security_configuration if role is AgentRole.SECURITY else None,
         )
 
@@ -220,9 +242,11 @@ class HostRuntimeServices:
 
     def qa(self, execution) -> QARuntimeServices:
         try:
+            from orchestrator.domain.service_design import service_policy
             return QARuntimeServices(self._repository, self._workspaces, self._artifacts,
                 mcp_configuration=self._configuration(execution, AgentRole.QA),
-                protected_cases=self._protected_cases, client_factory=self._client(execution))
+                protected_cases=() if service_policy(execution.configuration.scenario_contract) else self._protected_cases,
+                client_factory=self._client(execution))
         except LLMRuntimeError:
             raise
         except Exception:
@@ -230,9 +254,11 @@ class HostRuntimeServices:
 
     def security(self, execution) -> SecurityRuntimeServices:
         try:
+            from orchestrator.domain.service_design import service_policy
             return SecurityRuntimeServices(self._repository, self._workspaces, self._artifacts,
                 mcp_configuration=self._configuration(execution, AgentRole.SECURITY),
-                proof_verifier=self._proof_verifier, protected_cases=self._security_cases,
+                proof_verifier=self._proof_verifier,
+                protected_cases=() if service_policy(execution.configuration.scenario_contract) else self._security_cases,
                 client_factory=self._client(execution))
         except LLMRuntimeError:
             raise

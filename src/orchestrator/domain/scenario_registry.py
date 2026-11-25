@@ -250,7 +250,7 @@ SERVICE_WEB_KEY = "SERVICE-WEB"
 _SERVICE_EXTERNAL = {
     "app": {"module": "main", "attribute": "app", "framework": "FastAPI",
             "serve": "uvicorn main:app", "readyCheck": "GET / returns 2xx",
-            "interface": "GET / serves the usable HTML application, not just a health JSON response"},
+            "interface": "Planner serviceDesign selects API or WEB from the actual request. API-only work needs no HTML. WEB serves usable HTML at GET /."},
     "database": {"module": "database", "dependency": "get_db", "urlEnv": "DATABASE_URL",
                  "access": "Use the existing isolated SQLite connection when server persistence is required"},
     "startingFiles": ["main.py", "database.py", "models.py", "tests/test_health.py", "requirements.lock"],
@@ -258,6 +258,8 @@ _SERVICE_EXTERNAL = {
     "scope": "Implement the user's requested application. Do not add signup, login or another product unless requested.",
     "verification": "Read the actual source before selecting routes, fields and DOM selectors. Never invent an existing UI.",
     "clarification": "Ask INPUT_REQUIRED when the product goal conflicts or needs a material user decision. Routine implementation details may be chosen within this contract.",
+    "servicePolicy": "SERVICE_AUTONOMY_V2",
+    "implementationDefaults": "Use JSON for data endpoints in API and WEB work unless the user specifies another encoding. For a requested web UI prefer HTMLResponse and browser JSON requests using approved packages. Use the approved local SQLite when persistence is needed. Do not add a UI, login, email delivery or another product unless requested. Record routine choices in serviceDesign.implementationDecisions; they do not replace user acceptance criteria.",
 }
 _SERVICE_SECURITY = {
     "secretExposure": "Never expose credentials, private data or stored credential hashes in responses, messages or logs.",
@@ -299,9 +301,9 @@ def service_request_contract(request_text: str) -> dict[str, object]:
         if not chunk:
             continue
         add("사용자 원문 요구사항", "요청사항 구현: " + chunk, (RequirementValidator.QA,))
-    add("사용할 수 있는 웹 화면 제공", "GET /에서 HTML 화면을 제공하고 요청한 기능을 실제 화면에서 조작할 수 있다",
+    add("요청에 맞는 인터페이스 제공", "API 요청에는 사용할 수 있는 API를 제공하고, 웹 화면을 요청한 경우에는 GET /에서 요청한 기능을 조작할 수 있는 HTML 화면을 제공한다",
         (RequirementValidator.QA,))
-    add("사용자 입력과 상태 처리", "요청한 기능의 정상·잘못된 입력과 상태 변경이 일관되며 실제 처리 결과를 화면에 표시한다",
+    add("사용자 입력과 상태 처리", "요청한 기능의 정상·잘못된 입력과 상태 변경이 일관되며 실제 처리 결과를 요청한 인터페이스의 응답에 표시한다",
         (RequirementValidator.QA,))
     add("요청 범위의 보안 검증", "실제 구현의 입력·데이터 접근 경계를 검사하고 비밀정보를 응답·메시지·로그에 노출하지 않는다",
         (RequirementValidator.SECURITY,), "SECURITY")

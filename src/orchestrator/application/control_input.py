@@ -7,7 +7,7 @@ from orchestrator.core.security import redact_data
 
 
 _PROTECTED = frozenset({
-    "serviceContract", "sourceInterface",
+    "serviceContract", "sourceInterface", "serviceDesign", "runtimeCapabilities", "userFeedback",
     "workspaceId", "scenario", "scenarioContract", "runConfiguration", "plan",
     "sourceArtifact", "outputContract", "metadata", "runId", "workflowStepId",
     "scenarioId", "requirementIds", "projectArtifactIds", "projectArtifactId",

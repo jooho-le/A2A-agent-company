@@ -232,6 +232,8 @@ class QAAgentExecutor(AgentExecutor):
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.QA, context, execution, self._usage_sink)
             await services.prepare(execution)
+            from orchestrator.infrastructure.run_feedback import feedback_input
+            task_input.update(await _run_file_operation(feedback_input, services, execution))
             task_input["testSelectors"], task_input["testTargets"] = services.selectors, _test_targets(services, execution)
             if execution.scenario.key == 'SERVICE-WEB':
                 task_input['sourceInterface'] = await services.source_interface(execution)
@@ -262,7 +264,11 @@ class QAAgentExecutor(AgentExecutor):
                             validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
                             recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
                             input_observed_sink=telemetry.model_input if telemetry is not None else None)
-                    return await (text_engine if text_only else engine).run(prompt=prepare_role_prompt(
+                    from agents.runtime.test_fix import available_report_tools
+                    selected_tools = available_report_tools(tools, model_input)
+                    active_engine = engine if selected_tools == tools else LLMEngine(
+                        role=AgentRole.QA, provider=self._provider, tools=selected_tools, tool_executor=tracked)
+                    return await (text_engine if text_only else active_engine).run(prompt=prepare_role_prompt(
                         AgentRole.QA, task_input=model_input, metadata=execution.metadata),
                         model=execution.model,
                         output=with_expected_results(build_qa_output_contract(execution.metadata.requirement_ids,

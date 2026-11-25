@@ -18,6 +18,7 @@ from agents.api.validation import parse_workflow_metadata
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
 from agents.llm.corrections import contract_check, development_check
 from agents.runtime.start_precheck import start_precheck_for
+from mcp_tools.tools.files import _run_file_operation
 from agents.runtime.signup_quality_precheck import signup_quality_precheck_for
 from agents.llm.engine import LLMEngine
 from agents.llm.development_rejection import rejection_check
@@ -228,6 +229,10 @@ class DeveloperAgentExecutor(AgentExecutor):
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.DEVELOPER, context, execution, self._usage_sink)
             checkpoint = await services.prepare(execution)
+            from orchestrator.infrastructure.run_feedback import feedback_input
+            task_input.update(await _run_file_operation(feedback_input, services, execution))
+            if getattr(checkpoint, 'runtime_capabilities', None) is not None:
+                task_input['runtimeCapabilities'] = checkpoint.runtime_capabilities
             from agents.runtime.development_failure import failure_reader
             read_failure = failure_reader(services, execution)
             from agents.runtime.repair_baseline import with_repair_baseline
@@ -295,7 +300,8 @@ class DeveloperAgentExecutor(AgentExecutor):
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
                             if execution.budget.limits.max_output_corrections else None,
                         priority_check=checkpoint.pending_priority_paths if paths else None,
-                        service_interface_check=service_interface_check(checkpoint, execution.configuration.scenario_contract)))
+                        service_interface_check=service_interface_check(checkpoint, execution.configuration.scenario_contract,
+                            task_input.get('serviceDesign'))))
                 result = await run_model(task_input)
                 decision = validate(result.data)
                 if decision.kind == "READY" and self._semantic_reviewer is not None:

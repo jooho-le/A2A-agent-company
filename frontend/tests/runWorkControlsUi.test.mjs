@@ -9,14 +9,14 @@ import { promisify } from 'node:util'
 import { rolldown } from 'rolldown'
 
 // Real work panel and interaction hook; isolated HTTP, no live Host or paid work.
-test('직원 작업 제어: 질문·답변·중복 차단·메모·중단 확인', { timeout: 45000 }, async t => {
+test('직원 작업 제어: 질문·답변·추가 설명·중복 차단·중단 확인', { timeout: 45000 }, async t => {
   const chrome = process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
   try { await access(chrome) } catch { t.skip('CHROME_BIN 또는 설치된 Chrome 필요'); return }
   const dir = await mkdtemp(join(tmpdir(), 'run-controls-ui-'))
   try {
     const build = await rolldown({
       input: fileURLToPath(new URL('./fixtures/runWorkControlsUi.jsx', import.meta.url)),
-      transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': '"development"' } },
+      transform: { jsx: 'react-jsx', define: { 'process.env.NODE_ENV': '"development"', 'import.meta.env': '{}' } },
       plugins: [{ name: 'isolated-office', resolveId(source) {
         if (source === 'react') return fileURLToPath(import.meta.resolve('react'))
         if (source.endsWith('.css')) return '\0style'
@@ -36,7 +36,7 @@ test('직원 작업 제어: 질문·답변·중복 차단·메모·중단 확인
     assert.ok(result, `isolated browser produced a result: ${stdout.slice(-1500)}`)
     const report = JSON.parse(result.replaceAll('&quot;', '"').replaceAll('&amp;', '&').replaceAll('&gt;', '>').replaceAll('&lt;', '<'))
     assert.equal(report.failed, undefined, report.failed)
-    assert.equal(report.passed.length, 4)
+    assert.equal(report.passed.length, 7)
     report.passed.forEach(check => t.diagnostic(check))
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

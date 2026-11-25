@@ -56,6 +56,26 @@ _MAX_TOTAL_BYTES = 16 * 1024 * 1024
 _MAX_FILES = 1000
 
 
+def credential_assignment_kind(name):
+    """Classify only names covered by the existing ingress rule, not values.
+
+    Used by value-free repair hints. It does not authorize a credential or
+    alter validate_source_text; unrelated labels such as password_error stay
+    outside this classification just as they are outside the assignment rule.
+    """
+    if type(name) is not str or len(name) > 256:
+        return None
+    normalized = unicodedata.normalize('NFKC', name)
+    if re.fullmatch(_CREDENTIAL_NAME, normalized, re.IGNORECASE) is None:
+        return None
+    lowered = normalized.lower()
+    if any(part in lowered for part in ('password', 'passwd', 'pwd', '비밀번호', '암호')):
+        return 'HASH' if 'hash' in lowered else 'PASSWORD'
+    if any(part in lowered for part in ('token', 'authorization', '토큰')):
+        return 'TOKEN'
+    return 'SECRET'
+
+
 def source_credential_locations(source):
     """Bounded, value-free diagnostics; never authorize or rewrite any Source.
 

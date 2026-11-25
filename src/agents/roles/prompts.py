@@ -113,6 +113,10 @@ def prepare_role_prompt(
         from agents.runtime.service_scope import is_service_input, service_runtime_instructions
         if is_service_input(payload):
             payload["runtimeInstructions"] = service_runtime_instructions(payload)
+        if role in (AgentRole.QA, AgentRole.SECURITY):
+            from agents.runtime.test_guidance import credential_test_instructions
+            if "testTargets" in payload:
+                payload["runtimeInstructions"] = credential_test_instructions(payload)
         metadata_json = A2AWorkflowMetadata.model_validate(metadata.model_dump()).to_a2a_json()
         input_json = json.dumps(
             {"metadata": metadata_json, "taskInput": redact_data(payload)},

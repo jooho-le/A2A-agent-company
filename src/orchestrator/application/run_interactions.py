@@ -45,7 +45,7 @@ def public_question(message):
             "replyMode": "NEW_RUN" if policy == "NEW_RUN_REQUIRED" else "ANSWER"}
 
 
-async def read_interactions(repository, controls, run_id):
+async def read_interactions(repository, controls, run_id, *, expected_policy_sha256=None):
     run = repository.get_run(run_id)
     if run is None:
         return None
@@ -73,13 +73,46 @@ async def read_interactions(repository, controls, run_id):
         except Exception:
             return base
 
-    waiting = [s for s in steps if s.status == WorkflowStepStatus.WAITING_INPUT]
+    paused = (WorkflowStatus.WAITING_INPUT, WorkflowStatus.HUMAN_REVIEW)
+    # A Task may retain its historical question after an unattended Run ends.
+    # It cannot authorize a user command or advertise an answerable question.
+    waiting = [s for s in steps if run.status in paused
+               and s.status == WorkflowStepStatus.WAITING_INPUT]
     requests = await asyncio.gather(*(read(s) for s in waiting))
     current = repository.get_run(run_id)
     latest = repository.list_steps(run_id)
     revision = interaction_revision(current, latest)
-    if revision != interaction_revision(run, steps):
+    if current.status not in paused or revision != interaction_revision(run, steps):
         requests = []  # A question from a previous attempt must never accept input.
+    continuation_unavailable = None
+    if expected_policy_sha256 is not None:
+        try:
+            with repository._connection() as db:
+                has_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='run_host_policies'").fetchone()
+                pinned = None if has_table is None else db.execute(
+                    'SELECT policy_sha256 FROM run_host_policies WHERE run_id=?', (str(run_id),)).fetchone()
+            started = (current.status not in (WorkflowStatus.RECEIVED, WorkflowStatus.PLANNING)
+                       or any(step.a2a_task_id for step in latest))
+            if pinned is None and started:
+                continuation_unavailable = '이 작업의 승인된 실행 규칙 기록이 없어 이어갈 수 없어요. 새 작업을 시작해주세요.'
+            elif pinned is not None and pinned[0] != expected_policy_sha256:
+                continuation_unavailable = '이전 실행 규칙으로 시작된 작업이라 현재 서버에서 이어갈 수 없어요. 새 작업을 시작해주세요.'
+        except Exception:
+            continuation_unavailable = '기존 작업의 실행 규칙을 확인하지 못했어요. 실행 환경 확인이 필요해요.'
+    if continuation_unavailable:
+        requests = [{**question, 'replyMode': 'NEW_RUN', 'reason': continuation_unavailable,
+                     'questions': []} for question in requests]
+    from orchestrator.infrastructure.run_feedback import read_feedback
+    from orchestrator.application.work_failures import read_work_failures
+    from orchestrator.domain.service_design import service_policy
+    configuration = repository.get_run_configuration(run_id)
+    feedback = read_feedback(repository, run_id)
+    can_annotate = (continuation_unavailable is None and len(feedback) < 16
+                    and configuration is not None and service_policy(configuration.scenario_contract)
+                    and current.status not in (*paused, WorkflowStatus.FINISHED, WorkflowStatus.ABORTED))
     return {"runId": str(run_id), "revision": revision, "status": current.status.value,
+            "canAnnotate": can_annotate, "feedback": feedback,
+            "continuationUnavailable": continuation_unavailable,
+            "failures": await read_work_failures(repository, controls, current, latest),
             "requestText": redact_text(current.request_text)[:20000], "requests": requests,
             "canCancel": current.status not in (WorkflowStatus.FINISHED, WorkflowStatus.ABORTED)}

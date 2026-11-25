@@ -18,7 +18,7 @@ router = APIRouter(prefix="/runs", tags=["user-interaction"], dependencies=[Depe
 
 
 class UserCommand(APIModel):
-    action: Literal["CANCEL", "RESUME"]
+    action: Literal["CANCEL", "RESUME", "ANNOTATE"]
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     workflow_step_id: UUID4 | None = Field(default=None, alias="workflowStepId")
     clarification: str | None = Field(default=None, min_length=1, max_length=8000)
@@ -28,6 +28,9 @@ class UserCommand(APIModel):
         if self.action == "CANCEL":
             if self.workflow_step_id is not None or self.clarification is not None:
                 raise ValueError("CANCEL takes no clarification or Step")
+        elif self.action == 'ANNOTATE':
+            if self.workflow_step_id is not None or not self.clarification or not self.clarification.strip() or len(self.clarification.strip()) > 4000:
+                raise ValueError('Enter a supplementary explanation without selecting a Step')
         elif self.workflow_step_id is None or not self.clarification or not self.clarification.strip():
             raise ValueError("Choose one waiting Step and enter a clarification")
         if self.clarification is not None:
@@ -53,11 +56,12 @@ def require_run(repository, run_id):
 
 
 @router.get("/{run_id}/interaction")
-async def get_interaction(run_id: UUID, response: Response,
+async def get_interaction(run_id: UUID, response: Response, request: Request,
                           repository=Depends(get_workflow_repository), controls=Depends(get_workflow_controls)):
     require_run(repository, run_id)
     response.headers["Cache-Control"] = "no-store"
-    return await read_interactions(repository, controls, run_id)
+    return await read_interactions(repository, controls, run_id,
+        expected_policy_sha256=getattr(request.app.state, 'host_policy_sha256', None))
 
 
 async def execute_command(store, command_id, run_id, body, repository, controls):
@@ -99,12 +103,29 @@ async def submit_command(run_id: UUID, body: UserCommand, request: Request, resp
         return store.public(old)
     if run.status in (WorkflowStatus.FINISHED, WorkflowStatus.ABORTED):
         raise HTTPException(409, "RUN_ALREADY_ENDED")
+    if body.action == 'ANNOTATE':
+        from orchestrator.domain.service_design import service_policy
+        from orchestrator.infrastructure.run_feedback import admit_feedback
+        configuration = repository.get_run_configuration(run_id)
+        if configuration is None or not service_policy(configuration.scenario_contract):
+            raise HTTPException(409, 'SERVICE_FEEDBACK_NOT_SUPPORTED')
+        interaction = await read_interactions(repository, controls, run_id,
+            expected_policy_sha256=getattr(request.app.state, 'host_policy_sha256', None))
+        if not interaction['canAnnotate']:
+            raise HTTPException(409, 'FEEDBACK_NOT_ACTIONABLE')
+        try:
+            row = admit_feedback(store, run_id, command_id, payload)
+        except CommandConflict as error:
+            raise HTTPException(409, str(error)) from None
+        response.headers['Cache-Control'] = 'no-store'
+        return store.public(row)
     if body.action == "RESUME" and interaction_revision(run, repository.list_steps(run_id)) != body.revision:
         raise HTTPException(409, "STATE_CHANGED")
     if body.action == "RESUME":
         if run.status not in (WorkflowStatus.WAITING_INPUT, WorkflowStatus.HUMAN_REVIEW):
             raise HTTPException(409, "RUN_NOT_WAITING")
-        interaction = await read_interactions(repository, controls, run_id)
+        interaction = await read_interactions(repository, controls, run_id,
+            expected_policy_sha256=getattr(request.app.state, 'host_policy_sha256', None))
         target = next((row for row in interaction["requests"] if row["workflowStepId"] == str(body.workflow_step_id)), None)
         if interaction["revision"] != body.revision or target is None or target["replyMode"] != "ANSWER":
             raise HTTPException(409, "QUESTION_NOT_ACTIONABLE")

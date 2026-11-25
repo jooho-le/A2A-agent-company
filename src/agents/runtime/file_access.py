@@ -45,6 +45,11 @@ def constrain_workspace_file_tools(tools, role):
             field["description"] = (
                 "Workspace-relative file path including an allowed root: " + ", ".join(prefixes)
                 + ". Use fileAccess toolPath values for Source; a bare repository path is invalid.")
+            if tool.name == "write_test_file":
+                content = schema["properties"].get("content", {})
+                if content.get("type") == "string":
+                    from agents.runtime.test_guidance import PYTHON_TEST_CREDENTIAL_WRITE_GUIDANCE
+                    content["description"] = PYTHON_TEST_CREDENTIAL_WRITE_GUIDANCE
             tool = replace(tool, input_schema=JsonSchema.from_dict(schema))
         result.append(tool)
     return tuple(result)

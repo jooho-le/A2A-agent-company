@@ -79,7 +79,8 @@ def test_admission_freezes_the_user_application_and_scope_reaches_every_role(hos
     assert ScenarioDefinition.from_contract(contract).planner_contract() == contract
     authority = freeze_requirement_authority(saved)
     artifact_id, planner_step = uuid4(), uuid4()
-    payload = {'schemaVersion': 1, 'requirements': [{k: r[k] for k in
+    from service_test_helpers import service_design
+    payload = {'schemaVersion': 1, 'serviceDesign': service_design('WEB'), 'requirements': [{k: r[k] for k in
         ('requirementId', 'key', 'description', 'acceptanceCriteria')} for r in contract['requirements']],
         'implementationPlan': [{'taskId': 'TASK-WEB', 'title': '요청 웹사이트 구현',
             'description': '원문 기능과 실제 화면 구현', 'requirementIds': [str(i) for i in scenario.requirement_ids], 'dependsOn': []}]}

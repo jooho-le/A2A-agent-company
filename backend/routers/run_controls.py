@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v1/runs", tags=["run-controls"])
 
 class UserCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    action: Literal["CANCEL", "RESUME"]
+    action: Literal["CANCEL", "RESUME", "ANNOTATE"]
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     workflowStepId: UUID4 | None = None
     clarification: str | None = Field(default=None, min_length=1, max_length=8000)
@@ -25,6 +25,8 @@ class UserCommand(BaseModel):
             raise ValueError("중단 요청에는 추가 입력을 함께 보낼 수 없습니다.")
         if self.action == "RESUME" and (self.workflowStepId is None or not self.clarification):
             raise ValueError("답변할 직원과 내용을 선택해주세요.")
+        if self.action == 'ANNOTATE' and (self.workflowStepId is not None or not self.clarification or len(self.clarification) > 4000):
+            raise ValueError('현재 작업에 보충할 설명을 4000자 이내로 입력해주세요.')
         return self
 
 

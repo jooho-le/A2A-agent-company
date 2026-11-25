@@ -11,20 +11,31 @@ sessionStorage.setItem('access_token', 'test.' + btoa(JSON.stringify({ sub: '1' 
 const id = n => `70000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const runId = id(1), stepId = id(2)
 let phase = 'WAITING_INPUT', questionRole = 'PLANNER', root, calls = [], lost = false, receiptBlocked = false, changed = 0
+let staleQuestions = false, shownPhase = null, rejectNext = false
+const feedback = []
 const receipts = new Map()
 function check(value, message) { if (!value) throw new Error(message) }
 globalThis.fetch = async (url, options = {}) => {
   const method = options.method || 'GET'; calls.push({ url, method, options })
   if (url.endsWith('/interaction')) return Response.json({ runId, revision: 'a'.repeat(64), status: phase,
-    requestText: '회원가입 화면', canCancel: phase !== 'ABORTED', requests: phase === 'WAITING_INPUT' ? [{
+    canAnnotate: ['IMPLEMENTING', 'VALIDATING', 'REVALIDATING'].includes(phase), feedback,
+    requestText: '회원가입 화면', canCancel: !['ABORTED', 'FINISHED'].includes(phase), requests: phase === 'WAITING_INPUT' || staleQuestions ? [{
       workflowStepId: stepId, agentRole: questionRole, attempt: 0, codeVersion: questionRole === 'PLANNER' ? null : 1,
       replyMode: 'ANSWER', reason: '진행할 내용을 확인해주세요.', questions: ['회원가입 기능 안에서 어떻게 진행할까요?'],
     }] : [] })
   if (url.endsWith('/commands') && method === 'POST') {
     const body = JSON.parse(options.body), key = new Headers(options.headers).get('Idempotency-Key')
+    if (rejectNext) {
+      rejectNext = false; phase = 'FINISHED'
+      return Response.json({ detail: 'RUN_ALREADY_ENDED' }, { status: 409 })
+    }
     check(!receipts.has(key), 'test does not expect duplicate publication')
     const row = { runId, commandId: key, action: body.action, status: 'SUCCEEDED', createdAt: new Date().toISOString(), resultStatus: body.action === 'CANCEL' ? 'ABORTED' : 'WAITING_INPUT' }
     receipts.set(key, row)
+    if (body.action === 'ANNOTATE') {
+      feedback.push({ feedbackId: key, text: body.clarification, status: 'QUEUED' })
+      return Response.json(row, { status: 202 })
+    }
     if (body.action === 'CANCEL') phase = 'ABORTED'
     if (lost) { lost = false; throw new TypeError('simulated lost response') }
     return Response.json({ ...row, status: 'QUEUED' }, { status: 202 })
@@ -40,7 +51,7 @@ globalThis.fetch = async (url, options = {}) => {
 function Fixture() {
   const [selected, select] = useState(null)
   const controls = useRunInteraction(runId, true, () => { changed++ })
-  const run = { runId, status: phase, verdict: null, codeVersion: 1, fixAttempt: 0 }
+  const run = { runId, status: shownPhase || phase, verdict: null, codeVersion: 1, fixAttempt: 0 }
   const displayState = buildAgentRunDisplayState({ runId, run, architecture: 'MULTI_AGENT',
     status: { run: 'success', steps: 'success' }, steps: [{ runId, workflowStepId: stepId,
       agentRole: questionRole, status: phase === 'WAITING_INPUT' ? 'WAITING_INPUT' : phase === 'ABORTED' ? 'CANCELED' : 'RUNNING',
@@ -95,6 +106,18 @@ async function verify() {
   await click('기획', document.querySelector('.run-employee-picker'))
   await click('개발', document.querySelector('.run-employee-picker'))
   check(document.querySelector('textarea').value.includes('입력 안내'), 'employee-scoped memo preserved')
+  const beforeAnnotation = writes().length
+  await act(async () => { const form = document.querySelector('.run-reply'); form.requestSubmit(); form.requestSubmit() })
+  await settle(); await refresh()
+  check(writes().length === beforeAnnotation + 1, 'supplementary input is published once')
+  const annotation = JSON.parse(writes().at(-1).options.body)
+  check(annotation.action === 'ANNOTATE' && annotation.clarification.includes('입력 안내')
+    && !('workflowStepId' in annotation), 'annotation is not a resume or selected Step command')
+  check(document.querySelector('.run-command-notice').textContent.includes('접수했어요'), 'acceptance is not claimed as implementation')
+  check(document.body.textContent.includes('다음 직원 작업에 전달 대기'), 'queued delivery is visible')
+  feedback[0].status = 'INCLUDED'; await refresh()
+  check(document.body.textContent.includes('직원 작업 입력에 포함됨'), 'included is distinct from feature completion')
+  passed.push('추가 설명은 한 번 접수하고 서버의 전달 대기·입력 포함 상태를 표시')
   phase = 'WAITING_INPUT'; await refresh()
   check(document.querySelector('textarea').value.includes('입력 안내'), 'memo becomes the answer draft without loss')
   passed.push('진행 중 메모·직원 전환·질문 도착 때 입력 보존')
@@ -109,6 +132,26 @@ async function verify() {
   check(writes().length === before + 1 && JSON.parse(writes().at(-1).options.body).action === 'CANCEL', 'confirmed stop once')
   check(document.querySelector('.run-command-notice').textContent.includes('중단이 확인'), 'only confirmed cancellation is shown')
   passed.push('중단 확인·취소·한 번만 중단·서버 확인 후 종료 표시')
+
+  // Separate simulated lifecycle: the server ends between reading and answering.
+  phase = 'WAITING_INPUT'; questionRole = 'QA'; await refresh()
+  await click('품질 검사', document.querySelector('.run-employee-picker'))
+  await fill('단순 회원가입 API 수준으로 진행해주세요.')
+  rejectNext = true
+  const beforeReject = writes().length, beforeChanged = changed
+  await act(async () => document.querySelector('.run-reply').requestSubmit()); await settle(); await refresh()
+  check(writes().length === beforeReject + 1, '409 never triggers an automatic answer retry')
+  check(changed > beforeChanged, '409 refreshes the parent Run as well as interaction')
+  check(!document.querySelector('.run-reply') && !document.querySelector('.run-attention'), 'ended Run hides the answer and waiting notice')
+  check(document.querySelector('.run-command-notice').textContent.includes('이미 종료'), 'ended Run gives a concrete explanation')
+  check(Object.values(sessionStorage).some(value => value.includes('단순 회원가입 API 수준')), 'rejected answer draft is preserved')
+  passed.push('답변 직전 종료·409 처리 시 상태 갱신·재전송 차단·입력 보존')
+
+  staleQuestions = true; shownPhase = 'WAITING_INPUT'; await refresh()
+  check(!document.querySelector('.run-reply'), 'terminal interaction overrides stale Run display')
+  phase = 'WAITING_INPUT'; shownPhase = 'FINISHED'; await refresh()
+  check(!document.querySelector('.run-reply'), 'terminal Run display overrides stale interaction question')
+  passed.push('종료 상태가 어느 조회에 먼저 와도 오래된 질문의 답변 버튼 숨김')
   check(changed > 0, 'run monitor refresh is connected')
   await act(async () => root.unmount())
   return { passed }

@@ -32,7 +32,7 @@ export default function useRunInteraction(runId, enabled, onChanged) {
     context.current = identity
     rows.current = {}; patch({ commands: {}, data: null, error: '' })
     if (!runId) return () => { identity.active = false }
-    for (const action of ['CANCEL', 'RESUME']) {
+    for (const action of ['CANCEL', 'RESUME', 'ANNOTATE']) {
       try {
         const key = storageKey(action)
         const saved = key ? JSON.parse(sessionStorage.getItem(key)) : null
@@ -79,7 +79,8 @@ export default function useRunInteraction(runId, enabled, onChanged) {
     if (!data || data.runId !== runId || sending.current.has(action) || pending(rows.current[action])) return false
     const identity = context.current
     const commandId = crypto.randomUUID()
-    const body = { action, revision: data.revision, ...(action === 'RESUME' ? { workflowStepId: stepId, clarification } : {}) }
+    const body = { action, revision: data.revision, ...(action === 'RESUME' ? { workflowStepId: stepId, clarification }
+      : action === 'ANNOTATE' ? { clarification } : {}) }
     sending.current.add(action); patch({ error: '' })
     publish(action, { runId, commandId, action, status: 'SENDING', createdAt: new Date().toISOString() })
     try {
@@ -92,13 +93,15 @@ export default function useRunInteraction(runId, enabled, onChanged) {
       if ([400, 401, 403, 404, 409, 422, 429].includes(failure.status)) {
         publish(action, { runId, commandId, action, status: 'REJECTED', createdAt: new Date().toISOString() })
       } else publish(action, { runId, commandId, action, status: 'UNKNOWN', createdAt: new Date().toISOString() })
-      patch({ error: failure.message }); setRevision(value => value + 1)
+      patch({ error: failure.message }); setRevision(value => value + 1); onChangedRef.current?.()
       return false
     } finally { sending.current.delete(action) }
   }
   const scopedCommands = Object.fromEntries(Object.entries(commands).filter(([, row]) => row.runId === runId))
   return { data: data?.runId === runId ? data : null, error, commands: scopedCommands,
     cancel: () => submit('CANCEL'), reply: (text, stepId) => submit('RESUME', text, stepId),
+    annotate: text => submit('ANNOTATE', text),
     refresh: () => { setRevision(value => value + 1); onChangedRef.current?.() },
-    cancelPending: pending(scopedCommands.CANCEL), replyPending: pending(scopedCommands.RESUME) }
+    cancelPending: pending(scopedCommands.CANCEL), replyPending: pending(scopedCommands.RESUME),
+    annotatePending: pending(scopedCommands.ANNOTATE) }
 }

@@ -705,12 +705,18 @@ class LLMEngine:
                                 capture(sequence, 'SOURCE_CREDENTIAL_DENIED', True, report, tool_calls=response.tool_calls)
                                 seen_calls.update(item.call_id for item in response.tool_calls
                                                   if isinstance(item.call_id, str) and item.call_id.strip())
-                                from agents.runtime.test_guidance import PASSWORD_FIXTURE_GUIDANCE
+                                from agents.runtime.test_guidance import PASSWORD_FIXTURE_GUIDANCE, unit_test_data_contract
+                                python_test = test_write and str(arguments.get('path', '')).endswith('.py')
                                 instruction = ('The rejected test file was NOT written. Generate a new tool call. '
                                     'Do not embed password, token or hash literals in test source, dictionaries, '
                                     'default arguments or f-strings. Generate synthetic test passwords at runtime. '
-                                    + PASSWORD_FIXTURE_GUIDANCE + ' '
+                                    + (PASSWORD_FIXTURE_GUIDANCE if python_test else
+                                       'Keep the selected target format. Do not paste Python imports into browser JSON. ') + ' '
                                     'Fix all reported locations and inspect the whole file, not only the first match. '
+                                    'credentialRepairPlan contains value-free AST site hints, never approval. '
+                                    'For password boundary cases the factory arguments describe length/kind only; '
+                                    'preserve the original test intent and assertions. Move generated defaults into '
+                                    'the current test body. Do not replace one fixed credential with another fixed string. '
                                     'Do not print credentials. Use the existing requirements unchanged.') if test_write else (
                                     'No call from your previous response was executed: the source write held a '
                                     'credential-like literal. Re-issue the calls you still need. Do not embed password, '
@@ -720,6 +726,10 @@ class LLMEngine:
                                 from orchestrator.core.source_credentials import source_credential_locations
                                 source_field = report.field_path.removeprefix('/') if call.name == 'edit_source_file' else 'content'
                                 locations = source_credential_locations(arguments.get(source_field))
+                                from agents.runtime.test_credential_repair import credential_repair_plan
+                                test_guidance = ({'testData': unit_test_data_contract(),
+                                                  'credentialRepairPlan': credential_repair_plan(arguments)}
+                                                 if python_test else {})
                                 items.append({'role': 'user', 'content': json_text({
                                     'hostToolFeedback': {
                                         'code': 'SOURCE_CREDENTIAL_DENIED', 'toolName': call.name,
@@ -728,6 +738,7 @@ class LLMEngine:
                                         'sourceIssues': locations['issues'],
                                         'sourceIssuesTruncated': locations['truncated'],
                                         'sourceIssuesCoverage': locations['coverage'],
+                                        **test_guidance,
                                         'instruction': instruction}})})
                                 correct_test_source = True
                                 break

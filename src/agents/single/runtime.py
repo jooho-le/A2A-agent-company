@@ -155,6 +155,9 @@ class SingleAgentExecutor(AgentExecutor):
         # text_only: the semantic rewrite (docs/live-api/05 15절) — no tool, no forced edit, no catalog stop.
         if text_only and (tools or executor is not None or source_progress_check is not None):
             raise SingleExecutionError()
+        if phase is SinglePhase.QA:
+            from agents.runtime.test_fix import available_report_tools
+            tools = available_report_tools(tools, task_input)
         prompt = await prepare_single_prompt(self._store, context_id=context.context_id,
             metadata=execution.metadata, scenario=execution.scenario, draft_contract=contract,
             task_input=task_input, call_context=context.call_context,
@@ -262,6 +265,10 @@ class SingleAgentExecutor(AgentExecutor):
             return decision, ()
         services = await _host_factory(self._services[role], execution)
         checkpoint = await services.prepare(execution)
+        from orchestrator.infrastructure.run_feedback import feedback_input
+        task_input.update(await _run_file_operation(feedback_input, services, execution))
+        if getattr(checkpoint, 'runtime_capabilities', None) is not None:
+            task_input['runtimeCapabilities'] = checkpoint.runtime_capabilities
         from agents.runtime.development_failure import failure_reader
         read_failure = failure_reader(services, execution) if role is AgentRole.DEVELOPER else None
         if role is AgentRole.DEVELOPER:
@@ -342,7 +349,8 @@ class SingleAgentExecutor(AgentExecutor):
                         library_type_check=checkpoint.library_type_issues if role is AgentRole.DEVELOPER else None,
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
                             if role is AgentRole.DEVELOPER and execution.budget.limits.max_output_corrections else None,
-                        service_ui_check=service_interface_check(checkpoint, execution.configuration.scenario_contract)
+                        service_ui_check=service_interface_check(checkpoint, execution.configuration.scenario_contract,
+                            task_input.get('serviceDesign'))
                             if role is AgentRole.DEVELOPER else None,
                         path_check=checkpoint.ready_path_issues if options.get("repair_paths") else None,
                         correction_candidates=checkpoint.correction_candidates if options.get("repair_paths") else None,

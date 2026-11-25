@@ -59,8 +59,18 @@ def inspect_service_interface(source_root, contract):
     return []
 
 
-def service_interface_check(checkpoint, contract):
-    return lambda: inspect_service_interface(getattr(checkpoint, "source_root", None), contract)
+def service_interface_check(checkpoint, contract, service_design=None):
+    def inspect():
+        root = getattr(checkpoint, "source_root", None)
+        issues = []
+        capabilities = getattr(checkpoint, "runtime_capabilities", None)
+        if capabilities is not None:
+            from agents.runtime.service_capabilities import inspect_dependencies
+            issues.extend(inspect_dependencies(root, capabilities))
+        if service_design is None or service_design.get("delivery") == "WEB":
+            issues.extend(inspect_service_interface(root, contract))
+        return issues
+    return inspect
 
 
 class _Selectors(HTMLParser):

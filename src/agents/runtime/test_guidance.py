@@ -16,12 +16,42 @@ PASSWORD_FIXTURE_EXAMPLE = (
     'payload["password"] = sample'
 )
 
+CREDENTIAL_TEST_AUTHORING_POLICY = "RUNTIME_ONLY_CREDENTIAL_TEST_AUTHORING_V1"
+PASSWORD_BOUNDARY_EXAMPLE = (
+    'from _host_test_data import new_password\n'
+    'empty_sample = new_password(length=0)\n'
+    'short_sample = new_password(length=7)\n'
+    'sample = new_password(length=8)\n'
+    'payload = {}\n'
+    'payload["password"] = short_sample'
+)
+
+PYTHON_TEST_CREDENTIAL_WRITE_GUIDANCE = (
+    "Python unittest: use testTargets.testData, the Host runtime factory. Import "
+    "from _host_test_data import new_password; create sample = new_password(length=12) "
+    "inside the test and assign payload['password'] = sample. Empty, short and invalid "
+    "string cases also use this factory with the case's length/kind. Never embed any "
+    "credential string, including defaults, helper returns or dictionary values. "
+    "Choose case lengths from the assigned criteria; examples are not acceptance rules. "
+    "Read Source first, then submit one write_test_file call per response so a rejected "
+    "write can use the bounded pre-execution correction without replaying other tools. "
+    "This Python module is unavailable in browser JSON; use that target's format."
+)
+
 PASSWORD_FIXTURE_GUIDANCE = (
     "For Host Python unittest, fresh_email is your local variable, NOT self.fresh_email or a Host method. "
     "new_password is a module function, NOT self.new_password. Build the request with the testData factory:\n"
     + PASSWORD_FIXTURE_EXAMPLE
     + "\nChoose the length from the public requirements or your case, including 0. Use this same factory for every "
-    "password and reuse the variable for repeated requests. The Host supplies the module; do not write it."
+    "password and reuse the variable for repeated requests. The Host supplies the module only inside the "
+    "unit runner; do not read or write a _host_test_data.py file through project tools. "
+    "Negative and boundary string cases must use the same factory, not another fixed string:\n"
+    + PASSWORD_BOUNDARY_EXAMPLE
+    + "\nThe lengths above are examples, not a new minimum. Preserve the assigned case intent, "
+    "including wrong types and nulls when required; do not convert such values into valid strings. "
+    "Do not set credential strings in helper defaults or helper return values. Generate per test. "
+    "Use actual application responses for valid access tokens and runtime synthetic data for invalid "
+    "tokens; never copy server/API credentials or stored hash literals into tests."
 )
 
 CONCURRENT_SIGNUP_GUIDANCE = (
@@ -80,7 +110,26 @@ def unit_test_data_contract():
                            "kind": {"enum": ["ascii", "unicode", "digits", "spaces"], "default": "ascii"}},
             "availability": "Host Python unittest discovery and execution only",
             "returns": "Runtime synthetic string, exactly length characters; no acceptance verdict",
-            "example": PASSWORD_FIXTURE_EXAMPLE}
+            "example": PASSWORD_FIXTURE_EXAMPLE,
+            "authoringPolicy": CREDENTIAL_TEST_AUTHORING_POLICY,
+            "boundaryExample": PASSWORD_BOUNDARY_EXAMPLE,
+            "instruction": PYTHON_TEST_CREDENTIAL_WRITE_GUIDANCE}
+
+
+def credential_test_instructions(task_input):
+    """Place the same credential recipe next to the current validation task.
+
+    Only configured Python test targets advertise the Host Python module.
+    This adds instructions, never credentials, permissions or test verdicts.
+    """
+    original = task_input.get("runtimeInstructions", "")
+    targets = task_input.get("testTargets", ())
+    if not isinstance(original, str) or not isinstance(targets, (list, tuple)):
+        return original
+    if not any(isinstance(target, dict) and target.get("toolName") == "run_unit_tests"
+               and target.get("format") == "python-unittest" for target in targets):
+        return original
+    return original + "\n" + CREDENTIAL_TEST_AUTHORING_POLICY + ": " + PASSWORD_FIXTURE_GUIDANCE
 
 
 def unit_test_targets(configuration, role, *, scenario_key=None):
@@ -90,7 +139,8 @@ def unit_test_targets(configuration, role, *, scenario_key=None):
                  "directory": f"outputs/{role}/" + scope.source_directory,
                  "pattern": scope.pattern, "format": "python-unittest", "required": True,
                  "testIdRule": UNIT_TEST_ID_DESCRIPTION,
-                 "fixtureGuidance": "Use unittest and FastAPI TestClient as a context manager. Set an isolated temporary DATABASE_URL before importing main. Start the real app lifespan, clean up clients, sessions and imported product modules. Never create missing product tables or override product dependencies to make a test pass. Read the actual app/model/API first. SCN-001 AppTestCase and signup helpers do not describe this application.",
+                 "fixtureGuidance": "Use unittest and FastAPI TestClient as a context manager. Set an isolated temporary DATABASE_URL before importing main. Start the real app lifespan, clean up clients, sessions and imported product modules. Never create missing product tables or override product dependencies to make a test pass. Read the actual app/model/API first. SCN-001 AppTestCase and signup helpers do not describe this application. " + PASSWORD_FIXTURE_GUIDANCE,
+                 "testData": unit_test_data_contract(),
                  "testDataFactory": unit_test_data_contract()}
                 for scope in configuration.scopes if scope.kind == "QA_TESTS"]
     return [{"toolName": "run_unit_tests", "selector": scope.name,

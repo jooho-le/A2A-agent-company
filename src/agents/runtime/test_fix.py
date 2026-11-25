@@ -105,14 +105,48 @@ class TestFixRequired(Exception):
             guidance.append('Measure signup_hash_parameters(canonical_email, password=sample) on two distinct committed accounts within one test to measure their distinct salts; assert the public hash policy.')
         if 'CONCURRENT_SIGNUPS_NOT_OBSERVED' in self.reasons or test_not_run.HELPER_ASSERTION in self.reasons:
             guidance.append(CONCURRENT_SIGNUP_GUIDANCE)
+        from agents.runtime.service_scope import is_service_input
+        reports = sorted({row['reportRef'] for row in self.observed_cases if isinstance(row.get('reportRef'), str)})
+        instruction = INSTRUCTION
+        if is_service_input(task_input):
+            instruction = (
+                "Correct only your generated tests on the same frozen Source and keep every declared case unchanged. "
+                "Read serviceDesign and actual Source; use its exact route, JSON/FORM encoding and request fields. "
+                "Use ordinary unittest, the advertised testData factory and TestClient lifespan; do not use SCN-001 "
+                "AppTestCase, self.User or signup helpers. A not-run scope is not proof of a product FAIL or PASS. "
+                "Never install dependencies, create missing product tables or modify Source to hide a product defect. "
+                "Report any product/interface contradiction rather than weakening tests. Return the same READY JSON.")
+            guidance = []
+            instruction += (
+                " Only availableReportRefs below may be read. If it is empty, no report was published: "
+                "do not invent an artifact URI or call read_test_report; inspect your test files and the frozen Source instead.")
         return {**dict(task_input), "testRunFeedback": {
             "code": "GENERATED_OUTPUT_COVERAGE_INCOMPLETE" if set(self.reasons) - test_not_run.TECHNICAL else "GENERATED_TESTS_NOT_RUN",
             "reasonCodes": list(self.reasons), "scopes": list(self.selectors),
             "observedCases": parse_json(json_text(list(self.observed_cases))),
             "observationScope": "CURRENT_SOURCE_GENERATED_TESTS_ONLY",
             "casePassIsRequirementPass": False,
-            "instruction": " ".join([INSTRUCTION, *guidance]),
+            **({'availableReportRefs': reports, 'noReportAvailable': not reports} if is_service_input(task_input) else {}),
+            "instruction": " ".join([instruction, *guidance]),
             "previousReady": parse_json(json_text(previous_ready))}}
+
+
+def available_report_tools(tools, task_input):
+    from agents.runtime.service_scope import is_service_input
+    if not is_service_input(task_input):
+        return tools
+    refs = task_input.get('testRunFeedback', {}).get('availableReportRefs', [])
+    selected = []
+    for tool in tools:
+        if tool.name != 'read_test_report':
+            selected.append(tool)
+        elif refs:
+            from dataclasses import replace
+            from agents.llm.contracts import JsonSchema
+            schema = tool.input_schema.to_dict()
+            schema['properties']['reportRef'] = {'type': 'string', 'enum': refs}
+            selected.append(replace(tool, input_schema=JsonSchema.from_dict(schema)))
+    return tuple(selected)
 
 
 def same_cases(previous, current) -> bool:
