@@ -22,6 +22,12 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+.aio-monogram-image {
+  display: block;
+  max-width: 70%;
+  height: auto;
+}
+
 * {
   box-sizing: border-box;
 }

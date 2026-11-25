@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import aioLogo from '../../assets/aio-logo.webp'
 import { ModeSelector } from './ModeSelector'
 import { StudioObject } from './StudioVisuals'
 import { roleLabel } from './roleLabels'
@@ -91,7 +92,10 @@ export function RequestForm({ mode = 'multi', onMode, modal = false, onCreate, o
   const problem = submission?.error || submission?.configurationError
   const needsStatus = submission?.busy || submission?.uncertain || submission?.configurationLoading
   return <form className="request-composer" id={`${prefix}-form`} onSubmit={submit}>
-    <div className="composer-top"><label htmlFor={`${prefix}-text`}><Icon name="plan" />무엇을 만들까요?</label></div>
+    <div className={submission ? 'composer-top composer-top--branded' : 'composer-top'}>
+      {submission && <img src={aioLogo} alt="" width="56" height="56" />}
+      <label htmlFor={`${prefix}-text`}>{!submission && <Icon name="plan" />}무엇을 만들까요?</label>
+    </div>
     {submission && !submission.locked && <p className="request-scope">지금은 회원가입 기능을 만들 수 있어요.</p>}
     {onMode && <ModeSelector mode={mode} onMode={onMode} />}
     {fields}

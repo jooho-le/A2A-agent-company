@@ -1,4 +1,5 @@
 import '../../pages/LoginPage.css'
+import aioLogo from '../../assets/aio-logo.webp'
 import { humanAgents } from './humanAgents'
 import AuthRoleAccent from './AuthRoleAccent'
 
@@ -50,7 +51,7 @@ export default function OfficeAuthLayout({ children, reviewAccents = false }) {
   return <main className={`auth-page office-auth${reviewAccents ? ' office-auth--review-accents' : ''}`}>
     <div className="office-auth-shell">
       <header className="office-auth-brand">
-        <span className="office-auth-monogram" aria-hidden="true">A</span>
+        <span className="office-auth-monogram"><img className="aio-monogram-image" src={aioLogo} alt="" width="28" height="28" /></span>
         <span>AIO</span>
       </header>
       <div className="office-auth-mobile-team" aria-hidden="true">{[4, 0, 1, 2, 3].map(index =>

@@ -334,7 +334,15 @@
 .ux-simple .office3d-request > summary { display: flex; justify-content: space-between; align-items: center; padding-block: 8px 14px; color: #c2ccdc; font-size: 12px; cursor: pointer; list-style: none; }
 .ux-simple .agent-office-3d:not([data-run-id]) .office3d-request > summary { display: none; }
 .ux-simple.office-immersive .composer-top label { font-size: 20px; font-weight: 600; letter-spacing: -.04em; }
-.ux-simple .request-scope { margin: 10px 0 16px; color: #b7c4d8; font-size: 11px; line-height: 1.6; }
+.atelier-dashboard .composer-top.composer-top--branded {
+  display: grid;
+  justify-content: stretch;
+  justify-items: center;
+  gap: 10px;
+  padding-inline: 0;
+  text-align: center;
+}
+.ux-simple .request-scope { margin: 10px 0 16px; color: #b7c4d8; font-size: 11px; line-height: 1.6; text-align: center; }
 .ux-simple.office-immersive .request-text { min-height: 120px; font-size: 12px; }
 .ux-simple.office-immersive .composer-bottom .start { min-height: 44px; }
 .ux-simple.office-immersive .request-composer { margin-bottom: 18px; }
