@@ -665,6 +665,7 @@
 /* 기존 App 인증 콜백으로 이동하는 계정 메뉴는 목업 진행 상태와 분리합니다. */
 .atelier-dashboard .atelier-account { position: relative; margin-top: auto; }
 .atelier-dashboard .atelier-account > .owner-profile { display: flex; width: 100%; margin-top: 0; background: transparent; text-align: left; cursor: pointer; }
+.atelier-dashboard .owner-profile .owner-avatar { background: transparent; border: 0; }
 .atelier-dashboard .atelier-account-menu { position: absolute; inset: auto 0 calc(100% + 8px); z-index: 60; padding: 10px; border: 1px solid var(--border-control); border-radius: 12px; background: var(--surface-modal); box-shadow: var(--shadow-dialog); }
 .atelier-dashboard .atelier-account-menu p { margin: 0 0 8px; color: var(--muted); font-size: 9px; }
 .atelier-dashboard .atelier-account-menu button { display: block; width: 100%; padding: 10px 8px; border-radius: 6px; background: transparent; text-align: left; }

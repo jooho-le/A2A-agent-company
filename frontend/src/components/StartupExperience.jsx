@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import aioLogo from '../assets/aio-logo.webp'
 import { humanAgents } from './atelier/humanAgents'
 import './StartupExperience.css'
 
@@ -37,7 +38,7 @@ export default function StartupExperience({ children }) {
       <div className="startup-door startup-door-right" aria-hidden="true"><span>COMPANY.</span></div>
       <div className="startup-seam" aria-hidden="true" />
       <header className="startup-header">
-        <span className="startup-wordmark"><span>A</span>AIO</span>
+        <span className="startup-wordmark"><span><img className="aio-monogram-image" src={aioLogo} alt="" width="28" height="28" /></span>AIO</span>
         <span className="startup-header-note">A COMPANY OF YOUR OWN.</span>
         <button type="button" className="startup-skip" onClick={() => setPhase('finished')}>
           건너뛰기 <span aria-hidden="true">↗</span>
