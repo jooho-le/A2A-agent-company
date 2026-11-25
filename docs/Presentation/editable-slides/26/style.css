@@ -1,0 +1,37 @@
+/* 26페이지 전용. 글자·표는 index.html, 색·크기·배치는 이 파일, 상세 근거는 notes.html에서 수정합니다. */
+
+#deck > .slide[data-editable-page="26"] { --page-background:#030407;--accent:#d4ff24;--blue:#1558c9;--ink:#f0f2ec;--muted:#aaaeb8;--v08-cream:#f3e5ab;--page-title-offset:none;--page-content-offset:none;padding:38px 64px 26px;background-color:var(--page-background);background-image:radial-gradient(ellipse at 100% 0%,#1558c912,transparent 47%); }
+#deck > .slide[data-editable-page="26"] .slide-top { height:26px;margin-bottom:20px; }
+#deck > .slide[data-editable-page="26"] > h2 { font-size:54px;line-height:1.2;letter-spacing:-2px;font-weight:780;translate:var(--page-title-offset); }
+#deck > .slide[data-editable-page="26"] > .subtitle { margin:12px 0 0;font-size:22px;line-height:1.5;color:var(--muted); }
+#deck > .slide[data-editable-page="26"] > .content { display:flex;flex-direction:column;justify-content:center;gap:18px;padding-top:15px;min-height:0;translate:var(--page-content-offset); }
+#deck > .slide[data-editable-page="26"] h3, #deck > .slide[data-editable-page="26"] h4, #deck > .slide[data-editable-page="26"] p { margin:0; }
+#deck > .slide[data-editable-page="26"] h3 { font-size:26px;line-height:1.3;letter-spacing:-.7px; }
+#deck > .slide[data-editable-page="26"] p { line-height:1.45; }
+#deck > .slide[data-editable-page="26"] .slide-foot { margin-top:16px;padding-top:13px;font-size:13px;min-height:34px;color:#858e9d; }
+#deck > .slide[data-editable-page="26"] .slide-foot .folio { margin-left:auto;flex:0 0 auto;white-space:nowrap; }
+#deck > .slide[data-editable-page="26"] a:focus-visible { outline:2px solid var(--accent);outline-offset:4px; }
+
+#deck > .slide[data-editable-page="26"] .market-scope-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:22px; }
+#deck > .slide[data-editable-page="26"] .market-scope-grid article { padding:21px 25px;border:1px solid #3b4d67;border-top:3px solid var(--blue);border-radius:16px;background:linear-gradient(145deg,#1e2c40,#111b29); }
+#deck > .slide[data-editable-page="26"] .market-scope-grid .market-first-target { border-top-color:var(--accent);background:linear-gradient(145deg,#283b2c,#13212a); }
+#deck > .slide[data-editable-page="26"] .market-abbrev { display:flex;align-items:baseline;gap:14px;font-size:35px;line-height:1.1;font-weight:780;color:#bdd5fa;letter-spacing:-.8px; }
+#deck > .slide[data-editable-page="26"] .market-abbrev small { font-size:14px;font-weight:500;letter-spacing:0;color:#98adc9; }
+#deck > .slide[data-editable-page="26"] .market-scope-grid article > strong { display:block;font-size:60px;line-height:1.1;letter-spacing:-2.6px;margin:16px 0;color:#fff; }
+#deck > .slide[data-editable-page="26"] .market-scope-grid article > strong small { font-size:21px;letter-spacing:-.5px;margin-left:10px;font-weight:500;color:#b4c6df; }
+#deck > .slide[data-editable-page="26"] .market-first-target > strong { color:var(--accent)!important; }
+#deck > .slide[data-editable-page="26"] .market-scope-grid h3 { font-size:24px; }
+#deck > .slide[data-editable-page="26"] .market-scope-grid p { margin-top:10px;font-size:19px;line-height:1.5;color:#b3c4dd;min-height:57px; }
+#deck > .slide[data-editable-page="26"] .market-scope-grid em { display:block;margin-top:12px;padding-top:10px;border-top:1px solid #40516a;font-size:15px;line-height:1.4;font-style:normal;color:#91a3bd; }
+#deck > .slide[data-editable-page="26"] .market-basis { padding:18px 23px;border:1px solid #3c4b62;border-left:4px solid var(--accent);border-radius:12px;background:#111a27; }
+#deck > .slide[data-editable-page="26"] .market-basis-heading { display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:14px; }
+#deck > .slide[data-editable-page="26"] .market-basis-heading h3 { font-size:23px;color:var(--accent); }
+#deck > .slide[data-editable-page="26"] .market-basis-heading a { color:#aecbf6;font-size:15px;text-decoration:none; }
+#deck > .slide[data-editable-page="26"] .market-basis-heading a:hover { text-decoration:underline; }
+#deck > .slide[data-editable-page="26"] .market-basis-grid { display:grid;grid-template-columns:1fr 1fr 1fr;gap:25px; }
+#deck > .slide[data-editable-page="26"] .market-basis-grid article { min-width:0; }
+#deck > .slide[data-editable-page="26"] .market-basis-grid article + article { padding-left:25px;border-left:1px solid #3b4b62; }
+#deck > .slide[data-editable-page="26"] .market-basis-grid h4 { font-size:19px;line-height:1.3;margin-bottom:9px;color:#e0eaf8; }
+#deck > .slide[data-editable-page="26"] .market-basis-grid p { color:#b9c8de;font-size:18px;line-height:1.5; }
+#deck > .slide[data-editable-page="26"] .market-basis-grid b { color:var(--v08-cream);font-weight:650; }
+#deck > .slide[data-editable-page="26"] .market-basis-grid small { display:block;color:#8fa2bf;font-size:16px;line-height:1.45;margin-top:10px;word-break:keep-all; }

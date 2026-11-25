@@ -1,0 +1,111 @@
+<!doctype html>
+<!--
+========== 25페이지 수정 안내 ==========
+1. 실제 장표 글자: 아래 [화면 글자] 주석 바로 다음의 태그 사이를 수정하세요.
+2. 색·크기·위치: 같은 폴더의 style.css를 수정하세요.
+3. 발표자 메모: notes.html에 따로 있습니다. 장표 화면에는 나오지 않습니다.
+4. 이 파일을 열어 보면 저장·새로고침으로 바로 반영됩니다.
+   capstone-presentation-draft.html(통합본)을 보고 있다면 build.py로 다시 합쳐야 합니다.
+검색 단축키로 "[화면 글자" 또는 "큰 제목"을 찾으면 수정할 곳으로 바로 갈 수 있습니다.
+=========================================
+-->
+<html lang="ko">
+<head>
+<!-- [미리보기 설정] 브라우저 탭·디자인 연결입니다. 장표 본문 글자가 아닙니다. -->
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AIO · 25페이지 개별 편집</title>
+<link rel="stylesheet" href="../shared/global.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../shared/preview.css">
+</head>
+<body class="page-preview">
+<!-- [상단 도구] 미리보기 버튼입니다. PDF 장표 내용이 아닙니다. -->
+<header class="toolbar"><a href="../index.html">전체 페이지 목록</a>
+<span class="preview-title">개별 원본: editable-slides/25/index.html · 저장 후 이 페이지 새로고침</span>
+<a href="../../capstone-presentation-draft.html#slide-25">통합본 ↗ (다시 합쳐야 반영)</a>
+<button id="notes-button" aria-expanded="false">발표 노트</button><button id="print-page">이 페이지만 PDF</button></header>
+<main class="workspace" id="workspace"><div class="stage" id="stage"><div class="deck" id="deck">
+<!-- ============================================================
+     [여기부터 실제 장표 화면]
+     [화면 글자] 주석 아래의 태그 사이 문구를 수정하세요.
+     주의: section의 data-title은 목록용 제목입니다. 화면의 큰 제목이 아닙니다.
+     ============================================================ -->
+<!-- AIO:SLIDE:START -->
+<section class="slide business-v08" data-chapter="4" data-editable-page="25" data-source-page="biz-25" data-source-pages="24" data-title="3인 개발팀, 월 10건의 업무에서 약 16시간 절감 가능성">
+<div class="slide-top"><span class="kicker">05 / CUSTOMER ROI SCENARIO</span><div class="biz-heading-tools"><span class="tag">BUSINESS 07 / 09</span><a class="biz-detail-button" href="https://www.sw.or.kr/site/sw/ex/board/View.do?bcIdx=64717&amp;cbIdx=304&amp;searchExt1=" target="_blank" rel="noopener">2026 공식 임금 ↗</a></div></div>
+<!-- [화면 글자 | 제목·시나리오] -->
+<h2>3인 개발팀, 월 10건의 업무에서 약 16시간 절감 가능성</h2>
+<p class="subtitle">기존에도 Codex·Claude를 사용하는 3인 웹 개발팀 · 월 10건의 작은 기능 변경 · 업무별 시간은 추정 가정</p>
+<div class="content">
+  <div class="roi-main-layout">
+    <section class="roi-work-section" aria-labelledby="roi-work-title">
+      <div class="roi-section-heading"><h3 id="roi-work-title">개발·수정 1건의 사람 업무시간</h3><span>기존 AI 코딩 도구 사용 포함</span></div>
+      <!-- [화면 글자 | 업무별 시간 가정] 단위: 분 / 총합은 건당 전체 사람시간입니다. -->
+      <table class="roi-work-table" aria-label="작은 기능 변경 한 건의 기존 방식과 AIO 도입 시간 가정">
+        <colgroup><col class="roi-task-col"/><col/><col/><col/></colgroup>
+        <thead><tr><th scope="col">업무</th><th scope="col">기존 방식</th><th scope="col">AIO 가정</th><th scope="col">절약시간</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">PM·요구사항 정리</th><td>45분</td><td>25분</td><td>20분</td></tr>
+          <tr><th scope="row">Developer 구현·수정</th><td>150분</td><td>135분</td><td>15분</td></tr>
+          <tr><th scope="row">QA 테스트·재검증</th><td>60분</td><td>30분</td><td>30분</td></tr>
+          <tr><th scope="row">Security 검사·확인</th><td>30분</td><td>20분</td><td>10분</td></tr>
+          <tr><th scope="row">고객 변경 대응·인수 보고</th><td>45분</td><td>25분</td><td>20분</td></tr>
+          <tr class="roi-total-row"><th scope="row">총합</th><td>5시간 30분</td><td>3시간 55분</td><td>1시간 35분</td></tr>
+        </tbody>
+      </table>
+      <p class="roi-table-note">기존에도 AI로 개발하므로 구현보다 PM·QA·고객 변경 대응에 더 큰 절감 효과를 가정했습니다.</p>
+    </section>
+    <section class="roi-month-section" aria-labelledby="roi-month-title">
+      <div class="roi-section-heading"><h3 id="roi-month-title">월 10건 기준 예상 효과</h3><span>월 15시간 50분 절감 · 팀 합산</span></div>
+      <div class="roi-hours"><div><span>기존 업무시간</span><strong>55<small>시간</small></strong></div><i aria-hidden="true">→</i><div><span>AIO 도입 가정</span><strong>39<small>시간 10분</small></strong></div></div>
+      <!-- [화면 글자 | 월 예상 ROI 핵심 수치] -->
+      <div class="roi-kpis">
+        <article><span>업무시간 감소 가설</span><strong>28.8<small>%</small></strong><p>95분 ÷ 330분</p></article>
+        <article><span>월 시간 가치</span><strong>약 75<small>만 원</small></strong><p>748,616원</p></article>
+        <article class="roi-kpi-net"><span>구독료 차감 후</span><strong>약 62<small>만 원</small></strong><p>619,616원</p></article>
+      </div>
+      <div class="roi-wage-basis"><p><b>공식 임금 기준</b> 응용 SW 개발자 <strong>47,281원/시간</strong> 일괄 적용</p><p>950분 ÷ 60 × 47,281원 ≈ <strong>748,616원</strong><br/>748,616원 − Team 129,000원 = <strong>619,616원</strong></p></div>
+    </section>
+  </div>
+  <div class="roi-bottom-layout">
+    <section class="roi-sensitivity" aria-labelledby="roi-sensitivity-title"><h3 id="roi-sensitivity-title">월 작업 건수별 민감도 <small>같은 시간·임금 가정</small></h3>
+      <table aria-label="월 5건,10건,15건 작업에서의 가상 시간 절감 가치"><thead><tr><th>월 작업</th><th>절약시간</th><th>시간 가치</th><th>구독료 차감 후</th></tr></thead><tbody>
+        <tr><th scope="row">5건</th><td>약 7.9시간</td><td>약 37만 원</td><td>약 25만 원</td></tr>
+        <tr class="roi-sensitive-main"><th scope="row">10건</th><td>약 15.8시간</td><td>약 75만 원</td><td>약 62만 원</td></tr>
+        <tr><th scope="row">15건</th><td>약 23.8시간</td><td>약 112만 원</td><td>약 99만 원</td></tr>
+      </tbody></table>
+    </section>
+    <aside class="roi-assumptions"><h3>공식 임금통계에 기반한 예상 ROI</h3><p>Team 포함 실행원가 예산 <b>45,000원 ÷ 10건 = 4,500원/건 이하</b>여야 추가 요금 없이 처리 가능합니다.</p><p>추가 이용료·교육·온보딩·기존 도구의 증분 지출은 미포함.<br/></p></aside>
+  </div>
+</div>
+<footer class="slide-foot"><span><a href="https://www.sw.or.kr/site/sw/ex/board/View.do?bcIdx=64717&amp;cbIdx=304&amp;searchExt1=" target="_blank" rel="noopener">한국인공지능·소프트웨어산업협회 2026년 적용 평균임금</a> · 임금은 공식 통계, 업무시간·월 10건은 가정 · 원 단위 반올림</span><span class="folio">25 / 28</span></footer>
+</section>
+
+<!-- AIO:SLIDE:END -->
+<!-- ================= [실제 장표 화면 끝] ================= -->
+</div></div></main>
+
+<!-- [하단 도구] 페이지 이동용입니다. PDF 장표 내용이 아닙니다. -->
+<footer class="navigation"><div class="preview-navigation"><a data-previous-page="" href="../24/index.html">← 이전 페이지</a></div><span>PDF 25 / 28</span><div class="preview-navigation"><a data-next-page="" href="../26/index.html">다음 페이지 →</a></div></footer>
+
+<!-- [발표자 메모 창] 메모 내용은 notes.html에서 수정합니다. 장표 본문과 별개입니다. -->
+<aside id="notes-panel" class="notes" hidden>
+<div class="notes-heading"><h2 id="notes-title">25 · 발표 노트</h2><button id="notes-close" aria-label="노트 닫기">×</button></div>
+<div id="notes-content"><iframe class="notes-frame" src="notes.html" title="25페이지 발표자 메모"></iframe></div>
+</aside>
+
+<!-- [공통 아이콘] 도형 정의입니다. 보이는 글자를 수정하는 곳이 아닙니다. -->
+<svg aria-hidden="true" class="diagram-symbols" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="deck-icon-document" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M9 3h10l6 6v20H7V3h2zM19 3v7h6M11 15h10M11 20h10M11 25h6"></path></g></symbol>
+<symbol id="deck-icon-code" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="m11 10-7 6 7 6m10-12 7 6-7 6M18 6l-4 20"></path></g></symbol>
+<symbol id="deck-icon-check" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="m16 3 11 4v9c0 6-5 10-11 13C10 26 5 22 5 16V7zM10 16l4 4 8-9"></path></g></symbol>
+<symbol id="deck-icon-repeat" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M25 13a10 10 0 0 0-18-4L4 13m0-7v7h7M7 19a10 10 0 0 0 18 4l3-4m0 7v-7h-7"></path></g></symbol>
+<symbol id="deck-icon-network" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><circle cx="16" cy="7" r="4"></circle><circle cx="7" cy="25" r="4"></circle><circle cx="25" cy="25" r="4"></circle><path d="m14 11-5 10m9-10 5 10M11 25h10"></path></g></symbol>
+<symbol id="deck-icon-building" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M6 29V5h20v24M3 29h26M12 29v-7h8v7M11 10h2m6 0h2m-10 6h2m6 0h2"></path></g></symbol>
+<symbol id="deck-icon-chat" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M5 5h22v18H15l-8 6v-6H5zM10 11h12M10 17h8"></path></g></symbol>
+<symbol id="deck-icon-payment" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><rect height="20" rx="3" width="26" x="3" y="6"></rect><path d="M3 13h26M8 20h7m7 0h2"></path></g></symbol>
+</defs></svg>
+<!-- [미리보기 실행 코드] 본문 글자를 수정하는 곳이 아닙니다. -->
+<script src="../shared/preview.js"></script>
+</body></html>
