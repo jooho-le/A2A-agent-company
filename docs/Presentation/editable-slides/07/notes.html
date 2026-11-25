@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- 07페이지 발표자 메모입니다. 이 파일의 글자는 장표 본문에 나오지 않습니다. -->
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIO · 07페이지 발표자 메모</title>
+<style>:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;color:#f0f2ec;background:#111318}body{margin:0;padding:6px;line-height:1.8;font-size:16px}h4{color:#d4ff24}a{color:#b5cdf5}p{margin:0 0 18px}</style>
+</head><body>
+<!-- [발표자 메모 수정 영역] 장표 화면을 바꾸려면 index.html의 [화면 글자]를 수정하세요. -->
+<!-- AIO:NOTES:START -->
+<p>출처: 노션 ‘요구 사항에 대응되는 보호 검사와 세부 항목’. 서로 다른 요구사항은 7개, 보호 검사는 QA 6개와 Security 3개로 총 9개다. 이 장표는 검사 기준을 소개하며, 전체 통과를 주장하는 결과표가 아니다.</p>
+<p>REQ-001 → QA-SIGNUP-001: 유효한 이메일과 비밀번호로 가입할 때마다 2xx 응답과 사용자 1명 생성. REQ-002 → QA-SIGNUP-002: 빈 값, @ 없음·두 개, 로컬·도메인 없음, 중간 공백 이메일은 4xx이며 기존 사용자 정보는 바뀌지 않는다.</p>
+<p>REQ-003은 세 검사에 대응한다. QA-SIGNUP-003: 같은 이메일·대소문자·앞뒤 공백 변형 재가입을 거부한다. QA-SIGNUP-005: 동시 요청 5건을 3회 실행하여 매회 성공 1건, 나머지 4xx, 계정 1명을 확인한다. SEC-SIGNUP-003: 공백 제거·소문자 정규화 저장과 DB 직접 삽입 시 UNIQUE 거부를 확인한다. plus 태그나 Gmail 점 제거로 서로 다른 주소를 임의 통합하지 않는다.</p>
+<p>REQ-004 → QA-SIGNUP-004: 7자 이하 거부, 8자 이상 허용. REQ-005 → SEC-SIGNUP-002: Argon2id, 메모리 m 19456 이상·반복 t 2 이상·병렬도 p 1 이상, 계정별 다른 salt, 해당 비밀번호로만 검증 성공. 평문·일반 SHA 저장은 허용하지 않는다.</p>
+<p>REQ-006 → SEC-SIGNUP-005: 정상·이메일 오류·짧은 비밀번호·중복·필드 오타·필드 누락·객체 대신 목록·DB 오류 응답과 시작부터 종료까지의 서버 로그를 검사한다. 원문·base64·16진수 형태의 비밀번호와 해시·해시 일부의 노출도 검사한다. 노션의 4e2b1fe8 실행 사례는 이 검사에서 FAIL이며, 해당 사례를 전체 비교 실험의 성과로 일반화하지 않는다.</p>
+<p>REQ-007 → QA-SIGNUP-006: 정상·오류·중복 요청의 응답과 DB 변화를 대조하고, 거부됐던 이메일로 바로 정상 가입할 수 있는지도 확인한다. Ver1은 개발 중 공통 보호시험 피드백을 제공하고, Ver2는 이를 제공하지 않지만 자체 QA·Security 시험은 수행한다. 독립 최종 시험은 네 조건 모두 동일하다.</p>
+<!-- AIO:NOTES:END -->
+</body></html>

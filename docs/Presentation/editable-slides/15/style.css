@@ -1,0 +1,113 @@
+/* PDF 15 · 형식 검사를 통과한 응답도, 원문과 다시 비교했습니다.
+   이 파일은 이 페이지에만 적용됩니다. 내용은 같은 폴더의 index.html에서 수정합니다.
+   공통 배경·강조색은 아래 변수로, 원본 텍스트 색은 page-color 색상표로 바꿉니다. */
+#deck > .slide[data-editable-page="15"] {
+  --page-background: #030407;
+  --accent: #d4ff24;
+  --blue: #1558c9;
+  --ink: #f0f2ec;
+  --muted: #aaaeb8;
+  --page-padding: 38px 64px 26px;
+  --page-title-size: 54px;
+  --page-title-line-height: 66.96px;
+  --page-title-letter-spacing: -2px;
+  --page-title-offset: none; /* 예: 20px 0px = 제목을 오른쪽으로 20px */
+  --page-content-offset: none; /* 예: 0px 20px = 본문을 아래로 20px */
+
+  background-color: var(--page-background);
+  padding: var(--page-padding);
+}
+#deck > .slide[data-editable-page="15"] :is(h1,h2) {
+  font-size: var(--page-title-size);
+  line-height: var(--page-title-line-height);
+  letter-spacing: var(--page-title-letter-spacing);
+  translate: var(--page-title-offset);
+}
+#deck > .slide[data-editable-page="15"] > .content { translate: var(--page-content-offset); }
+
+/* 기존 요소별 스타일: 원래 HTML 안의 색상·폭·위치 값을 여기로 옮겼습니다. */
+
+
+/* 페이지 전용 추가 스타일. 선택자 앞의 페이지 번호는 유지하세요.
+#deck > .slide[data-editable-page="15"] .원하는요소클래스 {
+  font-size: 32px;
+  margin-top: 20px;
+}
+*/
+
+/* 보고서에서 확인한 자동 검사 결과만 간결하게 표시합니다. */
+#deck > .slide[data-editable-page="15"] .hallucination-result {
+  display: grid;
+  grid-template-columns: 390px minmax(0, 1fr);
+  align-items: center;
+  gap: 72px;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-total {
+  padding: 38px 24px;
+  text-align: center;
+  border: 1px solid #d4ff2440;
+  border-radius: 22px;
+  background: linear-gradient(150deg,#1e2a24,#11171a);
+}
+#deck > .slide[data-editable-page="15"] .hallucination-total > span {
+  display: block;
+  color: var(--muted);
+  font-size: 25px;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-total > strong {
+  display: block;
+  margin: 22px 0 14px;
+  color: var(--accent);
+  font-size: 215px;
+  line-height: 1;
+  letter-spacing: -9px;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-total strong > small {
+  margin-left: 8px;
+  font-size: 48px;
+  letter-spacing: -2px;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-total > p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 29px;
+  font-weight: 650;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-check {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  gap: 20px;
+  min-height: 112px;
+  padding: 22px 4px;
+  border-bottom: 1px solid var(--border);
+}
+#deck > .slide[data-editable-page="15"] .hallucination-check > span {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #d4ff2414;
+  color: var(--accent);
+  font-size: 26px;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-check > h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 31px;
+  line-height: 1.35;
+  letter-spacing: -.8px;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-check > strong {
+  color: var(--accent);
+  font-size: 38px;
+  font-weight: 750;
+}
+#deck > .slide[data-editable-page="15"] .hallucination-sample {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 23px;
+  text-align: center;
+  line-height: 1.4;
+}

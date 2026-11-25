@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- 17페이지 발표자 메모입니다. 이 파일의 글자는 장표 본문에 나오지 않습니다. -->
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIO · 17페이지 발표자 메모</title>
+<style>:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;color:#f0f2ec;background:#111318}body{margin:0;padding:6px;line-height:1.8;font-size:16px}h4{color:#d4ff24}a{color:#b5cdf5}p{margin:0 0 18px}</style>
+</head><body>
+<!-- [발표자 메모 수정 영역] 장표 화면을 바꾸려면 index.html의 [화면 글자]를 수정하세요. -->
+<!-- AIO:NOTES:START -->
+<h4>14~16페이지의 공통 목적</h4>
+<p>자연어 블로그·전자문서·추리게임 요청3종을 실제 OpenAI API에 전달하는 진단에서, 전송 보존·응답 자동 검사·처리 구간별 시간을 분리해 확인했다. Multi의4역할×3종=12응답, 별도Single×3종=3응답으로 총15개다. 근거는 docs/reports/agent-communication-revalidation-2026-11-13/revalidation-report.pdf와73·74번 기록이다.</p>
+<h4>14페이지: 인계 과정의 누락·변조 여부</h4>
+<p>사용자 원문과 이전 결과가 요청 객체·직렬화·수신·실행기에서 유지되는지, 실제 Host DB 접수 기록과 API 입력·응답·식별자가 맞는지 대조했다. 관측15건은 각 대조 지점에서15/15 일치했다. 100→100은 원리를 설명한 개념 예시다. 고부하·장시간·재시작을 포함한 모든 운영 조건의 무유실 보장은 아니다.</p>
+<h4>15페이지: 정의된 응답 규칙의 위반 여부</h4>
+<p>원문에 없는 인용, 다른 역할 roleWork 필드의 혼입, 실행하지 않은 작업의 성공 선언 등 닫힌 자동 검사의 위반은0건이었다.15응답 모두 NOT_EXECUTED였다. 이는 자연어 의미가 모두 정확하거나 일반적 할루시네이션이0%라는 뜻은 아니다. 같은 보고서에서 블로그의 미승인 조건 검사 기준화와 추리게임의 개인정보 범위 확대 위험도 확인했다.</p>
+<h4>16페이지: 시간 차이가 발생하는 구간</h4>
+<p>역할별3개 표본의 로컬 전달 중앙값은0.806~24.810ms, API 교환 중앙값은8.386~10.519초, Agent 처리 중앙값은8.408~10.766초였다. 장표의8.4~10.5초는 API 교환 중앙값 범위를 소수점 첫째 자리로 반올림한 것이다. 전체 표본의 최솟값·최댓값이나 모든 실행의 지연 범위가 아니다.</p>
+<p>API 교환에는 네트워크·원격 서버 처리·본문 수신이 포함되므로 순수 모델 추론 시간으로 단정하지 않는다. Agent 처리에는 이 API 교환이 포함되므로 두 시간을 더하지 않는다. Security의 로컬 전달 중앙값이 상대적으로 컸으나 병렬 스케줄링·이벤트 루프가 포함된 소수 표본이어서 원인을 단정하지 않는다. 유실은 시간 차이가 아니라 내용 대조로 확인한다.</p>
+<h4>이 진단에서 내릴 수 있는 결론</h4>
+<p>관측15건의 전달 보존과 정의된 자동 검사 위반0건을 확인했다. 이 배치의 Agent 처리 시간에서 API 교환이 주된 구간이었다. 제품 코드 생성·MCP·Docker·빌드·실제 QA/Security 시험·배포·동일 Snapshot 검증·결과물 다운로드의 E2E 성공을 입증한 실험은 아니다. 기존 시연 체크리스트의 FINISHED·SUCCESS를 이번 통신 진단의 실측 성공으로 혼동하지 않는다.</p>
+<!-- AIO:NOTES:END -->
+</body></html>

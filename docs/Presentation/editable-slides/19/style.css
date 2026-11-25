@@ -1,0 +1,40 @@
+/* PDF 19 · 사업 제안
+   이 파일은 이 페이지에만 적용됩니다. 내용은 같은 폴더의 index.html에서 수정합니다.
+   공통 배경·강조색은 아래 변수로, 원본 텍스트 색은 page-color 색상표로 바꿉니다. */
+#deck > .slide[data-editable-page="19"] {
+  --page-background: #030407;
+  --accent: #d4ff24;
+  --blue: #1558c9;
+  --ink: #f0f2ec;
+  --muted: #aaaeb8;
+  --page-padding: 38px 64px 26px;
+  --page-title-offset: none; /* 예: 20px 0px = 제목을 오른쪽으로 20px */
+  --page-content-offset: none; /* 예: 0px 20px = 본문을 아래로 20px */
+  --page-color-01: #d4ff24;
+  --page-color-02: #f0f2ec;
+  --page-color-03: #ed7d31;
+  --page-color-04: #ffc000;
+  --page-color-05: #858b98;
+  background-color: var(--page-background);
+  padding: var(--page-padding);
+}
+#deck > .slide[data-editable-page="19"] > .content { translate: var(--page-content-offset); }
+
+/* 기존 요소별 스타일: 원래 HTML 안의 색상·폭·위치 값을 여기로 옮겼습니다. */
+#deck > .slide[data-editable-page="19"] .p19-element-001 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="19"] .p19-element-002 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="19"] .p19-element-003 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="19"] .p19-element-004 { all:unset;color:var(--page-color-03)!important;display:contents }
+#deck > .slide[data-editable-page="19"] .p19-element-005 { all:unset;color:var(--page-color-02)!important;display:contents }
+#deck > .slide[data-editable-page="19"] .p19-element-006 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="19"] .p19-element-007 { all:unset;color:var(--page-color-02)!important;display:contents }
+#deck > .slide[data-editable-page="19"] .p19-element-008 { all:unset;color:var(--page-color-04)!important;display:contents }
+#deck > .slide[data-editable-page="19"] .p19-element-009 { all:unset;color:var(--page-color-02)!important;display:contents }
+#deck > .slide[data-editable-page="19"] .p19-element-010 { color:var(--page-color-05)!important }
+
+/* 페이지 전용 추가 스타일. 선택자 앞의 페이지 번호는 유지하세요.
+#deck > .slide[data-editable-page="19"] .원하는요소클래스 {
+  font-size: 32px;
+  margin-top: 20px;
+}
+*/
