@@ -24,6 +24,7 @@ from agents.roles.expected_results import with_expected_results
 from agents.runtime.start_precheck import start_precheck_for
 from agents.runtime.startup_preservation import preservation_notice_for
 from agents.runtime.signup_quality_precheck import signup_quality_precheck_for
+from agents.runtime.service_interface import service_interface_check
 from agents.llm.engine import LLMEngine
 from agents.runtime.file_access import build_file_access, constrain_frozen_read_tools, constrain_workspace_file_tools
 from agents.runtime.test_guidance import unit_test_targets
@@ -150,7 +151,7 @@ class SingleAgentExecutor(AgentExecutor):
                      precheck=None, source_progress_check=None, expectations=None, explain=None, extra_checks=(),
                      output_refresh=None, text_only=False, failure_evidence=None, path_check=None, priority_check=None,
                      library_type_check=None, correction_candidates=None, output_safety_check=None,
-                     signup_quality_check=None, source_preservation_check=None):
+                     signup_quality_check=None, source_preservation_check=None, service_ui_check=None):
         # text_only: the semantic rewrite (docs/live-api/05 15절) — no tool, no forced edit, no catalog stop.
         if text_only and (tools or executor is not None or source_progress_check is not None):
             raise SingleExecutionError()
@@ -182,7 +183,7 @@ class SingleAgentExecutor(AgentExecutor):
                           else development_check(contract.validate, precheck=precheck, path_check=path_check,
                                                  priority_check=priority_check, library_type_check=library_type_check,
                                                  output_safety_check=output_safety_check,
-                                                 signup_quality_check=signup_quality_check)
+                                                 signup_quality_check=signup_quality_check, service_interface_check=service_ui_check)
                           if phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING)
                           else case_expectation_check(contract.validate, expectations, explain=explain,
                                                       extra_checks=extra_checks)))
@@ -286,7 +287,9 @@ class SingleAgentExecutor(AgentExecutor):
             elif role is AgentRole.QA:
                 wanted = {"read_project_file", "write_test_file", "read_test_report"}
                 task_input["testSelectors"] = {name: list(values) for name, values in services.selectors.items()}
-                task_input["testTargets"] = _test_targets(services)
+                task_input["testTargets"] = _test_targets(services, execution)
+                if execution.scenario.key == 'SERVICE-WEB':
+                    task_input['sourceInterface'] = await services.source_interface(execution)
                 options["selectors"] = services.selectors
             else:
                 measured = await services.scan(execution, host_tracked)
@@ -303,7 +306,7 @@ class SingleAgentExecutor(AgentExecutor):
                     selectors = {"run_unit_tests": services.test_selectors}
                     options["security_test_selectors"] = selectors
                     task_input["testSelectors"] = {"run_unit_tests": list(services.test_selectors)}
-                    task_input["testTargets"] = unit_test_targets(services.configuration.unit_test_configuration, "security")
+                    task_input["testTargets"] = unit_test_targets(services.configuration.unit_test_configuration, "security", scenario_key=execution.scenario.key)
                     task_input["runtimeInstructions"] = security_test_instructions + ' ' + TEST_PLAN_INSTRUCTIONS
             contract = build_single_draft_contract(phase, scenario=execution.scenario, **options)
             if role in (AgentRole.QA, AgentRole.SECURITY) and execution.budget.limits.max_output_corrections:
@@ -339,6 +342,8 @@ class SingleAgentExecutor(AgentExecutor):
                         library_type_check=checkpoint.library_type_issues if role is AgentRole.DEVELOPER else None,
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
                             if role is AgentRole.DEVELOPER and execution.budget.limits.max_output_corrections else None,
+                        service_ui_check=service_interface_check(checkpoint, execution.configuration.scenario_contract)
+                            if role is AgentRole.DEVELOPER else None,
                         path_check=checkpoint.ready_path_issues if options.get("repair_paths") else None,
                         correction_candidates=checkpoint.correction_candidates if options.get("repair_paths") else None,
                         priority_check=checkpoint.pending_priority_paths if options.get("repair_paths") else None,

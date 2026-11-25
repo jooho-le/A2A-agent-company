@@ -24,7 +24,7 @@ CORRECTION_CODES = frozenset({
     'GENERATED_TESTS_INVALID', 'CODE_REFERENCE_INVALID', 'DEVELOPER_REJECTION_RECOVERABLE',
     'DEVELOPER_REJECTION_HELD',
     'READY_PATH_EVIDENCE_MISMATCH', 'READY_PRIORITY_REPAIR_NEEDED', 'READY_RUNTIME_REPAIR_REQUIRED',
-    'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW',
+    'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW',
 })
 CATEGORIES = Literal['MODEL_FORMAT', 'HOST_CONFIGURATION', 'HUMAN_DECISION',
                      'EXECUTION_UNCERTAIN', 'BUDGET_LIMIT', 'POLICY_BLOCK', 'MODEL_EXECUTION']
@@ -147,7 +147,8 @@ class FailureRoute(_Record):
     failure_diagnostic: FailureDiagnostic | None = Field(default=None, alias='failureDiagnostic',
                                                         exclude_if=lambda value: value is None)
     development_rejection: RejectionAssessment | None = Field(default=None, alias='developmentRejection')
-    draft_issue: Literal['GENERATED_TEST_FILE_MISSING'] | None = Field(default=None, alias='draftIssue')
+    draft_issue: Literal['GENERATED_TEST_FILE_MISSING', 'TEST_IN_FILE_NOT_DECLARED', 'DECLARED_TEST_NOT_IN_FILE',
+                         'CODE_REFERENCE_INVALID', 'OUTPUT_CONTRACT_INVALID', 'MODEL_OUTPUT_INVALID'] | None = Field(default=None, alias='draftIssue')
     observation: CorrectionObservation | None = None
     unlinked_repair_paths: tuple[str, ...] = Field(default=(), alias='unlinkedRepairPaths',
                                                    max_length=16, exclude_if=lambda v: not v)
@@ -211,7 +212,7 @@ def correction_route(code, *, sequence, operation_sequence, allowed, reason, dev
     category = ('HUMAN_DECISION' if code == 'QUESTIONS_NOT_ANSWERED'
                 else 'EXECUTION_UNCERTAIN' if code == 'PROVIDER_TRANSIENT_RETRY'
                 else 'MODEL_EXECUTION' if code in {'DEVELOPER_REJECTION_RECOVERABLE', 'READY_LIBRARY_TYPE_MISMATCH',
-                                                  'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'}
+                                                  'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'}
                 else 'MODEL_FORMAT')
     return FailureRoute(sequence=sequence, operationSequence=operation_sequence, code=code, category=category,
         action='REGENERATE' if allowed else ('RETURN_TO_VALIDATOR' if code in {

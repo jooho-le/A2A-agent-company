@@ -45,7 +45,7 @@ def supported(scenario_id):
     except ScenarioRegistryUnavailable:
         raise HostUnavailable() from None
     if not valid:
-        raise HTTPException(422, "현재 등록된 회원가입 시나리오만 실행할 수 있습니다.")
+        raise HTTPException(422, "등록된 서비스 또는 실험 시나리오를 확인해 주세요.")
 
 
 def approval(client, scenario_id):

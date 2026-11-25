@@ -131,6 +131,7 @@ def create_run(
     configuration = RunConfigurationArtifact(
         run_id=run.run_id, scenario_id=run.scenario_id,
         workspace_id=run.workspace_id, configuration=body.configuration,
+        **_service_baseline(run, body.configuration),
     )
     workspace = WorkspaceRecord(
         workspace_id=run.workspace_id, run_id=run.run_id,
@@ -163,6 +164,23 @@ def create_run(
         request.url_for("get_run", run_id=str(run.run_id))
     )
     return submitted
+
+
+def _service_baseline(run, configuration):
+    from orchestrator.domain.scenario_registry import SERVICE_WEB_ID, service_request_contract
+    from orchestrator.core.security import redact_data
+    import json
+    if run.scenario_id != SERVICE_WEB_ID:
+        return {}
+    if configuration.experiment_id is not None or configuration.protected_test_suite_ref is not None:
+        raise HTTPException(status_code=422, detail="SERVICE_REQUEST_REQUIRES_NON_EXPERIMENT_CONFIGURATION")
+    try:
+        contract = service_request_contract(run.request_text)
+    except (ValueError, UnicodeError):
+        raise HTTPException(status_code=422, detail="SERVICE_REQUEST_INVALID") from None
+    if redact_data(contract) != contract:
+        raise HTTPException(status_code=422, detail="SERVICE_REQUEST_CONTAINS_CREDENTIALS")
+    return {"frozen_scenario_contract_json": json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))}
 
 
 @router.get("/{run_id}", response_model=RunStatusResponse)

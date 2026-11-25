@@ -502,11 +502,13 @@ class ProductSemanticReviewer:
                     'basisSha256': binding['basisSha256'], 'evidenceCatalog': catalog}
                 system = SYSTEM
                 if actor is SingleAgentIdentity.SINGLE_AGENT:
+                    from agents.runtime.service_scope import is_service_envelope
+                    previous = parse_json(single_prompt.input_json) if type(single_prompt) is PreparedSinglePrompt else {}
                     if (type(single_prompt) is not PreparedSinglePrompt or single_prompt.phase is not phase
                             or single_prompt.context_id != context.context_id
-                            or single_prompt.system_prompt != build_single_system_prompt()):
+                            or single_prompt.system_prompt != build_single_system_prompt(
+                                service_request=is_service_envelope(previous))):
                         raise ValueError('SEMANTIC_REVIEW_SINGLE_CONTEXT_INVALID')
-                    previous = parse_json(single_prompt.input_json)
                     data = {'trusted': {**previous['trusted'], 'purpose': 'PUBLICATION_SEMANTIC_REVIEW',
                         'semanticReviewRules': SYSTEM}, 'contextId': previous['contextId'],
                         'history': previous['history'], 'taskInput': data}

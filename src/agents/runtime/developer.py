@@ -30,6 +30,8 @@ from agents.runtime.developer_context import DeveloperContextError, DeveloperExe
 from agents.runtime.developer_services import DeveloperRuntimeServices, DeveloperServicesError
 from agents.runtime.developer_workspace import DeveloperCheckpointError
 from agents.runtime.requirement_scope import signup_observation_plan, build_requirement_scope
+from agents.runtime.service_scope import service_input
+from agents.runtime.service_interface import service_interface_check
 from agents.runtime.file_access import build_file_access, constrain_workspace_file_tools
 from agents.runtime.planner import _host_factory, _message_data, _same_json, _TERMINAL
 from mcp_tools.execution_runtime import TrackedMCPError
@@ -51,6 +53,7 @@ class _DeveloperInputError(ValueError):
 
 
 _PROTECTED = frozenset({
+    "serviceContract", "sourceInterface",
     "publicObservationPlan",
     "workspaceId", "scenario", "runConfiguration", "plan", "sourceArtifact", "outputContract",
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds", "projectArtifactIds",
@@ -92,7 +95,7 @@ def _prepare_input(context, execution):
             answers.append(redact_data(answer))
         scope = build_requirement_scope(execution.configuration, execution.requirement_artifact,
                                         metadata, AgentRole.DEVELOPER)
-        return {**expected, "clarifications": answers,
+        return {**expected, **service_input(execution), "clarifications": answers,
             "fileAccess": build_file_access(execution.configuration.scenario_contract, AgentRole.DEVELOPER),
             "requirementAuthority": scope.authority.to_prompt_json(),
             "requirementScope": scope.to_prompt_json(),
@@ -291,7 +294,8 @@ class DeveloperAgentExecutor(AgentExecutor):
                         library_type_check=checkpoint.library_type_issues,
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
                             if execution.budget.limits.max_output_corrections else None,
-                        priority_check=checkpoint.pending_priority_paths if paths else None))
+                        priority_check=checkpoint.pending_priority_paths if paths else None,
+                        service_interface_check=service_interface_check(checkpoint, execution.configuration.scenario_contract)))
                 result = await run_model(task_input)
                 decision = validate(result.data)
                 if decision.kind == "READY" and self._semantic_reviewer is not None:

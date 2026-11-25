@@ -123,7 +123,7 @@ class SecurityExecutionContext:
                 raise ValueError
             for protected in (configuration, requirement, source):
                 sanitize_content(protected.model_dump(mode="json"), reject_secrets=True)
-            scenario = _scenario(configuration)
+            scenario = _scenario(configuration, request_text=self.request_text)
             plan = PlannerPlan.model_validate(requirement.payload)
             if (plan.model_dump(mode="json", by_alias=True) != requirement.payload
                     or tuple(item.requirement_id for item in plan.requirements) != scenario.requirement_ids

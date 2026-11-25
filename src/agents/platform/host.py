@@ -320,6 +320,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from mcp_tools.core import catalog as tool_catalog
         from orchestrator.domain import developer_artifacts, recovery_causes, repair_progress, validation_feedback, protected_feedback
         from agents.runtime import generated_revalidation, qa_services, security_services, security_test_scope, requirement_scope, protected_scopes
+        from agents.runtime import service_scope, service_interface
+        from orchestrator.domain import scenario_registry
         from orchestrator.application import dispatch as validation_dispatch, validation_output
         from orchestrator.infrastructure import automatic_stop, sqlite_workflows, validation_stop, protected_stop, protected_recheck
         policy = {
@@ -348,6 +350,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                      ('libraryContracts', library_contracts), ('readyLibraryTypes', ready_library_types),
                                      ('outputSafetyPrecheck', output_safety_precheck),
                                      ('signupQualityPrecheck', signup_quality_precheck),
+                                     ('serviceRequestScope', service_scope), ('serviceInterface', service_interface),
+                                     ('scenarioRegistry', scenario_registry),
                                      ('generatedTestInventory', generated_test_inventory), ('qaIdCatalog', qa_catalog),
                                      ('toolWire', tool_wire),
                                      ('generatedTestsPrecheck', generated_tests_precheck), ('generatedTestRepair', test_fix),

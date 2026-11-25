@@ -246,6 +246,11 @@ def _detail(value):
 def _feedback(data):
     """Read only our closed projection from a validation Artifact's details."""
     channels = {'outputChecks': validated_output_checks(data['outputChecks'])} if 'outputChecks' in data else {}
+    if data.get('code') in {'BROWSER_ACTION_TIMEOUT', 'BROWSER_ASSERTION_FAILED', 'BROWSER_ACTION_FAILED'}:
+        index, action = data.get('stepIndex'), data.get('action')
+        if (type(index) is int and 1 <= index <= 1000 and action in {
+                'goto', 'fill', 'click', 'assert_text', 'assert_visible', 'assert_url'}):
+            channels['browserFailure'] = {'code': data['code'], 'stepIndex': index, 'action': action}
     if 'signupChecks' in data:
         channels['signupChecks'] = validated_signup_checks(data['signupChecks'])
     if 'outputDiagnostics' in data:

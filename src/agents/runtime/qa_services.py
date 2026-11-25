@@ -229,6 +229,26 @@ class QARuntimeServices:
             raise QAServicesError() from None
         execution.budget.check()
 
+    async def source_interface(self, execution):
+        if execution.configuration.scenario_contract.get('scenarioKey') != 'SERVICE-WEB':
+            return {}
+        execution.budget.check()
+        def read():
+            self._verify(execution)
+            source, files = SnapshotReader(self._artifacts)._load(
+                self.configuration.binding, self.configuration.frozen_source)
+            from agents.runtime.service_interface import service_source_facts
+            return {'projectArtifactId': str(source.artifact_id), 'snapshotSha256': source.snapshot_sha256,
+                    **service_source_facts(files)}
+        try:
+            result = await _run_file_operation(read)
+            execution.budget.check()
+            return result
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            raise QAServicesError() from None
+
     def _verify(self, execution):
         binding, source = self.configuration.binding, execution.source
         if (binding.run_id != execution.metadata.run_id
@@ -532,6 +552,15 @@ class QARuntimeServices:
                 if facts.get('concurrentCanonicalSignup') is False:
                     verified, outcome, code = True, ValidationOutcome.FAIL, 'MEASURED_CONCURRENT_SIGNUP_FAILURE'
                 detail = code
+                if actual is not None and hasattr(actual, 'steps') and actual.outcome == 'FAIL':
+                    # Browser receipts contain closed action/result coordinates, not DOM or input values.
+                    failed_step = next((s for s in actual.steps if s.outcome == 'FAIL'), None)
+                    browser_reason = getattr(actual, 'details', None)
+                    if browser_reason in {'ACTION_TIMEOUT', 'ASSERTION_FAILED', 'ACTION_FAILED'}:
+                        code = 'BROWSER_' + browser_reason
+                        detail = json_text({'code': code, 'stepIndex': None if failed_step is None else failed_step.index,
+                            'action': None if failed_step is None else failed_step.action,
+                            'evidenceRefs': [evidence.evidence_ref], **measured_test_version(receipt)})
                 if actual is not None and hasattr(actual, 'observations_json'):
                     detail = json_text({'code': code, 'evidenceRefs': [evidence.evidence_ref],
                                         **measured_test_version(receipt), **case_feedback(actual)})

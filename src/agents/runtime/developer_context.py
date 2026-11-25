@@ -267,7 +267,7 @@ class DeveloperExecutionContext:
                 raise ValueError
             sanitize_content(configuration.model_dump(mode="json"), reject_secrets=True)
             sanitize_content(artifact.model_dump(mode="json"), reject_secrets=True)
-            scenario = _scenario(configuration)
+            scenario = _scenario(configuration, request_text=self.request_text)
             plan = PlannerPlan.model_validate(artifact.payload)
             canonical = plan.model_dump(mode="json", by_alias=True)
             if (canonical != artifact.payload

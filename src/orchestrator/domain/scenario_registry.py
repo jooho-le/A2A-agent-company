@@ -5,7 +5,8 @@ from enum import Enum
 import json
 from types import MappingProxyType
 from typing import Mapping, Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
+from hashlib import sha256
 
 
 class RequirementValidator(str, Enum):
@@ -242,8 +243,92 @@ _SCN_001 = ScenarioDefinition(
     external_contract_json=json.dumps(_SCN_001_EXTERNAL_CONTRACT, ensure_ascii=False),
 )
 
+# Product requests have their own contract. SCN-001 stays the unchanged,
+# reproducible experiment; product prose must never be interpreted as signup.
+SERVICE_WEB_ID = UUID("03d94bc5-1a31-473b-8527-c4acf8ea58a1")
+SERVICE_WEB_KEY = "SERVICE-WEB"
+_SERVICE_EXTERNAL = {
+    "app": {"module": "main", "attribute": "app", "framework": "FastAPI",
+            "serve": "uvicorn main:app", "readyCheck": "GET / returns 2xx",
+            "interface": "GET / serves the usable HTML application, not just a health JSON response"},
+    "database": {"module": "database", "dependency": "get_db", "urlEnv": "DATABASE_URL",
+                 "access": "Use the existing isolated SQLite connection when server persistence is required"},
+    "startingFiles": ["main.py", "database.py", "models.py", "tests/test_health.py", "requirements.lock"],
+    "packages": "Only installed packages and the standard library. Serve local HTML/CSS/JavaScript with FastAPI; no CDN or network installs.",
+    "scope": "Implement the user's requested application. Do not add signup, login or another product unless requested.",
+    "verification": "Read the actual source before selecting routes, fields and DOM selectors. Never invent an existing UI.",
+    "clarification": "Ask INPUT_REQUIRED when the product goal conflicts or needs a material user decision. Routine implementation details may be chosen within this contract.",
+}
+_SERVICE_SECURITY = {
+    "secretExposure": "Never expose credentials, private data or stored credential hashes in responses, messages or logs.",
+    "inputSafety": "Validate user input and test the actual application's access and injection boundaries.",
+    "credentialStorage": "If account storage was requested, use the approved argon2id policy; otherwise do not invent accounts.",
+}
+_SERVICE_WEB = ScenarioDefinition(
+    SERVICE_WEB_ID, SERVICE_WEB_KEY, "사용자 요청 웹 애플리케이션 개발",
+    (ScenarioRequirement(UUID("80be1440-90c2-4c32-8626-aa2be785a555"), "REQ-001", "FUNCTIONAL",
+        "사용자 원문의 기능과 사용자 흐름을 구현한다", ("원문에 명시된 기능이 실제로 동작한다",),
+        (RequirementValidator.QA,)),), (),
+    security_policy_json=json.dumps(_SERVICE_SECURITY, ensure_ascii=False),
+    email_policy_json="{}", external_contract_json=json.dumps(_SERVICE_EXTERNAL, ensure_ascii=False),
+)
+
+
+def service_request_contract(request_text: str) -> dict[str, object]:
+    """Freeze the exact user scope before any model runs; no model grants authority.
+
+    Host IDs and bounded verbatim chunks retain every part of the request.
+    Planner decomposes these into tasks; all other roles get the same frozen
+    criteria. No mutable registry, keyword guess, or later clarification can
+    replace this baseline. A new scope needs a new explicitly submitted Run.
+    """
+    if not isinstance(request_text, str) or not 1 <= len(request_text.strip()) <= 20000:
+        raise ValueError("SERVICE_REQUEST_INVALID")
+    text = request_text.strip()
+    if any((ord(char) < 32 and char not in '\n\t') or 127 <= ord(char) <= 159 for char in text):
+        raise ValueError("SERVICE_REQUEST_INVALID")
+    requirements = []
+    def add(description, criterion, validators, category="FUNCTIONAL"):
+        requirements.append({"requirementId": str(uuid4()), "key": f"REQ-{len(requirements)+1:03d}",
+            "category": category, "description": description, "acceptanceCriteria": [criterion],
+            "validators": [v.value for v in validators]})
+    # The context loader caps each criterion at 4096 UTF-8 bytes. One thousand
+    # Unicode characters (including four-byte emoji) leave room for the prefix.
+    for offset in range(0, len(text), 1000):
+        chunk = text[offset:offset+1000].strip()
+        if not chunk:
+            continue
+        add("사용자 원문 요구사항", "요청사항 구현: " + chunk, (RequirementValidator.QA,))
+    add("사용할 수 있는 웹 화면 제공", "GET /에서 HTML 화면을 제공하고 요청한 기능을 실제 화면에서 조작할 수 있다",
+        (RequirementValidator.QA,))
+    add("사용자 입력과 상태 처리", "요청한 기능의 정상·잘못된 입력과 상태 변경이 일관되며 실제 처리 결과를 화면에 표시한다",
+        (RequirementValidator.QA,))
+    add("요청 범위의 보안 검증", "실제 구현의 입력·데이터 접근 경계를 검사하고 비밀정보를 응답·메시지·로그에 노출하지 않는다",
+        (RequirementValidator.SECURITY,), "SECURITY")
+    add("실행 근거와 변경 이력", "요구사항·소스 버전·검사·문제·수정·재검증의 연결 관계를 기록한다",
+        (RequirementValidator.ORCHESTRATOR,), "OBSERVABILITY")
+    contract = _SERVICE_WEB.planner_contract()
+    contract["requirements"] = requirements
+    contract["externalContract"]["requestIdentity"] = sha256(text.encode("utf-8")).hexdigest()
+    # JSON strings remain task data, never system instructions or permissions.
+    contract["externalContract"]["userRequest"] = text
+    return contract
+
+
+def validate_service_request_binding(contract: Mapping[str, object], request_text: str) -> None:
+    """A saved service scope must belong to this Run's actual user request."""
+    if contract.get("scenarioKey") != SERVICE_WEB_KEY and contract.get("scenarioId") != str(SERVICE_WEB_ID):
+        return
+    external = contract.get("externalContract", {})
+    text = request_text.strip()
+    if (contract.get("scenarioKey") != SERVICE_WEB_KEY or contract.get("scenarioId") != str(SERVICE_WEB_ID)
+            or not isinstance(external, dict) or external.get("userRequest") != text
+            or external.get("requestIdentity") != sha256(text.encode("utf-8")).hexdigest()):
+        raise ValueError("SERVICE_REQUEST_BINDING_INVALID")
+
+
 SCENARIO_REGISTRY: Mapping[UUID, ScenarioDefinition] = MappingProxyType(
-    {_SCN_001.scenario_id: _SCN_001}
+    {_SCN_001.scenario_id: _SCN_001, _SERVICE_WEB.scenario_id: _SERVICE_WEB}
 )
 
 

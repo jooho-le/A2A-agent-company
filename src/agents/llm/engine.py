@@ -141,6 +141,16 @@ class LLMEngine:
             return (close_invalid_qa_draft and kind == 'GENERATED_TESTS_INVALID'
                     and any(i['reasonCode'] == 'GENERATED_TEST_FILE_MISSING' for i in issues))
 
+        def draft_issue_for(kind, issues):
+            if not close_invalid_qa_draft:
+                return None
+            if kind == 'GENERATED_TESTS_INVALID':
+                return next((code for code in ('GENERATED_TEST_FILE_MISSING', 'TEST_IN_FILE_NOT_DECLARED',
+                    'DECLARED_TEST_NOT_IN_FILE') if any(i['reasonCode'] == code for i in issues)), None)
+            if kind in ('OUTPUT_CONTRACT_INVALID', 'MODEL_OUTPUT_INVALID', 'CODE_REFERENCE_INVALID'):
+                return kind
+            return None
+
         def qa_draft_rejection(kind, issues):
             # Draft-format exhaustion that ends the step as a technical STOP (QA, and Security with
             # generated tests). For Security a code reference that stays invalid also qualifies: the
@@ -207,8 +217,11 @@ class LLMEngine:
                 correction_attempt += 1
                 pending_correction = (sequence, kind, correction_attempt)
         try:
+            from agents.runtime.service_scope import is_service_envelope
+            service_request = (isinstance(prompt, (PreparedRolePrompt, PreparedSinglePrompt, PreparedSemanticPrompt))
+                and is_service_envelope(parse_json(prompt.input_json, max_bytes=budget.limits.max_json_bytes)))
             if self._semantic_review:
-                review_system = (build_single_system_prompt() if self._role is SingleAgentIdentity.SINGLE_AGENT
+                review_system = (build_single_system_prompt(service_request=service_request) if self._role is SingleAgentIdentity.SINGLE_AGENT
                                  else SEMANTIC_SYSTEM)
                 valid = (type(prompt) is PreparedSemanticPrompt and prompt.actor == self._role
                          and prompt.phase is self._single_phase and prompt.version == SEMANTIC_PROMPT_VERSION
@@ -217,12 +230,12 @@ class LLMEngine:
                 valid = (isinstance(prompt, PreparedSinglePrompt)
                          and prompt.identity is SingleAgentIdentity.SINGLE_AGENT
                          and prompt.phase is self._single_phase and prompt.version == SINGLE_PROMPT_VERSION
-                         and prompt.system_prompt == build_single_system_prompt()
+                         and prompt.system_prompt == build_single_system_prompt(service_request=service_request)
                          and prompt.draft_contract.output == output)
             else:
                 valid = (isinstance(prompt, PreparedRolePrompt) and prompt.role == self._role
                          and prompt.version == get_role_contract(self._role).version
-                         and prompt.system_prompt == build_system_prompt(self._role))
+                         and prompt.system_prompt == build_system_prompt(self._role, service_request=service_request))
             if development_rejection_check is not None and (self._semantic_review or source_progress_check is None
                     or not (self._role is AgentRole.DEVELOPER or self._role is SingleAgentIdentity.SINGLE_AGENT
                             and self._single_phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING))):
@@ -328,18 +341,18 @@ class LLMEngine:
                     if evidence:
                         feedback['hostCorrection']['measuredFailure'] = evidence
                 if allowed and kind in ('READY_PRIORITY_REPAIR_NEEDED', 'READY_RUNTIME_REPAIR_REQUIRED',
-                                        'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'):
+                                        'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
                     # Source work and a subsequent truthful report share the existing Run budget.
                     messages = [*items, {'role': 'user', 'content': json_text(feedback, max_bytes=limit)}]
                     history = json.dumps(messages, ensure_ascii=False, separators=(',', ':'))
                     review_paths = (correction_rules.source_review_paths(issues)
-                                    if kind == 'READY_SIGNUP_QUALITY_REVIEW'
+                                    if kind in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW')
                                     and {'read_project_file', 'write_source_file'} <= self._definitions.keys() else ())
                     required_calls = 2 * len(review_paths) + 1 if review_paths else 2
                     required_tools = 2 * len(review_paths) if review_paths else 1
                     if (len(history.encode()) + len(prompt.system_prompt.encode()) > limit
                             or budget.limits.max_tool_calls - budget.tool_calls < required_tools
-                            or kind in ('READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW') and
+                            or kind in ('READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW') and
                             budget.limits.max_model_calls - budget.model_calls < required_calls):
                         # Fixing the incompatible call requires a source tool turn and a later READY turn.
                         allowed, reason = False, 'LIMIT_REACHED'
@@ -352,7 +365,7 @@ class LLMEngine:
                             allowed, reason = False, 'LIMIT_REACHED'
                 decide_correction(sequence, kind, allowed, reason,
                                   qa_exhausted=not allowed and qa_draft_rejection(kind, issues),
-                                  draft_issue='GENERATED_TEST_FILE_MISSING' if missing_test_files(kind, issues) else None,
+                                  draft_issue=draft_issue_for(kind, issues),
                                   development_rejection=development_rejection,
                                   path_evidence=correction_rules.ready_path_trace(feedback['hostCorrection']),
                                   unlinked_paths=(tuple(dict.fromkeys(i['fieldPath'].split('/')[2] for i in issues))
@@ -1030,9 +1043,9 @@ class LLMEngine:
                                                     if issue['reasonCode'] == 'NO_LINKED_CODE_CHANGE')
                             refresh_path_output = bool(restricted_paths)
                         if not allowed and rejection['code'] in ('READY_PATH_EVIDENCE_MISMATCH', 'READY_RUNTIME_REPAIR_REQUIRED',
-                                                                 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'):
+                                                                 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
                             raise LLMRuntimeError(LLMErrorCode.SOURCE_REPAIR)
-                        if allowed and rejection['code'] == 'READY_SIGNUP_QUALITY_REVIEW':
+                        if allowed and rejection['code'] in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
                             paths = correction_rules.source_review_paths(rejection['issues'])
                             if paths and {'read_project_file', 'write_source_file'} <= self._definitions.keys():
                                 source_repair_path, *source_review_pending = paths

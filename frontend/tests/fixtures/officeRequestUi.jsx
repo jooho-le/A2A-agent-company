@@ -4,7 +4,7 @@ import Dashboard from '../../src/pages/AtelierDashboard.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const id = n => '70000000-0000-4000-8000-' + String(n).padStart(12, '0')
-const scenarioId = 'f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76', runId = id(2), stepId = id(3), projectId = id(5)
+const scenarioId = '03d94bc5-1a31-473b-8527-c4acf8ea58a1', runId = id(2), stepId = id(3), projectId = id(5)
 const configurationId = 'c'.repeat(64)
 const productToken = user => 'test.' + btoa(JSON.stringify({ sub: user })) + '.test'
 const run = { runId, scenarioId, status: 'PLANNING', verdict: null, codeVersion: null, fixAttempt: 0 }

@@ -407,7 +407,7 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, "QA_REPORT_BINDING_INVALID")
         self.assertEqual(self.docker.calls, [])
 
-    async def test_browser_only_pass_and_trace_refs_are_measured(self):
+    async def browser_report(self, *, timeout=False):
         suite = BrowserTestSuite(name="signup-browser", kind="QA_TESTS")
         browser = BrowserTestConfiguration(suites=(suite,), service_argv=("/usr/local/bin/python", "-B", "/snapshot/main.py"),
             playwright_version="1.60.0", limits=SandboxLimits(timeout_seconds=2, control_timeout_seconds=.5), image_reference=IMAGE_ID)
@@ -428,17 +428,38 @@ class QAServicesTests(unittest.IsolatedAsyncioTestCase):
             {"index": 1, "action": "goto", "outcome": "PASS", "durationMs": 2},
             {"index": 2, "action": "assert_visible", "outcome": "PASS", "durationMs": 2}]}
             for case in data["tests"]]
-        self.docker.exit_code = 0
-        self.docker.start_result = CLIResult(returncode=0, stderr=b"", stdout=json.dumps({
+        if timeout:
+            cases[0].update(outcome='FAIL', details='ACTION_TIMEOUT')
+            cases[0]['steps'][1]['outcome'] = 'FAIL'
+        self.docker.exit_code = int(timeout)
+        self.docker.start_result = CLIResult(returncode=int(timeout), stderr=b"", stdout=json.dumps({
             "format": "browser-v1", "suiteName": suite.name, "playwrightVersion": "1.60.0", "browserVersion": "145.0.7632.6",
-            "total": len(cases), "passed": len(cases), "failed": 0, "tests": cases}).encode())
-        report = self.report(await self.finish())
+            "total": len(cases), "passed": len(cases) - int(timeout), "failed": int(timeout), "tests": cases}).encode())
+        return self.report(await self.finish())
+
+    async def test_browser_only_pass_and_trace_refs_are_measured(self):
+        report = await self.browser_report()
         self.assertFalse(report.passed)
         self.assertEqual([(case.test_id, case.actual_result) for case in report.tests
                           if case.outcome == ValidationOutcome.UNVERIFIED],
                          [(report.tests[2].test_id, "CONCURRENT_SIGNUPS_NOT_OBSERVED")])
         self.assertTrue(all(row.execution_evidence[0].tool_name == "run_browser_tests" for row in report.tests))
         self.assertEqual(self.input_counts(), (1, 5, 1))
+
+    async def test_browser_timeout_coordinates_reach_measured_report_and_fix_feedback(self):
+        from orchestrator.domain.validation_feedback import validation_feedback
+        report = await self.browser_report(timeout=True)
+        result = report.tests[0]
+        self.assertEqual(result.outcome, ValidationOutcome.FAIL)
+        self.assertEqual(result.actual_result, 'BROWSER_ACTION_TIMEOUT')
+        detail = json.loads(result.details)
+        self.assertEqual((detail['stepIndex'], detail['action']), (2, 'assert_visible'))
+        self.assertIn(result.tool_evidence.evidence_ref, detail['evidenceRefs'])
+        feedback = validation_feedback([self.source, report])[0]
+        self.assertEqual(feedback['browserFailure'], {
+            'code': 'BROWSER_ACTION_TIMEOUT', 'stepIndex': 2, 'action': 'assert_visible'})
+        self.assertEqual(feedback['outcome'], 'FAIL')
+        self.assertTrue(feedback['testVersion'].startswith('inputs:'))
 
 
 if __name__ == "__main__":

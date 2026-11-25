@@ -94,6 +94,7 @@ class WorkflowStepResponse(APIModel):
     run_id: UUID4 = Field(alias="runId")
     agent_role: AgentRole = Field(alias="agentRole")
     status: WorkflowStepStatus
+    failure_code: str | None = Field(default=None, alias="failureCode")
     attempt: int
     a2a_task_id: str | None = Field(alias="a2aTaskId")
     a2a_task_state: A2ATaskState | None = Field(alias="a2aTaskState")

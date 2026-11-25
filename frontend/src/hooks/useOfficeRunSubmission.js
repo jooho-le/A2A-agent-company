@@ -146,5 +146,5 @@ export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
     notice: !hasToken ? '업무를 맡기려면 로그인해 주세요.'
       : state.uncertain ? '접수 결과가 불확실합니다. 접수 상태 확인으로 복구해 주세요. 중복 생성은 차단되어 있습니다.'
         : configuration.loading ? '실행 서버의 준비 상태를 확인하고 있어요.'
-          : configuration.error || '현재 회원가입 기능 개발을 지원합니다. 업무 시작을 누르면 실제 에이전트가 실행됩니다.' }
+          : configuration.error || '요청한 웹사이트의 기획·화면·기능을 함께 만듭니다. 만들기 시작을 누르면 실제 에이전트가 실행됩니다.' }
 }

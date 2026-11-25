@@ -51,6 +51,7 @@ _TERMINAL = frozenset({
 })
 _INITIAL_FIELDS = frozenset({"request", "workspaceId", "runConfiguration", "scenarioContract"})
 _PROTECTED_FIELDS = _INITIAL_FIELDS - {"request"} | frozenset({
+    "serviceContract", "sourceInterface",
     "publicObservationPlan",
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds",
     "projectArtifactId", "projectArtifactIds", "artifactVersion", "model", "limits", "configuration",

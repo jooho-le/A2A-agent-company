@@ -83,8 +83,16 @@ def unit_test_data_contract():
             "example": PASSWORD_FIXTURE_EXAMPLE}
 
 
-def unit_test_targets(configuration, role):
+def unit_test_targets(configuration, role, *, scenario_key=None):
     from mcp_tools.tools.unit_runner import app_fixture_contract
+    if scenario_key == "SERVICE-WEB":
+        return [{"toolName": "run_unit_tests", "selector": scope.name,
+                 "directory": f"outputs/{role}/" + scope.source_directory,
+                 "pattern": scope.pattern, "format": "python-unittest", "required": True,
+                 "testIdRule": UNIT_TEST_ID_DESCRIPTION,
+                 "fixtureGuidance": "Use unittest and FastAPI TestClient as a context manager. Set an isolated temporary DATABASE_URL before importing main. Start the real app lifespan, clean up clients, sessions and imported product modules. Never create missing product tables or override product dependencies to make a test pass. Read the actual app/model/API first. SCN-001 AppTestCase and signup helpers do not describe this application.",
+                 "testDataFactory": unit_test_data_contract()}
+                for scope in configuration.scopes if scope.kind == "QA_TESTS"]
     return [{"toolName": "run_unit_tests", "selector": scope.name,
              "directory": f"outputs/{role}/" + scope.source_directory,
              "pattern": scope.pattern, "format": "python-unittest", "required": True,

@@ -1,0 +1,150 @@
+/* 18페이지 · 라이브 시연
+   실제 글자/그림: index.html / 크기·색·배치: 이 파일
+   브랜드색: --live-brand-color / 로고 크기: .live-brand */
+#deck > .slide[data-editable-page="18"] {
+  --page-background: #030407;
+  --accent: #d4ff24;
+  --blue: #1558c9;
+  --ink: #f0f2ec;
+  --muted: #aaaeb8;
+  --live-brand-color: #f3e5ab;
+  --page-padding: 38px 64px 26px;
+  --page-content-offset: none;
+  background-color: var(--page-background);
+  background-image: radial-gradient(ellipse at 82% 48%, #1558c91c, transparent 56%);
+  padding: var(--page-padding);
+}
+#deck > .slide[data-editable-page="18"] .slide-top { margin-bottom: 18px; }
+#deck > .slide[data-editable-page="18"] .kicker { color: var(--accent); }
+#deck > .slide[data-editable-page="18"] .live-indicator {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 13px; font-weight: 700; letter-spacing: 1.8px; color: var(--ink);
+}
+#deck > .slide[data-editable-page="18"] .live-indicator i {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 5px #d4ff2412;
+}
+#deck > .slide[data-editable-page="18"] > .content {
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 22px; padding-top: 0; translate: var(--page-content-offset);
+}
+#deck > .slide[data-editable-page="18"] .live-layout {
+  display: grid; grid-template-columns: 470px minmax(0, 1fr);
+  gap: 40px; align-items: center; flex: 1; min-height: 0;
+}
+#deck > .slide[data-editable-page="18"] .live-copy { padding: 0 0 0 4px; }
+#deck > .slide[data-editable-page="18"] .live-heading {
+  margin: 0; padding: 0; font-weight: 800; line-height: 1; letter-spacing: -3px;
+}
+#deck > .slide[data-editable-page="18"] .live-brand {
+  display: flex; align-items: baseline; gap: 16px;
+  margin: 0 0 24px -8px;
+  color: var(--live-brand-color); font-size: 190px; font-weight: 850;
+  line-height: .94; letter-spacing: -10px;
+}
+#deck > .slide[data-editable-page="18"] .live-particle {
+  color: var(--accent); font-size: 42px; font-weight: 650; letter-spacing: -2px;
+}
+#deck > .slide[data-editable-page="18"] .live-headline {
+  display: block; font-size: 66px; line-height: 1.14; letter-spacing: -3.2px;
+  color: var(--ink);
+}
+#deck > .slide[data-editable-page="18"] .live-message {
+  margin: 28px 0 0; font-size: 29px; line-height: 1.5; letter-spacing: -.8px;
+  font-weight: 400; color: #aeb7c6;
+}
+#deck > .slide[data-editable-page="18"] .live-message strong { color: var(--ink); font-weight: 650; }
+#deck > .slide[data-editable-page="18"] .live-copy-line {
+  display: flex; align-items: center; gap: 20px; width: 370px; margin-top: 26px;
+}
+#deck > .slide[data-editable-page="18"] .live-copy-line span {
+  height: 1px; background: linear-gradient(90deg, #f3e5ab80, #f3e5ab08); flex: 1;
+}
+#deck > .slide[data-editable-page="18"] .live-copy-line i {
+  color: var(--live-brand-color); font-size: 35px; font-style: normal; line-height: 1;
+}
+/* 기존 오피스 배경과 캐릭터로 구성한 일러스트 */
+#deck > .slide[data-editable-page="18"] .live-layout > .live-visual {
+  position: relative; height: 590px; min-width: 0;
+  padding: 0; border: 0; border-radius: 0; background: none;
+}
+#deck > .slide[data-editable-page="18"] .office-window {
+  position: absolute; inset: 18px 4px 40px 0;
+  overflow: hidden; border-radius: 24px; border: 1px solid #a1b5d257;
+  background: #10151e;
+  box-shadow: 0 35px 65px #0008, 0 0 0 6px #ffffff03;
+  transform: perspective(1800px) rotateY(-4deg) rotateZ(.6deg);
+}
+#deck > .slide[data-editable-page="18"] .office-window-bar {
+  position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between;
+  height: 38px; padding: 0 17px; border-bottom: 1px solid #ffffff12;
+  color: #b5bfd0; font-size: 10px; font-weight: 600; letter-spacing: 2px;
+  background: #121820;
+}
+#deck > .slide[data-editable-page="18"] .window-dots { display: flex; gap: 6px; }
+#deck > .slide[data-editable-page="18"] .window-dots i { width: 7px; height: 7px; border-radius: 50%; background: #53616d; }
+#deck > .slide[data-editable-page="18"] .window-dots i:first-child { background: #c4987b; }
+#deck > .slide[data-editable-page="18"] .window-dots i:nth-child(2) { background: #d5c28b; }
+#deck > .slide[data-editable-page="18"] .window-dots i:last-child { background: #8d9e7d; }
+#deck > .slide[data-editable-page="18"] .window-symbol { font-size: 17px; line-height: 1; color: var(--accent); }
+#deck > .slide[data-editable-page="18"] .office-scene { position: absolute; inset: 38px 0 0; isolation: isolate; }
+#deck > .slide[data-editable-page="18"] .live-office-image {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center;
+}
+#deck > .slide[data-editable-page="18"] .office-light {
+  position: absolute; inset: 0; background: linear-gradient(180deg, #03040705 22%, #03040740 100%);
+}
+#deck > .slide[data-editable-page="18"] .live-crew { position: absolute; inset: 0; display: block; height: auto; margin: 0; }
+#deck > .slide[data-editable-page="18"] .live-crew .employee {
+  position: absolute; display: block; min-width: 0;
+  width: 185px; height: 270px; bottom: 21px; margin: 0;
+  filter: drop-shadow(0 20px 10px #0009);
+}
+#deck > .slide[data-editable-page="18"] .live-crew .orchestrator { left: 3%; bottom: 45px; width: 200px; height: 280px; z-index: 2; }
+#deck > .slide[data-editable-page="18"] .live-crew .planner { left: 24%; bottom: 129px; width: 165px; height: 230px; z-index: 1; }
+#deck > .slide[data-editable-page="18"] .live-crew .developer { left: 40%; bottom: 23px; z-index: 3; }
+#deck > .slide[data-editable-page="18"] .live-crew .qa { left: 60%; bottom: 127px; width: 160px; height: 228px; z-index: 1; }
+#deck > .slide[data-editable-page="18"] .live-crew .security { left: 76%; bottom: 23px; z-index: 3; }
+/* 파란 요청 말풍선: 오피스 화면에 겹쳐 깊이감을 만듭니다. */
+#deck > .slide[data-editable-page="18"] .request-bubble {
+  position: absolute; z-index: 4; top: 0; left: 36px; width: 540px;
+  padding: 20px 28px 23px; border: 1px solid #7daefc7a; border-radius: 21px;
+  background: linear-gradient(120deg, #1558c9 15%, #236ade);
+  color: #fff; box-shadow: 0 20px 45px #030e2b80, inset 0 1px 0 #ffffff26;
+  transform: rotate(-1.5deg);
+}
+#deck > .slide[data-editable-page="18"] .request-bubble::after {
+  content: ""; position: absolute; bottom: -13px; left: 38px;
+  width: 23px; height: 23px; border-radius: 0 0 4px 0;
+  transform: rotate(45deg); background: #1558c9;
+  border-right: 1px solid #7daefc7a; border-bottom: 1px solid #7daefc7a;
+}
+#deck > .slide[data-editable-page="18"] .request-bubble-top { display: flex; justify-content: space-between; align-items: center; }
+#deck > .slide[data-editable-page="18"] .request-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #d3e4ff; }
+#deck > .slide[data-editable-page="18"] .request-bubble-top svg { width: 21px; height: 21px; color: #c8ddff; }
+#deck > .slide[data-editable-page="18"] .demo-prompt {
+  border: 0; padding: 0; margin: 13px 0 0; color: #fff;
+  font-size: 34px; font-weight: 700; letter-spacing: -1px; line-height: 1.32;
+}
+#deck > .slide[data-editable-page="18"] .request-send {
+  position: absolute; right: 27px; bottom: 24px; display: grid; place-items: center;
+  width: 45px; height: 45px; border-radius: 50%; background: var(--accent);
+  color: #172200; font-size: 28px; font-weight: 500;
+}
+#deck > .slide[data-editable-page="18"] .demo-status {
+  position: absolute; right: 8px; bottom: 0; margin: 0;
+  color: #929eaf; font-size: 14px; line-height: 1.6; letter-spacing: 0;
+}
+/* 하단 단계: 역할별 흐름을 한 줄로 정리합니다. */
+#deck > .slide[data-editable-page="18"] .demo-journey {
+  display: flex; align-items: center; gap: 36px; min-height: 66px;
+  border-top: 1px solid #ffffff1c; padding-top: 17px;
+}
+#deck > .slide[data-editable-page="18"] .journey-label { color: #a5afbf; font-size: 16px; flex: 0 0 206px; }
+#deck > .slide[data-editable-page="18"] .journey-steps { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 24px; }
+#deck > .slide[data-editable-page="18"] .journey-steps > span { font-size: 26px; font-weight: 650; letter-spacing: -.8px; white-space: nowrap; }
+#deck > .slide[data-editable-page="18"] .journey-steps > i { color: #536475; font-size: 22px; font-style: normal; }
+#deck > .slide[data-editable-page="18"] .journey-steps .journey-result { display: flex; align-items: center; gap: 32px; color: var(--accent); }
+#deck > .slide[data-editable-page="18"] .journey-result b { font-weight: 400; }
+#deck > .slide[data-editable-page="18"] .slide-foot { margin-top: 16px; border-top: 0; color: #758090; }
+#deck > .slide[data-editable-page="18"] .folio { margin-left: auto; white-space: nowrap; }

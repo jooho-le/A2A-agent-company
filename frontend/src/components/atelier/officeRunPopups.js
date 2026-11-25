@@ -5,6 +5,18 @@ const names = ['계획에이전트', '개발에이전트', 'QA에이전트', '�
 const roles = ['PLANNER', 'DEVELOPER', 'QA', 'SECURITY', 'ORCHESTRATOR']
 const problem = '검증 과정에서 문제가 발견되었습니다. 상세 결과 확인이 필요합니다.'
 const verdicts = { SUCCESS: '성공', FAIL: '실패', UNVERIFIED: '미검증', HUMAN_REVIEW: '사람의 검토 필요' }
+const failureReasons = {
+  LLM_VALIDATION_DRAFT_EXHAUSTED: '검사 코드나 결과 초안을 규격에 맞추지 못해 교정 한도에서 중단됐어요.',
+  LLM_DEVELOPMENT_NO_PROGRESS: '수정 요청을 받았지만 실제 코드 변경 없이 완료를 제출해 중단됐어요.',
+  LLM_SOURCE_REPAIR_EXHAUSTED: '필수 구현이나 수정 조건을 교정 한도 안에서 해결하지 못했어요.',
+  LLM_SCHEMA_INVALID: '에이전트의 응답 형식이 규격과 맞지 않아요.',
+  LLM_BUDGET_EXHAUSTED: '정해진 실행 한도(시간·호출량)에 도달했어요.',
+  LLM_EXECUTION_TIMEOUT: '에이전트 호출의 제한 시간을 초과했어요.',
+  LLM_PROVIDER_ERROR: 'AI 제공자 호출에 문제가 생겼어요. 서버 기록을 확인해야 해요.',
+  LLM_TOOL_EXECUTION_FAILED: '작업 도구 실행에 문제가 생겼어요.',
+  QA_TEST_UNVERIFIED: '검사 도구의 실행 결과를 확인하지 못했어요.',
+  QA_REPORT_BINDING_INVALID: '검사 결과와 선언한 테스트 항목의 연결이 일치하지 않아요.',
+}
 const runLabels = { RECEIVED: '요청 접수', PLANNING: '계획 수립', IMPLEMENTING: '개발 진행', SNAPSHOT_READY: '코드 버전 확정',
   VALIDATING: '검증 진행', FIX_REQUIRED: '수정 필요', FIXING: '수정 진행', REVALIDATING: '재검증 진행',
   WAITING_INPUT: '확인 대기', HUMAN_REVIEW: '사람의 검토 필요', FINISHED: '실행 종료', ABORTED: '실행 중단' }
@@ -76,7 +88,7 @@ function stepPopup(snapshot, row, agent) {
     detail: snapshot.run?.verdict ? `현재 Run 판정: ${verdicts[snapshot.run.verdict] ?? '확인 불가'}`
       : snapshot.run?.status ? 'Run 상태에 따라 업무 흐름을 관리합니다.' : '현재 Run 상태를 확인할 수 없습니다.' }
   if (row.displayState === 'failed') return { ...base, tone: 'error', title: '에이전트 실행 실패',
-    detail: 'Step 실행이 실패했습니다. 구체적인 원인은 현재 조회 정보에 제공되지 않습니다.' }
+    detail: failureReasons[step?.failureCode] ?? 'Step 실행이 실패했습니다. 구체적인 원인은 현재 조회 정보에 제공되지 않습니다.' }
   if (row.displayState === 'working') {
     const fixes = agent === 1 ? issuesFor(snapshot, issue => issue.fixWorkflowStepId === step.workflowStepId && issue.newCodeVersion === step.codeVersion) : []
     return { ...base,

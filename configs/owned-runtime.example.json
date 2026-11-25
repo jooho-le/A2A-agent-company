@@ -39,6 +39,7 @@
   },
   "apiKeyEnv": "A2A_PLATFORM_LLM_API_KEY",
   "llmLimits": {
+    "max_output_corrections": 2,
     "max_model_calls": 8,
     "max_tool_calls": 20,
     "max_output_tokens": 2048,

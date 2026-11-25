@@ -8,9 +8,21 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { rolldown } from 'rolldown'
 import { createProductRunFetch, runApiTransport } from '../src/api/productRunRequest.js'
-import { loadOfficeApproval, officeScenarioId, submitOfficeWork } from '../src/api/officeService.js'
+import { loadOfficeApproval, officeScenarioId, submitOfficeWork, lookupOfficeWork } from '../src/api/officeService.js'
 
 const id = n => '70000000-0000-4000-8000-' + String(n).padStart(12, '0')
+
+test('새 웹앱 접수는 요청한 시나리오만 연결하며 과거 실험 접수는 조회로 복구한다', async t => {
+  const previous = runApiTransport.fetch
+  t.after(() => { runApiTransport.fetch = previous })
+  const key = id(80)
+  runApiTransport.fetch = async () => Response.json({ requestId: key, projectId: id(81),
+    submissionStatus: 'CREATED', run: { runId: id(82), scenarioId: 'f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76' },
+    firstStep: { runId: id(82) }, dispatchStatus: 'SCHEDULED' })
+  await assert.rejects(submitOfficeWork({ projectName: '할 일 앱', scenarioId: officeScenarioId,
+    configurationId: 'c'.repeat(64), requestText: '할 일을 추가하는 웹사이트를 만들어줘.' }, key, { confirmed: true }), /접수 결과/)
+  assert.equal((await lookupOfficeWork(key)).run.runId, id(82))
+})
 
 test('JWT → 승인 GET → 제품 POST: 기본 차단·명시 클릭·본문·동일 접수 키', async t => {
   const calls = [], key = id(1), projectId = id(2), token = 'mock-product-jwt'

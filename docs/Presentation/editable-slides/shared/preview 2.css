@@ -1,0 +1,15 @@
+/* Preview controls only; printed output consists of the slide itself. */
+.page-preview .toolbar{gap:16px}
+.page-preview .toolbar .preview-title{color:var(--muted);font-size:14px;flex:1}
+.page-preview .toolbar a{color:var(--ink);text-decoration:none;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:12px}
+.page-preview .toolbar a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.page-preview .preview-navigation{display:flex;gap:14px;align-items:center}
+.page-preview .preview-navigation a{color:var(--ink);text-decoration:none}
+.page-preview #notes-title{font-size:19px}
+.page-preview .notes-frame{display:block;width:100%;height:calc(100vh - 150px);min-height:240px;border:0;background:transparent}
+.page-preview .navigation{justify-content:space-between}
+.page-preview .toolbar button{border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink);padding:9px 12px;cursor:pointer;font-size:12px}
+/* Keep the editing preview at the same stable layout as the printed slide. */
+.page-preview #deck>.slide>.content{animation:none!important}
+@media(max-width:900px){.page-preview .toolbar{flex-wrap:wrap;height:auto;padding:12px}.page-preview .preview-title{display:none}.page-preview .toolbar a,.page-preview .toolbar button{font-size:11px}}
+@media print{.page-preview .toolbar,.page-preview .navigation,.page-preview .notes{display:none!important}}

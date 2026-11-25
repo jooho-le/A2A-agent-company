@@ -17,6 +17,7 @@ from google.protobuf.json_format import MessageToDict
 from agents.api.validation import parse_workflow_metadata
 from agents.runtime.file_access import build_file_access, constrain_frozen_read_tools, constrain_workspace_file_tools
 from agents.runtime.test_guidance import unit_test_targets
+from agents.runtime.service_scope import service_input
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, ToolCall, ToolContext, json_text, parse_json
 from agents.llm.corrections import case_expectation_check
 from agents.roles.contract_explain import security_issues
@@ -56,6 +57,7 @@ class _SecurityInputError(ValueError):
 
 
 _PROTECTED = frozenset({
+    "serviceContract", "sourceInterface",
     "publicObservationPlan",
     "request", "snapshot", "workspaceId", "scenario", "runConfiguration", "plan", "sourceArtifact",
     "outputContract", "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds",
@@ -98,7 +100,7 @@ def _prepare_input(context, execution):
             answers.append(redact_data(answer))
         scope = build_requirement_scope(execution.configuration, execution.requirement_artifact, metadata, AgentRole.SECURITY)
         assigned = {str(item.requirement_id) for item in scope.requirements}
-        return {**expected, "clarifications": answers,
+        return {**expected, **service_input(execution), "clarifications": answers,
             "fileAccess": build_file_access(execution.configuration.scenario_contract, AgentRole.SECURITY),
             "requirementAuthority": scope.authority.to_prompt_json(),
             "requirementScope": scope.to_prompt_json(),
@@ -149,10 +151,10 @@ _TEST_INSTRUCTIONS = (
 )
 
 
-def _test_targets(services):
+def _test_targets(services, execution=None):
     """Only generated Security test paths; never disclose protected suite bytes/bindings."""
     unit = services.configuration.unit_test_configuration
-    return unit_test_targets(unit, "security")
+    return unit_test_targets(unit, "security", scenario_key=execution.scenario.key if execution else None)
 
 
 class _SecurityReadExecutor:
@@ -280,7 +282,7 @@ class SecurityAgentExecutor(AgentExecutor):
                     # Same shape as QA: the model writes and binds its own tests; the Host runs them.
                     wanted.add("write_test_file")
                     task_input["testSelectors"] = {"run_unit_tests": list(services.test_selectors)}
-                    task_input["testTargets"] = _test_targets(services)
+                    task_input["testTargets"] = _test_targets(services, execution)
                     draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256)
                     task_input["sourceReferenceCatalog"] = draft_wire.catalog
                     task_input["runtimeInstructions"] = _TEST_INSTRUCTIONS + ' ' + TEST_PLAN_INSTRUCTIONS

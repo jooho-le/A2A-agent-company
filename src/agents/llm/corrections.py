@@ -49,6 +49,12 @@ VALIDATION_ERROR_GUIDANCE = (
     'This is public framework API guidance, not a measured finding, hidden test or permission to change requirements.')
 
 INSTRUCTIONS = {
+    'READY_SERVICE_INTERFACE_REVIEW': (
+        'This is a user-requested web application, but the submitted GET / only returns JSON and no HTML '
+        'interface was found. Implement the requested usable local HTML/CSS/JavaScript screen and connect '
+        'its actions to the real application. Preserve main.app, lifespan and the approved database connection. '
+        'Read the current source and make an actual source change before READY. Do not change the request, '
+        'test criteria or substitute a signup app. This static check is not proof that the completed UI works.'),
     'READY_SIGNUP_QUALITY_REVIEW': (
         'The Host found reviewable source paths against the public signup contract; these are static warnings, '
         'not measured security findings or proof of product success. Read the listed sourcePath and lineNumber. '
@@ -598,7 +604,7 @@ def checked_rejection(value) -> dict | None:
                     'READY_WITHOUT_CHANGES', 'START_CONTRACT_PRECHECK_FAILED', 'CASE_EXPECTATION_INVALID',
                     'GENERATED_TESTS_INVALID', 'CODE_REFERENCE_INVALID', 'READY_PATH_EVIDENCE_MISMATCH', 'READY_PRIORITY_REPAIR_NEEDED',
                     'READY_RUNTIME_REPAIR_REQUIRED', 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW',
-                    'READY_SIGNUP_QUALITY_REVIEW'):
+                    'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
         return None
     raw = value.get('issues') or []
     issues = []
@@ -779,7 +785,7 @@ def case_expectation_check(validate, expectation_issues=None, *, explain=None, e
 
 
 def development_check(validate, precheck=None, path_check=None, priority_check=None, library_type_check=None,
-                      output_safety_check=None, signup_quality_check=None):
+                      output_safety_check=None, signup_quality_check=None, service_interface_check=None):
     """``source_change_check`` plus the Host's read-only start-contract precheck for READY.
 
     ``precheck`` returns closed issues for start failures that the Host build would
@@ -791,6 +797,10 @@ def development_check(validate, precheck=None, path_check=None, priority_check=N
 
     def check(data, executed_tools=()):
         rejection = change(data, executed_tools)
+        if rejection is None and isinstance(data, dict) and data.get('kind') == 'READY' and service_interface_check is not None:
+            issues = service_interface_check()
+            if issues:
+                return {'code': 'READY_SERVICE_INTERFACE_REVIEW', 'issues': issues}
         if (library_type_check is not None and isinstance(data, dict) and data.get('kind') == 'READY'
                 and (not rejection or rejection['code'] == 'READY_WITHOUT_CHANGES')):
             issues = library_type_check()
