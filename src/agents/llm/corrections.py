@@ -50,11 +50,11 @@ VALIDATION_ERROR_GUIDANCE = (
 
 INSTRUCTIONS = {
     'READY_SERVICE_INTERFACE_REVIEW': (
-        'This is a user-requested web application, but the submitted GET / only returns JSON and no HTML '
-        'interface was found. Implement the requested usable local HTML/CSS/JavaScript screen and connect '
-        'its actions to the real application. Preserve main.app, lifespan and the approved database connection. '
-        'Read the current source and make an actual source change before READY. Do not change the request, '
-        'test criteria or substitute a signup app. This static check is not proof that the completed UI works.'),
+        'The Host read your service source and found the listed startup, dependency or interface issues. '
+        'Read each sourcePath at source/<sourcePath>, fix the actual reasonCode and return READY again. '
+        'Follow the shared serviceDesign: API work needs its API and readiness response, not a new HTML UI. '
+        'Preserve main.app, lifespan, approved dependencies and the original database connection. '
+        'Do not change user requirements or tests to hide defects. This static check is not a PASS verdict.'),
     'READY_SIGNUP_QUALITY_REVIEW': (
         'The Host found reviewable source paths against the public signup contract; these are static warnings, '
         'not measured security findings or proof of product success. Read the listed sourcePath and lineNumber. '
@@ -484,6 +484,13 @@ def ready_path_trace(feedback):
 def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_name=None, repair_brief=None) -> dict:
     reasons = {item['reasonCode'] for item in issues}
     instruction = INSTRUCTIONS[kind]
+    if kind == 'READY_SERVICE_INTERFACE_REVIEW':
+        if 'WEB_UI_NOT_IMPLEMENTED' in reasons:
+            instruction += ' The requested WEB delivery is missing its usable local HTML/CSS/JavaScript screen. Implement it and connect its actions to the real application.'
+        if 'SERVICE_DEPENDENCY_UNAVAILABLE' in reasons:
+            instruction += ' An import or parser is absent from runtimeCapabilities. Use approved installed packages; editing the dependency lock or adding a screen cannot install it.'
+        if 'MODEL_PRIMARY_KEY_MISSING' in reasons:
+            instruction += ' The reported SQLAlchemy model lacks a primary key and fails while being imported. Define an appropriate primary key on that model, preserving its existing fields and constraints. An engine import or create_tables() function cannot fix mapper configuration.'
     if kind == 'GENERATED_TESTS_INVALID' and stage == 'TOOL_ARGUMENTS':
         instruction += (' No tool call in this rejected batch was executed. Previously successful writes remain. '
                         'Fix all listed source issues together and reissue only the still-needed calls. '

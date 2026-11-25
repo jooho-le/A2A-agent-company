@@ -61,7 +61,25 @@ def service_policy(contract):
             and contract.get("externalContract", {}).get("servicePolicy") == SERVICE_POLICY)
 
 
-def service_design_schema():
+def explicit_api_request(contract):
+    """Narrow guard for an explicit API request without a requested UI.
+
+    Ambiguous requests remain the Planner's decision; this never infers the
+    product's functionality or silently changes the user's request.
+    """
+    if not service_policy(contract):
+        return False
+    request = contract.get('externalContract', {}).get('userRequest', '')
+    if not isinstance(request, str) or not re.search(
+            r'(?<![a-z0-9])api(?![a-z0-9])\s*(?:(?:를|을|만|부터)\s*)?(?:만들|구현|개발|작성)', request, re.I):
+        return False
+    if re.search(r'api.{0,40}(?:필요\s*없|원하지|원치|하지\s*마|말고|없이|만들지\s*마)', request, re.I):
+        return False
+    ui = r'화면|페이지|사이트|프론트|브라우저|모바일|앱|(?<![a-z0-9])(?:html|ui|frontend|front-end|website|webpage|browser|screen)(?![a-z0-9])'
+    return re.search(ui, request, re.I) is None
+
+
+def service_design_schema(contract=None):
     """Inline, all-required schema for provider strict output; no remote refs."""
     text_list = {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": r"^[A-Za-z_][A-Za-z0-9_]{0,63}$"}}
     properties = {
@@ -81,12 +99,19 @@ def service_design_schema():
         "dataModel": {"type": "string", "minLength": 1, "maxLength": 2000},
         "implementationDecisions": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 600}},
     }
+    if explicit_api_request(contract):
+        design['delivery']['enum'] = ['API']
+        properties['responseFormat']['enum'] = ['JSON', 'EMPTY']
     return {"type": "object", "additionalProperties": False, "required": list(design), "properties": design}
 
 
 def validate_service_plan(contract, plan):
     if service_policy(contract) and plan.service_design is None:
         raise ValueError("SERVICE_DESIGN_REQUIRED")
+    if explicit_api_request(contract) and plan.service_design is not None and (
+            plan.service_design.delivery != 'API'
+            or any(endpoint.response_format == 'HTML' for endpoint in plan.service_design.endpoints)):
+        raise ValueError('SERVICE_API_REQUEST_REQUIRES_API_DELIVERY')
     if contract.get("scenarioKey") != "SERVICE-WEB" and plan.service_design is not None:
         raise ValueError("EXPERIMENT_DESIGN_OVERRIDE_DENIED")
 

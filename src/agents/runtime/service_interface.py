@@ -64,6 +64,16 @@ def service_interface_check(checkpoint, contract, service_design=None):
         root = getattr(checkpoint, "source_root", None)
         issues = []
         capabilities = getattr(checkpoint, "runtime_capabilities", None)
+        from orchestrator.domain.service_design import service_policy
+        if service_policy(contract):
+            from agents.runtime.start_precheck import start_precheck_for
+            precheck = start_precheck_for(checkpoint, contract)
+            if precheck is not None:
+                try:
+                    issues.extend(item for item in precheck()
+                                  if item.get('reasonCode') == 'MODEL_PRIMARY_KEY_MISSING')
+                except Exception:
+                    pass  # An uncertain optional check still goes to the Sandbox.
         if capabilities is not None:
             from agents.runtime.service_capabilities import inspect_dependencies
             issues.extend(inspect_dependencies(root, capabilities))

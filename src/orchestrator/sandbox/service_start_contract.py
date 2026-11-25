@@ -12,6 +12,27 @@ from orchestrator.domain.service_design import ServiceDesign
 SERVICE_START_POLICY = "SERVICE_START_AND_SHARED_INTERFACE_V1"
 
 
+def service_start_failure_code(error, current_code):
+    """Return closed causes only; never publish exception text or values."""
+    if isinstance(error, ModuleNotFoundError):
+        return 'SERVICE_DEPENDENCY_IMPORT_FAILED'
+    if current_code != 'SERVICE_START_FAILED':
+        return current_code
+    try:
+        from sqlalchemy.exc import ArgumentError, SQLAlchemyError
+        if isinstance(error, ArgumentError) and 'could not assemble any primary key columns' in ' '.join(str(error).split()):
+            return 'SERVICE_MODEL_PRIMARY_KEY_REQUIRED'
+        if isinstance(error, SQLAlchemyError):
+            return 'SERVICE_MODEL_DEFINITION_INVALID'
+    except ImportError:
+        pass
+    for kind, code in ((ImportError, 'SERVICE_IMPORT_FAILED'), (NameError, 'SERVICE_NAME_UNDEFINED'),
+                       (TypeError, 'SERVICE_ARGUMENT_TYPE_INVALID'), (ValueError, 'SERVICE_ARGUMENT_VALUE_INVALID')):
+        if isinstance(error, kind):
+            return code
+    return current_code
+
+
 def service_interface_failure(schema, design, ready_status, content_type):
     """Pure checks over measured readiness/OpenAPI, also shipped in the probe."""
     if not 200 <= ready_status < 300:
@@ -91,8 +112,8 @@ try:
             raise ValueError()
     code = 'PASS'
 except BaseException as error:
+    code = service_start_failure_code(error, code)
     if isinstance(error, ModuleNotFoundError):
-        code = 'SERVICE_DEPENDENCY_IMPORT_FAILED'
         name = getattr(error, 'name', '')
         if isinstance(name, str) and name.isidentifier() and len(name) <= 64:
             # Only a public import present in authenticated source may cross.
@@ -132,6 +153,12 @@ _MESSAGES = {
     "SERVICE_REQUEST_FIELDS_MISMATCH": "Expose the agreed serviceDesign request fields in the API body schema.",
     "SERVICE_DATABASE_UNAVAILABLE": "The original database.get_db connection is not usable after the application's lifespan started. Restore initialization and the same isolated SQLite connection; do not make QA create product tables.",
     "SERVICE_DEPENDENCY_IMPORT_FAILED": "A required import is unavailable in the approved runtime. Use runtimeCapabilities and the immutable dependency lock; do not install a new package.",
+    "SERVICE_MODEL_PRIMARY_KEY_REQUIRED": "A SQLAlchemy model has no primary key, so importing the model fails before lifespan or create_tables() can run. Define a real primary key on the reported model (for example an id column with primary_key=True, or an appropriate natural/composite key), preserving existing fields and constraints. Adding engine imports or a create_tables() function cannot repair the mapper definition.",
+    "SERVICE_MODEL_DEFINITION_INVALID": "SQLAlchemy rejected a model or mapping while importing/starting the app. Inspect the reported model definition and its columns, relationships and table configuration; adding table creation cannot fix an invalid mapper.",
+    "SERVICE_IMPORT_FAILED": "An application import failed. Inspect the reported import for unavailable symbols, incorrect module paths or circular imports.",
+    "SERVICE_NAME_UNDEFINED": "Application startup referenced an undefined name at the reported Source location. Define or import that symbol before use.",
+    "SERVICE_ARGUMENT_TYPE_INVALID": "Application import or startup passed incompatible argument types or names. Check the reported call against the approved installed library interface.",
+    "SERVICE_ARGUMENT_VALUE_INVALID": "Application import or startup used an invalid value. Inspect the reported Source location and the approved library's accepted choices.",
 }
 
 
@@ -139,7 +166,7 @@ def service_build_argv(design, python_executable="/usr/local/bin/python"):
     checked = design if isinstance(design, ServiceDesign) else ServiceDesign.model_validate(design)
     payload = json.dumps(checked.model_dump(mode="json", by_alias=True), separators=(",", ":"), ensure_ascii=False)
     # Data travels in a separate argv, never interpolated into source code.
-    program = inspect.getsource(service_interface_failure) + '\n' + _PROBE
+    program = inspect.getsource(service_start_failure_code) + '\n' + inspect.getsource(service_interface_failure) + '\n' + _PROBE
     return (python_executable, "-I", "-X", "pycache_prefix=/work/pycache", "-c", f'exec({program!r})', payload)
 
 

@@ -117,7 +117,7 @@ def build_planner_output_contract(scenario: ScenarioDefinition) -> StructuredOut
         if service_policy(scenario.planner_contract()):
             expanded = schema.to_dict()
             expanded["required"].append("serviceDesign")
-            expanded["properties"]["serviceDesign"] = {"anyOf": [service_design_schema(), {"type": "null"}]}
+            expanded["properties"]["serviceDesign"] = {"anyOf": [service_design_schema(scenario.planner_contract()), {"type": "null"}]}
             schema = JsonSchema.from_dict(expanded)
         schema.require_openai_strict()
         output = StructuredOutput(name="planner_decision_v2", schema=schema)

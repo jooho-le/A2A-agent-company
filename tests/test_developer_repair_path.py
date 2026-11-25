@@ -172,7 +172,8 @@ class ConsecutiveEditTests(unittest.IsolatedAsyncioTestCase):
     async def test_edit_after_own_full_write_needs_no_reread(self):
         f, dispatcher = self.fixture()
         content = "value = 'written'\n"
-        written = await dispatcher.call_tool('write_source_file', f.arguments(content=content))
+        written = await dispatcher.call_tool('write_source_file', f.arguments(
+            content=content, expectedSha256=sha256(f.original).hexdigest()))
         self.assertIsNone(written.error_code)
         result = await dispatcher.call_tool('edit_source_file', f.arguments(
             oldText="'written'", newText="'edited'", expectedSha256=sha256(content.encode()).hexdigest()))
