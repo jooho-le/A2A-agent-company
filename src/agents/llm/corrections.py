@@ -32,7 +32,7 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V9'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V10'
 
 VALIDATION_ERROR_GUIDANCE = (
     'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
@@ -154,7 +154,14 @@ INSTRUCTIONS = {
         'a name the product module does not define (database.get_db is not in main); import each name from the '
         'module that defines it. TEST_HOST_FIXTURE_REQUIRED: for SCN-001 subclass the Host AppTestCase '
         'from _host_app_test, use self.client/self.db/self.User in test methods, and remove product imports '
-        'at module level and custom setup/teardown. The Host handles isolated DB and lifespan; it does not '
+        'at module level and custom setup/teardown. TEST_SERVICE_FIXTURE_REQUIRED: for SERVICE-WEB import '
+        'ServiceTestCase from _host_service_test, subclass it and use self.client. Remove TestClient construction, '
+        'top-level main/database/models imports and custom setup/teardown/run; testTargets.appFixture describes '
+        'the generic lifecycle. It assumes no User model and supplies no grading answers. '
+        'TEST_OUTPUT_ARGUMENT_INVALID: check_http_output(client, method, path, sensitive=sample, json=payload) '
+        'or self.check_http_output(method, path, sensitive=sample, json=payload) takes the actual current-test '
+        'new_password() STRING as sensitive, never the name "password", a list, a dict or a password keyword. '
+        'The Host handles isolated DB and lifespan; it does not '
         'create missing product tables. TEST_HOST_MEMBER_MISSING: self.fresh_email and self.new_password are not '
         'Host members; create a local fresh_email (for example with uuid4) and import new_password from '
         '_host_test_data. Respect explicitly defined custom helpers. TEST_HOST_RETURN_MISUSED: '

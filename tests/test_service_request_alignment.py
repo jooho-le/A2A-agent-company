@@ -177,8 +177,10 @@ def test_general_test_targets_preserve_mandatory_paths_without_requiring_user_mo
         target = unit_test_targets(unit, role, scenario_key='SERVICE-WEB')[0]
         assert target['required'] is True
         assert target['directory'] == f'outputs/{role}/tests'
-        assert 'appFixture' not in target and 'signupEmailEvidence' not in target
-        assert 'TestClient' in target['fixtureGuidance']
+        assert target['appFixture']['class'] == 'ServiceTestCase'
+        assert target['appFixture']['createsProductTables'] is False
+        assert 'signupEmailEvidence' not in target
+        assert 'ServiceTestCase' in target['fixtureGuidance']
 
 
 def test_service_security_retains_anchor_and_pending_review_protocol():

@@ -205,11 +205,13 @@ class QARuntimeServices:
                 and row.get("toolName") == "run_unit_tests"] if isinstance(data, dict) else []
         source = Path(workspace.record.root_path) / "source"
         from orchestrator.domain import SCN_001_ID
+        from orchestrator.domain.scenario_registry import SERVICE_WEB_ID
         run = self._repository.get_run(binding.run_id)
         output_root = Path(workspace.record.root_path) / "outputs" / "qa"
         issues = inspect_generated_tests(output_root / "tests", scopes, rows, "cases",
                                         source_root=source if source.is_dir() else None,
-                                        host_app_fixture=run is not None and run.scenario_id == SCN_001_ID)
+                                        host_app_fixture=run is not None and run.scenario_id == SCN_001_ID,
+                                        service_fixture=run is not None and run.scenario_id == SERVICE_WEB_ID)
         browser = self.configuration.browser_test_configuration
         suites = [(suite.name, suite.suite_path) for suite in (() if browser is None else browser.suites)
                   if suite.kind == "QA_TESTS" and suite.name in self._selectors.get("run_browser_tests", ())]

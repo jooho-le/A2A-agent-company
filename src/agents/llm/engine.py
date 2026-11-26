@@ -131,7 +131,8 @@ class LLMEngine:
         last_role_validation = None
         test_file_defects = {'GENERATED_TEST_FILE_MISSING', 'TEST_CLIENT_NOT_STARTED',
             'GENERATED_TEST_SYNTAX_INVALID', 'GENERATED_TEST_NONE', 'ASYNC_TEST_IN_SYNC_CASE',
-            'TEST_IMPORT_NAME_MISSING', 'TEST_HOST_FIXTURE_REQUIRED'}
+            'TEST_IMPORT_NAME_MISSING', 'TEST_HOST_FIXTURE_REQUIRED',
+            'TEST_SERVICE_FIXTURE_REQUIRED', 'TEST_OUTPUT_ARGUMENT_INVALID'}
 
         def exhausted_qa_draft(validation=None):
             # Preserve the value-free cause when replacing the failure code

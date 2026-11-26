@@ -5,11 +5,12 @@ interface compatibility, not functional/security acceptance.
 """
 import json
 import inspect
+import ast
 
 from orchestrator.domain.developer_artifacts import BuildDiagnostic
 from orchestrator.domain.service_design import ServiceDesign
 
-SERVICE_START_POLICY = "SERVICE_START_AND_SHARED_INTERFACE_V2"
+SERVICE_START_POLICY = "SERVICE_START_AND_SHARED_INTERFACE_V3"
 
 
 def service_start_failure_code(error, current_code):
@@ -40,6 +41,11 @@ def service_interface_failure(schema, design, ready_status, content_type):
     if design['delivery'] == 'WEB' and 'text/html' not in content_type:
         return 'SERVICE_HTML_REQUIRED'
     for endpoint in design['endpoints']:
+        if (endpoint['method'] == 'GET' and endpoint['path'] == '/'
+                and endpoint['responseFormat'] == 'JSON'
+                and not (content_type.split(';', 1)[0].strip().lower() == 'application/json'
+                         or content_type.split(';', 1)[0].strip().lower().endswith('+json'))):
+            return 'SERVICE_JSON_REQUIRED'
         operation = schema.get('paths', {}).get(endpoint['path'], {}).get(endpoint['method'].lower())
         if not isinstance(operation, dict):
             return 'SERVICE_ENDPOINT_MISSING'
@@ -171,6 +177,7 @@ _MESSAGES = {
     "SERVICE_APP_REQUIRED": "Expose a FastAPI application as main.app.",
     "SERVICE_READY_FAILED": "After application startup, GET / must return a successful readiness response.",
     "SERVICE_HTML_REQUIRED": "The agreed WEB service must return usable HTML at GET /.",
+    "SERVICE_JSON_REQUIRED": "GET / is agreed as JSON in serviceDesign but returns another format. Return an API readiness JSON response on the real main.app. Do not add an HTML signup form for an API-only request or change QA to accept HTML.",
     "SERVICE_ENDPOINT_MISSING": "Implement every method/path in the shared serviceDesign; do not change QA to target another route.",
     "SERVICE_REQUEST_ENCODING_MISMATCH": "The actual API request encoding differs from serviceDesign. Preserve the agreed JSON/FORM interface and fix the product.",
     "SERVICE_REQUEST_FIELDS_MISMATCH": "Expose the agreed serviceDesign request fields in the API body schema.",
@@ -198,6 +205,14 @@ def service_build_argv(design, python_executable="/usr/local/bin/python"):
     # Data travels in a separate argv, never interpolated into source code.
     program = (inspect.getsource(service_start_failure_code) + '\n' + inspect.getsource(service_interface_failure)
                + '\n' + inspect.getsource(service_validation_requests) + '\n' + _PROBE)
+    # Compact only fixed Host-owned code; never parse/evaluate product Source.
+    # Keep the existing 8 KiB argument guard rather than enlarging it.
+    tree = ast.parse(program)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
+                node.body.pop(0)
+    program = ast.unparse(tree)
     return (python_executable, "-I", "-X", "pycache_prefix=/work/pycache", "-c", f'exec({program!r})', payload)
 
 

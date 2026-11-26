@@ -138,13 +138,15 @@ def credential_test_instructions(task_input):
 
 
 def unit_test_targets(configuration, role, *, scenario_key=None):
-    from mcp_tools.tools.unit_runner import app_fixture_contract
+    from mcp_tools.tools.unit_runner import app_fixture_contract, service_fixture_contract
     if scenario_key == "SERVICE-WEB":
         return [{"toolName": "run_unit_tests", "selector": scope.name,
                  "directory": f"outputs/{role}/" + scope.source_directory,
                  "pattern": scope.pattern, "format": "python-unittest", "required": True,
                  "testIdRule": UNIT_TEST_ID_DESCRIPTION,
-                 "fixtureGuidance": "Use unittest and FastAPI TestClient as a context manager. Set an isolated temporary DATABASE_URL before importing main. Start the real app lifespan, clean up clients, sessions and imported product modules. Never create missing product tables or override product dependencies to make a test pass. Read the actual app/model/API first. SCN-001 AppTestCase and signup helpers do not describe this application. " + PASSWORD_FIXTURE_GUIDANCE,
+                 "fixtureGuidance": "HTTP tests must import ServiceTestCase from _host_service_test and subclass it. Use self.client in test methods. Do not construct TestClient, override setup/teardown/run, import main/database/models at module level, create missing tables, or override product dependencies. The Host starts the actual main.app lifespan on an isolated DB and cleans up. Read actual Source and serviceDesign. SCN-001 AppTestCase/User/signup helpers do not describe this application. " + PASSWORD_FIXTURE_GUIDANCE,
+                 "appFixture": service_fixture_contract(),
+                 "minimalExample": "from _host_service_test import ServiceTestCase\nfrom _host_test_data import new_password\nclass ApiTests(ServiceTestCase):\n    def test_request(self):\n        response = self.client.get('/')\n        self.assertEqual(response.status_code, 200)\n",
                  "testData": unit_test_data_contract(),
                  "testDataFactory": unit_test_data_contract()}
                 for scope in configuration.scopes if scope.kind == "QA_TESTS"]

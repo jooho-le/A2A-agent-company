@@ -116,7 +116,9 @@ class TestFixRequired(Exception):
             instruction = (
                 "Correct only your generated tests on the same frozen Source and keep every declared case unchanged. "
                 "Read serviceDesign and actual Source; use its exact route, JSON/FORM encoding and request fields. "
-                "Use ordinary unittest, the advertised testData factory and TestClient lifespan; do not use SCN-001 "
+                "For HTTP tests subclass _host_service_test.ServiceTestCase, use self.client and remove your "
+                "TestClient/setup/teardown and top-level product imports. The Host owns startup and isolation. "
+                "Use the advertised testData factory; do not use SCN-001 "
                 "AppTestCase, self.User or signup helpers. A not-run scope is not proof of a product FAIL or PASS. "
                 "Never install dependencies, create missing product tables or modify Source to hide a product defect. "
                 "Report any product/interface contradiction rather than weakening tests. Return the same READY JSON.")

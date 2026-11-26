@@ -79,6 +79,20 @@ def service_interface_check(checkpoint, contract, service_design=None):
             issues.extend(inspect_dependencies(root, capabilities))
         if service_design is None or service_design.get("delivery") == "WEB":
             issues.extend(inspect_service_interface(root, contract))
+        elif root is not None and any(e['method'] == 'GET' and e['path'] == '/' and e['responseFormat'] == 'JSON'
+                                      for e in service_design.get('endpoints', [])):
+            for path, tree in _modules(Path(root), 'main').values():
+                for fn in tree.body:
+                    if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)): continue
+                    root_route = any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                        and isinstance(d.func.value, ast.Name) and d.func.value.id == 'app'
+                        and d.func.attr == 'get' and d.args and isinstance(d.args[0], ast.Constant)
+                        and d.args[0].value == '/' for d in fn.decorator_list)
+                    if root_route and any(isinstance(s, ast.Return) and isinstance(s.value, ast.Call)
+                            and isinstance(s.value.func, ast.Name) and s.value.func.id == 'HTMLResponse'
+                            and not any(k.arg == 'media_type' for k in s.value.keywords) for s in fn.body):
+                        issues.append({'fieldPath': '/source', 'reasonCode': 'SERVICE_JSON_REQUIRED',
+                                       'sourcePath': path.relative_to(Path(root)).as_posix(), 'lineNumber': fn.lineno})
         return issues
     return inspect
 
@@ -106,7 +120,7 @@ def service_source_facts(files):
     Do not execute imports/JS, infer missing UI from absence, or turn this
     inventory into a test result. Dynamic rendering still needs browser tests.
     """
-    paths, selectors, routes = [], [], []
+    paths, selectors, routes, response_fields = [], [], [], []
     total = 0
     truncated = False
     for index, (path, raw) in enumerate(sorted(files.items())):
@@ -140,9 +154,22 @@ def service_source_facts(files):
                                 if (isinstance(value, str) and re.fullmatch(r'/[A-Za-z0-9_/{.}-]{0,199}', value)
                                         and len(routes) < 64):
                                     routes.append({'path': path, 'method': decorator.func.attr.upper(), 'route': value})
+                                    fields = set()
+                                    for result in (n for n in node.body if isinstance(n, ast.Return)):
+                                        returned = result.value
+                                        if isinstance(returned, ast.Call) and isinstance(returned.func, ast.Name) and returned.func.id == 'JSONResponse':
+                                            status = next((k.value for k in returned.keywords if k.arg == 'status_code'), None)
+                                            if isinstance(status, ast.Constant) and isinstance(status.value, int) and status.value >= 400: continue
+                                            returned = next((k.value for k in returned.keywords if k.arg == 'content'), None)
+                                        if isinstance(returned, ast.Dict):
+                                            fields.update(k.value for k in returned.keys if isinstance(k, ast.Constant)
+                                                and isinstance(k.value, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', k.value))
+                                    if fields:
+                                        response_fields.append({'path': path, 'method': decorator.func.attr.upper(),
+                                            'route': value, 'fields': sorted(fields), 'basis': 'STATIC_SOURCE_ONLY'})
             else:
                 _Selectors(path, selectors).feed(text)
         except (UnicodeError, SyntaxError, ValueError, RecursionError):
             truncated = True
-    return {'files': paths, 'staticRoutes': routes, 'staticSelectors': selectors,
+    return {'files': paths, 'staticRoutes': routes, 'staticSelectors': selectors, 'staticResponseFields': response_fields,
             'truncated': truncated, 'isLiveDOM': False}

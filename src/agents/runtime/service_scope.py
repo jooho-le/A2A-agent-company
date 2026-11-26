@@ -11,7 +11,9 @@ SERVICE_RUNTIME_INSTRUCTIONS = (
     "freezes the complete candidate and measures its startup; READY is not product success. "
     "Keep assigned Requirement IDs and copy their acceptanceCriteria exactly into expectedResult. "
     "Test files belong under outputs/qa or outputs/security; never modify Source during validation. "
-    "Use ordinary unittest and a properly started TestClient lifecycle for this application, not "
+    "For HTTP tests subclass _host_service_test.ServiceTestCase and use self.client; the Host owns "
+    "the actual application lifespan, isolated DATABASE_URL and cleanup. Do not construct TestClient, "
+    "override setup/teardown/run or import product modules at test module level. This is not "
     "SCN-001-only AppTestCase/User/signup helpers. The Host runs builds, tests and scans and assembles "
     "measured evidence; do not invent results, hashes, execution manifests or verdicts. "
     "Follow the shared serviceDesign exactly: delivery=API needs working APIs and a readiness endpoint, not HTML; "
@@ -24,6 +26,10 @@ SERVICE_RUNTIME_INSTRUCTIONS = (
     "Missing UI must not be hidden by changing tests. Ask INPUT_REQUIRED for a material unresolved user decision."
     " sourceInterface lists bounded static facts read from the authenticated Source archive, not a live DOM "
     "or a PASS verdict. Read those files and verify the actual UI; truncated or empty facts prove nothing."
+    " staticResponseFields lists keys from simple actual Source returns. Do not invent a required 'email', "
+    "'id' or 'message' response key when neither requirements nor serviceDesign prescribe it. Verify "
+    "the documented result and behavior. If an approved requirement explicitly requires a missing field, "
+    "preserve that failing check instead of accepting the incomplete Source."
 )
 
 
@@ -85,7 +91,7 @@ SERVICE_RULES = (
     "기존 main.app·lifespan·database.get_db와 DATABASE_URL을 보존한다. User 모델·회원가입 API·이메일 정책은 일반 앱의 전제가 아니며 요청에 없는 로그인 기능을 만들지 않는다.",
     "검사는 실제 Source를 읽고 실제 라우트·모델·DOM 선택자를 사용한다. 없는 input, 버튼, .success-message, API 경로를 상상해 시험을 쓰지 않는다. 실제 기능이 누락됐다면 구체적인 실패 위치를 보고한다.",
     "QA·보안은 같은 요구사항과 불변 Source를 검사하며 다른 에이전트의 완료 주장을 증거로 삼지 않는다. 시험·실행 결과는 Host가 측정한다. 미실행은 UNVERIFIED다.",
-    "일반 앱 단위 시험은 unittest와 FastAPI TestClient의 lifespan 문맥을 사용한다. DATABASE_URL을 임시 SQLite 파일로 먼저 정하고 앱을 import하며 종료 시 클라이언트·세션·모듈을 정리한다. 제품의 빠진 테이블을 시험이 대신 생성하지 않는다. SCN-001 전용 AppTestCase·self.User·signup helper를 사용하지 않는다.",
+    "일반 앱 HTTP 시험은 _host_service_test.ServiceTestCase를 상속하고 self.client를 사용한다. 앱 시작·종료와 임시 DB·모듈 정리는 Host가 담당한다. TestClient 생성·setUp/tearDown/run 재정의·모듈 최상단 main/database/models import를 하지 않는다. 제품의 빠진 테이블을 시험이 대신 생성하지 않는다. SCN-001 전용 AppTestCase·self.User·signup helper를 사용하지 않는다.",
     "보안은 실제 구현의 입력·데이터 접근·예외 출력 경계를 검사한다. 계정 기능이 없는 앱에 Password Hash 검사를 강요하지 않는다. 비밀정보·원문 비밀번호·저장 해시·인증값은 출력하지 않으며 합성 자격증명은 런타임에 생성한다.",
     "응답 내용만 검사하고 로그나 DB 저장값까지 확인했다고 주장하지 않는다. 실제 비밀 입력이 있는 일반 앱은 _host_test_data.check_http_output과 현재 시험에서 생성한 new_password를 사용해 응답·헤더·Python 로그를 관찰한다. 저장 해시·권한 검증은 실제 Source를 읽고 별도 검사하며, 관찰하지 못한 경계는 UNVERIFIED로 남긴다.",
     "수정은 활성 Issue와 validationFeedback의 실제 실패 동작을 읽고 원인 파일을 변경한다. 변경 없이 READY를 제출하거나 시험·요구사항을 바꾸어 실패를 숨기지 않는다. 수정 후 같은 기능을 재검증한다.",

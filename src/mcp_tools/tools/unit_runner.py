@@ -36,6 +36,77 @@ MAX_TEST_PASSWORD_LENGTH = 4096
 APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V8'
 APP_FIXTURE_MODULE = '_host_app_test'
 APP_FIXTURE_EXPORTS = ('AppTestCase',)
+SERVICE_FIXTURE_MODULE = '_host_service_test'
+SERVICE_FIXTURE_EXPORTS = ('ServiceTestCase',)
+
+
+def service_fixture_contract():
+    return {'module': SERVICE_FIXTURE_MODULE, 'class': 'ServiceTestCase', 'inherits': 'unittest.TestCase',
+        'attributes': ['client', 'app'], 'createsProductTables': False,
+        'policy': 'HOST_GENERIC_SERVICE_LIFESPAN_V1',
+        'instruction': 'Subclass ServiceTestCase and use self.client in test methods. Do not import main/database/models at module level, construct TestClient, or override setup/teardown/run. The Host enters the real main.app lifespan with an isolated DATABASE_URL before each test and cleans up afterwards. It never creates product tables or changes dependencies. Pure non-HTTP unit tests can remain ordinary TestCase.',
+        'methods': {'check_http_output': {'parameters': ['method', 'path'], 'keywordOnly': ['sensitive'],
+            'returns': 'httpx.Response', 'instruction': 'sensitive is the actual current-test new_password() STRING in the request, not a field name, list or dict. Pass json/data/headers as request keywords.'}}}
+
+
+@contextmanager
+def _service_app_test_api(source_root):
+    """Generic app lifetime only, executed with Source inside the Sandbox."""
+    source = Path(source_root).resolve()
+    def product_modules():
+        return {name: module for name, module in tuple(sys.modules.items())
+                if getattr(module, '__file__', None)
+                and Path(module.__file__).resolve().is_relative_to(source)}
+    class ServiceTestCase(unittest.TestCase):
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if any(name in cls.__dict__ for name in ('setUp', 'tearDown', 'setUpClass', 'tearDownClass',
+                    '_callSetUp', '_callTearDown', '_callCleanup', 'run')):
+                raise ValueError('HOST_SERVICE_LIFECYCLE_OVERRIDE')
+
+        def setUp(self):
+            if any(name in sys.modules for name in ('main', 'database', 'models')):
+                raise ValueError('HOST_SERVICE_IMPORT_BEFORE_FIXTURE')
+            resources = ExitStack()
+            self.addCleanup(resources.close)
+            folder = resources.enter_context(tempfile.TemporaryDirectory(prefix='host-service-'))
+            previous = os.environ.get('DATABASE_URL')
+            def restore_environment():
+                if previous is None: os.environ.pop('DATABASE_URL', None)
+                else: os.environ['DATABASE_URL'] = previous
+            resources.callback(restore_environment)
+            os.environ['DATABASE_URL'] = 'sqlite:///' + str(Path(folder) / 'case.db')
+            previous_modules = product_modules()
+            for name in previous_modules: sys.modules.pop(name, None)
+            def restore_modules():
+                failed = False
+                for name, module in product_modules().items():
+                    try:
+                        engine = getattr(module, 'engine', None)
+                        if engine is not None and callable(getattr(engine, 'dispose', None)): engine.dispose()
+                    except Exception: failed = True
+                    finally: sys.modules.pop(name, None)
+                sys.modules.update(previous_modules)
+                importlib.invalidate_caches()
+                if failed: raise ValueError('HOST_SERVICE_CLEANUP_FAILED')
+            resources.callback(restore_modules)
+            from fastapi.testclient import TestClient
+            self.app = importlib.import_module('main').app
+            self.client = resources.enter_context(TestClient(self.app, raise_server_exceptions=False))
+
+        def check_http_output(self, method, path, *, sensitive, **request):
+            return sys.modules[TEST_DATA_MODULE].check_http_output(
+                self.client, method, path, sensitive=sensitive, **request)
+
+    previous = sys.modules.get(SERVICE_FIXTURE_MODULE)
+    module = ModuleType(SERVICE_FIXTURE_MODULE)
+    module.__all__ = list(SERVICE_FIXTURE_EXPORTS)
+    module.ServiceTestCase = ServiceTestCase
+    sys.modules[SERVICE_FIXTURE_MODULE] = module
+    try: yield
+    finally:
+        if previous is None: sys.modules.pop(SERVICE_FIXTURE_MODULE, None)
+        else: sys.modules[SERVICE_FIXTURE_MODULE] = previous
 
 # Public fixture shapes only. No hidden test cases, acceptance thresholds or verdicts.
 APP_FIXTURE_ATTRIBUTES = ('client', 'db', 'User', 'app')
@@ -919,6 +990,22 @@ def app_fixture_source_issues(source):
 
 def _fixture_usage_reason(test, err):
     """Bind a closed repair code to the actual failing frame and the unchanged Host API."""
+    # A bad generic-helper argument is a test preparation error, not a product
+    # defect. Bind to the actual Host function frame; an app/test raising the
+    # same words elsewhere cannot acquire this not-run classification.
+    if err[0] is ValueError and err[1].args == ('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST',):
+        helper = getattr(sys.modules.get(TEST_DATA_MODULE), 'check_http_output', None)
+        try:
+            method = inspect.getattr_static(type(test), test._testMethodName)
+            frame, belongs_to_test = err[2], False
+            while frame:
+                belongs_to_test |= frame.tb_frame.f_code is method.__code__
+                if frame.tb_next is None:
+                    if helper is not None and belongs_to_test and frame.tb_frame.f_code is helper.__code__:
+                        return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+                frame = frame.tb_next
+        except (AttributeError, TypeError):
+            pass
     fixture = getattr(sys.modules.get(APP_FIXTURE_MODULE), 'AppTestCase', None)
     if fixture is None or not isinstance(test, fixture) or err[0] not in (AttributeError, AssertionError, TypeError, ValueError, KeyError):
         return None
@@ -1375,7 +1462,9 @@ def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observatio
     diagnostics = {} if capture_output_checks else None
     signup_checks = {} if capture_output_checks else None
     observer_state = {}
-    with _test_data_api(issued, checks, observer_state), _app_test_api(source_root, checks, issued, diagnostics, signup_checks):
+    with (_test_data_api(issued, checks, observer_state),
+          _app_test_api(source_root, checks, issued, diagnostics, signup_checks),
+          _service_app_test_api(source_root)):
         return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair, observer_state=observer_state)
 
 

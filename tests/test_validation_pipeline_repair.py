@@ -218,7 +218,8 @@ def test_security_test_title_does_not_count_as_log_or_storage_evidence():
 
 
 @pytest.mark.parametrize('rewrite', [True, False])
-def test_invalid_lifespan_requires_a_real_test_write_before_ready(rewrite):
+@pytest.mark.parametrize('reason', ['TEST_CLIENT_NOT_STARTED', 'TEST_SERVICE_FIXTURE_REQUIRED', 'TEST_OUTPUT_ARGUMENT_INVALID'])
+def test_invalid_lifespan_requires_a_real_test_write_before_ready(rewrite, reason):
     from agents.llm.contracts import LLMErrorCode, LLMRuntimeError
     from agents.llm.engine import LLMEngine
     import test_llm_runtime as fixture
@@ -238,14 +239,14 @@ def test_invalid_lifespan_requires_a_real_test_write_before_ready(rewrite):
             output=owner.output, budget=budget, workspace_id=owner.workspace_id,
             close_invalid_qa_draft=True, recovery_sink=lambda route: routes.append(route.public()),
             output_check=lambda *_: None if fixed else {'code': 'GENERATED_TESTS_INVALID',
-                'issues': [{'fieldPath': '/cases', 'reasonCode': 'TEST_CLIENT_NOT_STARTED'}]})
+                'issues': [{'fieldPath': '/cases', 'reasonCode': reason}]})
     if rewrite:
         assert asyncio.run(run()).data == {'answer': 'draft'}
         assert fixed
     else:
         with pytest.raises(LLMRuntimeError) as caught: asyncio.run(run())
         assert caught.value.code is LLMErrorCode.VALIDATION_DRAFT
-        assert caught.value.public_validation()['issues'][0]['reasonCode'] == 'TEST_CLIENT_NOT_STARTED'
+        assert caught.value.public_validation()['issues'][0]['reasonCode'] == reason
         assert not fixed
     assert provider.requests[1].required_tool == 'write_test_file'
     assert any(row.get('llmValidation', {}).get('issues') for row in routes)

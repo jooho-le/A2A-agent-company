@@ -288,10 +288,12 @@ class SecurityRuntimeServices:
         rows = [row for row in (data.get("testCases") or []) if isinstance(row, dict)] if isinstance(data, dict) else []
         source = Path(workspace.record.root_path) / "source"
         from orchestrator.domain import SCN_001_ID
+        from orchestrator.domain.scenario_registry import SERVICE_WEB_ID
         run = self._repository.get_run(binding.run_id)
         return inspect_generated_tests(Path(workspace.record.root_path) / "outputs" / "security" / "tests",
                                        scopes, rows, "testCases", source_root=source if source.is_dir() else None,
-                                       host_app_fixture=run is not None and run.scenario_id == SCN_001_ID)
+                                       host_app_fixture=run is not None and run.scenario_id == SCN_001_ID,
+                                       service_fixture=run is not None and run.scenario_id == SERVICE_WEB_ID)
 
     def reference_issues(self, measured, data):
         """The ``_anchors`` rules that a draft can still fix (handoff P5, point 5).
