@@ -126,7 +126,9 @@ class TestFixRequired(Exception):
                 " For OUTPUT_NOT_OBSERVED_REQUEST_LOGS/OTHER_RESPONSE, use the generic "
                 "_host_test_data.check_http_output(client, method, path, sensitive=sample, json=body) "
                 "with your started TestClient, the agreed route and a current-test new_password() sample "
-                "present in the request. It measures response/headers/Python request logs and returns "
+                "present in the request. Alternatively use self.check_http_output(method, path, sensitive=sample, json=body); "
+                "this bound method already supplies self.client. Do not add a positional client to this bound method. "
+                "It measures response/headers/Python request logs and returns "
                 "the response. It does not check DB storage or grant a PASS. A response-text assertion "
                 "alone cannot establish that logs were checked.")
             guidance = []

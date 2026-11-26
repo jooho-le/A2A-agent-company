@@ -32,7 +32,7 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V10'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V11'
 
 VALIDATION_ERROR_GUIDANCE = (
     'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
@@ -159,8 +159,15 @@ INSTRUCTIONS = {
         'top-level main/database/models imports and custom setup/teardown/run; testTargets.appFixture describes '
         'the generic lifecycle. It assumes no User model and supplies no grading answers. '
         'TEST_OUTPUT_ARGUMENT_INVALID: check_http_output(client, method, path, sensitive=sample, json=payload) '
-        'or self.check_http_output(method, path, sensitive=sample, json=payload) takes the actual current-test '
-        'new_password() STRING as sensitive, never the name "password", a list, a dict or a password keyword. '
+        'or self.check_http_output(method, path, sensitive=sample, json=payload) uses an actual current-test '
+        'new_password() STRING for complete observations, never the name "password", a list, a dict or a password keyword. '
+        'The bound self method supplies its own started client; omit client there. If client=self.client is '
+        'explicitly supplied it must be exactly the same started self.client, never a replacement. '
+        'For empty/missing/null negative input, keep the invalid input and use the empty runtime sample or '
+        'sensitive=None. Empty/None executes the request with NO_SAMPLE observations, not CHECKED. '
+        'Nonempty short samples and lost/truncated outputs remain INCOMPLETE. '
+        'Include a real current-test synthetic sample in a positive request to observe output channels; '
+        'never turn an invalid-input case into a valid one or treat missing observation as PASS. '
         'The Host handles isolated DB and lifespan; it does not '
         'create missing product tables. TEST_HOST_MEMBER_MISSING: self.fresh_email and self.new_password are not '
         'Host members; create a local fresh_email (for example with uuid4) and import new_password from '

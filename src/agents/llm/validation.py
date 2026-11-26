@@ -30,7 +30,7 @@ REASONS = MappingProxyType({
         ('TEST_IMPORT_NAME_MISSING', '제품에 없는 이름을 검사 코드에서 불러왔습니다.'),
         ('TEST_HOST_FIXTURE_REQUIRED', '승인된 검사 준비 기능을 사용해야 합니다.'),
         ('TEST_SERVICE_FIXTURE_REQUIRED', '일반 서비스의 공통 검사 준비 기능을 사용해야 합니다.'),
-        ('TEST_OUTPUT_ARGUMENT_INVALID', '출력 검사에 실제 합성 문자열과 올바른 인자를 전달해야 합니다.'),
+        ('TEST_OUTPUT_ARGUMENT_INVALID', '출력 검사에 지원되는 합성 입력 또는 빈 입력 옵션을 전달해야 합니다.'),
         ('SERVICE_JSON_REQUIRED', '합의된 JSON 준비 응답 대신 다른 형식을 반환합니다.'),
         ('ASSIGNED_REQUIREMENT_WITHOUT_CASE', '할당된 요구사항의 검사 항목이 빠졌습니다.'),
         ('ASSIGNED_REQUIREMENT_WITHOUT_REVIEW', '할당된 요구사항의 검토 항목이 빠졌습니다.'),

@@ -86,9 +86,11 @@ def _service_fixture_issues(path):
         parameters = ('method', 'path') if bound else ('client', 'method', 'path')
         positionals = set(parameters[:len(node.args)])
         named = {k.arg for k in node.keywords if k.arg in parameters}
+        empty_or_absent = isinstance(sample, ast.Constant) and (
+            sample.value is None or type(sample.value) is str and sample.value == '')
         if (len(node.args) > len(parameters) or positionals & named
                 or positionals | named != set(parameters) or sample is None
-                or isinstance(sample, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set))):
+                or isinstance(sample, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set)) and not empty_or_absent):
             issues.add('TEST_OUTPUT_ARGUMENT_INVALID')
     return issues
 

@@ -387,6 +387,10 @@ def compact_fix_input(task_input, *, repair_history=None, issue_records=(), sour
         brief['unitFailureInstruction'] = (
             'These are value-free observed symptoms on active fix targets, not confirmed root causes. '
             'For an actualStatus/expectedStatus mismatch, preserve serviceDesign and repair the implementation. '
+            'If invalid input received 2xx where 4xx was expected, repair that validation path before hashing '
+            'or writing data. A required Pydantic str field rejects missing input but still accepts an empty '
+            'string unless the model or handler validates it. Preserve the failed negative case and its '
+            'agreed status; do not turn its input into a valid request or change the test to expect success. '
             'FastAPI can return 422 before entering a request-model endpoint; when 400 is agreed, inspect '
             'the application RequestValidationError handler rather than adding a missing-field check inside '
             'that endpoint. For DATABASE_TABLE_MISSING, check application startup and test lifespan first; '

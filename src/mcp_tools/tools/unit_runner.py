@@ -29,7 +29,7 @@ MAX_CASES = 1000
 MAX_OUTPUT_BYTES = 1024 * 1024
 MAX_ID_BYTES = 512
 MAX_DETAILS_BYTES = 4096
-TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V1"
+TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V2"
 TEST_DATA_MODULE = "_host_test_data"
 TEST_DATA_EXPORTS = ("new_password", "check_http_output")
 MAX_TEST_PASSWORD_LENGTH = 4096
@@ -43,10 +43,13 @@ SERVICE_FIXTURE_EXPORTS = ('ServiceTestCase',)
 def service_fixture_contract():
     return {'module': SERVICE_FIXTURE_MODULE, 'class': 'ServiceTestCase', 'inherits': 'unittest.TestCase',
         'attributes': ['client', 'app'], 'createsProductTables': False,
-        'policy': 'HOST_GENERIC_SERVICE_LIFESPAN_V1',
+        'policy': 'HOST_GENERIC_SERVICE_LIFESPAN_V3',
         'instruction': 'Subclass ServiceTestCase and use self.client in test methods. Do not import main/database/models at module level, construct TestClient, or override setup/teardown/run. The Host enters the real main.app lifespan with an isolated DATABASE_URL before each test and cleans up afterwards. It never creates product tables or changes dependencies. Pure non-HTTP unit tests can remain ordinary TestCase.',
         'methods': {'check_http_output': {'parameters': ['method', 'path'], 'keywordOnly': ['sensitive'],
-            'returns': 'httpx.Response', 'instruction': 'sensitive is the actual current-test new_password() STRING in the request, not a field name, list or dict. Pass json/data/headers as request keywords.'}}}
+            'optionalKeywordOnly': ['client'], 'clientPolicy': 'Omit client; if supplied it must be this test self.client.',
+            'returns': 'httpx.Response', 'example': 'self.check_http_output(method, path, sensitive=sample, json=payload)',
+            'negativeInputPolicy': 'Empty input and sensitive=None execute the request but record NO_SAMPLE, never CHECKED. Nonempty short runtime samples, lost or truncated output remain INCOMPLETE; encoded hash exposure still fails. A current-test synthetic sample of 8+ characters in a request permits complete observations; this is an observation threshold, not a product password rule.',
+            'instruction': 'This bound method already supplies self.client. The module-level _host_test_data.check_http_output takes client as its first argument. sensitive is the actual current-test new_password() string in the request; for empty/absent input use the empty sample or None. Never pass a field name, list or dict. Pass json/data/headers as request keywords.'}}}
 
 
 @contextmanager
@@ -94,7 +97,12 @@ def _service_app_test_api(source_root):
             self.app = importlib.import_module('main').app
             self.client = resources.enter_context(TestClient(self.app, raise_server_exceptions=False))
 
-        def check_http_output(self, method, path, *, sensitive, **request):
+        def check_http_output(self, method, path, *, sensitive, client=None, **request):
+            # Accept the module helper's explicit-client spelling only when it
+            # names the already-started client of this very test. Never let an
+            # arbitrary client bypass the Host-owned lifespan.
+            if client is not None and client is not self.client:
+                raise ValueError('HOST_SERVICE_CLIENT_MISMATCH')
             return sys.modules[TEST_DATA_MODULE].check_http_output(
                 self.client, method, path, sensitive=sensitive, **request)
 
@@ -652,6 +660,8 @@ def _test_data_api(issued_passwords=None, exposure_checks=None, state=None):
         value = _new_test_password(length, kind)
         if issued_passwords is not None and len(value) >= 8:
             issued_passwords.add(value)
+        if state is not None and state.get('test') is not None:
+            state.setdefault('httpTestSamples', set()).add(value)
         return value
     module.new_password = new_password
     def check_http_output(client, method, path, *, sensitive, **request):
@@ -664,11 +674,28 @@ def _test_data_api(issued_passwords=None, exposure_checks=None, state=None):
         current = state.get('test') if state is not None else None
         if current is None or exposure_checks is None:
             raise ValueError('GENERATED_SECURITY_OBSERVATION_UNAVAILABLE')
-        if (type(sensitive) is not str or len(sensitive) < 8 or issued_passwords is None
-                or sensitive not in issued_passwords or not _contains_password(request, sensitive)
+        no_secret = sensitive is None or type(sensitive) is str and sensitive == ''
+        current_sample = (type(sensitive) is str and state is not None
+                          and sensitive in state.get('httpTestSamples', ())
+                          and _contains_password(request, sensitive))
+        qualified = (type(sensitive) is str and len(sensitive) >= 8 and issued_passwords is not None
+                     and sensitive in issued_passwords and _contains_password(request, sensitive))
+        if (not (no_secret or current_sample or qualified)
                 or method not in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
                 or type(path) is not str or not path.startswith('/') or path.startswith('//')):
             raise ValueError('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST')
+        request_method = getattr(client, 'request', None)
+        if not callable(request_method):
+            raise ValueError('HOST_HTTP_REQUEST_ARGUMENT_INVALID')
+        try:
+            signature = inspect.signature(request_method)
+        except (TypeError, ValueError):
+            signature = None  # An opaque client remains authoritative at invocation.
+        if signature is not None:
+            try:
+                signature.bind(method, path, **request)
+            except TypeError:
+                raise ValueError('HOST_HTTP_REQUEST_ARGUMENT_INVALID') from None
         stream, response = _BoundedOutput(), None
         formatted = logging.StreamHandler.format
         def observe_format(handler, record):
@@ -677,11 +704,12 @@ def _test_data_api(issued_passwords=None, exposure_checks=None, state=None):
             return text
         def record(channel, content, incomplete=False):
             text = content.decode('utf-8', errors='replace') if isinstance(content, bytes) else content
-            escaped = json.dumps(sensitive, ensure_ascii=True)[1:-1]
-            exposed = sensitive in text or escaped in text or re.search(r'\$(?:argon2(?:id|i|d)\$|2[aby]\$)[^\s"\x27<>]{12,}', text) is not None
-            outcome = 'EXPOSED' if exposed else 'INCOMPLETE' if incomplete else 'CHECKED'
+            escaped = json.dumps(sensitive, ensure_ascii=True)[1:-1] if qualified else None
+            exposed = (qualified and (sensitive in text or escaped in text)) or re.search(r'\$(?:argon2(?:id|i|d)\$|2[aby]\$)[^\s"\x27<>]{12,}', text) is not None
+            outcome = ('EXPOSED' if exposed else 'INCOMPLETE' if incomplete or not (qualified or no_secret)
+                       else 'CHECKED' if qualified else 'NO_SAMPLE')
             marks = exposure_checks.setdefault(current, {})
-            rank = {'CHECKED': 0, 'INCOMPLETE': 1, 'EXPOSED': 2}
+            rank = {'NO_SAMPLE': 0, 'CHECKED': 1, 'INCOMPLETE': 2, 'EXPOSED': 3}
             if rank[outcome] >= rank.get(marks.get(channel), -1):
                 marks[channel] = outcome
             return exposed
@@ -988,24 +1016,81 @@ def app_fixture_source_issues(source):
     return issues[:32]
 
 
+def _http_helper_usage_reason(test, err):
+    """Only proven Host-helper argument failures, never response/app failures."""
+    if err[0] not in (TypeError, ValueError):
+        return None
+    helper = getattr(sys.modules.get(TEST_DATA_MODULE), 'check_http_output', None)
+    service = getattr(sys.modules.get(SERVICE_FIXTURE_MODULE), 'ServiceTestCase', None)
+    try:
+        method = inspect.getattr_static(type(test), test._testMethodName)
+        frame = err[2]
+        while frame and frame.tb_frame.f_code is not method.__code__:
+            frame = frame.tb_next
+        if frame is None:
+            return None
+        terminal = frame
+        while terminal.tb_next:
+            terminal = terminal.tb_next
+        original = service.check_http_output if service is not None and isinstance(test, service) else None
+        bound_is_original = original is not None and inspect.getattr_static(test, 'check_http_output') is original
+        if err[0] is ValueError:
+            if (helper is not None and terminal.tb_frame.f_code is helper.__code__
+                    and err[1].args in (('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST',),
+                                       ('HOST_HTTP_REQUEST_ARGUMENT_INVALID',))):
+                return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+            if (bound_is_original and terminal.tb_frame.f_code is original.__code__
+                    and terminal.tb_frame.f_locals.get('self') is test
+                    and err[1].args == ('HOST_SERVICE_CLIENT_MISMATCH',)):
+                return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+            return None
+        if terminal is not frame:
+            return None  # Product/request/library TypeErrors remain measured failures.
+        # Python rejects a bad signature before entering the helper. Prove the
+        # exact CALL position and actual callee identity, then bind placeholders
+        # to its signature. Never evaluate expressions or inspect input values.
+        import dis
+        position = next((i.positions for i in dis.get_instructions(method)
+                         if i.offset == frame.tb_lasti), None)
+        if position is None:
+            return None
+        lines, first = inspect.getsourcelines(method)
+        indentation = len(lines[0]) - len(lines[0].lstrip())
+        tree = ast.parse(textwrap.dedent(''.join(lines)))
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call) or node.lineno + first - 1 != position.lineno
+                    or node.col_offset + indentation != position.col_offset
+                    or any(k.arg is None for k in node.keywords)
+                    or any(isinstance(arg, ast.Starred) for arg in node.args)):
+                continue
+            function, leading = None, ()
+            if (bound_is_original and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'check_http_output' and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == 'self'):
+                function, leading = original, (test,)
+            elif isinstance(node.func, ast.Name):
+                actual = frame.tb_frame.f_locals.get(node.func.id, frame.tb_frame.f_globals.get(node.func.id))
+                if actual is helper:
+                    function = helper
+            if function is not None:
+                try:
+                    inspect.signature(function).bind(*leading, *(object() for _ in node.args),
+                        **{k.arg: object() for k in node.keywords})
+                except TypeError:
+                    return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+    except (AttributeError, OSError, TypeError, ValueError, SyntaxError, RecursionError):
+        pass
+    return None
+
+
 def _fixture_usage_reason(test, err):
     """Bind a closed repair code to the actual failing frame and the unchanged Host API."""
     # A bad generic-helper argument is a test preparation error, not a product
     # defect. Bind to the actual Host function frame; an app/test raising the
     # same words elsewhere cannot acquire this not-run classification.
-    if err[0] is ValueError and err[1].args == ('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST',):
-        helper = getattr(sys.modules.get(TEST_DATA_MODULE), 'check_http_output', None)
-        try:
-            method = inspect.getattr_static(type(test), test._testMethodName)
-            frame, belongs_to_test = err[2], False
-            while frame:
-                belongs_to_test |= frame.tb_frame.f_code is method.__code__
-                if frame.tb_next is None:
-                    if helper is not None and belongs_to_test and frame.tb_frame.f_code is helper.__code__:
-                        return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
-                frame = frame.tb_next
-        except (AttributeError, TypeError):
-            pass
+    http_reason = _http_helper_usage_reason(test, err)
+    if http_reason is not None:
+        return http_reason
     fixture = getattr(sys.modules.get(APP_FIXTURE_MODULE), 'AppTestCase', None)
     if fixture is None or not isinstance(test, fixture) or err[0] not in (AttributeError, AssertionError, TypeError, ValueError, KeyError):
         return None
@@ -1166,6 +1251,7 @@ class _Result(unittest.TestResult):
         super().startTest(test)
         if self.observer_state is not None:
             self.observer_state['test'] = test
+            self.observer_state['httpTestSamples'] = set()
         if self.issued_passwords is not None:
             self.issued_passwords.clear()
         test_id = self._id(test)
@@ -1184,6 +1270,7 @@ class _Result(unittest.TestResult):
     def stopTest(self, test):
         if self.observer_state is not None:
             self.observer_state.pop('test', None)
+            self.observer_state.pop('httpTestSamples', None)
         test_id = self.active.pop(id(test), None)
         if test_id is None or self.rows[test_id]["outcome"] is None:
             self.invalid = True

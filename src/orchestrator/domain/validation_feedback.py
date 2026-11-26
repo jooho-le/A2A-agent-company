@@ -61,7 +61,9 @@ def validated_signup_checks(value):
 
 def validated_output_checks(marks):
     if (type(marks) is not dict or not marks or marks.keys() - OUTPUT_CHANNELS
-            or any(v not in ('CHECKED', 'EXPOSED', 'INCOMPLETE') for v in marks.values())):
+            or any(v not in ('CHECKED', 'EXPOSED', 'INCOMPLETE', 'NO_SAMPLE') for v in marks.values())
+            or any(value == 'NO_SAMPLE' and channel not in ('REQUEST_LOGS', 'OTHER_RESPONSE')
+                   for channel, value in marks.items())):
         raise ValueError('INVALID_OUTPUT_OBSERVATIONS')
     return dict(marks)
 

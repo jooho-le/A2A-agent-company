@@ -114,7 +114,7 @@ def unit_test_data_contract():
                 "parameters": ["client", "method", "path"], "keywordOnly": ["sensitive"],
                 "requestArguments": "json/data/headers/params follow the actual TestClient request API",
                 "returns": "httpx.Response; raises REQUEST_OUTPUT_EXPOSURE when a synthetic secret or encoded hash is exposed",
-                "instruction": "Import check_http_output from _host_test_data. Pass your started TestClient and real serviceDesign route. sensitive must be a current-test new_password() value present in the request. The Host observes response, headers and Python request logs without publishing values. This does not inspect DB storage or establish authorization correctness."},
+                "instruction": "Import check_http_output from _host_test_data. Pass your started TestClient and real serviceDesign route. sensitive is a current-test new_password() value present in the request; use the empty sample or None for empty/missing/null input. Negative requests still execute. Empty input and None record NO_SAMPLE, never CHECKED. Nonempty short runtime samples and lost/truncated output remain INCOMPLETE. Use a current-test 8+ character synthetic sample in a request for complete observations; that length is not a product acceptance rule. Encoded hash exposure always fails. The Host observes response, headers and Python request logs without publishing values. This does not inspect DB storage or establish authorization correctness."},
             "example": PASSWORD_FIXTURE_EXAMPLE,
             "authoringPolicy": CREDENTIAL_TEST_AUTHORING_POLICY,
             "boundaryExample": PASSWORD_BOUNDARY_EXAMPLE,

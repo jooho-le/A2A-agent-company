@@ -75,12 +75,34 @@ def run_trusted_app(tmp_path, *, create_table=True, start_fail=False, mode='ordi
                 result = self.client.get('/')
                 self.assertEqual(result.status_code, 200)
                 self.assertEqual(result.json(), {'rows': 0, 'started': True})
-                if mode in {'output', 'bad_helper', 'forged_helper_error'}:
+                if mode in {'output', 'bad_helper', 'forged_helper_error', 'client_keyword', 'wrong_client',
+                            'missing_bound_path', 'missing_module_client', 'unrelated_typeerror',
+                            'bad_request_keyword', 'inner_request_typeerror'}:
                     sample = sample_factory()
                     if mode == 'forged_helper_error':
                         raise ValueError('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST')
-                    result = self.check_http_output('POST', '/items', sensitive=sample,
-                        json={'password': 'different-request-value' if mode == 'bad_helper' else sample})
+                    if mode in {'client_keyword', 'wrong_client'}:
+                        result = self.check_http_output(client=self.client if mode == 'client_keyword' else object(),
+                            method='POST', path='/items', sensitive=sample, json={'password': sample})
+                    elif mode == 'missing_bound_path':
+                        result = self.check_http_output(method='POST', sensitive=sample, json={'password': sample})
+                    elif mode == 'missing_module_client':
+                        observe = sys.modules[unit_runner.TEST_DATA_MODULE].check_http_output
+                        result = observe(method='POST', path='/items', sensitive=sample, json={'password': sample})
+                    elif mode == 'bad_request_keyword':
+                        result = self.check_http_output('POST', '/items', sensitive=sample,
+                            json={'password': sample}, unsupported_request_option=True)
+                    elif mode == 'inner_request_typeerror':
+                        class Client:
+                            def request(self, method, path, **kwargs):
+                                raise TypeError('trusted fixture request implementation failure')
+                        observe = sys.modules[unit_runner.TEST_DATA_MODULE].check_http_output
+                        result = observe(Client(), 'POST', '/items', sensitive=sample, json={'password': sample})
+                    else:
+                        result = self.check_http_output('POST', '/items', sensitive=sample,
+                            json={'password': 'different-request-value' if mode == 'bad_helper' else sample})
+                    if mode == 'unrelated_typeerror':
+                        len(None)
                 else:
                     result = self.client.post('/items', json={'title': 'fixture'})
                 self.assertEqual(result.status_code, 200)

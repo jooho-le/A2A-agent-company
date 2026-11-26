@@ -67,10 +67,11 @@ def _generated_observations(row):
         marks = validated_output_checks(row.get('outputChecks'))
     except ValueError:
         return None
-    if (all(value == 'INCOMPLETE' for value in marks.values())
+    if (all(value in ('INCOMPLETE', 'NO_SAMPLE') for value in marks.values())
             or row.get('outcome') == 'FAIL' and 'EXPOSED' not in marks.values()):
         return None
-    grades = {'CHECKED': ('PASS', False), 'EXPOSED': ('FAIL', True), 'INCOMPLETE': ('UNVERIFIED', None)}
+    grades = {'CHECKED': ('PASS', False), 'EXPOSED': ('FAIL', True), 'INCOMPLETE': ('UNVERIFIED', None),
+              'NO_SAMPLE': ('UNVERIFIED', None)}
     return {('generated_output', channel): {
         'kind': 'assertion', 'status': grades[mark][0], 'actual': grades[mark][1], 'reason': mark
     } for channel, mark in marks.items()}

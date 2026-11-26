@@ -25,6 +25,9 @@ def service_output_coverage(design, cases):
     coverage = {}
     for channel in ('REQUEST_LOGS', 'OTHER_RESPONSE'):
         observed = [row.get('outputChecks', {}).get(channel) for row in cases]
+        # NO_SAMPLE executes a negative request without inventing positive
+        # evidence. A real CHECKED sample is still required; actual lost or
+        # truncated observations (INCOMPLETE) continue to block a PASS.
         coverage[channel] = ('FAIL' if 'EXPOSED' in observed else 'UNVERIFIED' if 'INCOMPLETE' in observed
             else 'PASS' if any(row.get('outcome') == 'PASS' and row.get('outputChecks', {}).get(channel) == 'CHECKED'
                                for row in cases) else 'UNVERIFIED')
