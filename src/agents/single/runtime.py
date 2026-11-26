@@ -307,7 +307,8 @@ class SingleAgentExecutor(AgentExecutor):
                 options.update(finding_ids=measured.finding_ids, source_paths=measured.source_paths)
                 if services.test_selectors:
                     from agents.roles.security_draft import SecurityTestDraft, TEST_PLAN_INSTRUCTIONS
-                    draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256)
+                    draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256,
+                        pending_requirement_ids=execution.metadata.requirement_ids)
                     task_input["sourceReferenceCatalog"] = draft_wire.catalog
                     wanted.add("write_test_file")
                     selectors = {"run_unit_tests": services.test_selectors}
@@ -495,14 +496,17 @@ class SingleAgentExecutor(AgentExecutor):
 
 def _contract_explainer(role, execution, services, measured, *, decode=lambda data: data):
     from agents.roles.contract_explain import qa_issues, security_issues
+    from agents.roles.security_draft import SecurityTestDraft
     from orchestrator.domain.scenario_registry import RequirementValidator
     if role is AgentRole.QA:
         ids = execution.scenario.requirement_ids_for(RequirementValidator.QA)
         return lambda data: qa_issues(data, ids, services.selectors)
     if role is AgentRole.SECURITY:
         ids = execution.scenario.requirement_ids_for(RequirementValidator.SECURITY)
-        return lambda data: security_issues(decode(data), ids, measured.finding_ids, measured.source_paths,
-                                            services.test_selectors or None)
+        explain = lambda value: security_issues(value, ids, measured.finding_ids, measured.source_paths,
+                                                services.test_selectors or None)
+        wire = getattr(decode, '__self__', None)
+        return (lambda data: wire.explain(data, explain)) if isinstance(wire, SecurityTestDraft) else lambda data: explain(decode(data))
     return None
 
 

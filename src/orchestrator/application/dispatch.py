@@ -1227,7 +1227,9 @@ class PlannerRunDispatcher:
                     actual_result=test.actual_result or test.details or "Required QA assertion failed.",
                     normalized_location=test.normalized_location or test.test_id,
                     evidence_refs=(test.tool_evidence.evidence_ref,) if test.tool_evidence else (),
-                    cause_status="CONFIRMED",
+                    # A failed assertion/exception is measured, but does not
+                    # by itself identify whether Source or test setup caused it.
+                    cause_status="UNKNOWN",
                     consecutive_repeat_count=0,
                 )
             )

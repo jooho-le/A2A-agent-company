@@ -23,8 +23,9 @@ the Run as UNVERIFIED with recovery evidence. No ID is guessed or normalized.
 
 Some test-file defects make the Host run a correct product as FAIL, or a broken
 test as PASS. They are named here too (2026-11-17, Run 42f131fe and Codex's
-offline review). The engine only buys one regeneration for them; whatever the
-model returns still goes to the Host run, so these never fail a step:
+offline review). Known defects now require a real test-file write within the
+existing correction budget. An unchanged invalid draft stops as a validator
+technical failure before product execution; it never becomes a product FAIL:
 
 * ``GENERATED_TEST_SYNTAX_INVALID``: the file does not parse, so nothing runs;
 * ``GENERATED_TEST_NONE``: a scope whose files show test code (a ``TestCase``
@@ -61,17 +62,31 @@ def _base_name(node):
 
 def _starts_test_client(tree) -> bool:
     """False when a ``TestClient(...)`` is made outside a ``with`` and nothing else enters it."""
-    in_with, made = set(), []
+    in_with, made, bindings = set(), [], {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if isinstance(value, ast.Call) and _base_name(value.func) == 'TestClient':
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    bindings[ast.dump(target, include_attributes=False).replace('Store()', 'Load()')] = id(value)
+    def entered(expression):
+        if isinstance(expression, ast.Call) and _base_name(expression.func) == 'TestClient':
+            in_with.add(id(expression))
+        else:
+            identity = bindings.get(ast.dump(expression, include_attributes=False))
+            if identity is not None:
+                in_with.add(identity)
     for node in ast.walk(tree):
         if isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
-                in_with.add(id(item.context_expr))
-                if not isinstance(item.context_expr, ast.Call):
-                    return True  # ``with client:`` on a client made earlier: assume it is entered
-        elif isinstance(node, ast.Attribute) and node.attr in (
-                '__enter__', 'enter_context', 'enterContext', 'enterClassContext'):
-            return True
-        elif isinstance(node, ast.Call) and _base_name(node.func) == 'TestClient':
+                entered(item.context_expr)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == '__enter__':
+                entered(node.func.value)
+            elif node.func.attr in ('enter_context', 'enterContext', 'enterClassContext') and node.args:
+                entered(node.args[0])
+        if isinstance(node, ast.Call) and _base_name(node.func) == 'TestClient':
             made.append(node)
     return all(id(call) in in_with for call in made)
 

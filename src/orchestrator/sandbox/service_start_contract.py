@@ -9,7 +9,7 @@ import inspect
 from orchestrator.domain.developer_artifacts import BuildDiagnostic
 from orchestrator.domain.service_design import ServiceDesign
 
-SERVICE_START_POLICY = "SERVICE_START_AND_SHARED_INTERFACE_V1"
+SERVICE_START_POLICY = "SERVICE_START_AND_SHARED_INTERFACE_V2"
 
 
 def service_start_failure_code(error, current_code):
@@ -58,6 +58,24 @@ def service_interface_failure(schema, design, ready_status, content_type):
             if isinstance(model.get('properties'), dict) and not set(endpoint['requestFields']) <= set(model['properties']):
                 return 'SERVICE_REQUEST_FIELDS_MISMATCH'
     return None
+
+
+def service_validation_requests(schema, design):
+    """Known required JSON bodies with an explicit 400 rejection policy."""
+    targets = []
+    for endpoint in design['endpoints']:
+        statuses = endpoint['rejectionStatuses']
+        if (endpoint['bodyFormat'] != 'JSON' or endpoint['method'] not in ('POST', 'PUT', 'PATCH')
+                or '{' in endpoint['path'] or 400 not in statuses or 422 in statuses):
+            continue
+        operation = schema.get('paths', {}).get(endpoint['path'], {}).get(endpoint['method'].lower(), {})
+        model = operation.get('requestBody', {}).get('content', {}).get('application/json', {}).get('schema', {})
+        ref = model.get('$ref')
+        if isinstance(ref, str) and ref.startswith('#/components/schemas/'):
+            model = schema.get('components', {}).get('schemas', {}).get(ref.split('/')[-1], {})
+        if isinstance(model.get('required'), list) and model['required']:
+            targets.append((endpoint['method'], endpoint['path'], tuple(statuses)))
+    return targets
 
 
 _PROBE = r'''
@@ -110,6 +128,11 @@ try:
         if problem:
             code = problem
             raise ValueError()
+        for method, path, accepted in service_validation_requests(app.openapi(), design):
+            rejection = client.request(method, path, json={})
+            if rejection.status_code not in accepted:
+                code = 'SERVICE_INPUT_REJECTION_MISMATCH'
+                raise ValueError()
     code = 'PASS'
 except BaseException as error:
     code = service_start_failure_code(error, code)
@@ -151,6 +174,7 @@ _MESSAGES = {
     "SERVICE_ENDPOINT_MISSING": "Implement every method/path in the shared serviceDesign; do not change QA to target another route.",
     "SERVICE_REQUEST_ENCODING_MISMATCH": "The actual API request encoding differs from serviceDesign. Preserve the agreed JSON/FORM interface and fix the product.",
     "SERVICE_REQUEST_FIELDS_MISMATCH": "Expose the agreed serviceDesign request fields in the API body schema.",
+    "SERVICE_INPUT_REJECTION_MISMATCH": "An empty required JSON body did not return an agreed rejectionStatuses response. FastAPI validates request models BEFORE entering the endpoint. Register a RequestValidationError handler on main.app returning the agreed value-free 400 response when 422 is not approved. An empty-field check inside the endpoint or an HTTPException-only handler cannot fix this earlier path. Preserve all business rejection rules, do not change QA expectations, and never echo exc.body, str(exc), raw exc.errors() or credentials.",
     "SERVICE_DATABASE_UNAVAILABLE": "The original database.get_db connection is not usable after the application's lifespan started. Restore initialization and the same isolated SQLite connection; do not make QA create product tables.",
     "SERVICE_DEPENDENCY_IMPORT_FAILED": "A required import is unavailable in the approved runtime. Use runtimeCapabilities and the immutable dependency lock; do not install a new package.",
     "SERVICE_MODEL_PRIMARY_KEY_REQUIRED": "A SQLAlchemy model has no primary key, so importing the model fails before lifespan or create_tables() can run. Define a real primary key on the reported model (for example an id column with primary_key=True, or an appropriate natural/composite key), preserving existing fields and constraints. Adding engine imports or a create_tables() function cannot repair the mapper definition.",
@@ -164,9 +188,16 @@ _MESSAGES = {
 
 def service_build_argv(design, python_executable="/usr/local/bin/python"):
     checked = design if isinstance(design, ServiceDesign) else ServiceDesign.model_validate(design)
-    payload = json.dumps(checked.model_dump(mode="json", by_alias=True), separators=(",", ":"), ensure_ascii=False)
+    # The probe consumes only these machine fields. Free prose such as
+    # "password_hash: str" is a plan description, not an executable argument;
+    # sending it as argv also triggers the unchanged credential-assignment guard.
+    # The complete design stays in the immutable Requirement and agent input.
+    contract = checked.model_dump(mode="json", by_alias=True,
+        include={'delivery', 'endpoints', 'storage'})
+    payload = json.dumps(contract, separators=(",", ":"), ensure_ascii=False)
     # Data travels in a separate argv, never interpolated into source code.
-    program = inspect.getsource(service_start_failure_code) + '\n' + inspect.getsource(service_interface_failure) + '\n' + _PROBE
+    program = (inspect.getsource(service_start_failure_code) + '\n' + inspect.getsource(service_interface_failure)
+               + '\n' + inspect.getsource(service_validation_requests) + '\n' + _PROBE)
     return (python_executable, "-I", "-X", "pycache_prefix=/work/pycache", "-c", f'exec({program!r})', payload)
 
 

@@ -285,7 +285,8 @@ class SecurityAgentExecutor(AgentExecutor):
                     wanted.add("write_test_file")
                     task_input["testSelectors"] = {"run_unit_tests": list(services.test_selectors)}
                     task_input["testTargets"] = _test_targets(services, execution)
-                    draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256)
+                    draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256,
+                        pending_requirement_ids=execution.metadata.requirement_ids)
                     task_input["sourceReferenceCatalog"] = draft_wire.catalog
                     task_input["runtimeInstructions"] = _TEST_INSTRUCTIONS + ' ' + TEST_PLAN_INSTRUCTIONS
                 tools = tuple(tool for tool in tracked.list_tools() if tool.name in wanted)
@@ -344,8 +345,11 @@ class SecurityAgentExecutor(AgentExecutor):
                             (lambda data: generated_case_expectation_issues(data, field="testCases",
                                 configuration=execution.configuration, metadata=execution.metadata,
                                 role=AgentRole.SECURITY)) if services.test_selectors else None,
-                            explain=lambda data: security_issues(decode(data), execution.metadata.requirement_ids,
-                                measured.finding_ids, measured.source_paths, services.test_selectors or None),
+                            explain=lambda data: (draft_wire.explain(data, lambda value: security_issues(
+                                value, execution.metadata.requirement_ids, measured.finding_ids,
+                                measured.source_paths, services.test_selectors or None)) if draft_wire is not None
+                                else security_issues(data, execution.metadata.requirement_ids,
+                                    measured.finding_ids, measured.source_paths, services.test_selectors or None)),
                             extra_checks=(("GENERATED_TESTS_INVALID", services.generated_test_issues),
                                           ("CODE_REFERENCE_INVALID", lambda data: (
                                               draft_wire.reference_issues(services, measured, data) if draft_wire is not None

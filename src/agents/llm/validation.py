@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 FIELDS = frozenset('workspaceId path content oldText newText expectedSha256 patch baseSnapshotSha256 snapshotId testScope testSuite scannerProfile reportRef answer summary questions kind implementationPlan taskId title description requirementIds dependsOn unapprovedAssumptions cases testCases toolName selector testId requirementId expectedResult sourceRefs quote sourceRef evidence reasonCode status findings requirementResults findingId severity disposition rationale ruleId ruleIds location references file line column codeVersion schemaVersion fieldReviews candidateSha256 basisSha256 sha256 sizeBytes changed changedFiles newHashes exitCode stdoutRef stderrRef durationMs executionManifestId total passed failed skipped traceRefs testResult securityResult'.split())
+FIELDS = FIELDS | frozenset({'requirementReviews', 'findingReviews', 'proposedOutcome',
+    'proposedDisposition', 'anchorId', 'startLine', 'endLine'})
 PATH = r'^(?:/(?:' + '|'.join(sorted(FIELDS)) + r'|[0-9]{1,6}))*$'
 STAGES = Literal['TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'TOOL_RESULT',
                  'TOOL_RESULT_REDACTED', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED']
@@ -17,6 +19,42 @@ TOOLS = Literal['read_project_file', 'write_source_file', 'edit_source_file', 'w
                 'read_test_report', 'read_security_report']
 TYPES = Literal['object', 'array', 'string', 'integer', 'number', 'boolean', 'null', 'unknown']
 REASONS = MappingProxyType({
+    **{code: text for code, text in (
+        ('TEST_CLIENT_NOT_STARTED', '검사 코드가 앱의 시작·종료 절차를 실행하지 않았습니다.'),
+        ('GENERATED_TEST_SYNTAX_INVALID', '검사 코드의 Python 문법을 수정해야 합니다.'),
+        ('GENERATED_TEST_NONE', '실제로 실행 가능한 검사 메서드가 없습니다.'),
+        ('GENERATED_TEST_FILE_MISSING', '필수 검사 파일이 없습니다.'),
+        ('TEST_IN_FILE_NOT_DECLARED', '파일에 있는 검사가 결과서 목록에 없습니다.'),
+        ('DECLARED_TEST_NOT_IN_FILE', '결과서에 적힌 검사가 실제 파일에 없습니다.'),
+        ('ASYNC_TEST_IN_SYNC_CASE', '비동기 검사를 동기 TestCase로 실행할 수 없습니다.'),
+        ('TEST_IMPORT_NAME_MISSING', '제품에 없는 이름을 검사 코드에서 불러왔습니다.'),
+        ('TEST_HOST_FIXTURE_REQUIRED', '승인된 검사 준비 기능을 사용해야 합니다.'),
+        ('ASSIGNED_REQUIREMENT_WITHOUT_CASE', '할당된 요구사항의 검사 항목이 빠졌습니다.'),
+        ('ASSIGNED_REQUIREMENT_WITHOUT_REVIEW', '할당된 요구사항의 검토 항목이 빠졌습니다.'),
+        ('CASE_DUPLICATE', '동일한 검사 식별자가 중복됐습니다.'),
+        ('CASE_REQUIREMENT_NOT_ASSIGNED', '할당되지 않은 요구사항을 검사 항목에 사용했습니다.'),
+        ('REQUIREMENT_DUPLICATE', '요구사항 검토가 중복됐습니다.'),
+        ('REQUIREMENT_NOT_ASSIGNED', '할당되지 않은 요구사항을 사용했습니다.'),
+        ('FINDING_DUPLICATE', '보안 발견 항목의 검토가 중복됐습니다.'),
+        ('FINDING_NOT_MEASURED', '실제 검사기에 없는 발견 항목을 사용했습니다.'),
+        ('MEASURED_FINDING_WITHOUT_REVIEW', '실제 보안 발견 항목의 검토가 빠졌습니다.'),
+        ('FIELD_MISSING', '필수 결과서 필드가 없습니다.'),
+        ('FIELD_NOT_ALLOWED', '허용되지 않은 결과서 필드가 있습니다.'),
+        ('QUESTIONS_NOT_ALLOWED_WHEN_READY', '완료 결과서에 입력 요청을 함께 넣을 수 없습니다.'),
+        ('SELECTOR_NOT_ALLOWED', '승인되지 않은 검사 범위를 사용했습니다.'),
+        ('REFERENCE_PATH_NOT_MEASURED', '현재 Source에 없는 참조를 사용했습니다.'),
+        ('REFERENCE_LINES_INVALID', '소스 참조의 줄 범위가 올바르지 않습니다.'),
+        ('REFERENCES_REQUIRED_FOR_OUTCOME', '검토 판단의 소스 근거가 없습니다.'),
+        ('REFERENCE_FILE_NOT_READ', '현재 단계에서 읽지 않은 소스를 참조했습니다.'),
+        ('REFERENCE_PAST_END_OF_FILE', '파일 끝을 넘는 소스 범위를 참조했습니다.'),
+        ('REFERENCE_DUPLICATE', '소스 참조가 중복됐습니다.'),
+        ('REFERENCE_RANGE_TOO_LONG', '소스 참조 범위가 너무 깁니다.'),
+        ('TOO_MANY_REFERENCES', '허용된 소스 참조 수를 초과했습니다.'),
+        ('TEXT_CONTROL_CHARACTER', '결과서 문자열에 제어문자가 있습니다.'),
+        ('TEXT_LOOKS_LIKE_SECRET', '결과서 문자열에서 인증정보 패턴이 감지됐습니다.'),
+        ('PENDING_STATE_REQUIRED', '실행 전 보안 검토는 Host 검사 대기 상태여야 합니다.'),
+        ('SOURCE_ANCHOR_INVALID', '현재 Snapshot의 소스 참조 식별자가 아닙니다.'),
+    )},
     'JSON_INVALID': '완전하고 유효한 JSON 문서가 아닙니다.',
     'TYPE_INVALID': '필드의 자료형이 규격과 다릅니다.',
     'REQUIRED_MISSING': '필수 필드가 없습니다.',
@@ -119,6 +157,26 @@ def _path(parts):
         else:
             break  # No unknown property names, source paths or submitted IDs.
     return ''.join('/' + part for part in safe)[:512]
+
+
+def role_report(schema, issues, *, sequence):
+    """Persist Host reason codes without copying candidate IDs or values."""
+    import json
+    rows = []
+    for item in issues[:64]:
+        path, code = item.get('fieldPath', ''), item.get('reasonCode')
+        if code in REASONS and isinstance(path, str) and re_full_path(path):
+            rows.append(ValidationIssue(fieldPath=path, reasonCode=code, actualType='unknown'))
+    if not rows:
+        return None
+    return LLMValidationReport(stage='MODEL_OUTPUT', sequence=sequence,
+        schemaSha256=sha256(json.dumps(schema.to_dict(), sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+        issues=tuple(rows), issuesTruncated=len(issues) > 64)
+
+
+def re_full_path(path):
+    import re
+    return len(path) <= 512 and re.fullmatch(PATH, path) is not None
 
 
 def _type(value):

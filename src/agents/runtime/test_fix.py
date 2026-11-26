@@ -42,6 +42,10 @@ def generated_test_feedback(measured, allowed_scopes):
             marks = getattr(actual, "output_checks", ())
             if marks:
                 row["outputChecks"] = dict(marks)
+            failure = getattr(actual, 'failure_diagnostic_json', None)
+            if failure:
+                from orchestrator.domain.unit_failure_diagnostics import validate_failure_diagnostic
+                row['failureDiagnostic'] = validate_failure_diagnostic(json.loads(failure))
             encoded = getattr(actual, "signup_checks_json", None)
             if encoded:
                 facts = json.loads(encoded)
@@ -116,6 +120,13 @@ class TestFixRequired(Exception):
                 "AppTestCase, self.User or signup helpers. A not-run scope is not proof of a product FAIL or PASS. "
                 "Never install dependencies, create missing product tables or modify Source to hide a product defect. "
                 "Report any product/interface contradiction rather than weakening tests. Return the same READY JSON.")
+            instruction += (
+                " For OUTPUT_NOT_OBSERVED_REQUEST_LOGS/OTHER_RESPONSE, use the generic "
+                "_host_test_data.check_http_output(client, method, path, sensitive=sample, json=body) "
+                "with your started TestClient, the agreed route and a current-test new_password() sample "
+                "present in the request. It measures response/headers/Python request logs and returns "
+                "the response. It does not check DB storage or grant a PASS. A response-text assertion "
+                "alone cannot establish that logs were checked.")
             guidance = []
             instruction += (
                 " Only availableReportRefs below may be read. If it is empty, no report was published: "

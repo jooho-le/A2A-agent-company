@@ -14,8 +14,11 @@ _CAUSES = {
     'LLM_EXECUTION_TIMEOUT': ('작업의 제한 시간을 초과했어요.', 'OPERATOR'),
     'QA_TEST_UNVERIFIED': ('검사 결과를 확인할 수 없어 통과로 처리하지 않았어요.', 'OPERATOR'),
     'LLM_SOURCE_REPAIR_EXHAUSTED': ('필수 구현 문제를 허용된 수정 횟수 안에 해결하지 못했어요.', 'DEVELOPER'),
-    'LLM_VALIDATION_DRAFT_EXHAUSTED': ('검사 산출물의 형식을 수정 한도 안에 맞추지 못했어요.', 'VALIDATOR'),
+    'LLM_VALIDATION_DRAFT_EXHAUSTED': ('검사 준비 또는 결과서 작성에 문제가 생겼어요.', 'VALIDATOR'),
     'LLM_TOOL_POLICY_VIOLATION': ('허용되지 않은 도구 입력이 차단됐어요.', 'OPERATOR'),
+    'DEVELOPER_CONTEXT_DENIED': ('개발 작업의 실행 정보가 승인 조건과 일치하지 않아요.', 'OPERATOR'),
+    'DEVELOPER_INPUT_INVALID': ('개발 요청을 실행 규격에 맞게 읽지 못했어요.', 'OPERATOR'),
+    'DEVELOPER_SERVICES_DENIED': ('개발 도구의 실행 설정을 준비하지 못했어요.', 'OPERATOR'),
 }
 _TOOL_MESSAGES = {
     'TEST_RUNNER_ERROR': '검사 실행기가 유효한 결과 보고서를 만들지 못했어요.',
@@ -29,14 +32,55 @@ _TOOLS = {'read_project_file', 'write_test_file', 'run_unit_tests', 'run_browser
 
 
 async def read_work_failures(repository, controls, run, steps):
+    active = run.status.value in {'RECEIVED', 'PLANNING', 'IMPLEMENTING', 'SNAPSHOT_READY',
+        'VALIDATING', 'FIX_REQUIRED', 'FIXING', 'REVALIDATING'}
+    waiting_during_work = run.status.value == 'WAITING_INPUT' and getattr(run.resume_state, 'value', None) in {
+        'PLANNING', 'IMPLEMENTING', 'FIXING', 'VALIDATING', 'REVALIDATING'}
+    active = active or waiting_during_work
     async def read(step):
         code = step.failure_code or 'AGENT_EXECUTION_FAILED'
         message, owner = _CAUSES.get(code, ('직원 실행에 실패했어요. 실행 기록 확인이 필요해요.', 'OPERATOR'))
+        # Refine old generic records from the exact terminal Task, without
+        # rewriting Step history or trusting arbitrary peer-provided messages.
+        if code == 'AGENT_EXECUTION_FAILED' and step.agent_role.value == 'DEVELOPER' and step.a2a_task_id:
+            try:
+                url = controls.registry.require_base_url(step.agent_role)
+                async with controls.client_factory(url) as client:
+                    task = await asyncio.wait_for(client.get_task(step.a2a_task_id), 4)
+                if (task.id == step.a2a_task_id and task.context_id == step.agent_context_id
+                        and task.status.state in (TaskState.TASK_STATE_FAILED, TaskState.TASK_STATE_REJECTED)):
+                    parts = MessageToDict(task.status.message).get('parts', [])
+                    detail_code = parts[0].get('data', {}).get('code') if len(parts) == 1 else None
+                    if detail_code in {'DEVELOPER_CONTEXT_DENIED', 'DEVELOPER_INPUT_INVALID', 'DEVELOPER_SERVICES_DENIED'}:
+                        code = detail_code
+                        message, owner = _CAUSES[code]
+            except Exception:
+                pass
         result = {'workflowStepId': str(step.workflow_step_id), 'agentRole': step.agent_role.value,
                   'code': code, 'message': message, 'recoveryOwner': owner,
+                  'blocking': not active, 'recovering': active,
                   'nextAction': 'REVIEW_OR_NEW_RUN',
                   'instruction': '이 단계는 이미 실패해서 답변만으로 재개할 수 없어요. 만든 결과와 원인을 확인한 뒤 새 작업으로 시작해주세요.'}
-        if code in ('LLM_PROVIDER_ERROR', 'LLM_AUTH_REQUIRED') and step.a2a_task_id:
+        if code in ('LLM_PROVIDER_ERROR', 'LLM_AUTH_REQUIRED') and repository is not None:
+            # Prefer durable facts: the Agent can be offline after a failure.
+            try:
+                with repository._connection() as db:
+                    stored = db.execute('''SELECT payload_json FROM agent_runtime_events
+                        WHERE run_id=? AND workflow_step_id=? ORDER BY sequence DESC LIMIT 64''',
+                        (str(run.run_id), str(step.workflow_step_id))).fetchall()
+                retries = 0
+                for record in stored:
+                    detail = json.loads(record[0]).get('detail', {})
+                    recovery = detail.get('recovery', {})
+                    retries += recovery.get('code') == 'PROVIDER_TRANSIENT_RETRY'
+                    diagnostic = detail.get('failureDiagnostic') or recovery.get('failureDiagnostic', {})
+                    status = diagnostic.get('httpStatus') if isinstance(diagnostic, dict) else None
+                    if 'httpStatus' not in result and type(status) is int and 400 <= status <= 599:
+                        result['httpStatus'] = status
+                result['providerRetriesUsed'] = retries
+            except Exception:
+                pass
+        if code in ('LLM_PROVIDER_ERROR', 'LLM_AUTH_REQUIRED') and step.a2a_task_id and 'httpStatus' not in result:
             try:
                 url = controls.registry.require_base_url(step.agent_role)
                 async with controls.client_factory(url) as client:
@@ -56,6 +100,31 @@ async def read_work_failures(repository, controls, run, steps):
                             result['message'] = f'AI 인증 또는 접근 권한 확인이 필요해요({int(status)}).'
             except Exception:
                 pass
+        status = result.get('httpStatus')
+        if code == 'LLM_PROVIDER_ERROR':
+            result.update(nextAction='CHECK_PROVIDER', productFailure=False, workPreserved=True,
+                instruction='AI 제공자 오류로 중단됐어요. 이전 작업물과 기록은 보존됐어요. 제공자 연결·사용량을 확인해주세요. 이미 실패한 요청을 답변으로 재개하거나 자동 반복하지 않아요.')
+            if isinstance(status, int) and status >= 500:
+                result['message'] = f'AI 제공자가 서버 오류({status})를 반환했어요.'
+        if code == 'LLM_VALIDATION_DRAFT_EXHAUSTED' and repository is not None:
+            try:
+                with repository._connection() as db:
+                    stored = db.execute('''SELECT payload_json FROM agent_runtime_events
+                        WHERE run_id=? AND workflow_step_id=? ORDER BY sequence DESC LIMIT 32''',
+                        (str(run.run_id), str(step.workflow_step_id))).fetchall()
+                from agents.llm.validation import LLMValidationReport
+                for record in stored:
+                    detail = json.loads(record[0]).get('detail', {})
+                    validation = detail.get('llmValidation') or detail.get('recovery', {}).get('llmValidation')
+                    if validation:
+                        validation = {k: v for k, v in validation.items() if k != 'schemaVersion'}
+                        validation['issues'] = [{k: v for k, v in row.items() if k != 'reason'}
+                                                for row in validation.get('issues', [])]
+                        result['validationIssues'] = LLMValidationReport.model_validate(
+                            validation).public()['issues']
+                        break
+            except Exception:
+                pass
         if code == 'LLM_TOOL_EXECUTION_FAILED':
             try:
                 with repository._connection() as db:
@@ -70,6 +139,10 @@ async def read_work_failures(repository, controls, run, steps):
                         break
             except Exception:
                 pass
+        if active:
+            result.update(nextAction='WAIT_FOR_REVALIDATION',
+                instruction=('현재 작업의 다른 직원이 확인을 기다려요. 확인 요청에 답변하고 이 작업에서 진행 상황을 확인해주세요.'
+                    if waiting_during_work else '앞선 단계의 실패를 바탕으로 자동 수정·재검사를 진행 중이에요. 현재 작업에서 진행 상황을 확인해주세요.'))
         return result
 
     latest = {}

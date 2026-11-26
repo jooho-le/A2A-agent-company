@@ -138,7 +138,7 @@ def test_probe_is_host_bound_data_and_only_closed_diagnostics_are_returned():
     design = service_design()
     argv = service_build_argv(design)
     ast.parse(argv[-2])
-    assert json.loads(argv[-1]) == design
+    assert json.loads(argv[-1]) == {key: design[key] for key in ('delivery', 'endpoints', 'storage')}
     assert 'TestClient' in argv[-2] and 'service_interface_failure' in argv[-2]
     assert 'DATABASE_URL' in argv[-2] and '/work/service-start.sqlite3' in argv[-2]
     assert '\n' not in argv[-2] and len(argv[-2].encode()) < 8192

@@ -91,10 +91,15 @@ export default function RunWorkPanel({ runId, projectName, displayState, control
       aria-pressed={i === safeIndex} data-state={rows[i]?.displayState} onClick={() => onSelectRole(humanAgents[i].id.toUpperCase())}>
       <img src={humanAgents[i].portrait} alt="" /><span>{roleLabel(humanAgents[i].id)}</span><i aria-hidden="true" />
     </button>)}</div>
-    <article className="run-person-work" data-state={row?.displayState}>
-      <div className="run-person-heading"><strong>{roleLabel(person.id)}</strong><span>{row?.label || '상태 확인 중'}</span></div>
+    <article className="run-person-work" data-state={failure?.recovering ? 'waiting' : row?.displayState}>
+      <div className="run-person-heading"><strong>{roleLabel(person.id)}</strong><span>{failure?.recovering ? '수정·재검사 중' : row?.label || '상태 확인 중'}</span></div>
       {!target && <p className="run-person-purpose">{purposes[safeIndex]}</p>}
-      {failure && !target && <div className="run-person-result" role="alert"><h4>{failure.message}</h4><p>{failure.instruction}</p></div>}
+      {failure && !target && <div className="run-person-result" role={failure.recovering ? 'status' : 'alert'}>
+        <h4>{failure.recovering ? '수정·재검사를 진행 중이에요.' : failure.message}</h4><p>{failure.instruction}</p>
+        {!!failure.validationIssues?.length && <details><summary>검사 오류 자세히</summary><ul>{failure.validationIssues.slice(0, 4).map((issue, i) =>
+          <li key={i}>{issue.reason}{issue.fieldPath && <small> ({issue.fieldPath})</small>}</li>)}</ul></details>}
+        {!failure.recovering && failure.nextAction === 'CHECK_PROVIDER' && <button type="button" className="button" onClick={controls.refresh}>중단 원인 다시 확인</button>}
+      </div>}
       {popup && !target && !failure && <div className="run-person-result"><h4>{popup.title}</h4>{popup.source === 'report' ? <p>{popup.detail}</p>
         : <details><summary>현재 작업 자세히</summary><p>{popup.detail}</p></details>}</div>}
       {target && <div className="run-question"><strong>{target.reason}</strong><ul>{target.questions.map((question, i) => <li key={i}>{question}</li>)}</ul>
@@ -113,7 +118,7 @@ export default function RunWorkPanel({ runId, projectName, displayState, control
     <footer className="run-work-actions">
       <button type="button" className="button" onClick={onResults}><Icon name="file" />만든 결과</button>
       {!final && !target && data?.canAnnotate && <button type="button" className="button" aria-expanded={memoOpen} onClick={() => setMemoOpen(value => !value)}><Icon name="plan" />추가 의견</button>}
-      {(final || failures.length > 0 || data?.continuationUnavailable) && <button type="button" className="button start" onClick={onNew}>새 작업 만들기</button>}
+      {(final || failures.some(item => !item.recovering && item.nextAction === 'REVIEW_OR_NEW_RUN') || data?.continuationUnavailable) && <button type="button" className="button start" onClick={onNew}>새 작업 만들기</button>}
     </footer>
     {confirmStop && <StopDialog onClose={() => setConfirmStop(false)} onConfirm={() => { setConfirmStop(false); controls.cancel() }} />}
   </section>

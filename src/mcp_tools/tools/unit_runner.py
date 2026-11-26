@@ -31,7 +31,7 @@ MAX_ID_BYTES = 512
 MAX_DETAILS_BYTES = 4096
 TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V1"
 TEST_DATA_MODULE = "_host_test_data"
-TEST_DATA_EXPORTS = ("new_password",)
+TEST_DATA_EXPORTS = ("new_password", "check_http_output")
 MAX_TEST_PASSWORD_LENGTH = 4096
 APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V8'
 APP_FIXTURE_MODULE = '_host_app_test'
@@ -568,7 +568,7 @@ def _new_test_password(length=12, kind="ascii"):
 
 
 @contextmanager
-def _test_data_api(issued_passwords=None):
+def _test_data_api(issued_passwords=None, exposure_checks=None, state=None):
     # Preload before untrusted source/tests join sys.path: an accidentally
     # same-named product/test file cannot shadow the Host-owned factory.
     # As with unittest itself, this is not isolation from malicious Python
@@ -583,6 +583,55 @@ def _test_data_api(issued_passwords=None):
             issued_passwords.add(value)
         return value
     module.new_password = new_password
+    def check_http_output(client, method, path, *, sensitive, **request):
+        """Observe a test-authored HTTP request's response AND bounded request logs.
+
+        This generic helper knows no app model, route, accepted status or DB
+        schema. Only channel marks cross the container boundary. It does not
+        claim that a stored hash, authorization policy or product is correct.
+        """
+        current = state.get('test') if state is not None else None
+        if current is None or exposure_checks is None:
+            raise ValueError('GENERATED_SECURITY_OBSERVATION_UNAVAILABLE')
+        if (type(sensitive) is not str or len(sensitive) < 8 or issued_passwords is None
+                or sensitive not in issued_passwords or not _contains_password(request, sensitive)
+                or method not in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
+                or type(path) is not str or not path.startswith('/') or path.startswith('//')):
+            raise ValueError('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST')
+        stream, response = _BoundedOutput(), None
+        formatted = logging.StreamHandler.format
+        def observe_format(handler, record):
+            text = formatted(handler, record)
+            stream.write(text)
+            return text
+        def record(channel, content, incomplete=False):
+            text = content.decode('utf-8', errors='replace') if isinstance(content, bytes) else content
+            escaped = json.dumps(sensitive, ensure_ascii=True)[1:-1]
+            exposed = sensitive in text or escaped in text or re.search(r'\$(?:argon2(?:id|i|d)\$|2[aby]\$)[^\s"\x27<>]{12,}', text) is not None
+            outcome = 'EXPOSED' if exposed else 'INCOMPLETE' if incomplete else 'CHECKED'
+            marks = exposure_checks.setdefault(current, {})
+            rank = {'CHECKED': 0, 'INCOMPLETE': 1, 'EXPOSED': 2}
+            if rank[outcome] >= rank.get(marks.get(channel), -1):
+                marks[channel] = outcome
+            return exposed
+        from unittest.mock import patch
+        exposed = False
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(logging.StreamHandler, 'format', observe_format))
+                stack.enter_context(redirect_stdout(stream))
+                stack.enter_context(redirect_stderr(stream))
+                response = client.request(method, path, **request)
+        finally:
+            exposed |= record('REQUEST_LOGS', stream.text(), stream.buffer.truncated)
+            content = response.content if response is not None else b''
+            headers = b'\n'.join(key + b': ' + value for key, value in response.headers.raw) if response is not None else b''
+            exposed |= record('OTHER_RESPONSE', content[:MAX_OUTPUT_BYTES] + headers[:MAX_OUTPUT_BYTES],
+                response is None or len(content) + len(headers) > MAX_OUTPUT_BYTES)
+            if exposed:
+                raise AssertionError('REQUEST_OUTPUT_EXPOSURE')
+        return response
+    module.check_http_output = check_http_output
     sys.modules[TEST_DATA_MODULE] = module
     try:
         yield
@@ -992,7 +1041,7 @@ def _status_used_as_container(test, err):
 class _Result(unittest.TestResult):
     """Aggregate failed subtests into their parent, count class callbacks too."""
 
-    def __init__(self, expected, capture_observations=False, roots=(), exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False):
+    def __init__(self, expected, capture_observations=False, roots=(), exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False, observer_state=None):
         super().__init__()
         self.diagnostics = diagnostics
         self.expected = expected
@@ -1014,6 +1063,7 @@ class _Result(unittest.TestResult):
         self.signup_checks = signup_checks
         self.exposure_checks = exposure_checks
         self.issued_passwords = issued_passwords
+        self.observer_state = observer_state
 
     def _id(self, test):
         test_id = test.id()
@@ -1027,6 +1077,8 @@ class _Result(unittest.TestResult):
 
     def startTest(self, test):
         super().startTest(test)
+        if self.observer_state is not None:
+            self.observer_state['test'] = test
         if self.issued_passwords is not None:
             self.issued_passwords.clear()
         test_id = self._id(test)
@@ -1043,6 +1095,8 @@ class _Result(unittest.TestResult):
             self.unawaited.add(test_id)
 
     def stopTest(self, test):
+        if self.observer_state is not None:
+            self.observer_state.pop('test', None)
         test_id = self.active.pop(id(test), None)
         if test_id is None or self.rows[test_id]["outcome"] is None:
             self.invalid = True
@@ -1139,6 +1193,60 @@ class _Result(unittest.TestResult):
         return _bounded(err[0].__name__ + ": " + str(err[1]) + " [origin=" + self._origin(err[2]) + "]",
                         MAX_DETAILS_BYTES)
 
+    def _failure_facts(self, err):
+        """Project only exception class, source coordinates and proven HTTP comparisons.
+
+        Never copy frame locals, exception messages, assertion values or SQL to
+        the public diagnostic. A missing table is a symptom, not blame assigned
+        to the product: a test may have failed to enter the app's lifespan.
+        """
+        allowed = {'AssertionError', 'OperationalError', 'IntegrityError', 'ProgrammingError',
+            'StatementError', 'DatabaseError', 'DataError', 'RuntimeError', 'ValueError', 'TypeError',
+            'AttributeError', 'ImportError', 'ModuleNotFoundError', 'KeyError'}
+        name = err[0].__name__
+        data = {'kind': 'ASSERTION' if issubclass(err[0], AssertionError) else 'EXCEPTION',
+                'exceptionType': name if name in allowed else 'OTHER', 'origin': self._origin(err[2])}
+        if name == 'OperationalError' and 'no such table:' in str(err[1]):
+            data['cause'] = 'DATABASE_TABLE_MISSING'
+        trace, frames, equality = err[2], [], None
+        while trace is not None and len(frames) < 256:
+            frames.append(trace)
+            if trace.tb_frame.f_code is unittest.TestCase.assertEqual.__code__:
+                first, second = (trace.tb_frame.f_locals.get(k) for k in ('first', 'second'))
+                if all(type(v) is int and 100 <= v <= 599 for v in (first, second)):
+                    equality = first, second
+            trace = trace.tb_next
+        for frame in frames:
+            try:
+                path = Path(frame.tb_frame.f_code.co_filename).resolve()
+                matches = [(len(root), label) for label, root in self.roots
+                           if str(path).startswith(root + os.sep)]
+                if not matches or not path.is_file() or path.stat().st_size > MAX_OUTPUT_BYTES:
+                    continue
+                raw = path.read_bytes()
+                data['location'] = {'sourceSha256': hashlib.sha256(raw).hexdigest(), 'line': frame.tb_lineno}
+                if max(matches)[1] != 'TEST' or equality is None or self.capture_observations:
+                    continue
+                for node in ast.walk(ast.parse(raw)):
+                    if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute)
+                            or node.func.attr != 'assertEqual' or len(node.args) < 2
+                            or not node.lineno <= frame.tb_lineno <= node.end_lineno):
+                        continue
+                    for index, argument in enumerate(node.args[:2]):
+                        expected = node.args[1 - index]
+                        if (isinstance(argument, ast.Attribute) and argument.attr == 'status_code'
+                                and isinstance(expected, ast.Constant) and type(expected.value) is int
+                                and expected.value == equality[1 - index]):
+                            data['comparison'] = {'actualStatus': equality[index], 'expectedStatus': equality[1 - index]}
+            except (OSError, ValueError, SyntaxError, UnicodeError, RecursionError):
+                continue
+        return data
+
+    def _record_failure(self, test, err):
+        row = self.rows.get(self.active.get(id(test)))
+        if row is not None and row['outcome'] == 'FAIL':
+            row['failureDiagnostic'] = self._failure_facts(err)
+
     def _setup_error(self, test, err):
         """Record failure before the body, without deciding whether the product caused it.
 
@@ -1183,6 +1291,7 @@ class _Result(unittest.TestResult):
         if not self._setup_error(test, err):
             reason = _fixture_usage_reason(test, err) if self.fixture_usage_repair else None
             self._outcome(test, 'SKIP' if reason else 'FAIL', reason or self._error(err))
+            self._record_failure(test, err)
 
     def addError(self, test, err):
         if not self.capture_observations and _status_used_as_container(test, err):
@@ -1190,6 +1299,7 @@ class _Result(unittest.TestResult):
         elif not self._setup_error(test, err):
             reason = _fixture_usage_reason(test, err) if self.fixture_usage_repair else None
             self._outcome(test, 'SKIP' if reason else 'FAIL', reason or self._error(err))
+            self._record_failure(test, err)
 
     def addSkip(self, test, reason):
         parent = getattr(test, "test_case", None)
@@ -1208,6 +1318,7 @@ class _Result(unittest.TestResult):
     def addSubTest(self, test, subtest, err):
         if err is not None:
             self._outcome(test, "FAIL", self._error(err))
+            self._record_failure(test, err)
 
     def report(self):
         if (self.invalid or self.active or self.started != self.finished or not self.rows
@@ -1263,11 +1374,12 @@ def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observatio
     issued = set() if capture_output_checks else None
     diagnostics = {} if capture_output_checks else None
     signup_checks = {} if capture_output_checks else None
-    with _test_data_api(issued), _app_test_api(source_root, checks, issued, diagnostics, signup_checks):
-        return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair)
+    observer_state = {}
+    with _test_data_api(issued, checks, observer_state), _app_test_api(source_root, checks, issued, diagnostics, signup_checks):
+        return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair, observer_state=observer_state)
 
 
-def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False):
+def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False, observer_state=None):
     """Run explicit trusted-fixture tests or, in the Container, mounted tests.
 
     Return (report, exit_code), where report is None and exit is 2 for empty,
@@ -1292,7 +1404,7 @@ def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observati
         if loader.errors or not 1 <= suite.countTestCases() <= MAX_CASES or budget[1]:
             raise _HarnessError()
         result = _Result(_expected_cases(suite), capture_observations,
-                         roots=(("TEST", str(root.resolve())), ("PRODUCT", str(source.resolve()))), exposure_checks=exposure_checks, issued_passwords=issued_passwords, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair)
+                         roots=(("TEST", str(root.resolve())), ("PRODUCT", str(source.resolve()))), exposure_checks=exposure_checks, issued_passwords=issued_passwords, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair, observer_state=observer_state)
         suite.run(result)
         if loader.errors or result.shouldStop or budget[1] or result.testsRun != result.started:
             raise _HarnessError()

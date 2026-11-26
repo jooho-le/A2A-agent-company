@@ -214,6 +214,10 @@ def measured_test_version(receipt):
 def case_feedback(case):
     """Use already authenticated UnitTestCase receipts; no test re-execution."""
     channels = {'outputChecks': dict(case.output_checks)} if getattr(case, 'output_checks', ()) else {}
+    encoded_failure = getattr(case, 'failure_diagnostic_json', None)
+    if encoded_failure:
+        from orchestrator.domain.unit_failure_diagnostics import validate_failure_diagnostic
+        channels['failureDiagnostic'] = validate_failure_diagnostic(json.loads(encoded_failure))
     if getattr(case, 'signup_checks_json', None):
         channels['signupChecks'] = validated_signup_checks(json.loads(case.signup_checks_json))
     if getattr(case, 'output_diagnostics_json', None):
@@ -246,6 +250,9 @@ def _detail(value):
 def _feedback(data):
     """Read only our closed projection from a validation Artifact's details."""
     channels = {'outputChecks': validated_output_checks(data['outputChecks'])} if 'outputChecks' in data else {}
+    if 'failureDiagnostic' in data:
+        from orchestrator.domain.unit_failure_diagnostics import validate_failure_diagnostic
+        channels['failureDiagnostic'] = validate_failure_diagnostic(data['failureDiagnostic'])
     if data.get('code') in {'BROWSER_ACTION_TIMEOUT', 'BROWSER_ASSERTION_FAILED', 'BROWSER_ACTION_FAILED'}:
         index, action = data.get('stepIndex'), data.get('action')
         if (type(index) is int and 1 <= index <= 1000 and action in {

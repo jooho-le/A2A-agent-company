@@ -18,6 +18,9 @@ SERVICE_RUNTIME_INSTRUCTIONS = (
     "delivery=WEB needs usable HTML at GET / and connected actions. Copy endpoint paths, request encoding, "
     "field names and response rules from the shared design; do not substitute JSON for FORM or vice versa. During fixes, "
     "read current Issue and browser action failure coordinates, edit the real cause and preserve working behavior. "
+    "HTTP 422 can happen before the endpoint body: if serviceDesign approves 400 instead, repair the app's "
+    "RequestValidationError handler, not a field check inside the endpoint. Failure diagnostics identify "
+    "actualStatus/expectedStatus, exception class and source digest without leaking inputs. "
     "Missing UI must not be hidden by changing tests. Ask INPUT_REQUIRED for a material unresolved user decision."
     " sourceInterface lists bounded static facts read from the authenticated Source archive, not a live DOM "
     "or a PASS verdict. Read those files and verify the actual UI; truncated or empty facts prove nothing."
@@ -31,7 +34,8 @@ def service_runtime_instructions(task_input):
         # The catalog/pending-review protocol is generic. Keep it even when
         # removing the legacy signup-specific runtime instructions.
         instructions += (
-            ' Cover every assigned security requirement and measured finding exactly once. '
+            ' Bind every assigned security requirement in testCases and review every measured finding exactly once. '
+            'The Host supplies missing typed pending requirementReviews; it does not supply test evidence. '
             'Bind every required test target with exact runner test IDs. For full scanner reports, '
             'use measuredSecurity.profiles[].reportRef, not profile names. ' + TEST_PLAN_INSTRUCTIONS)
     return instructions
@@ -83,6 +87,7 @@ SERVICE_RULES = (
     "QA·보안은 같은 요구사항과 불변 Source를 검사하며 다른 에이전트의 완료 주장을 증거로 삼지 않는다. 시험·실행 결과는 Host가 측정한다. 미실행은 UNVERIFIED다.",
     "일반 앱 단위 시험은 unittest와 FastAPI TestClient의 lifespan 문맥을 사용한다. DATABASE_URL을 임시 SQLite 파일로 먼저 정하고 앱을 import하며 종료 시 클라이언트·세션·모듈을 정리한다. 제품의 빠진 테이블을 시험이 대신 생성하지 않는다. SCN-001 전용 AppTestCase·self.User·signup helper를 사용하지 않는다.",
     "보안은 실제 구현의 입력·데이터 접근·예외 출력 경계를 검사한다. 계정 기능이 없는 앱에 Password Hash 검사를 강요하지 않는다. 비밀정보·원문 비밀번호·저장 해시·인증값은 출력하지 않으며 합성 자격증명은 런타임에 생성한다.",
+    "응답 내용만 검사하고 로그나 DB 저장값까지 확인했다고 주장하지 않는다. 실제 비밀 입력이 있는 일반 앱은 _host_test_data.check_http_output과 현재 시험에서 생성한 new_password를 사용해 응답·헤더·Python 로그를 관찰한다. 저장 해시·권한 검증은 실제 Source를 읽고 별도 검사하며, 관찰하지 못한 경계는 UNVERIFIED로 남긴다.",
     "수정은 활성 Issue와 validationFeedback의 실제 실패 동작을 읽고 원인 파일을 변경한다. 변경 없이 READY를 제출하거나 시험·요구사항을 바꾸어 실패를 숨기지 않는다. 수정 후 같은 기능을 재검증한다.",
     "응답은 Host의 닫힌 JSON 출력 계약을 지킨다. 코드·Tool evidence·검사 수·시간·해시·최종 성공 판정을 꾸며내지 않는다.",
 )
