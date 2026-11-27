@@ -1,0 +1,99 @@
+<!doctype html>
+<!--
+========== 23페이지 수정 안내 ==========
+1. 실제 장표 글자: 아래 [화면 글자] 주석 바로 다음의 태그 사이를 수정하세요.
+2. 색·크기·위치: 같은 폴더의 style.css를 수정하세요.
+3. 발표자 메모: notes.html에 따로 있습니다. 장표 화면에는 나오지 않습니다.
+4. 이 파일을 열어 보면 저장·새로고침으로 바로 반영됩니다.
+   capstone-presentation-draft.html(통합본)을 보고 있다면 build.py로 다시 합쳐야 합니다.
+검색 단축키로 "[화면 글자" 또는 "큰 제목"을 찾으면 수정할 곳으로 바로 갈 수 있습니다.
+=========================================
+-->
+<html lang="ko">
+<head>
+<!-- [미리보기 설정] 브라우저 탭·디자인 연결입니다. 장표 본문 글자가 아닙니다. -->
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AIO · 23페이지 개별 편집</title>
+<link rel="stylesheet" href="../shared/global.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../shared/preview.css">
+</head>
+<body class="page-preview">
+<!-- [상단 도구] 미리보기 버튼입니다. PDF 장표 내용이 아닙니다. -->
+<header class="toolbar"><a href="../index.html">전체 페이지 목록</a>
+<span class="preview-title">개별 원본: editable-slides/23/index.html · 저장 후 이 페이지 새로고침</span>
+<a href="../../capstone-presentation-draft.html#slide-23">통합본 ↗ (다시 합쳐야 반영)</a>
+<button id="notes-button" aria-expanded="false">발표 노트</button><button id="print-page">이 페이지만 PDF</button></header>
+<main class="workspace" id="workspace"><div class="stage" id="stage"><div class="deck" id="deck">
+<!-- ============================================================
+     [여기부터 실제 장표 화면]
+     [화면 글자] 주석 아래의 태그 사이 문구를 수정하세요.
+     주의: section의 data-title은 목록용 제목입니다. 화면의 큰 제목이 아닙니다.
+     ============================================================ -->
+<!-- AIO:SLIDE:START -->
+<section class="slide business-v08" data-chapter="4" data-editable-page="23" data-source-page="biz-offer" data-source-pages="21,27,20,22,23,25,26" data-strategy-version="v08" data-title="가격정책과 모델별 API 비용 계산">
+<div class="slide-top"><span class="kicker">05 / PRICING & MODEL COST</span><div class="biz-heading-tools"><span class="tag">BUSINESS 05 / 09</span><button class="biz-detail-button" data-business-details="21,27,20,22,23,25,26" type="button">이전 PDF ↗</button><a class="biz-detail-button" href="https://www.notion.so/422d062130a981808105eeab1024e130" target="_blank" rel="noopener">v08 근거 ↗</a></div></div>
+<!-- [화면 글자 | 큰 제목·설명] -->
+<h2>가격정책과 모델별 API 비용 계산</h2><p class="subtitle">팀 협업 구독 + 포함 실행 예산 · 역할별 모델 혼합으로 실행원가를 통제하는 설계</p>
+<!-- [화면 글자 | 실제 본문] 금액·계산·역할·근거 문구는 아래 태그 사이를 수정합니다. -->
+<div class="content"> 
+<div class="pricing-plans">
+  <article><header><h3>Start</h3><strong>49,000<small>원/월</small></strong></header><p>최대 3명 · 활성 프로젝트 2개</p><div class="plan-budget">포함 실행원가 예산 <b>18,000원</b></div><small>예산 전량 사용 후 잔여 <b>31,000원 · 63.3%</b></small></article>
+  <article class="plan-main"><header><h3>Team</h3><strong>129,000<small>원/월</small></strong></header><p>최대 6명 · 활성 프로젝트 8개</p><div class="plan-budget">포함 실행원가 예산 <b>45,000원</b></div><small>예산 전량 사용 후 잔여 <b>84,000원 · 65.1%</b></small></article>
+  <article><header><h3>Studio</h3><strong>299,000<small>원/월</small></strong></header><p>최대 12명 · 활성 프로젝트 20개</p><div class="plan-budget">포함 실행원가 예산 <b>110,000원</b></div><small>예산 전량 사용 후 잔여 <b>189,000원 · 63.2%</b></small></article>
+</div>
+<div class="model-cost-layout">
+  <section><div class="section-heading"><h3>모델별 Standard API 단가</h3><span>USD / 100만 토큰 · 일반 입력</span></div>
+    <table class="cost-table" aria-label="역할별 예시 모델과 Standard API 단가"><thead><tr><th>예시 모델</th><th>입력</th><th>출력</th><th>배정 역할</th></tr></thead><tbody>
+      <tr><th scope="row"><a href="https://developers.openai.com/api/docs/models/gpt-6-luna" target="_blank" rel="noopener">GPT-6 Luna</a></th><td>$0.10</td><td>$0.50</td><td>요구 정리·QA 요약</td></tr>
+      <tr><th scope="row"><a href="https://developers.openai.com/api/docs/models/gpt-6.1-terra" target="_blank" rel="noopener">GPT-6.1 Terra</a></th><td>$1.00</td><td>$5.00</td><td>일반 코드 구현</td></tr>
+      <tr><th scope="row"><a href="https://developers.openai.com/api/docs/models/gpt-6.1-sol" target="_blank" rel="noopener">GPT-6.1 Sol</a></th><td>$2.00</td><td>$10.00</td><td>어려운 수정·분석</td></tr>
+    </tbody></table>
+    <p class="tool-policy">QA·보안은 <b>실제 검사 도구 우선</b> · 변경 범위 재검증 · 고성능 모델은 필요할 때 승격</p>
+  </section>
+  <section><div class="section-heading"><h3>같은 토큰량의 가상 비용 비교</h3><span>단계별 합산 입력 / 출력</span></div>
+    <table class="cost-table workload-table" aria-label="동일 토큰량 가정에서 역할별 혼합모델 비용"><thead><tr><th>단계</th><th>입력 / 출력</th><th>모델</th><th>API 비용</th></tr></thead><tbody>
+      <tr><th scope="row">PM·요구분석</th><td>10만 / 1만</td><td>Luna</td><td>$0.015</td></tr>
+      <tr><th scope="row">Developer</th><td>45만 / 8만</td><td>Terra</td><td>$0.850</td></tr>
+      <tr><th scope="row">QA·보안 요약</th><td>15만 / 2만</td><td>Luna</td><td>$0.025</td></tr>
+      <tr><th scope="row">어려운 오류 수정</th><td>25만 / 4만</td><td>Sol</td><td>$0.900</td></tr>
+    </tbody></table>
+    <div class="api-comparison"><span>모두 Sol <b>4,760원</b></span><i aria-hidden="true">→</i><span>혼합 <b>2,506원</b></span><strong>47.4%↓<small>API비 가정 계산</small></strong></div>
+  </section>
+</div>
+<aside class="pricing-evidence" aria-label="요금 정책과 계산 근거">
+  <p><b>요금 정책</b> 포함 예산 내 반복 수정·검증 · 초과 시 견적·사전 승인 · 자동 초과결제 OFF <span>(추가 요금 내부 실험안: 직접 실행원가 × 1.8)</span></p>
+  <p><b>계산 근거</b> 총 입력 95만·출력 15만 토큰 · 모두 Sol $3.400 / 혼합 $1.790 · 환율 가정 1 USD=1,400원 · 일반 단가·할증 없음</p>
+  <p class="evidence-limit">API비 = Σ(입력 토큰×입력 단가 + 출력 토큰×출력 단가) ÷ 100만. API 계산은 도구·재시도·사람 비용 제외. </p>
+</aside></div>
+<footer class="slide-foot"><span>제안 요금·가정 계산 · 실제 혼합모델 성능·절감 실측 아님 · API 공식 단가 확인 2026.11.25</span><span class="folio">23 / 28</span></footer>
+</section>
+
+<!-- AIO:SLIDE:END -->
+<!-- ================= [실제 장표 화면 끝] ================= -->
+</div></div></main>
+
+<!-- [하단 도구] 페이지 이동용입니다. PDF 장표 내용이 아닙니다. -->
+<footer class="navigation"><div class="preview-navigation"><a data-previous-page="" href="../22/index.html">← 이전 페이지</a></div><span>PDF 23 / 28</span><div class="preview-navigation"><a data-next-page="" href="../24/index.html">다음 페이지 →</a></div></footer>
+
+<!-- [발표자 메모 창] 메모 내용은 notes.html에서 수정합니다. 장표 본문과 별개입니다. -->
+<aside id="notes-panel" class="notes" hidden>
+<div class="notes-heading"><h2 id="notes-title">23 · 발표 노트</h2><button id="notes-close" aria-label="노트 닫기">×</button></div>
+<div id="notes-content"><iframe class="notes-frame" src="notes.html" title="23페이지 발표자 메모"></iframe></div>
+</aside>
+
+<!-- [공통 아이콘] 도형 정의입니다. 보이는 글자를 수정하는 곳이 아닙니다. -->
+<svg aria-hidden="true" class="diagram-symbols" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="deck-icon-document" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M9 3h10l6 6v20H7V3h2zM19 3v7h6M11 15h10M11 20h10M11 25h6"></path></g></symbol>
+<symbol id="deck-icon-code" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="m11 10-7 6 7 6m10-12 7 6-7 6M18 6l-4 20"></path></g></symbol>
+<symbol id="deck-icon-check" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="m16 3 11 4v9c0 6-5 10-11 13C10 26 5 22 5 16V7zM10 16l4 4 8-9"></path></g></symbol>
+<symbol id="deck-icon-repeat" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M25 13a10 10 0 0 0-18-4L4 13m0-7v7h7M7 19a10 10 0 0 0 18 4l3-4m0 7v-7h-7"></path></g></symbol>
+<symbol id="deck-icon-network" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><circle cx="16" cy="7" r="4"></circle><circle cx="7" cy="25" r="4"></circle><circle cx="25" cy="25" r="4"></circle><path d="m14 11-5 10m9-10 5 10M11 25h10"></path></g></symbol>
+<symbol id="deck-icon-building" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M6 29V5h20v24M3 29h26M12 29v-7h8v7M11 10h2m6 0h2m-10 6h2m6 0h2"></path></g></symbol>
+<symbol id="deck-icon-chat" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M5 5h22v18H15l-8 6v-6H5zM10 11h12M10 17h8"></path></g></symbol>
+<symbol id="deck-icon-payment" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><rect height="20" rx="3" width="26" x="3" y="6"></rect><path d="M3 13h26M8 20h7m7 0h2"></path></g></symbol>
+</defs></svg>
+<!-- [미리보기 실행 코드] 본문 글자를 수정하는 곳이 아닙니다. -->
+<script src="../shared/preview.js"></script>
+</body></html>

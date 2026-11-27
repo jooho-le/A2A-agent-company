@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="460" viewBox="0 0 1400 460" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">AIO — Your idea. One team.</title>
+  <desc id="desc">AIO의 검정·파랑·라임 색상으로 만든 소개 배너. 하나의 요청이 기획, 개발, 품질, 보안 업무로 이어지는 모습을 표현했습니다.</desc>
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1400" y2="460" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#030407"/>
+      <stop offset="1" stop-color="#121A24"/>
+    </linearGradient>
+    <linearGradient id="window" x1="755" y1="60" x2="1340" y2="405" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#202731"/>
+      <stop offset="1" stop-color="#0E131A"/>
+    </linearGradient>
+    <linearGradient id="request" x1="774" y1="126" x2="1308" y2="226" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1558C9"/>
+      <stop offset="1" stop-color="#246CDD"/>
+    </linearGradient>
+  </defs>
+  <rect width="1400" height="460" rx="30" fill="url(#canvas)"/>
+  <rect x=".75" y=".75" width="1398.5" height="458.5" rx="29.25" stroke="#FFFFFF" stroke-opacity=".12" stroke-width="1.5"/>
+  <path d="M700 36V424" stroke="#FFFFFF" stroke-opacity=".08"/>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif">
+    <rect x="64" y="47" width="232" height="29" rx="14.5" fill="#D4FF24" fill-opacity=".09" stroke="#D4FF24" stroke-opacity=".25"/>
+    <circle cx="80" cy="61.5" r="3.5" fill="#D4FF24"/>
+    <text x="92" y="66" fill="#D4FF24" font-size="11" font-weight="600" letter-spacing="2">AGENT AI OFFICE</text>
+    <text x="58" y="218" fill="#F6F7FA" font-size="164" font-weight="750" letter-spacing="-13">AIO</text>
+    <rect x="366" y="193" width="20" height="20" rx="5" fill="#D4FF24"/>
+    <text x="66" y="283" fill="#F6F7FA" font-size="43" font-weight="600" letter-spacing="-1.8">Your idea.</text>
+    <text x="66" y="335" fill="#D4FF24" font-size="43" font-weight="600" letter-spacing="-1.8">One team.</text>
+    <text x="68" y="377" fill="#A1ABB8" font-size="15" letter-spacing=".25">Plan. Build. Verify. Together.</text>
+    <g font-size="10" font-weight="600" letter-spacing="1.1">
+      <rect x="65" y="401" width="83" height="26" rx="13" stroke="#FFFFFF" stroke-opacity=".16"/>
+      <text x="85" y="418" fill="#BEC6D1">A2A</text>
+      <rect x="157" y="401" width="83" height="26" rx="13" stroke="#FFFFFF" stroke-opacity=".16"/>
+      <text x="177" y="418" fill="#BEC6D1">MCP</text>
+      <rect x="249" y="401" width="156" height="26" rx="13" stroke="#FFFFFF" stroke-opacity=".16"/>
+      <text x="269" y="418" fill="#BEC6D1">HUMAN IN THE LOOP</text>
+    </g>
+    <rect x="744" y="63" width="590" height="342" rx="24" fill="#000000" fill-opacity=".3"/>
+    <rect x="738" y="55" width="590" height="342" rx="24" fill="url(#window)" stroke="#6D7C90" stroke-opacity=".42"/>
+    <path d="M739 102H1327" stroke="#FFFFFF" stroke-opacity=".1"/>
+    <circle cx="763" cy="79" r="4" fill="#D0B48C"/>
+    <circle cx="779" cy="79" r="4" fill="#959E8A"/>
+    <circle cx="795" cy="79" r="4" fill="#677E9A"/>
+    <text x="822" y="83" fill="#AAB4C2" font-size="10" font-weight="600" letter-spacing="1.6">AIO / YOUR OFFICE</text>
+    <rect x="763" y="122" width="540" height="108" rx="16" fill="url(#request)" stroke="#619DFF" stroke-opacity=".5"/>
+    <text x="785" y="148" fill="#C6DDFF" font-size="10" font-weight="600" letter-spacing="1.6">YOUR NEXT PROJECT</text>
+    <text x="785" y="177" fill="#FFFFFF" font-size="23" font-weight="600" letter-spacing="-.5">Build a signup API.</text>
+    <text x="785" y="208" fill="#C1D7F7" font-size="11">One request. A connected workflow.</text>
+    <rect x="1174" y="188" width="109" height="28" rx="14" fill="#D4FF24"/>
+    <text x="1197" y="206" fill="#172000" font-size="11" font-weight="700">START</text>
+    <path d="M1258 202H1269M1265 198L1269 202L1265 206" stroke="#172000" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g stroke="#FFFFFF" stroke-opacity=".2" stroke-linecap="round">
+      <path d="M883 294H897M893 290L897 294L893 298"/>
+      <path d="M1020 294H1034M1030 290L1034 294L1030 298"/>
+      <path d="M1157 294H1171M1167 290L1171 294L1167 298"/>
+    </g>
+    <g>
+      <rect x="763" y="251" width="117" height="86" rx="15" fill="#FFFFFF" fill-opacity=".045" stroke="#FFFFFF" stroke-opacity=".12"/>
+      <rect x="900" y="251" width="117" height="86" rx="15" fill="#D4FF24" fill-opacity=".07" stroke="#D4FF24" stroke-opacity=".55"/>
+      <rect x="1037" y="251" width="117" height="86" rx="15" fill="#FFFFFF" fill-opacity=".045" stroke="#FFFFFF" stroke-opacity=".12"/>
+      <rect x="1174" y="251" width="129" height="86" rx="15" fill="#FFFFFF" fill-opacity=".045" stroke="#FFFFFF" stroke-opacity=".12"/>
+    </g>
+    <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M781 269H793V284H781Z M784 273H790 M784 277H790 M784 281H787" stroke="#B6C3A1"/>
+      <path d="M925 271L920 276L925 281 M936 271L941 276L936 281 M933 268L928 284" stroke="#D4FF24"/>
+      <circle cx="1061" cy="276" r="8" stroke="#B5BDD6"/>
+      <path d="M1057 276L1060 279L1065 273" stroke="#B5BDD6"/>
+      <path d="M1197 268L1205 271V277C1205 281 1201 284 1197 286C1193 284 1189 281 1189 277V271Z" stroke="#A8C8CE"/>
+    </g>
+    <g font-size="12" font-weight="650" letter-spacing=".7">
+      <text x="780" y="315" fill="#E4E9F0">PLAN</text>
+      <text x="918" y="315" fill="#D4FF24">BUILD</text>
+      <text x="1054" y="315" fill="#E4E9F0">QUALITY</text>
+      <text x="1190" y="315" fill="#E4E9F0">SECURITY</text>
+    </g>
+    <circle cx="770" cy="368" r="3" fill="#D4FF24"/>
+    <text x="782" y="372" fill="#A6B2C2" font-size="11">Visible progress. Verifiable results.</text>
+    <text x="1220" y="372" fill="#748296" font-size="10">ALL IN ONE</text>
+  </g>
+</svg>
