@@ -320,6 +320,17 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from mcp_tools.core import catalog as tool_catalog
         from orchestrator.domain import developer_artifacts, recovery_causes, repair_progress, validation_feedback, protected_feedback
         from agents.runtime import generated_revalidation, qa_services, security_services, security_test_scope, requirement_scope, protected_scopes
+        from agents.runtime import service_scope, service_interface
+        from agents.runtime import service_capabilities
+        from orchestrator.domain import service_design
+        from orchestrator.sandbox import service_start_contract
+        from orchestrator.infrastructure import run_feedback
+        from orchestrator.infrastructure import service_continuations, repair_reproduction
+        from agents.runtime import developer_context
+        from orchestrator.application import work_failures
+        from agents.runtime import test_credential_repair
+        from orchestrator.core import source_credentials
+        from orchestrator.domain import scenario_registry
         from orchestrator.application import dispatch as validation_dispatch, validation_output
         from orchestrator.infrastructure import automatic_stop, sqlite_workflows, validation_stop, protected_stop, protected_recheck
         policy = {
@@ -348,6 +359,13 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                      ('libraryContracts', library_contracts), ('readyLibraryTypes', ready_library_types),
                                      ('outputSafetyPrecheck', output_safety_precheck),
                                      ('signupQualityPrecheck', signup_quality_precheck),
+                                     ('serviceRequestScope', service_scope), ('serviceInterface', service_interface),
+                                     ('scenarioRegistry', scenario_registry),
+                                     ('serviceDesign', service_design), ('serviceRuntimeCapabilities', service_capabilities),
+                                     ('serviceStartContract', service_start_contract), ('serviceFeedback', run_feedback),
+                                     ('serviceContinuations', service_continuations), ('repairReproduction', repair_reproduction),
+                                     ('developerContextAdmission', developer_context),
+                                     ('workFailureDescriptions', work_failures),
                                      ('generatedTestInventory', generated_test_inventory), ('qaIdCatalog', qa_catalog),
                                      ('toolWire', tool_wire),
                                      ('generatedTestsPrecheck', generated_tests_precheck), ('generatedTestRepair', test_fix),
@@ -356,6 +374,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                      ('singleRuntime', single_runtime), ('recoveryRouting', recovery),
                                      ('readyPathDiff', ready_path_diff), ('repairDependencies', repair_dependencies),
                                      ('testGuidance', test_guidance), ('requirements', requirement_scope),
+                                     ('testCredentialRepair', test_credential_repair),
+                                     ('sourceCredentialPolicy', source_credentials),
                                      ('dockerControl', docker_cli),
                                      ('qaValidation', qa_services), ('securityValidation', security_services),
                                      ('securityTestScope', security_test_scope), ('validationFeedback', validation_feedback),
@@ -488,9 +508,10 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
             client_factory=mcp_client_factory, protected_cases=plan.protected_cases, proof_verifier=verifier)
 
         async def prepare_workspace(run_id):
+            frozen = await _host_call(repository.get_run_configuration, run_id)
+            services.require_scenario(frozen.scenario_contract)
             await _host_call(ObservationStore(repository).pin_policy, run_id)
             await _host_call(platform.orchestrator_app.state.package_service.enroll, run_id)
-            frozen = await _host_call(repository.get_run_configuration, run_id)
             plan.validate_configuration(frozen.configuration)
             if verifier is not None:
                 verifier.verify_integrity()
@@ -539,6 +560,7 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
             original_control(run_id)
 
         platform.orchestrator_app.state.submission_validator = validate_submission
+        platform.orchestrator_app.state.service_source_configuration = plan.source.configuration
         platform.orchestrator_app.state.control_preflight = control_preflight
         install_package_service(platform, repository)
         # Host-only assembly metadata, not a new HTTP/Artifact/Trace contract.

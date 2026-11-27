@@ -329,7 +329,9 @@ class DeveloperFixTests(unittest.IsolatedAsyncioTestCase):
             source += ('from fastapi import FastAPI\nfrom fastapi.exceptions import RequestValidationError\n'
                        'app = FastAPI()\n@app.exception_handler(RequestValidationError)\n'
                        'def invalid_request(request, exc):\n    return None\n')
-            responses += [self.write_response(content=source, path='source/main.py', call_id='write-priority'),
+            # The first scripted write creates main.py. Bind the next write to
+            # those actual bytes, rather than precomputing an absence-only call.
+            responses += [lambda _request: self.write_response(content=source, path='source/main.py', call_id='write-priority'),
                           self.draft_response(repairPaths={INPUT: {'edit': 'Changed validation output.',
                               'sourceRef': 'source/main.py::invalid_request', 'recheck': 'Measure again.'}})]
         if mode == 'partial':

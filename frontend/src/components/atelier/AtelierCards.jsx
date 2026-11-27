@@ -85,18 +85,15 @@ export function RequestForm({ mode = 'multi', onMode, modal = false, onCreate, o
   const fields = <>
     <label className={modal ? 'field-label' : 'sr-only'} htmlFor={`${prefix}-name`}>{modal ? '프로젝트 이름' : '새 업무의 프로젝트 이름'}</label>
     <input id={`${prefix}-name`} name="projectName" className={modal ? 'field' : 'request-name'} placeholder={modal ? '예: 우리 팀의 업무 도구' : '프로젝트 이름'} maxLength={60} required autoComplete="off" disabled={submission?.busy || submission?.locked} defaultValue={submission?.draft?.name || ''} onInput={rememberDraft} />
-    {modal ? <div className="blue-field"><label className="field-label" htmlFor={`${prefix}-request`}>업무 요청</label><textarea id={`${prefix}-request`} name="request" placeholder="예: 이메일로 가입하는 회원가입 화면을 만들어줘" maxLength={1600} rows={5} required /><span>{planner.name} · 요청을 받아 계획을 정리합니다.</span></div> : <textarea id={`${prefix}-text`} name="request" className="request-text" placeholder="예: 이메일로 가입하는 회원가입 화면을 만들어줘" maxLength={1600} rows={2} required disabled={submission?.busy || submission?.locked} defaultValue={submission?.draft?.requestText || ''} onInput={rememberDraft} />}
+    {modal ? <div className="blue-field"><label className="field-label" htmlFor={`${prefix}-request`}>업무 요청</label><textarea id={`${prefix}-request`} name="request" placeholder="예: 할 일을 추가하고 완료 표시할 수 있는 웹사이트를 만들어줘" maxLength={1600} rows={5} required /><span>{planner.name} · 요청을 받아 계획을 정리합니다.</span></div> : <textarea id={`${prefix}-text`} name="request" className="request-text" placeholder="예: 할 일을 추가하고 완료 표시할 수 있는 웹사이트를 만들어줘" maxLength={1600} rows={2} required disabled={submission?.busy || submission?.locked} defaultValue={submission?.draft?.requestText || ''} onInput={rememberDraft} />}
   </>
   if (modal) return <form id="new-form" onSubmit={submit}><div className="dialog-body">{fields}<p className="dialog-note">디자인 목업입니다. 실제 서버에 요청을 보내지 않습니다.</p></div><div className="dialog-footer"><button className="button" type="button" onClick={onClose}>취소</button><button className="button start" type="submit">{mode === 'single' ? '목업 업무 시작' : '업무 시작'}<Icon name="arrow" /></button></div></form>
   const loginFirst = typeof submission?.onLogin === 'function'
   const problem = submission?.error || submission?.configurationError
   const needsStatus = submission?.busy || submission?.uncertain || submission?.configurationLoading
   return <form className="request-composer" id={`${prefix}-form`} onSubmit={submit}>
-    <div className={submission ? 'composer-top composer-top--branded' : 'composer-top'}>
-      {submission && <img src={aioLogo} alt="" width="56" height="56" />}
-      <label htmlFor={`${prefix}-text`}>{!submission && <Icon name="plan" />}무엇을 만들까요?</label>
-    </div>
-    {submission && !submission.locked && <p className="request-scope">지금은 회원가입 기능을 만들 수 있어요.</p>}
+    <div className="composer-top"><label htmlFor={`${prefix}-text`}><Icon name="plan" />무엇을 만들까요?</label></div>
+    {submission && !submission.locked && <p className="request-scope">만들고 싶은 웹사이트와 필요한 기능을 알려주세요.</p>}
     {onMode && <ModeSelector mode={mode} onMode={onMode} />}
     {fields}
     {!submission && <div className="composer-office"><OfficeDesk role={deskRole} /></div>}

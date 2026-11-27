@@ -24,7 +24,7 @@ from orchestrator.domain.states import AgentRole
 
 
 SEMANTIC_PROTECTED_FIELDS = frozenset({'semanticReview', 'semanticReviewResult', 'semanticReviewer',
-    'reviewId', 'reviewRecord', 'reviewDecision', 'semantic_review'})
+    'reviewId', 'reviewRecord', 'reviewDecision', 'semantic_review', 'serviceDesign', 'runtimeCapabilities', 'userFeedback'})
 WRITE_TOOLS = frozenset({'write_source_file', 'edit_source_file', 'write_test_file', 'apply_patch'})
 SEMANTIC_PROMPT_VERSION = 5
 SEMANTIC_OUTPUT_NAME = 'product_semantic_review_v5'
@@ -134,7 +134,10 @@ def draft_fields(candidate):
     allowed = {'title', 'description', 'summary', 'rationale', 'expectedResult'}
     result = {}
     def visit(value, pointer='', key=None):
-        if type(value) is str and key in allowed and value.strip():
+        implementation_choice = (pointer.startswith('/serviceDesign/') and key in {
+            'delivery', 'method', 'path', 'bodyFormat', 'requestFields', 'responseFormat',
+            'storage', 'dataModel', 'implementationDecisions'})
+        if type(value) is str and (key in allowed or implementation_choice) and value.strip():
             result[pointer] = value
         elif type(value) is dict:
             for name, child in value.items():
@@ -502,11 +505,13 @@ class ProductSemanticReviewer:
                     'basisSha256': binding['basisSha256'], 'evidenceCatalog': catalog}
                 system = SYSTEM
                 if actor is SingleAgentIdentity.SINGLE_AGENT:
+                    from agents.runtime.service_scope import is_service_envelope
+                    previous = parse_json(single_prompt.input_json) if type(single_prompt) is PreparedSinglePrompt else {}
                     if (type(single_prompt) is not PreparedSinglePrompt or single_prompt.phase is not phase
                             or single_prompt.context_id != context.context_id
-                            or single_prompt.system_prompt != build_single_system_prompt()):
+                            or single_prompt.system_prompt != build_single_system_prompt(
+                                service_request=is_service_envelope(previous))):
                         raise ValueError('SEMANTIC_REVIEW_SINGLE_CONTEXT_INVALID')
-                    previous = parse_json(single_prompt.input_json)
                     data = {'trusted': {**previous['trusted'], 'purpose': 'PUBLICATION_SEMANTIC_REVIEW',
                         'semanticReviewRules': SYSTEM}, 'contextId': previous['contextId'],
                         'history': previous['history'], 'taskInput': data}

@@ -29,13 +29,92 @@ MAX_CASES = 1000
 MAX_OUTPUT_BYTES = 1024 * 1024
 MAX_ID_BYTES = 512
 MAX_DETAILS_BYTES = 4096
-TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V1"
+TEST_DATA_POLICY = "RUNTIME_SYNTHETIC_TEST_DATA_V2"
 TEST_DATA_MODULE = "_host_test_data"
-TEST_DATA_EXPORTS = ("new_password",)
+TEST_DATA_EXPORTS = ("new_password", "check_http_output")
 MAX_TEST_PASSWORD_LENGTH = 4096
 APP_FIXTURE_POLICY = 'SCN001_HOST_SIGNUP_OBSERVATIONS_V8'
 APP_FIXTURE_MODULE = '_host_app_test'
 APP_FIXTURE_EXPORTS = ('AppTestCase',)
+SERVICE_FIXTURE_MODULE = '_host_service_test'
+SERVICE_FIXTURE_EXPORTS = ('ServiceTestCase',)
+
+
+def service_fixture_contract():
+    return {'module': SERVICE_FIXTURE_MODULE, 'class': 'ServiceTestCase', 'inherits': 'unittest.TestCase',
+        'attributes': ['client', 'app'], 'createsProductTables': False,
+        'policy': 'HOST_GENERIC_SERVICE_LIFESPAN_V3',
+        'instruction': 'Subclass ServiceTestCase and use self.client in test methods. Do not import main/database/models at module level, construct TestClient, or override setup/teardown/run. The Host enters the real main.app lifespan with an isolated DATABASE_URL before each test and cleans up afterwards. It never creates product tables or changes dependencies. Pure non-HTTP unit tests can remain ordinary TestCase.',
+        'methods': {'check_http_output': {'parameters': ['method', 'path'], 'keywordOnly': ['sensitive'],
+            'optionalKeywordOnly': ['client'], 'clientPolicy': 'Omit client; if supplied it must be this test self.client.',
+            'returns': 'httpx.Response', 'example': 'self.check_http_output(method, path, sensitive=sample, json=payload)',
+            'negativeInputPolicy': 'Empty input and sensitive=None execute the request but record NO_SAMPLE, never CHECKED. Nonempty short runtime samples, lost or truncated output remain INCOMPLETE; encoded hash exposure still fails. A current-test synthetic sample of 8+ characters in a request permits complete observations; this is an observation threshold, not a product password rule.',
+            'instruction': 'This bound method already supplies self.client. The module-level _host_test_data.check_http_output takes client as its first argument. sensitive is the actual current-test new_password() string in the request; for empty/absent input use the empty sample or None. Never pass a field name, list or dict. Pass json/data/headers as request keywords.'}}}
+
+
+@contextmanager
+def _service_app_test_api(source_root):
+    """Generic app lifetime only, executed with Source inside the Sandbox."""
+    source = Path(source_root).resolve()
+    def product_modules():
+        return {name: module for name, module in tuple(sys.modules.items())
+                if getattr(module, '__file__', None)
+                and Path(module.__file__).resolve().is_relative_to(source)}
+    class ServiceTestCase(unittest.TestCase):
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if any(name in cls.__dict__ for name in ('setUp', 'tearDown', 'setUpClass', 'tearDownClass',
+                    '_callSetUp', '_callTearDown', '_callCleanup', 'run')):
+                raise ValueError('HOST_SERVICE_LIFECYCLE_OVERRIDE')
+
+        def setUp(self):
+            if any(name in sys.modules for name in ('main', 'database', 'models')):
+                raise ValueError('HOST_SERVICE_IMPORT_BEFORE_FIXTURE')
+            resources = ExitStack()
+            self.addCleanup(resources.close)
+            folder = resources.enter_context(tempfile.TemporaryDirectory(prefix='host-service-'))
+            previous = os.environ.get('DATABASE_URL')
+            def restore_environment():
+                if previous is None: os.environ.pop('DATABASE_URL', None)
+                else: os.environ['DATABASE_URL'] = previous
+            resources.callback(restore_environment)
+            os.environ['DATABASE_URL'] = 'sqlite:///' + str(Path(folder) / 'case.db')
+            previous_modules = product_modules()
+            for name in previous_modules: sys.modules.pop(name, None)
+            def restore_modules():
+                failed = False
+                for name, module in product_modules().items():
+                    try:
+                        engine = getattr(module, 'engine', None)
+                        if engine is not None and callable(getattr(engine, 'dispose', None)): engine.dispose()
+                    except Exception: failed = True
+                    finally: sys.modules.pop(name, None)
+                sys.modules.update(previous_modules)
+                importlib.invalidate_caches()
+                if failed: raise ValueError('HOST_SERVICE_CLEANUP_FAILED')
+            resources.callback(restore_modules)
+            from fastapi.testclient import TestClient
+            self.app = importlib.import_module('main').app
+            self.client = resources.enter_context(TestClient(self.app, raise_server_exceptions=False))
+
+        def check_http_output(self, method, path, *, sensitive, client=None, **request):
+            # Accept the module helper's explicit-client spelling only when it
+            # names the already-started client of this very test. Never let an
+            # arbitrary client bypass the Host-owned lifespan.
+            if client is not None and client is not self.client:
+                raise ValueError('HOST_SERVICE_CLIENT_MISMATCH')
+            return sys.modules[TEST_DATA_MODULE].check_http_output(
+                self.client, method, path, sensitive=sensitive, **request)
+
+    previous = sys.modules.get(SERVICE_FIXTURE_MODULE)
+    module = ModuleType(SERVICE_FIXTURE_MODULE)
+    module.__all__ = list(SERVICE_FIXTURE_EXPORTS)
+    module.ServiceTestCase = ServiceTestCase
+    sys.modules[SERVICE_FIXTURE_MODULE] = module
+    try: yield
+    finally:
+        if previous is None: sys.modules.pop(SERVICE_FIXTURE_MODULE, None)
+        else: sys.modules[SERVICE_FIXTURE_MODULE] = previous
 
 # Public fixture shapes only. No hidden test cases, acceptance thresholds or verdicts.
 APP_FIXTURE_ATTRIBUTES = ('client', 'db', 'User', 'app')
@@ -61,10 +140,10 @@ APP_FIXTURE_METHODS = {
             'required': ['argon2id', 'verified', 'memoryKiB', 'iterations', 'parallelism'],
             'optional': {'distinctSalts': 'Present only in the current return after observing another distinct '
                          'committed account in this test. Earlier return dictionaries are snapshots and never update.'},
-            'usage': 'first = self.signup_hash_parameters(email1, password=sample); '
-                     'second = self.signup_hash_parameters(email2, password=sample); '
-                     'self.assertTrue(second["distinctSalts"]). Never read first["distinctSalts"]. '
-                     'Check each account with its own synthetic password. Public numeric hash parameters are minimums.'},
+            'usage': 'Call signup_hash_parameters for two distinct committed accounts, passing each account\'s '
+                     'current-test runtime sample through the password keyword argument. Save separate first '
+                     'and second return snapshots, then assert second["distinctSalts"]. Never read '
+                     'first["distinctSalts"]. Public numeric hash parameters are minimums.'},
     },
     'check_signup_output': {
         'parameters': ['payload'], 'keywordOnly': ['password'],
@@ -568,7 +647,7 @@ def _new_test_password(length=12, kind="ascii"):
 
 
 @contextmanager
-def _test_data_api(issued_passwords=None):
+def _test_data_api(issued_passwords=None, exposure_checks=None, state=None):
     # Preload before untrusted source/tests join sys.path: an accidentally
     # same-named product/test file cannot shadow the Host-owned factory.
     # As with unittest itself, this is not isolation from malicious Python
@@ -581,8 +660,77 @@ def _test_data_api(issued_passwords=None):
         value = _new_test_password(length, kind)
         if issued_passwords is not None and len(value) >= 8:
             issued_passwords.add(value)
+        if state is not None and state.get('test') is not None:
+            state.setdefault('httpTestSamples', set()).add(value)
         return value
     module.new_password = new_password
+    def check_http_output(client, method, path, *, sensitive, **request):
+        """Observe a test-authored HTTP request's response AND bounded request logs.
+
+        This generic helper knows no app model, route, accepted status or DB
+        schema. Only channel marks cross the container boundary. It does not
+        claim that a stored hash, authorization policy or product is correct.
+        """
+        current = state.get('test') if state is not None else None
+        if current is None or exposure_checks is None:
+            raise ValueError('GENERATED_SECURITY_OBSERVATION_UNAVAILABLE')
+        no_secret = sensitive is None or type(sensitive) is str and sensitive == ''
+        current_sample = (type(sensitive) is str and state is not None
+                          and sensitive in state.get('httpTestSamples', ())
+                          and _contains_password(request, sensitive))
+        qualified = (type(sensitive) is str and len(sensitive) >= 8 and issued_passwords is not None
+                     and sensitive in issued_passwords and _contains_password(request, sensitive))
+        if (not (no_secret or current_sample or qualified)
+                or method not in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
+                or type(path) is not str or not path.startswith('/') or path.startswith('//')):
+            raise ValueError('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST')
+        request_method = getattr(client, 'request', None)
+        if not callable(request_method):
+            raise ValueError('HOST_HTTP_REQUEST_ARGUMENT_INVALID')
+        try:
+            signature = inspect.signature(request_method)
+        except (TypeError, ValueError):
+            signature = None  # An opaque client remains authoritative at invocation.
+        if signature is not None:
+            try:
+                signature.bind(method, path, **request)
+            except TypeError:
+                raise ValueError('HOST_HTTP_REQUEST_ARGUMENT_INVALID') from None
+        stream, response = _BoundedOutput(), None
+        formatted = logging.StreamHandler.format
+        def observe_format(handler, record):
+            text = formatted(handler, record)
+            stream.write(text)
+            return text
+        def record(channel, content, incomplete=False):
+            text = content.decode('utf-8', errors='replace') if isinstance(content, bytes) else content
+            escaped = json.dumps(sensitive, ensure_ascii=True)[1:-1] if qualified else None
+            exposed = (qualified and (sensitive in text or escaped in text)) or re.search(r'\$(?:argon2(?:id|i|d)\$|2[aby]\$)[^\s"\x27<>]{12,}', text) is not None
+            outcome = ('EXPOSED' if exposed else 'INCOMPLETE' if incomplete or not (qualified or no_secret)
+                       else 'CHECKED' if qualified else 'NO_SAMPLE')
+            marks = exposure_checks.setdefault(current, {})
+            rank = {'NO_SAMPLE': 0, 'CHECKED': 1, 'INCOMPLETE': 2, 'EXPOSED': 3}
+            if rank[outcome] >= rank.get(marks.get(channel), -1):
+                marks[channel] = outcome
+            return exposed
+        from unittest.mock import patch
+        exposed = False
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(patch.object(logging.StreamHandler, 'format', observe_format))
+                stack.enter_context(redirect_stdout(stream))
+                stack.enter_context(redirect_stderr(stream))
+                response = client.request(method, path, **request)
+        finally:
+            exposed |= record('REQUEST_LOGS', stream.text(), stream.buffer.truncated)
+            content = response.content if response is not None else b''
+            headers = b'\n'.join(key + b': ' + value for key, value in response.headers.raw) if response is not None else b''
+            exposed |= record('OTHER_RESPONSE', content[:MAX_OUTPUT_BYTES] + headers[:MAX_OUTPUT_BYTES],
+                response is None or len(content) + len(headers) > MAX_OUTPUT_BYTES)
+            if exposed:
+                raise AssertionError('REQUEST_OUTPUT_EXPOSURE')
+        return response
+    module.check_http_output = check_http_output
     sys.modules[TEST_DATA_MODULE] = module
     try:
         yield
@@ -868,8 +1016,81 @@ def app_fixture_source_issues(source):
     return issues[:32]
 
 
+def _http_helper_usage_reason(test, err):
+    """Only proven Host-helper argument failures, never response/app failures."""
+    if err[0] not in (TypeError, ValueError):
+        return None
+    helper = getattr(sys.modules.get(TEST_DATA_MODULE), 'check_http_output', None)
+    service = getattr(sys.modules.get(SERVICE_FIXTURE_MODULE), 'ServiceTestCase', None)
+    try:
+        method = inspect.getattr_static(type(test), test._testMethodName)
+        frame = err[2]
+        while frame and frame.tb_frame.f_code is not method.__code__:
+            frame = frame.tb_next
+        if frame is None:
+            return None
+        terminal = frame
+        while terminal.tb_next:
+            terminal = terminal.tb_next
+        original = service.check_http_output if service is not None and isinstance(test, service) else None
+        bound_is_original = original is not None and inspect.getattr_static(test, 'check_http_output') is original
+        if err[0] is ValueError:
+            if (helper is not None and terminal.tb_frame.f_code is helper.__code__
+                    and err[1].args in (('SUPPLY_CURRENT_SYNTHETIC_SECRET_PRESENT_IN_REQUEST',),
+                                       ('HOST_HTTP_REQUEST_ARGUMENT_INVALID',))):
+                return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+            if (bound_is_original and terminal.tb_frame.f_code is original.__code__
+                    and terminal.tb_frame.f_locals.get('self') is test
+                    and err[1].args == ('HOST_SERVICE_CLIENT_MISMATCH',)):
+                return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+            return None
+        if terminal is not frame:
+            return None  # Product/request/library TypeErrors remain measured failures.
+        # Python rejects a bad signature before entering the helper. Prove the
+        # exact CALL position and actual callee identity, then bind placeholders
+        # to its signature. Never evaluate expressions or inspect input values.
+        import dis
+        position = next((i.positions for i in dis.get_instructions(method)
+                         if i.offset == frame.tb_lasti), None)
+        if position is None:
+            return None
+        lines, first = inspect.getsourcelines(method)
+        indentation = len(lines[0]) - len(lines[0].lstrip())
+        tree = ast.parse(textwrap.dedent(''.join(lines)))
+        for node in ast.walk(tree):
+            if (not isinstance(node, ast.Call) or node.lineno + first - 1 != position.lineno
+                    or node.col_offset + indentation != position.col_offset
+                    or any(k.arg is None for k in node.keywords)
+                    or any(isinstance(arg, ast.Starred) for arg in node.args)):
+                continue
+            function, leading = None, ()
+            if (bound_is_original and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'check_http_output' and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == 'self'):
+                function, leading = original, (test,)
+            elif isinstance(node.func, ast.Name):
+                actual = frame.tb_frame.f_locals.get(node.func.id, frame.tb_frame.f_globals.get(node.func.id))
+                if actual is helper:
+                    function = helper
+            if function is not None:
+                try:
+                    inspect.signature(function).bind(*leading, *(object() for _ in node.args),
+                        **{k.arg: object() for k in node.keywords})
+                except TypeError:
+                    return 'NOT_RUN_FIXTURE_ARGUMENT_INVALID'
+    except (AttributeError, OSError, TypeError, ValueError, SyntaxError, RecursionError):
+        pass
+    return None
+
+
 def _fixture_usage_reason(test, err):
     """Bind a closed repair code to the actual failing frame and the unchanged Host API."""
+    # A bad generic-helper argument is a test preparation error, not a product
+    # defect. Bind to the actual Host function frame; an app/test raising the
+    # same words elsewhere cannot acquire this not-run classification.
+    http_reason = _http_helper_usage_reason(test, err)
+    if http_reason is not None:
+        return http_reason
     fixture = getattr(sys.modules.get(APP_FIXTURE_MODULE), 'AppTestCase', None)
     if fixture is None or not isinstance(test, fixture) or err[0] not in (AttributeError, AssertionError, TypeError, ValueError, KeyError):
         return None
@@ -992,7 +1213,7 @@ def _status_used_as_container(test, err):
 class _Result(unittest.TestResult):
     """Aggregate failed subtests into their parent, count class callbacks too."""
 
-    def __init__(self, expected, capture_observations=False, roots=(), exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False):
+    def __init__(self, expected, capture_observations=False, roots=(), exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False, observer_state=None):
         super().__init__()
         self.diagnostics = diagnostics
         self.expected = expected
@@ -1014,6 +1235,7 @@ class _Result(unittest.TestResult):
         self.signup_checks = signup_checks
         self.exposure_checks = exposure_checks
         self.issued_passwords = issued_passwords
+        self.observer_state = observer_state
 
     def _id(self, test):
         test_id = test.id()
@@ -1027,6 +1249,9 @@ class _Result(unittest.TestResult):
 
     def startTest(self, test):
         super().startTest(test)
+        if self.observer_state is not None:
+            self.observer_state['test'] = test
+            self.observer_state['httpTestSamples'] = set()
         if self.issued_passwords is not None:
             self.issued_passwords.clear()
         test_id = self._id(test)
@@ -1043,6 +1268,9 @@ class _Result(unittest.TestResult):
             self.unawaited.add(test_id)
 
     def stopTest(self, test):
+        if self.observer_state is not None:
+            self.observer_state.pop('test', None)
+            self.observer_state.pop('httpTestSamples', None)
         test_id = self.active.pop(id(test), None)
         if test_id is None or self.rows[test_id]["outcome"] is None:
             self.invalid = True
@@ -1139,6 +1367,78 @@ class _Result(unittest.TestResult):
         return _bounded(err[0].__name__ + ": " + str(err[1]) + " [origin=" + self._origin(err[2]) + "]",
                         MAX_DETAILS_BYTES)
 
+    def _failure_facts(self, err):
+        """Project only exception class, source coordinates and proven HTTP comparisons.
+
+        Never copy frame locals, exception messages, assertion values or SQL to
+        the public diagnostic. A missing table is a symptom, not blame assigned
+        to the product: a test may have failed to enter the app's lifespan.
+        """
+        allowed = {'AssertionError', 'OperationalError', 'IntegrityError', 'ProgrammingError',
+            'StatementError', 'DatabaseError', 'DataError', 'RuntimeError', 'ValueError', 'TypeError',
+            'AttributeError', 'ImportError', 'ModuleNotFoundError', 'KeyError'}
+        name = err[0].__name__
+        data = {'kind': 'ASSERTION' if issubclass(err[0], AssertionError) else 'EXCEPTION',
+                'exceptionType': name if name in allowed else 'OTHER', 'origin': self._origin(err[2])}
+        if name == 'OperationalError' and 'no such table:' in str(err[1]):
+            data['cause'] = 'DATABASE_TABLE_MISSING'
+        trace, frames, equality, membership = err[2], [], None, None
+        while trace is not None and len(frames) < 256:
+            frames.append(trace)
+            if trace.tb_frame.f_code is unittest.TestCase.assertEqual.__code__:
+                first, second = (trace.tb_frame.f_locals.get(k) for k in ('first', 'second'))
+                if all(type(v) is int and 100 <= v <= 599 for v in (first, second)):
+                    equality = first, second
+            elif trace.tb_frame.f_code is unittest.TestCase.assertIn.__code__:
+                member, container = (trace.tb_frame.f_locals.get(k) for k in ('member', 'container'))
+                if (type(member) is int and 100 <= member <= 599
+                        and type(container) in (tuple, list, set, frozenset) and 1 <= len(container) <= 16
+                        and all(type(v) is int and 100 <= v <= 599 for v in container)):
+                    membership = member, sorted(set(container))
+            trace = trace.tb_next
+        for frame in frames:
+            try:
+                path = Path(frame.tb_frame.f_code.co_filename).resolve()
+                matches = [(len(root), label) for label, root in self.roots
+                           if str(path).startswith(root + os.sep)]
+                if not matches or not path.is_file() or path.stat().st_size > MAX_OUTPUT_BYTES:
+                    continue
+                raw = path.read_bytes()
+                data['location'] = {'sourceSha256': hashlib.sha256(raw).hexdigest(), 'line': frame.tb_lineno}
+                if max(matches)[1] != 'TEST' or self.capture_observations:
+                    continue
+                for node in ast.walk(ast.parse(raw)):
+                    if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute)
+                            or node.func.attr not in ('assertEqual', 'assertIn') or len(node.args) < 2
+                            or not node.lineno <= frame.tb_lineno <= node.end_lineno):
+                        continue
+                    if node.func.attr == 'assertIn' and membership is not None:
+                        argument, expected = node.args[:2]
+                        if (isinstance(argument, ast.Attribute) and argument.attr == 'status_code'
+                                and isinstance(expected, (ast.Tuple, ast.List, ast.Set))
+                                and 1 <= len(expected.elts) <= 16
+                                and all(isinstance(v, ast.Constant) and type(v.value) is int
+                                        and 100 <= v.value <= 599 for v in expected.elts)
+                                and sorted(set(v.value for v in expected.elts)) == membership[1]):
+                            data['comparison'] = {'actualStatus': membership[0], 'expectedStatuses': membership[1]}
+                        continue
+                    if node.func.attr != 'assertEqual' or equality is None:
+                        continue
+                    for index, argument in enumerate(node.args[:2]):
+                        expected = node.args[1 - index]
+                        if (isinstance(argument, ast.Attribute) and argument.attr == 'status_code'
+                                and isinstance(expected, ast.Constant) and type(expected.value) is int
+                                and expected.value == equality[1 - index]):
+                            data['comparison'] = {'actualStatus': equality[index], 'expectedStatus': equality[1 - index]}
+            except (OSError, ValueError, SyntaxError, UnicodeError, RecursionError):
+                continue
+        return data
+
+    def _record_failure(self, test, err):
+        row = self.rows.get(self.active.get(id(test)))
+        if row is not None and row['outcome'] == 'FAIL':
+            row['failureDiagnostic'] = self._failure_facts(err)
+
     def _setup_error(self, test, err):
         """Record failure before the body, without deciding whether the product caused it.
 
@@ -1183,6 +1483,7 @@ class _Result(unittest.TestResult):
         if not self._setup_error(test, err):
             reason = _fixture_usage_reason(test, err) if self.fixture_usage_repair else None
             self._outcome(test, 'SKIP' if reason else 'FAIL', reason or self._error(err))
+            self._record_failure(test, err)
 
     def addError(self, test, err):
         if not self.capture_observations and _status_used_as_container(test, err):
@@ -1190,6 +1491,7 @@ class _Result(unittest.TestResult):
         elif not self._setup_error(test, err):
             reason = _fixture_usage_reason(test, err) if self.fixture_usage_repair else None
             self._outcome(test, 'SKIP' if reason else 'FAIL', reason or self._error(err))
+            self._record_failure(test, err)
 
     def addSkip(self, test, reason):
         parent = getattr(test, "test_case", None)
@@ -1208,6 +1510,7 @@ class _Result(unittest.TestResult):
     def addSubTest(self, test, subtest, err):
         if err is not None:
             self._outcome(test, "FAIL", self._error(err))
+            self._record_failure(test, err)
 
     def report(self):
         if (self.invalid or self.active or self.started != self.finished or not self.rows
@@ -1263,11 +1566,14 @@ def run_tests(test_root, source_root, pattern="test_*.py", *, capture_observatio
     issued = set() if capture_output_checks else None
     diagnostics = {} if capture_output_checks else None
     signup_checks = {} if capture_output_checks else None
-    with _test_data_api(issued), _app_test_api(source_root, checks, issued, diagnostics, signup_checks):
-        return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair)
+    observer_state = {}
+    with (_test_data_api(issued, checks, observer_state),
+          _app_test_api(source_root, checks, issued, diagnostics, signup_checks),
+          _service_app_test_api(source_root)):
+        return _run_tests(test_root, source_root, pattern, capture_observations=capture_observations, exposure_checks=checks, issued_passwords=issued, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair, observer_state=observer_state)
 
 
-def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False):
+def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observations=False, exposure_checks=None, issued_passwords=None, diagnostics=None, signup_checks=None, fixture_usage_repair=False, observer_state=None):
     """Run explicit trusted-fixture tests or, in the Container, mounted tests.
 
     Return (report, exit_code), where report is None and exit is 2 for empty,
@@ -1292,7 +1598,7 @@ def _run_tests(test_root, source_root, pattern="test_*.py", *, capture_observati
         if loader.errors or not 1 <= suite.countTestCases() <= MAX_CASES or budget[1]:
             raise _HarnessError()
         result = _Result(_expected_cases(suite), capture_observations,
-                         roots=(("TEST", str(root.resolve())), ("PRODUCT", str(source.resolve()))), exposure_checks=exposure_checks, issued_passwords=issued_passwords, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair)
+                         roots=(("TEST", str(root.resolve())), ("PRODUCT", str(source.resolve()))), exposure_checks=exposure_checks, issued_passwords=issued_passwords, diagnostics=diagnostics, signup_checks=signup_checks, fixture_usage_repair=fixture_usage_repair, observer_state=observer_state)
         suite.run(result)
         if loader.errors or result.shouldStop or budget[1] or result.testsRun != result.started:
             raise _HarnessError()

@@ -24,6 +24,7 @@ from agents.roles.expected_results import with_expected_results
 from agents.runtime.start_precheck import start_precheck_for
 from agents.runtime.startup_preservation import preservation_notice_for
 from agents.runtime.signup_quality_precheck import signup_quality_precheck_for
+from agents.runtime.service_interface import service_interface_check
 from agents.llm.engine import LLMEngine
 from agents.runtime.file_access import build_file_access, constrain_frozen_read_tools, constrain_workspace_file_tools
 from agents.runtime.test_guidance import unit_test_targets
@@ -150,10 +151,13 @@ class SingleAgentExecutor(AgentExecutor):
                      precheck=None, source_progress_check=None, expectations=None, explain=None, extra_checks=(),
                      output_refresh=None, text_only=False, failure_evidence=None, path_check=None, priority_check=None,
                      library_type_check=None, correction_candidates=None, output_safety_check=None,
-                     signup_quality_check=None, source_preservation_check=None):
+                     signup_quality_check=None, source_preservation_check=None, service_ui_check=None):
         # text_only: the semantic rewrite (docs/live-api/05 15절) — no tool, no forced edit, no catalog stop.
         if text_only and (tools or executor is not None or source_progress_check is not None):
             raise SingleExecutionError()
+        if phase is SinglePhase.QA:
+            from agents.runtime.test_fix import available_report_tools
+            tools = available_report_tools(tools, task_input)
         prompt = await prepare_single_prompt(self._store, context_id=context.context_id,
             metadata=execution.metadata, scenario=execution.scenario, draft_contract=contract,
             task_input=task_input, call_context=context.call_context,
@@ -180,9 +184,10 @@ class SingleAgentExecutor(AgentExecutor):
             output_check=(contract_check(contract.validate) if text_only and phase in (
                               SinglePhase.IMPLEMENTING, SinglePhase.FIXING)
                           else development_check(contract.validate, precheck=precheck, path_check=path_check,
+                                                 allow_unchanged_source=execution.scenario.key == 'SERVICE-WEB',
                                                  priority_check=priority_check, library_type_check=library_type_check,
                                                  output_safety_check=output_safety_check,
-                                                 signup_quality_check=signup_quality_check)
+                                                 signup_quality_check=signup_quality_check, service_interface_check=service_ui_check)
                           if phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING)
                           else case_expectation_check(contract.validate, expectations, explain=explain,
                                                       extra_checks=extra_checks)))
@@ -261,6 +266,10 @@ class SingleAgentExecutor(AgentExecutor):
             return decision, ()
         services = await _host_factory(self._services[role], execution)
         checkpoint = await services.prepare(execution)
+        from orchestrator.infrastructure.run_feedback import feedback_input
+        task_input.update(await _run_file_operation(feedback_input, services, execution))
+        if getattr(checkpoint, 'runtime_capabilities', None) is not None:
+            task_input['runtimeCapabilities'] = checkpoint.runtime_capabilities
         from agents.runtime.development_failure import failure_reader
         read_failure = failure_reader(services, execution) if role is AgentRole.DEVELOPER else None
         if role is AgentRole.DEVELOPER:
@@ -286,7 +295,9 @@ class SingleAgentExecutor(AgentExecutor):
             elif role is AgentRole.QA:
                 wanted = {"read_project_file", "write_test_file", "read_test_report"}
                 task_input["testSelectors"] = {name: list(values) for name, values in services.selectors.items()}
-                task_input["testTargets"] = _test_targets(services)
+                task_input["testTargets"] = _test_targets(services, execution)
+                if execution.scenario.key == 'SERVICE-WEB':
+                    task_input['sourceInterface'] = await services.source_interface(execution)
                 options["selectors"] = services.selectors
             else:
                 measured = await services.scan(execution, host_tracked)
@@ -297,13 +308,14 @@ class SingleAgentExecutor(AgentExecutor):
                 options.update(finding_ids=measured.finding_ids, source_paths=measured.source_paths)
                 if services.test_selectors:
                     from agents.roles.security_draft import SecurityTestDraft, TEST_PLAN_INSTRUCTIONS
-                    draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256)
+                    draft_wire = SecurityTestDraft(measured.source_files, execution.source.snapshot_sha256,
+                        pending_requirement_ids=execution.metadata.requirement_ids)
                     task_input["sourceReferenceCatalog"] = draft_wire.catalog
                     wanted.add("write_test_file")
                     selectors = {"run_unit_tests": services.test_selectors}
                     options["security_test_selectors"] = selectors
                     task_input["testSelectors"] = {"run_unit_tests": list(services.test_selectors)}
-                    task_input["testTargets"] = unit_test_targets(services.configuration.unit_test_configuration, "security")
+                    task_input["testTargets"] = unit_test_targets(services.configuration.unit_test_configuration, "security", scenario_key=execution.scenario.key)
                     task_input["runtimeInstructions"] = security_test_instructions + ' ' + TEST_PLAN_INSTRUCTIONS
             contract = build_single_draft_contract(phase, scenario=execution.scenario, **options)
             if role in (AgentRole.QA, AgentRole.SECURITY) and execution.budget.limits.max_output_corrections:
@@ -339,6 +351,9 @@ class SingleAgentExecutor(AgentExecutor):
                         library_type_check=checkpoint.library_type_issues if role is AgentRole.DEVELOPER else None,
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
                             if role is AgentRole.DEVELOPER and execution.budget.limits.max_output_corrections else None,
+                        service_ui_check=service_interface_check(checkpoint, execution.configuration.scenario_contract,
+                            task_input.get('serviceDesign'))
+                            if role is AgentRole.DEVELOPER else None,
                         path_check=checkpoint.ready_path_issues if options.get("repair_paths") else None,
                         correction_candidates=checkpoint.correction_candidates if options.get("repair_paths") else None,
                         priority_check=checkpoint.pending_priority_paths if options.get("repair_paths") else None,
@@ -482,14 +497,17 @@ class SingleAgentExecutor(AgentExecutor):
 
 def _contract_explainer(role, execution, services, measured, *, decode=lambda data: data):
     from agents.roles.contract_explain import qa_issues, security_issues
+    from agents.roles.security_draft import SecurityTestDraft
     from orchestrator.domain.scenario_registry import RequirementValidator
     if role is AgentRole.QA:
         ids = execution.scenario.requirement_ids_for(RequirementValidator.QA)
         return lambda data: qa_issues(data, ids, services.selectors)
     if role is AgentRole.SECURITY:
         ids = execution.scenario.requirement_ids_for(RequirementValidator.SECURITY)
-        return lambda data: security_issues(decode(data), ids, measured.finding_ids, measured.source_paths,
-                                            services.test_selectors or None)
+        explain = lambda value: security_issues(value, ids, measured.finding_ids, measured.source_paths,
+                                                services.test_selectors or None)
+        wire = getattr(decode, '__self__', None)
+        return (lambda data: wire.explain(data, explain)) if isinstance(wire, SecurityTestDraft) else lambda data: explain(decode(data))
     return None
 
 

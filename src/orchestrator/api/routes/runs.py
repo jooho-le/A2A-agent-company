@@ -20,6 +20,7 @@ from orchestrator.api.dependencies import (
     get_workflow_repository,
     get_workflow_controls,
     get_workspace_registry,
+    get_artifact_store,
 )
 from orchestrator.api.schemas.runs import (
     CancelRunRequest,
@@ -131,13 +132,36 @@ def create_run(
     configuration = RunConfigurationArtifact(
         run_id=run.run_id, scenario_id=run.scenario_id,
         workspace_id=run.workspace_id, configuration=body.configuration,
+        **_service_baseline(run, body.configuration),
     )
+    continuation = None
+    from orchestrator.infrastructure.service_continuations import (
+        capture_continuation, ContinuationConflict, requires_previous_work)
+    from orchestrator.domain.scenario_registry import SERVICE_WEB_ID
+    if body.continuation_of is not None:
+        if body.scenario_id != SERVICE_WEB_ID:
+            raise HTTPException(422, detail='CONTINUATION_SERVICE_ONLY')
+        source_configuration = getattr(request.app.state, 'service_source_configuration', None)
+        if source_configuration is None:
+            raise HTTPException(503, detail='CONTINUATION_NOT_CONFIGURED')
+        try:
+            continuation = capture_continuation(repository, get_workspace_registry(request), get_artifact_store(request),
+                source_configuration, parent_id=body.continuation_of, run_id=run.run_id,
+                instruction=body.request_text, configuration=body.configuration)
+            configuration = configuration.model_copy(update={'frozen_scenario_contract_json':continuation.contract_json})
+        except ContinuationConflict as error:
+            raise HTTPException(409, detail=error.code) from None
+        except Exception:
+            raise HTTPException(409, detail='CONTINUATION_SOURCE_UNAVAILABLE') from None
+    elif body.scenario_id == SERVICE_WEB_ID and requires_previous_work(body.request_text):
+        raise HTTPException(422, detail='CONTINUATION_TARGET_REQUIRED')
     workspace = WorkspaceRecord(
         workspace_id=run.workspace_id, run_id=run.run_id,
         root_path=str((Path(request.app.state.settings.workspace_root) / str(run.workspace_id)).resolve()),
     )
     dispatch_status = "SCHEDULED" if dispatcher is not None else "NOT_CONFIGURED"
     submitted = RunSubmissionResponse(
+        continuation_of=body.continuation_of,
         run=RunStatusResponse.from_run(run),
         first_step=WorkflowStepResponse.from_step(step),
         dispatch_status=dispatch_status,
@@ -149,11 +173,14 @@ def create_run(
     )
     try:
         result = repository.create_run(run, (step,), events, run_configuration=configuration,
-                                       workspace=workspace, **({"submission": record} if record else {}))
+                                       workspace=workspace, **({"submission": record} if record else {}),
+                                       **({'continuation':continuation} if continuation is not None else {}))
         if result is not None and not result[1]:
             return replay_submission(result[0], submission, request, response)
     except SubmissionKeyConflict:
         raise HTTPException(status_code=409, detail="IDEMPOTENCY_KEY_CONFLICT") from None
+    except ContinuationConflict as error:
+        raise HTTPException(409, detail=error.code) from None
     if dispatcher is not None:
         background_tasks.add_task(dispatcher.dispatch_planner, run.run_id)
     if submission is not None:
@@ -163,6 +190,23 @@ def create_run(
         request.url_for("get_run", run_id=str(run.run_id))
     )
     return submitted
+
+
+def _service_baseline(run, configuration):
+    from orchestrator.domain.scenario_registry import SERVICE_WEB_ID, service_request_contract
+    from orchestrator.core.security import redact_data
+    import json
+    if run.scenario_id != SERVICE_WEB_ID:
+        return {}
+    if configuration.experiment_id is not None or configuration.protected_test_suite_ref is not None:
+        raise HTTPException(status_code=422, detail="SERVICE_REQUEST_REQUIRES_NON_EXPERIMENT_CONFIGURATION")
+    try:
+        contract = service_request_contract(run.request_text)
+    except (ValueError, UnicodeError):
+        raise HTTPException(status_code=422, detail="SERVICE_REQUEST_INVALID") from None
+    if redact_data(contract) != contract:
+        raise HTTPException(status_code=422, detail="SERVICE_REQUEST_CONTAINS_CREDENTIALS")
+    return {"frozen_scenario_contract_json": json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))}
 
 
 @router.get("/{run_id}", response_model=RunStatusResponse)

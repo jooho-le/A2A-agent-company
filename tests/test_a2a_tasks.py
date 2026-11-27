@@ -271,6 +271,18 @@ class A2ATaskRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(run.verdict)
         self.assertEqual(run.status, WorkflowStatus.PLANNING)
 
+    async def test_developer_preparation_rejection_keeps_its_closed_reason(self) -> None:
+        for code in ('DEVELOPER_SERVICES_DENIED', 'unapproved-private-error'):
+            run = self.make_run()
+            task = make_task('developer-task', 'TASK_STATE_REJECTED')
+            task.status.message.CopyFrom(ParseDict({'parts': [{'data': {'code': code}}]}, type(task.status.message)()))
+            client = FakeAgentClient(submitted=(task,), polled=())
+            result = await self.make_runner(client).submit_and_wait(run,
+                self.make_step(run, AgentRole.DEVELOPER), agent_id='developer-agent', payload={'request': 'Implement'})
+            self.assertEqual(result.step.failure_code,
+                'DEVELOPER_SERVICES_DENIED' if code == 'DEVELOPER_SERVICES_DENIED' else 'AGENT_EXECUTION_FAILED')
+            self.assertIsNone(run.verdict)
+
     async def test_interrupted_and_rejected_states_keep_their_distinct_meanings(self) -> None:
         cases = (
             ("TASK_STATE_INPUT_REQUIRED", TaskRunDisposition.WAITING_INPUT, WorkflowStepStatus.WAITING_INPUT),

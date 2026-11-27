@@ -173,8 +173,15 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
     : activeWork?.dispatchStatus === 'NOT_CONFIGURED' ? '실행 서버 연결을 확인해주세요.'
       : runMonitor.run ? runLabel(runMonitor.run) : '진행 상황을 확인하고 있어요.' : ''
 
+  function continueWork(instruction) {
+    if (!activeWork?.projectId || activeWork.run?.runId !== observedRunId) return
+    return submission.submit(activeWork.projectName || '내 프로젝트', instruction,
+      { projectId: activeWork.projectId, continuationOf: observedRunId })
+  }
   const workPanel = observedRunId ? <RunWorkPanel key={observedRunId} runId={observedRunId} projectName={activeWork?.projectName}
     displayState={runDisplayState} controls={controls} selectedRole={selectedRole} onSelectRole={setSelectedRole}
+    onContinue={continueWork} onChooseWork={() => changeView('projects')}
+    continuationBusy={submission.busy} continuationError={submission.error}
     onResults={() => changeView('outputs')} onNew={requestNew} /> : null
 
   return <div ref={rootRef} className={'atelier-dashboard workspace-shell ux-simple ' + (motion ? 'motion-ready' : 'motion-paused') + (view === 'home' ? ' office-immersive' : '') + (mobile && drawerOpen ? ' nav-open' : '')}>

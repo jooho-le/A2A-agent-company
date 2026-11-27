@@ -91,7 +91,7 @@ def _configuration(data):
     return RunConfigurationArtifact.model_validate(data)
 
 
-def _scenario(configuration):
+def _scenario(configuration, *, request_text=None):
     """Validate semantic fields without inventing policies or canonical IDs."""
     try:
         data = _json(configuration.frozen_scenario_contract_json)
@@ -149,6 +149,9 @@ def _scenario(configuration):
         # Known credential literals are refused, not normalized into a weaker
         # baseline. Optional future fields are bounded and checked as well.
         sanitize_content(data, reject_secrets=True)
+        if request_text is not None:
+            from orchestrator.domain.scenario_registry import validate_service_request_binding
+            validate_service_request_binding(data, request_text)
         return ScenarioDefinition.from_contract(data)
     except Exception:
         raise PlannerContextError() from None
@@ -191,7 +194,7 @@ class PlannerExecutionContext:
                     or remaining > frozen.limits.runtime_budget_ms / 1000 + 0.001):
                 raise ValueError
             sanitize_content(configuration.model_dump(mode="json"), reject_secrets=True)
-            scenario = _scenario(configuration)
+            scenario = _scenario(configuration, request_text=self.request_text)
             if metadata.requirement_ids and metadata.requirement_ids != scenario.requirement_ids:
                 raise ValueError
         except LLMRuntimeError as error:

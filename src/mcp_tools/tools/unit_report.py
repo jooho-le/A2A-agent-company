@@ -9,6 +9,7 @@ import json
 
 from orchestrator.core.security import redact_text
 from orchestrator.domain.validation_feedback import observation_json, validated_output_checks, validated_output_diagnostics, validated_signup_checks
+from orchestrator.domain.unit_failure_diagnostics import validate_failure_diagnostic
 
 
 MAX_UNIT_REPORT_BYTES = 1024 * 1024
@@ -37,6 +38,7 @@ class UnitTestCase:
     output_diagnostics_json: str | None = field(default=None, repr=False)
 
     signup_checks_json: str | None = field(default=None, repr=False)
+    failure_diagnostic_json: str | None = field(default=None, repr=False)
 
     def to_dict(self):
         result = {"testId": self.test_id, "outcome": self.outcome}
@@ -52,6 +54,8 @@ class UnitTestCase:
             result['signupChecks'] = json.loads(self.signup_checks_json)
         if self.output_diagnostics_json:
             result["outputDiagnostics"] = json.loads(self.output_diagnostics_json)
+        if self.failure_diagnostic_json:
+            result['failureDiagnostic'] = json.loads(self.failure_diagnostic_json)
         return result
 
 
@@ -117,7 +121,7 @@ def parse_unit_report(stdout: str, exit_code: int) -> UnitTestReport:
         seen, cases = set(), []
         outcomes = {"PASS": 0, "FAIL": 0, "SKIP": 0}
         for row in data["tests"]:
-            if type(row) is not dict or not {"testId", "outcome"} <= set(row) <= {"testId", "outcome", "details", "observations", "observationError", "outputChecks", "outputDiagnostics", "signupChecks"}:
+            if type(row) is not dict or not {"testId", "outcome"} <= set(row) <= {"testId", "outcome", "details", "observations", "observationError", "outputChecks", "outputDiagnostics", "signupChecks", "failureDiagnostic"}:
                 raise UnitReportError()
             test_id = _string(row["testId"], MAX_UNIT_TEST_ID_BYTES, nonempty=True)
             if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in test_id) or redact_text(test_id) != test_id:
@@ -137,8 +141,13 @@ def parse_unit_report(stdout: str, exit_code: int) -> UnitTestReport:
             diagnostics = (json.dumps(validated_output_diagnostics(row["outputDiagnostics"], marks), sort_keys=True)
                            if "outputDiagnostics" in row else None)
             signup = json.dumps(validated_signup_checks(row['signupChecks']), sort_keys=True) if 'signupChecks' in row else None
+            failure = None
+            if 'failureDiagnostic' in row:
+                if row['outcome'] != 'FAIL':
+                    raise UnitReportError()
+                failure = json.dumps(validate_failure_diagnostic(row['failureDiagnostic']), sort_keys=True)
             cases.append(UnitTestCase(test_id, row["outcome"], details, observations, error,
-                                      tuple(sorted(marks.items())), diagnostics, signup))
+                                      tuple(sorted(marks.items())), diagnostics, signup, failure))
             outcomes[row["outcome"]] += 1
         if (outcomes["PASS"], outcomes["FAIL"], outcomes["SKIP"]) != (counts["passed"], counts["failed"], counts["skipped"]):
             raise UnitReportError()

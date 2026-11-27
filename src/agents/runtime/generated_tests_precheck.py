@@ -23,8 +23,9 @@ the Run as UNVERIFIED with recovery evidence. No ID is guessed or normalized.
 
 Some test-file defects make the Host run a correct product as FAIL, or a broken
 test as PASS. They are named here too (2026-11-17, Run 42f131fe and Codex's
-offline review). The engine only buys one regeneration for them; whatever the
-model returns still goes to the Host run, so these never fail a step:
+offline review). Known defects now require a real test-file write within the
+existing correction budget. An unchanged invalid draft stops as a validator
+technical failure before product execution; it never becomes a product FAIL:
 
 * ``GENERATED_TEST_SYNTAX_INVALID``: the file does not parse, so nothing runs;
 * ``GENERATED_TEST_NONE``: a scope whose files show test code (a ``TestCase``
@@ -48,7 +49,50 @@ from pathlib import Path
 
 from agents.runtime.generated_test_inventory import MAX_FILES, MAX_FILE_BYTES, unit_inventory, scope_root
 
-TESTCASE_BASES = frozenset({'TestCase', 'IsolatedAsyncioTestCase', 'AppTestCase'})
+TESTCASE_BASES = frozenset({'TestCase', 'IsolatedAsyncioTestCase', 'AppTestCase', 'ServiceTestCase'})
+
+
+def _service_fixture_issues(path):
+    try: tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, SyntaxError, UnicodeError): return set()
+    issues = set()
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    service_classes = [node for node in classes if any(_base_name(base) == 'ServiceTestCase' for base in node.bases)]
+    output_helpers = {alias.asname or alias.name for node in tree.body
+                      if isinstance(node, ast.ImportFrom) and node.module == '_host_test_data'
+                      for alias in node.names if alias.name == 'check_http_output'}
+    if any(isinstance(node, ast.Call) and _base_name(node.func) == 'TestClient' for node in ast.walk(tree)):
+        issues.add('TEST_SERVICE_FIXTURE_REQUIRED')
+    if any(any(_base_name(base) == 'AppTestCase' for base in node.bases) for node in classes):
+        issues.add('TEST_SERVICE_FIXTURE_REQUIRED')
+    if service_classes:
+        if any(isinstance(n, ast.ImportFrom) and n.module in {'main', 'database', 'models'}
+               or isinstance(n, ast.Import) and any(a.name in {'main', 'database', 'models'} for a in n.names)
+               for n in tree.body):
+            issues.add('TEST_SERVICE_FIXTURE_REQUIRED')
+        if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in {
+                'setUp', 'tearDown', 'setUpClass', 'tearDownClass', '_callSetUp', '_callTearDown', '_callCleanup', 'run'}
+                for cls in service_classes for n in cls.body):
+            issues.add('TEST_SERVICE_FIXTURE_REQUIRED')
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call): continue
+        direct = isinstance(node.func, ast.Name) and node.func.id in output_helpers
+        bound = (bool(service_classes) and isinstance(node.func, ast.Attribute)
+                 and node.func.attr == 'check_http_output' and isinstance(node.func.value, ast.Name)
+                 and node.func.value.id == 'self')
+        if (not (direct or bound) or any(k.arg is None for k in node.keywords)
+                or any(isinstance(arg, ast.Starred) for arg in node.args)): continue
+        sample = next((k.value for k in node.keywords if k.arg == 'sensitive'), None)
+        parameters = ('method', 'path') if bound else ('client', 'method', 'path')
+        positionals = set(parameters[:len(node.args)])
+        named = {k.arg for k in node.keywords if k.arg in parameters}
+        empty_or_absent = isinstance(sample, ast.Constant) and (
+            sample.value is None or type(sample.value) is str and sample.value == '')
+        if (len(node.args) > len(parameters) or positionals & named
+                or positionals | named != set(parameters) or sample is None
+                or isinstance(sample, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set)) and not empty_or_absent):
+            issues.add('TEST_OUTPUT_ARGUMENT_INVALID')
+    return issues
 
 
 def _base_name(node):
@@ -61,17 +105,31 @@ def _base_name(node):
 
 def _starts_test_client(tree) -> bool:
     """False when a ``TestClient(...)`` is made outside a ``with`` and nothing else enters it."""
-    in_with, made = set(), []
+    in_with, made, bindings = set(), [], {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if isinstance(value, ast.Call) and _base_name(value.func) == 'TestClient':
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    bindings[ast.dump(target, include_attributes=False).replace('Store()', 'Load()')] = id(value)
+    def entered(expression):
+        if isinstance(expression, ast.Call) and _base_name(expression.func) == 'TestClient':
+            in_with.add(id(expression))
+        else:
+            identity = bindings.get(ast.dump(expression, include_attributes=False))
+            if identity is not None:
+                in_with.add(identity)
     for node in ast.walk(tree):
         if isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
-                in_with.add(id(item.context_expr))
-                if not isinstance(item.context_expr, ast.Call):
-                    return True  # ``with client:`` on a client made earlier: assume it is entered
-        elif isinstance(node, ast.Attribute) and node.attr in (
-                '__enter__', 'enter_context', 'enterContext', 'enterClassContext'):
-            return True
-        elif isinstance(node, ast.Call) and _base_name(node.func) == 'TestClient':
+                entered(item.context_expr)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == '__enter__':
+                entered(node.func.value)
+            elif node.func.attr in ('enter_context', 'enterContext', 'enterClassContext') and node.args:
+                entered(node.args[0])
+        if isinstance(node, ast.Call) and _base_name(node.func) == 'TestClient':
             made.append(node)
     return all(id(call) in in_with for call in made)
 
@@ -160,7 +218,7 @@ def _fixture_issues(path, source_root):
         return set()
     if all((root / name).is_file() for name in ('main.py', 'database.py', 'models.py')):
         cases = [node for node in tree.body if isinstance(node, ast.ClassDef)]
-        if any(any(_base_name(base) in {'TestCase', 'IsolatedAsyncioTestCase'} for base in node.bases)
+        if any(any(_base_name(base) in {'TestCase', 'IsolatedAsyncioTestCase', 'ServiceTestCase'} for base in node.bases)
                for node in cases):
             return {'TEST_HOST_FIXTURE_REQUIRED'}
         if any(any(_base_name(base) == 'AppTestCase' for base in node.bases) for node in cases):
@@ -189,7 +247,8 @@ def _fixture_api_issues(path):
 def _import_issues(path: Path, source_root, tests_root: Path) -> set:
     """``TEST_IMPORT_NAME_MISSING`` when a product-module import certainly fails at collection."""
     from agents.runtime.start_precheck import _bindings, _module_file, _parse
-    from mcp_tools.tools.unit_runner import TEST_DATA_MODULE, TEST_DATA_EXPORTS, APP_FIXTURE_MODULE, APP_FIXTURE_EXPORTS
+    from mcp_tools.tools.unit_runner import (TEST_DATA_MODULE, TEST_DATA_EXPORTS, APP_FIXTURE_MODULE,
+        APP_FIXTURE_EXPORTS, SERVICE_FIXTURE_MODULE, SERVICE_FIXTURE_EXPORTS)
     if source_root is None:
         return set()
     try:
@@ -206,6 +265,10 @@ def _import_issues(path: Path, source_root, tests_root: Path) -> set:
             continue  # the Host runner preloads this module before product/test paths
         if node.module == APP_FIXTURE_MODULE:
             if any(alias.name not in (*APP_FIXTURE_EXPORTS, '*') for alias in node.names):
+                return {'TEST_IMPORT_NAME_MISSING'}
+            continue
+        if node.module == SERVICE_FIXTURE_MODULE:
+            if any(alias.name not in (*SERVICE_FIXTURE_EXPORTS, '*') for alias in node.names):
                 return {'TEST_IMPORT_NAME_MISSING'}
             continue
         if _module_file(tests_root, node.module) is not None:
@@ -233,7 +296,7 @@ def test_ids(path: Path, module=None) -> set[str] | None:
     return _analyze(path, module)[0]
 
 
-def inspect_generated_tests(tests_dir, scopes, rows, field, source_root=None, *, host_app_fixture=False) -> list[dict]:
+def inspect_generated_tests(tests_dir, scopes, rows, field, source_root=None, *, host_app_fixture=False, service_fixture=False) -> list[dict]:
     """Closed issues for generated scopes ``[(selector, pattern)]`` against declared case rows."""
     scopes = [(s[0], s[1], s[2] if len(s) == 3 else 'tests') for s in scopes
               if len(s) in (2, 3) and isinstance(s[0], str) and isinstance(s[1], str)]
@@ -262,8 +325,12 @@ def inspect_generated_tests(tests_dir, scopes, rows, field, source_root=None, *,
             codes |= file_codes | _import_issues(path, source_root, selected_root)
             if host_app_fixture:
                 codes |= _fixture_issues(path, source_root) | _fixture_api_issues(path)
+            if service_fixture and 'GENERATED_TEST_SYNTAX_INVALID' not in file_codes:
+                codes |= _service_fixture_issues(path)
             shows_tests = shows_tests or file_shows_tests
             found = None if found is None or ids is None else found | ids
+        if service_fixture and 'TEST_SERVICE_FIXTURE_REQUIRED' in codes:
+            codes.discard('TEST_CLIENT_NOT_STARTED')
         for code in sorted(codes):
             if {'fieldPath': '/' + field, 'reasonCode': code} not in issues:
                 issues.append({'fieldPath': '/' + field, 'reasonCode': code})

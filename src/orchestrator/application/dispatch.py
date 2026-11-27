@@ -353,6 +353,8 @@ class PlannerRunDispatcher:
             if scenario is None:
                 raise ValueError("Run scenario is not supported by the Scenario Registry")
             scenario.validate_planner_requirements(planner_output.plan.requirements)
+            from orchestrator.domain.service_design import validate_service_plan
+            validate_service_plan(scenario.planner_contract(), planner_output.plan)
         except PlannerOutputValidationError as exc:
             logger.warning(
                 "Planner output requires review for Run %s (error type: %s)",
@@ -634,6 +636,17 @@ class PlannerRunDispatcher:
                     break
         else:
             outcomes = await asyncio.gather(*(dispatch_one(step) for step in steps))
+        question = self._service_validation_question(run, outcomes)
+        if question is not None:
+            # Interactive SERVICE-WEB work must remain resumable. SCN-001's
+            # unattended experiment still uses the existing automatic-stop rule.
+            # Both Task observers have preserved their results; a completed peer
+            # is observed, rather than sent new work, when the user answers.
+            self._move_to_human_review(
+                run.run_id, question.step.workflow_step_id, question.step.attempt,
+                additional_event_types=("VALIDATION_INPUT_REQUIRED",),
+            )
+            return
         if any(
             isinstance(outcome, Exception)
             or outcome.disposition != TaskRunDisposition.COMPLETED
@@ -668,6 +681,19 @@ class PlannerRunDispatcher:
             return
 
         await self.consume_validation_results(run, steps, handoff, outcomes, plan=plan, scenario=scenario)
+
+    @staticmethod
+    def _service_validation_question(run, outcomes):
+        from orchestrator.domain.scenario_registry import SERVICE_WEB_ID
+        from orchestrator.infrastructure.automatic_stop import agent_stop_code
+
+        if run.scenario_id != SERVICE_WEB_ID:
+            return None
+        return next((outcome for outcome in outcomes
+                     if isinstance(outcome, A2ATaskRunResult)
+                     and outcome.disposition == TaskRunDisposition.WAITING_INPUT
+                     and outcome.step.agent_role in (AgentRole.QA, AgentRole.SECURITY)
+                     and agent_stop_code(outcome) == f"{outcome.step.agent_role.value}_INPUT_REQUIRED"), None)
 
     @staticmethod
     def _validation_draft_stop(outcome):
@@ -984,9 +1010,10 @@ class PlannerRunDispatcher:
             if artifact.artifact_id in input_artifact_ids
             or artifact.artifact_id in {issue.report_artifact_id for issue in stored_issues}
         ]
-        payload = self.build_fix_payload(fixing_run, step, plan, scenario, stored_issues, input_artifacts)
-        payload["runConfiguration"] = self._run_configuration_payload(run.run_id)
         try:
+            payload = self.build_fix_payload(fixing_run, step, plan, scenario, stored_issues, input_artifacts,
+                                             repository=self._repository)
+            payload["runConfiguration"] = self._run_configuration_payload(run.run_id)
             async with self._client_factory(developer_url) as client:
                 await client.resolve_agent_card()
                 result = await A2ATaskRunner(client).submit_and_wait(
@@ -1076,7 +1103,7 @@ class PlannerRunDispatcher:
         return get_scenario(run.scenario_id)
 
     @staticmethod
-    def build_fix_payload(run, step, plan, scenario, issues, input_artifacts):
+    def build_fix_payload(run, step, plan, scenario, issues, input_artifacts, *, repository=None):
         """Create a recoverable Fix Request with scrubbed, actionable evidence."""
         from orchestrator.domain.validation_feedback import validation_feedback, without_expectations
         payload = {
@@ -1125,6 +1152,13 @@ class PlannerRunDispatcher:
                 artifact['record'] = without_expectations(artifact['record'])
         from orchestrator.domain.protected_feedback import append_protected_feedback
         append_protected_feedback(fix, issues, input_artifacts)
+        if repository is not None:
+            sources = [a for a in input_artifacts if a.artifact_type == 'SOURCE']
+            if len(sources) == 1:
+                from orchestrator.infrastructure.repair_reproduction import generated_reproduction
+                reproduction = generated_reproduction(repository, sources[0], fix['validationFeedback'])
+                if reproduction:
+                    fix['reproduction'] = reproduction
         return payload
 
     @staticmethod
@@ -1201,7 +1235,9 @@ class PlannerRunDispatcher:
                     actual_result=test.actual_result or test.details or "Required QA assertion failed.",
                     normalized_location=test.normalized_location or test.test_id,
                     evidence_refs=(test.tool_evidence.evidence_ref,) if test.tool_evidence else (),
-                    cause_status="CONFIRMED",
+                    # A failed assertion/exception is measured, but does not
+                    # by itself identify whether Source or test setup caused it.
+                    cause_status="UNKNOWN",
                     consecutive_repeat_count=0,
                 )
             )

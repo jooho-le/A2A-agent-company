@@ -372,6 +372,30 @@ def compact_fix_input(task_input, *, repair_history=None, issue_records=(), sour
                                                value.get('previousRepairResult'), issue_records, fix.get('attempt'),
                                                fix.get('inputArtifacts', []))
     brief = value['activeRepairFocus']['brief']
+    unit_failures = []
+    for row in feedback:
+        diagnostic = row.get('failureDiagnostic')
+        if row.get('hostDecision') != 'FIX_TARGET' or not diagnostic:
+            continue
+        from orchestrator.domain.unit_failure_diagnostics import validate_failure_diagnostic
+        unit_failures.append({'testId': row.get('testId'),
+                              'failureDiagnostic': validate_failure_diagnostic(diagnostic)})
+        if len(unit_failures) == 16:
+            break
+    if unit_failures:
+        brief['unitFailureDiagnostics'] = unit_failures
+        brief['unitFailureInstruction'] = (
+            'These are value-free observed symptoms on active fix targets, not confirmed root causes. '
+            'For an actualStatus/expectedStatus mismatch, preserve serviceDesign and repair the implementation. '
+            'If invalid input received 2xx where 4xx was expected, repair that validation path before hashing '
+            'or writing data. A required Pydantic str field rejects missing input but still accepts an empty '
+            'string unless the model or handler validates it. Preserve the failed negative case and its '
+            'agreed status; do not turn its input into a valid request or change the test to expect success. '
+            'FastAPI can return 422 before entering a request-model endpoint; when 400 is agreed, inspect '
+            'the application RequestValidationError handler rather than adding a missing-field check inside '
+            'that endpoint. For DATABASE_TABLE_MISSING, check application startup and test lifespan first; '
+            'do not create tables in tests or add unrelated initialization just to hide a fixture defect. '
+            'Read the actual Source and explain which failure path your edit reaches. Preserve passing checks.')
     runtime = config.get('configuration') if isinstance(config, dict) else None
     runtime = runtime if isinstance(runtime, dict) else {}
     invalid_input = measured_invalid_input(fix, runtime)

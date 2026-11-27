@@ -77,6 +77,17 @@ class ProductControlTests(unittest.TestCase):
         self.assertEqual(self.post()[0], 409)
         self.assertEqual(len(self.host.calls), 2)  # explicit calls; no automatic retry
 
+    def test_supplementary_input_uses_the_same_owner_and_idempotency_gate(self):
+        body = {'action':'ANNOTATE','revision':'a'*64,'clarification':'현재 요청 안에서 입력 안내를 명확하게 해주세요.'}
+        self.assertEqual(self.post(body=body,user=2)[0],404)
+        self.assertEqual(self.host.calls,[])
+        self.assertEqual(self.post(body=body)[0],202)
+        self.assertEqual(self.host.calls[-1][2]['body'],{**body,'workflowStepId':None})
+        before = len(self.host.calls)
+        self.assertEqual(self.post(body={**body,'workflowStepId':str(uuid4())})[0],422)
+        self.assertEqual(self.post(body={**body,'clarification':'x'*4001})[0],422)
+        self.assertEqual(len(self.host.calls),before)
+
 
 class HostActivationPolicyTests(unittest.TestCase):
     """기존 임시 DB·Mock HTTP fixture만 재사용하며 실제 Host 요청은 하지 않습니다."""

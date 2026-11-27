@@ -10,13 +10,15 @@ from hashlib import sha256
 from agents.llm.contracts import JsonSchema, StructuredOutput, json_text, parse_json
 from agents.roles.security_contract import MAX_SECURITY_REFERENCE_LINES, SecurityContractError
 
-SECURITY_DRAFT_POLICY = 'HOST_ANCHORED_SECURITY_TEST_PLAN_V1'
+SECURITY_DRAFT_POLICY = 'HOST_ANCHORED_SECURITY_TEST_PLAN_V2'
 PENDING_TESTS = 'HOST_TESTS_PENDING'
 MAX_ANCHORS = 2048
 
 
 class SecurityTestDraft:
-    def __init__(self, source_files, snapshot_sha256):
+    def __init__(self, source_files, snapshot_sha256, *, pending_requirement_ids=()):
+        from uuid import UUID
+        self._pending_ids = tuple(sorted({str(UUID(str(value))) for value in pending_requirement_ids}))
         anchors = {}
         unanchored = {}
         if (not isinstance(snapshot_sha256, str) or len(snapshot_sha256) != 64
@@ -103,6 +105,14 @@ class SecurityTestDraft:
                             raise ValueError()
                         decoded.append(dict(anchors[ref['anchorId']]))
                     row['references'] = decoded
+            if result.get('kind') == 'READY' and self._pending_ids:
+                # These rows are mechanical pre-execution markers, never model
+                # findings, semantic approvals or product PASS. The Host owns
+                # their required inventory; supplied citations remain verified.
+                seen = {row['requirementId'] for row in result['requirementReviews']}
+                result['requirementReviews'].extend({'requirementId': identity,
+                    'proposedOutcome': 'UNVERIFIED', 'rationale': PENDING_TESTS, 'references': []}
+                    for identity in self._pending_ids if identity not in seen)
             return result
         except Exception:
             raise SecurityContractError() from None
@@ -112,6 +122,29 @@ class SecurityTestDraft:
         # Feedback names the model's actual wire field, not resolved Host coordinates.
         return [{**issue, 'fieldPath': issue['fieldPath'].rsplit('/', 1)[0] + '/anchorId'}
                 for issue in issues]
+
+    def explain(self, wire, canonical_explain):
+        """Name wire errors even when decoding cannot reach the role validator."""
+        issues = []
+        if isinstance(wire, dict):
+            for field in ('requirementReviews', 'findingReviews'):
+                rows = wire.get(field)
+                if not isinstance(rows, list):
+                    issues.append({'fieldPath': '/' + field, 'reasonCode': 'FIELD_MISSING'})
+                    continue
+                for index, row in enumerate(rows[:256]):
+                    if not isinstance(row, dict):
+                        continue
+                    if field == 'requirementReviews':
+                        for key, expected in (('proposedOutcome', 'UNVERIFIED'), ('rationale', PENDING_TESTS)):
+                            if row.get(key) != expected:
+                                issues.append({'fieldPath': f'/{field}/{index}/{key}', 'reasonCode': 'PENDING_STATE_REQUIRED'})
+                    for number, ref in enumerate(row.get('references', []) if isinstance(row.get('references'), list) else []):
+                        if not isinstance(ref, dict) or set(ref) != {'anchorId'} or ref.get('anchorId') not in self.catalog['anchors']:
+                            issues.append({'fieldPath': f'/{field}/{index}/references/{number}/anchorId', 'reasonCode': 'SOURCE_ANCHOR_INVALID'})
+        if issues:
+            return issues[:16]
+        return canonical_explain(self.decode(wire))
 
 
 def pending_fields(candidate):
@@ -134,6 +167,9 @@ def pending_fields(candidate):
 
 
 TEST_PLAN_INSTRUCTIONS = (
+    'The Host supplies missing requirementReviews as typed pending markers for the frozen assigned IDs; '
+    'you may return an empty requirementReviews list for generated tests. This never supplies a PASS, '
+    'a finding review, a test case or a source citation. Declare all actual tests and required coverage. '
     'sourceReferenceCatalog is Host-owned and bound to this frozen Snapshot. '
     'Read each source file you cite, then choose its anchorId from the catalog. The answer schema offers '
     'only anchorIds of files you have already read in this step, so read a file before citing it. '

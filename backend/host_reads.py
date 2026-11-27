@@ -43,6 +43,15 @@ class HostRejected(Exception):
         self.code = code
 
 
+CONTINUATION_REJECTIONS = frozenset({
+    'CONTINUATION_SERVICE_ONLY', 'CONTINUATION_PARENT_NOT_FOUND', 'CONTINUATION_PARENT_NOT_READY',
+    'CONTINUATION_BASELINE_CHANGED', 'CONTINUATION_SOURCE_INVALID', 'CONTINUATION_SOURCE_UNAVAILABLE',
+    'CONTINUATION_CONTEXT_TOO_LARGE', 'CONTINUATION_UNSAFE_CONTEXT', 'CONTINUATION_PARENT_CHANGED',
+    'CONTINUATION_ALREADY_ACTIVE', 'CONTINUATION_BINDING_INVALID', 'CONTINUATION_INTEGRITY_FAILED',
+    'CONTINUATION_TARGET_REQUIRED',
+})
+
+
 @dataclass(frozen=True, repr=False)
 class HostResponse:
     status: int
@@ -218,7 +227,7 @@ class HostReadClient:
                     raise HostAuthenticationFailed()
                 if response.status == 404:
                     raise HostRunNotFound()
-                if response.status == 409 and method == "POST" and path == "/api/v1/runs":
+                if response.status in (409, 422) and method == "POST" and path == "/api/v1/runs":
                     # 계약상 확인된 코드만 보존합니다. 원본 오류는 반환/기록하지 않습니다.
                     code = None
                     if response.getheader("Content-Type", "").split(";")[0].strip().lower() == "application/json":
@@ -226,11 +235,13 @@ class HostReadClient:
                         if len(raw_error) <= 4096:
                             try:
                                 error = json.loads(raw_error, parse_constant=_reject_nonfinite_json)
-                                if error == {"detail": "IDEMPOTENCY_KEY_CONFLICT"}:
-                                    code = "IDEMPOTENCY_KEY_CONFLICT"
+                                if (isinstance(error, dict) and set(error) == {'detail'}
+                                        and isinstance(error['detail'], str)
+                                        and error['detail'] in CONTINUATION_REJECTIONS | {'IDEMPOTENCY_KEY_CONFLICT'}):
+                                    code = error['detail']
                             except (ValueError, UnicodeError):
                                 pass
-                    raise HostRejected(409, code)
+                    raise HostRejected(response.status, code)
                 if 400 <= response.status < 500 and response.status not in (401, 403):
                     raise HostRejected(response.status)
                 if response.status not in accepted_statuses:

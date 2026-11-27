@@ -41,7 +41,7 @@ def is_supported_project_scenario(scenario_id):
         except (ValueError, TypeError, AttributeError):
             return False
         scenario = registry.get_scenario(identifier)
-        return scenario is not None and scenario.key == "SCN-001"
+        return scenario is not None and scenario.key in {"SCN-001", "SERVICE-WEB"}
     except ScenarioRegistryUnavailable:
         raise
     except Exception as exc:

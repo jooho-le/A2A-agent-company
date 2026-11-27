@@ -64,26 +64,34 @@ function ReplyEditor({ runId, role, target, controls }) {
   })
   const id = useId()
   const canReply = target?.replyMode === 'ANSWER'
+  const canAnnotate = !target && controls.data?.canAnnotate === true
+  const pending = controls.replyPending || controls.annotatePending
   function change(value) {
     setText(value)
     try { if (key) value ? sessionStorage.setItem(key, value) : sessionStorage.removeItem(key) } catch { /* Keep the draft in memory. */ }
   }
-  return <form className="run-reply" onSubmit={event => { event.preventDefault(); if (canReply && text.trim()) controls.reply(text.trim(), target.workflowStepId) }}>
-    <label htmlFor={id}>{target ? '직원에게 알려주세요' : '추가 의견 메모'}</label>
-    <textarea id={id} value={text} onChange={event => change(event.target.value)} maxLength={8000}
-      placeholder="예: 정해진 회원가입 기능 안에서 진행해주세요." disabled={controls.replyPending} />
-    {canReply ? <button type="submit" className="button start" disabled={!text.trim() || controls.replyPending || controls.cancelPending}>
-      {controls.replyPending ? '전달 상태 확인 중…' : '답변하고 이어가기'}<Icon name="arrow" /></button>
-      : <p className="run-draft-hint">메모는 브라우저에만 저장돼요. 확인 요청을 받으면 답변할 수 있어요.</p>}
+  return <form className="run-reply" onSubmit={event => { event.preventDefault(); if (!text.trim()) return
+    if (canReply) controls.reply(text.trim(), target.workflowStepId)
+    else if (canAnnotate) controls.annotate(text.trim()) }}>
+    <label htmlFor={id}>{target ? '직원에게 알려주세요' : '작업에 설명 보충하기'}</label>
+    <textarea id={id} value={text} onChange={event => change(event.target.value)} maxLength={canReply ? 8000 : 4000}
+      placeholder="예: 요청한 API는 JSON으로 사용하려고 해요." disabled={pending} />
+    {(canReply || canAnnotate) ? <button type="submit" className="button start" disabled={!text.trim() || pending || controls.cancelPending}>
+      {pending ? '전달 상태 확인 중…' : canReply ? '답변하고 이어가기' : '추가 설명 전달'}<Icon name="arrow" /></button>
+      : <p className="run-draft-hint">현재 단계에는 설명을 전달할 수 없어요. 확인 질문에 답하거나 새 작업을 시작해주세요.</p>}
+    {canAnnotate && <p className="run-draft-hint">현재 요청 안의 보충 설명을 다음 직원 작업에 전달해요. 새 기능이나 범위 변경은 새 작업으로 시작해주세요.</p>}
   </form>
 }
 
-export default function RunWorkPanel({ runId, projectName, displayState: rawDisplayState, controls, selectedRole, onSelectRole, onResults, onNew }) {
-  const displayState = useWorkPresentation(rawDisplayState)
+export default function RunWorkPanel({ runId, projectName, displayState, controls, selectedRole, onSelectRole, onResults, onNew, onContinue, onChooseWork, continuationBusy, continuationError }) {
   const [confirmStop, setConfirmStop] = useState(false)
   const [memoOpen, setMemoOpen] = useState(false)
+  const [continueOpen, setContinueOpen] = useState(false)
+  const [continueNote, setContinueNote] = useState('')
+  const continueInput = useId()
   const data = controls.data
-  const requests = data?.requests || []
+  const final = [displayState.run?.status, data?.status].some(status => ['FINISHED', 'ABORTED'].includes(status))
+  const requests = !final && ['WAITING_INPUT', 'HUMAN_REVIEW'].includes(data?.status) ? data?.requests || [] : []
   const role = selectedRole || requests[0]?.agentRole || displayState.agents.find(row => row.displayState === 'working')?.agentRole || 'ORCHESTRATOR'
   const index = humanAgents.findIndex(person => person.id.toUpperCase() === role)
   const safeIndex = index < 0 ? 4 : index
@@ -92,14 +100,17 @@ export default function RunWorkPanel({ runId, projectName, displayState: rawDisp
   const popups = buildOfficeRunPopups(displayState, rows, { ready: false, current: [] })
   const row = rows[safeIndex], popup = popups[safeIndex]
   const target = requests.find(item => item.agentRole === role)
-  const final = ['FINISHED', 'ABORTED'].includes(displayState.run?.status)
+  const failures = data?.failures || []
+  const failure = failures.find(item => item.agentRole === role) || (role === 'ORCHESTRATOR' ? failures[0] : null)
   const command = Object.values(controls.commands).sort((a, b) =>
     String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0]
-  const receiptMessage = command?.status === 'SUCCEEDED' ? command.action === 'CANCEL' ? '작업 중단이 확인됐어요.' : '답변 전달 처리가 끝났어요. 최신 작업 내용을 확인해주세요.'
-    : command?.status === 'REJECTED' ? '진행 상태가 바뀌었어요. 최신 내용을 확인하고 다시 선택해주세요.'
+  const receiptMessage = command?.status === 'SUCCEEDED' ? command.action === 'CANCEL' ? '작업 중단이 확인됐어요.'
+    : command.action === 'ANNOTATE' ? '추가 설명을 접수했어요. 아래에서 전달 상태를 확인해주세요.' : '답변 전달 처리가 끝났어요. 최신 작업 내용을 확인해주세요.'
+    : command?.status === 'REJECTED' ? final ? '이 작업은 이미 종료됐어요. 답변을 이어 보낼 수 없어요.' : '진행 상태가 바뀌었어요. 최신 내용을 확인하고 다시 선택해주세요.'
       : command?.status === 'UNKNOWN' ? command.errorCode ? '서버가 처리를 확신할 수 없어 관리자 확인이 필요해요. 같은 요청을 다시 보내지 않아요.'
         : '처리 결과를 확인해야 해요. 같은 요청을 다시 보내지 않고 확인 중이에요.'
-        : command ? command.action === 'CANCEL' ? '직원들의 중단 확인을 기다리고 있어요…' : '답변을 전달하고 이어서 진행하고 있어요…' : ''
+        : command ? command.action === 'CANCEL' ? '직원들의 중단 확인을 기다리고 있어요…'
+          : command.action === 'ANNOTATE' ? '추가 설명의 접수 상태를 확인하고 있어요…' : '답변을 전달하고 이어서 진행하고 있어요…' : ''
 
   return <section className="run-work-panel" aria-label="직원 작업 내용과 작업 제어">
     <header><div>{projectName && <h3>{projectName}</h3>}</div>
@@ -112,13 +123,19 @@ export default function RunWorkPanel({ runId, projectName, displayState: rawDisp
       aria-pressed={i === safeIndex} data-state={rows[i]?.displayState} onClick={() => onSelectRole(humanAgents[i].id.toUpperCase())}>
       <img src={humanAgents[i].portrait} alt="" /><span>{roleLabel(humanAgents[i].id)}</span><i aria-hidden="true" />
     </button>)}</div>
-    <article className="run-person-work" data-state={row?.displayState}>
-      <div className="run-person-heading"><strong>{roleLabel(person.id)}</strong><span>{row?.label || '상태 확인 중'}</span></div>
+    <article className="run-person-work" data-state={failure?.recovering ? 'waiting' : row?.displayState}>
+      <div className="run-person-heading"><strong>{roleLabel(person.id)}</strong><span>{failure?.recovering ? '수정·재검사 중' : row?.label || '상태 확인 중'}</span></div>
       {!target && <p className="run-person-purpose">{purposes[safeIndex]}</p>}
-      {popup && !target && <div className="run-person-result"><h4>{popup.title}</h4>{popup.source === 'report' ? <p>{popup.detail}</p>
+      {failure && !target && <div className="run-person-result" role={failure.recovering ? 'status' : 'alert'}>
+        <h4>{failure.recovering ? '수정·재검사를 진행 중이에요.' : failure.message}</h4><p>{failure.instruction}</p>
+        {!!failure.validationIssues?.length && <details><summary>검사 오류 자세히</summary><ul>{failure.validationIssues.slice(0, 4).map((issue, i) =>
+          <li key={i}>{issue.reason}{issue.fieldPath && <small> ({issue.fieldPath})</small>}</li>)}</ul></details>}
+        {!failure.recovering && failure.nextAction === 'CHECK_PROVIDER' && <button type="button" className="button" onClick={controls.refresh}>중단 원인 다시 확인</button>}
+      </div>}
+      {popup && !target && !failure && <div className="run-person-result"><h4>{popup.title}</h4>{popup.source === 'report' ? <p>{popup.detail}</p>
         : <details><summary>현재 작업 자세히</summary><p>{popup.detail}</p></details>}</div>}
       {target && <div className="run-question"><strong>{target.reason}</strong><ul>{target.questions.map((question, i) => <li key={i}>{question}</li>)}</ul>
-        {target.replyMode === 'NEW_RUN' && <><p>이 작업은 새 요청으로 시작해야 해요.</p><button type="button" className="button" onClick={onNew}>새 작업 만들기<Icon name="arrow" /></button></>}
+        {target.replyMode === 'NEW_RUN' && <p>이전 실행을 직접 재개할 수 없어요. 아래에서 기존 코드를 이어받아 수정·재시도할 수 있어요.</p>}
         {target.replyMode === 'UNAVAILABLE' && <button className="button" type="button" onClick={controls.refresh}>질문 다시 확인</button>}
       </div>}
       {(target?.replyMode === 'ANSWER' || (memoOpen && !final && !target)) && <ReplyEditor key={runId + ':' + (target?.workflowStepId || role)} runId={runId} role={role} target={target} controls={controls} />}
@@ -126,12 +143,34 @@ export default function RunWorkPanel({ runId, projectName, displayState: rawDisp
     </article>
     {receiptMessage && <p className="run-command-notice" role="status">{receiptMessage}</p>}
     {controls.error && <div className="run-control-error" role="alert"><p>{controls.error}</p><button type="button" className="button" onClick={controls.refresh}>처리 상태 확인</button></div>}
+    {data?.continuationUnavailable && !target && <p className="run-control-error" role="alert">{data.continuationUnavailable}</p>}
+    {!!data?.feedback?.length && <details className="run-waiting-work"><summary>전달한 추가 설명</summary>{data.feedback.map(note => <p key={note.feedbackId}>
+      {note.text}<br /><small>{note.status === 'INCLUDED' ? '직원 작업 입력에 포함됨' : note.status === 'NOT_APPLIED' ? '다음 단계 없이 종료되어 전달되지 않음' : '다음 직원 작업에 전달 대기'}</small></p>)}</details>}
     {!data && !controls.error && <p className="run-command-notice" role="status">직원과 연결하고 있어요…</p>}
     <footer className="run-work-actions">
       <button type="button" className="button" onClick={onResults}><Icon name="file" />만든 결과</button>
-      {!final && !target && <button type="button" className="button" aria-expanded={memoOpen} onClick={() => setMemoOpen(value => !value)}><Icon name="plan" />추가 의견</button>}
-      {final && <button type="button" className="button start" onClick={onNew}>새 작업 만들기</button>}
+      {!final && !target && data?.canAnnotate && <button type="button" className="button" aria-expanded={memoOpen} onClick={() => setMemoOpen(value => !value)}><Icon name="plan" />추가 의견</button>}
+      {data?.continuation?.available && onContinue && <button type="button" className="button start" disabled={continuationBusy}
+        aria-expanded={continueOpen} onClick={() => setContinueOpen(value => !value)}>
+        {continuationBusy ? '이전 작업을 연결하고 있어요…' : '이어서 수정·재시도'}</button>}
+      {data?.continuation?.reason && !data.continuation.available && (final || data.status === 'HUMAN_REVIEW')
+        && <p className="run-draft-hint">{data.continuation.reason}</p>}
+      {data?.continuation && !data.continuation.available && (final || data.status === 'HUMAN_REVIEW') && onChooseWork
+        && <button type="button" className="button" onClick={onChooseWork}>수정할 작업 선택</button>}
+      {(final || data?.continuationUnavailable) && <button type="button" className="button" onClick={onNew}>다른 작업 만들기</button>}
     </footer>
+    {continueOpen && data?.continuation?.available && <form className="run-reply" onSubmit={event => {
+      event.preventDefault()
+      onContinue(continueNote.trim() || '원래 요구사항과 인터페이스를 유지하고, 기록된 실패를 수정한 뒤 재검증해주세요.')
+    }}>
+      <p>이전 코드·요구사항·검사 기록을 이어받아요. 기존 기록은 남고 에이전트가 다시 실행돼요.</p>
+      <label htmlFor={continueInput}>덧붙일 설명 <small>(선택)</small></label>
+      <textarea id={continueInput} value={continueNote} onChange={event => setContinueNote(event.target.value)}
+        maxLength={4000} disabled={continuationBusy} placeholder="설명 없이도 기록된 오류를 바탕으로 다시 진행해요." />
+      {continuationError && <p role="alert">{continuationError}</p>}
+      <button className="button start" type="submit" disabled={continuationBusy}>
+        {continuationBusy ? '연결 중…' : '이전 작업에서 이어서 시작'}</button>
+    </form>}
     {confirmStop && <StopDialog onClose={() => setConfirmStop(false)} onConfirm={() => { setConfirmStop(false); controls.cancel() }} />}
   </section>
 }

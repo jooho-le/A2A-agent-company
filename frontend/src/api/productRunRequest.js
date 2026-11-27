@@ -20,6 +20,22 @@ export class ProductRunRequestError extends Error {
   }
 }
 
+export const continuationMessages = {
+  CONTINUATION_TARGET_REQUIRED: '이전 오류를 수정하려면 내 프로젝트에서 원래 작업을 선택하고 이어서 수정·재시도를 눌러주세요.',
+  CONTINUATION_PARENT_NOT_FOUND: '원래 작업을 찾을 수 없어요. 수정할 프로젝트와 작업을 다시 선택해주세요.',
+  CONTINUATION_PARENT_NOT_READY: '원래 작업이 아직 진행 중이거나 이어갈 수 없는 상태예요. 최신 상태를 확인해주세요.',
+  CONTINUATION_ALREADY_ACTIVE: '이 작업의 수정 실행이 이미 진행 중이에요. 프로젝트의 최신 실행을 확인해주세요.',
+  CONTINUATION_PARENT_CHANGED: '원래 작업의 상태가 바뀌었어요. 최신 상태를 확인한 뒤 다시 선택해주세요.',
+  CONTINUATION_BASELINE_CHANGED: '원래 코드와 현재 승인 환경이 달라 이어갈 수 없어요. 실행 환경을 확인해주세요.',
+  CONTINUATION_SOURCE_UNAVAILABLE: '저장된 코드를 안전하게 불러오지 못했어요. 기존 기록은 보존돼요. 실행 환경 확인이 필요해요.',
+  CONTINUATION_SOURCE_INVALID: '저장된 코드가 승인 기준과 일치하지 않아요. 기존 기록과 실행 환경을 확인해주세요.',
+  CONTINUATION_CONTEXT_TOO_LARGE: '이전 검사 기록이 전달 한도를 넘었어요. 실행 기록 확인이 필요해요.',
+  CONTINUATION_UNSAFE_CONTEXT: '이전 기록을 안전하게 전달하지 못했어요. 기존 작업의 민감정보를 확인해주세요.',
+  CONTINUATION_INTEGRITY_FAILED: '저장된 작업의 무결성을 확인하지 못했어요. 실행 기록 확인이 필요해요.',
+  CONTINUATION_BINDING_INVALID: '이전 작업 연결 정보를 확인하지 못했어요. 프로젝트에서 원래 작업을 다시 선택해주세요.',
+  CONTINUATION_SERVICE_ONLY: '이어서 수정은 서비스 작업에서 이용할 수 있어요.',
+}
+
 export function loginRequired() {
   return new ProductRunRequestError('로그인이 필요합니다. 기존 로그인 화면에서 로그인해 주세요.', 'AUTH_REQUIRED', 401)
 }
@@ -78,10 +94,12 @@ export function createProductRunFetch({
         code = 'SUBMISSION_NOT_FOUND'
         message = '이전 요청의 접수 기록을 찾지 못했어요. 아래에서 이전 요청을 확인하고 다시 입력할 수 있어요.'
       }
-      if (response.status === 409 && createsRun) {
+      if ([409, 422].includes(response.status) && createsRun) {
         let detail
         try { detail = (await response.json())?.detail } catch { /* 확인 불가 충돌은 불확실 상태로 유지 */ }
-        if (detail === 'CONFIGURATION_CHANGED') {
+        if (Object.hasOwn(continuationMessages, detail)) {
+          code = detail; message = continuationMessages[detail]
+        } else if (detail === 'CONFIGURATION_CHANGED') {
           code = detail; message = '승인 설정이 변경되었습니다. 다시 연결한 뒤 업무 시작을 눌러 주세요.'
         } else if (detail === 'IDEMPOTENCY_KEY_CONFLICT' || detail === '같은 요청 식별자로 다른 업무를 접수할 수 없습니다.') {
           code = 'IDEMPOTENCY_KEY_CONFLICT'; message = '동일 접수 키의 요청 내용이 충돌했습니다. 기존 접수 상태를 확인해 주세요.'
@@ -94,7 +112,8 @@ export function createProductRunFetch({
       const error = new ProductRunRequestError(message, code, response.status)
       // 제품 서버가 외부 POST 전 미접수를 확정한 경우만 재입력을 허용합니다.
       error.submissionNotAccepted = createsRun && (code === 'SUBMISSION_KEY_RETIRED'
-        || response.status === 503 && response.headers?.get('X-Submission-Status') === 'NOT_ACCEPTED')
+        || (response.status === 503 || Object.hasOwn(continuationMessages, code))
+          && response.headers?.get('X-Submission-Status') === 'NOT_ACCEPTED')
       throw error
     }
     return response

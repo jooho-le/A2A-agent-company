@@ -11,6 +11,29 @@ from pathlib import PurePosixPath
 EXPOSURE_CHANNELS = ('SUCCESS_RESPONSE', 'REJECTION_RESPONSE', 'STORAGE_ERROR_RESPONSE', 'REQUEST_LOGS', 'STORAGE_ERROR_REQUEST_LOGS')
 
 
+def service_output_coverage(design, cases):
+    """Require actual channel observations for explicitly declared secret inputs.
+
+    No inference from test titles or from arbitrary user text. Non-credential
+    services retain their own input/access checks and are not forced to signup.
+    This measures output coverage only, not password storage or authorization.
+    """
+    fields = {name.lower().replace('_', '') for endpoint in design.get('endpoints', [])
+              for name in endpoint.get('requestFields', [])}
+    if not fields & {'password', 'secret', 'apikey', 'accesstoken', 'refreshtoken'}:
+        return None, []
+    coverage = {}
+    for channel in ('REQUEST_LOGS', 'OTHER_RESPONSE'):
+        observed = [row.get('outputChecks', {}).get(channel) for row in cases]
+        # NO_SAMPLE executes a negative request without inventing positive
+        # evidence. A real CHECKED sample is still required; actual lost or
+        # truncated observations (INCOMPLETE) continue to block a PASS.
+        coverage[channel] = ('FAIL' if 'EXPOSED' in observed else 'UNVERIFIED' if 'INCOMPLETE' in observed
+            else 'PASS' if any(row.get('outcome') == 'PASS' and row.get('outputChecks', {}).get(channel) == 'CHECKED'
+                               for row in cases) else 'UNVERIFIED')
+    return coverage, ['OUTPUT_NOT_OBSERVED_' + key for key, value in coverage.items() if value == 'UNVERIFIED']
+
+
 def generated_output_coverage(cases):
     """Only runner observations from tests bound to this one requirement are eligible."""
     priority = {'PASS': 0, 'UNVERIFIED': 1, 'FAIL': 2}

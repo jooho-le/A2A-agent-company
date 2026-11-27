@@ -12,10 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agents.llm.contracts import LLMErrorCode
 from agents.llm.development_rejection import RejectionAssessment
 from agents.llm.failure_diagnostics import FailureDiagnostic, PERMANENT_REASONS, compatible
+from agents.llm.validation import LLMValidationReport
 
 POLICY = 'BOUNDED_PRE_EXECUTION_REGENERATION_V1'
-DEVELOPMENT_PROGRESS_POLICY = 'HOST_NET_DIFF_FOCUSED_SOURCE_REPAIR_V7'
-GENERATED_TEST_READY_POLICY = 'HOST_REQUIRED_TEST_FILE_WRITE_AND_EXHAUSTION_V1'
+DEVELOPMENT_PROGRESS_POLICY = 'HOST_NET_DIFF_WITH_SERVICE_REVALIDATION_V8'
+GENERATED_TEST_READY_POLICY = 'HOST_REQUIRED_TEST_FILE_WRITE_AND_EXHAUSTION_V3'
 CORRECTION_CODES = frozenset({
     'TOOL_ARGUMENTS_INVALID', 'TOOL_REQUEST_REJECTED', 'MODEL_OUTPUT_INVALID',
     'OUTPUT_CONTRACT_INVALID', 'QUESTIONS_NOT_ANSWERED', 'READY_WITHOUT_CHANGES',
@@ -24,7 +25,7 @@ CORRECTION_CODES = frozenset({
     'GENERATED_TESTS_INVALID', 'CODE_REFERENCE_INVALID', 'DEVELOPER_REJECTION_RECOVERABLE',
     'DEVELOPER_REJECTION_HELD',
     'READY_PATH_EVIDENCE_MISMATCH', 'READY_PRIORITY_REPAIR_NEEDED', 'READY_RUNTIME_REPAIR_REQUIRED',
-    'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW',
+    'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW',
 })
 CATEGORIES = Literal['MODEL_FORMAT', 'HOST_CONFIGURATION', 'HUMAN_DECISION',
                      'EXECUTION_UNCERTAIN', 'BUDGET_LIMIT', 'POLICY_BLOCK', 'MODEL_EXECUTION']
@@ -147,7 +148,13 @@ class FailureRoute(_Record):
     failure_diagnostic: FailureDiagnostic | None = Field(default=None, alias='failureDiagnostic',
                                                         exclude_if=lambda value: value is None)
     development_rejection: RejectionAssessment | None = Field(default=None, alias='developmentRejection')
-    draft_issue: Literal['GENERATED_TEST_FILE_MISSING'] | None = Field(default=None, alias='draftIssue')
+    draft_issue: Literal['GENERATED_TEST_FILE_MISSING', 'TEST_IN_FILE_NOT_DECLARED', 'DECLARED_TEST_NOT_IN_FILE',
+                         'TEST_CLIENT_NOT_STARTED', 'GENERATED_TEST_SYNTAX_INVALID', 'GENERATED_TEST_NONE',
+                         'ASYNC_TEST_IN_SYNC_CASE', 'TEST_IMPORT_NAME_MISSING', 'TEST_HOST_FIXTURE_REQUIRED',
+                         'TEST_SERVICE_FIXTURE_REQUIRED', 'TEST_OUTPUT_ARGUMENT_INVALID',
+                         'CODE_REFERENCE_INVALID', 'OUTPUT_CONTRACT_INVALID', 'MODEL_OUTPUT_INVALID'] | None = Field(default=None, alias='draftIssue')
+    validation_report: LLMValidationReport | None = Field(default=None, alias='llmValidation',
+        exclude_if=lambda value: value is None)
     observation: CorrectionObservation | None = None
     unlinked_repair_paths: tuple[str, ...] = Field(default=(), alias='unlinkedRepairPaths',
                                                    max_length=16, exclude_if=lambda v: not v)
@@ -158,6 +165,8 @@ class FailureRoute(_Record):
 
     def public(self):
         data = super().public()
+        if self.validation_report is not None:
+            data['llmValidation'] = self.validation_report.model_dump(mode='json', by_alias=True)
         if self.failure_diagnostic is not None:
             data['failureDiagnostic'] = self.failure_diagnostic.public()
         if self.development_rejection is None:
@@ -211,7 +220,7 @@ def correction_route(code, *, sequence, operation_sequence, allowed, reason, dev
     category = ('HUMAN_DECISION' if code == 'QUESTIONS_NOT_ANSWERED'
                 else 'EXECUTION_UNCERTAIN' if code == 'PROVIDER_TRANSIENT_RETRY'
                 else 'MODEL_EXECUTION' if code in {'DEVELOPER_REJECTION_RECOVERABLE', 'READY_LIBRARY_TYPE_MISMATCH',
-                                                  'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'}
+                                                  'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'}
                 else 'MODEL_FORMAT')
     return FailureRoute(sequence=sequence, operationSequence=operation_sequence, code=code, category=category,
         action='REGENERATE' if allowed else ('RETURN_TO_VALIDATOR' if code in {

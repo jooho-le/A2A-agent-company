@@ -105,6 +105,7 @@ class WorkflowStep(DomainModel):
     run_id: UUID4
     agent_role: AgentRole
     status: WorkflowStepStatus = WorkflowStepStatus.PENDING
+    failure_code: str | None = None
     attempt: int = Field(default=0, ge=0)
     a2a_task_id: str | None = Field(default=None, min_length=1)
     a2a_task_state: A2ATaskState | None = None
@@ -118,6 +119,12 @@ class WorkflowStep(DomainModel):
     output_artifact_ids: list[UUID4] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("failure_code")
+    @classmethod
+    def safe_failure_code(cls, value):
+        from orchestrator.domain.agent_failures import public_failure_code
+        return None if value is None else public_failure_code(value)
 
     @field_validator("requirement_ids", "input_artifact_ids", "output_artifact_ids")
     @classmethod

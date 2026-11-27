@@ -38,7 +38,7 @@ import re
 
 MAX_FILES = 400
 # Recorded in the Host policy for both Single and Multi.
-START_PRECHECK_POLICY = 'STATIC_START_PRECHECK_V6'
+START_PRECHECK_POLICY = 'STATIC_START_PRECHECK_V7'
 _ROUTE_METHODS = frozenset({'get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'api_route', 'route'})
 _READY_CHECK = re.compile(r'GET\s+(/\S*)')
 MAX_FILE_BYTES = 1_048_576
@@ -582,6 +582,53 @@ def inspect(source_root, external_contract) -> list[dict]:
                                             '__abstract__'))
         if only_base and not mapped_elsewhere:
             issues.append({'fieldPath': model[2].relative_to(root).as_posix(), 'reasonCode': 'MODEL_PRIMARY_KEY_MISSING'})
+    if external_contract.get('servicePolicy') == 'SERVICE_AUTONOMY_V2' and database is not None and database[2] is not None:
+        # Generic service models are not necessarily called User. Inspect only
+        # the known plain SQLAlchemy Base; unknown/mixin/dynamic mappings go to
+        # the Sandbox, never guessed product failures on the Host.
+        db_bindings, db_dynamic = _bindings(trees[database[2]])
+        base = db_bindings.get('Base')
+        declarative = db_bindings.get('DeclarativeBase')
+        plain_base = (not db_dynamic and isinstance(base, ast.ClassDef) and len(base.bases) == 1
+                      and isinstance(base.bases[0], ast.Name) and base.bases[0].id == 'DeclarativeBase'
+                      and not base.decorator_list and not base.keywords
+                      and all(isinstance(statement, ast.Pass) or isinstance(statement, ast.Expr)
+                              and isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str)
+                              for statement in base.body)
+                      and isinstance(declarative, ast.ImportFrom) and declarative.level == 0
+                      and declarative.module == 'sqlalchemy.orm'
+                      and any(alias.name == 'DeclarativeBase' for alias in declarative.names))
+        if plain_base:
+            database_module = external_contract['database']['module']
+            database_text = database[2].read_text(encoding='utf-8', errors='replace')
+            entry = _module_file(root, (external_contract.get('app') or {}).get('module'))
+            reachable = {entry} if entry in trees else set()
+            for statement in trees[entry].body if entry in trees else ():
+                modules = ([alias.name for alias in statement.names] if isinstance(statement, ast.Import)
+                           else [statement.module] if isinstance(statement, ast.ImportFrom) and statement.level == 0
+                           else [])
+                reachable.update(_module_file(root, module) for module in modules)
+            for path, tree in trees.items():
+                if path not in reachable:
+                    continue  # Unimported examples/tests cannot break main.app startup.
+                bindings, dynamic = _bindings(tree)
+                origin = bindings.get('Base')
+                if dynamic or not (isinstance(origin, ast.ImportFrom) and origin.level == 0 and origin.module == database_module):
+                    continue
+                source = path.read_text(encoding='utf-8', errors='replace') + database_text
+                if any(word in source for word in ('primary_key', 'PrimaryKeyConstraint', '__table__', '__mapper_args__', '__abstract__')):
+                    continue
+                for candidate in bindings.values():
+                    if (isinstance(candidate, ast.ClassDef) and len(candidate.bases) == 1
+                            and isinstance(candidate.bases[0], ast.Name) and candidate.bases[0].id == 'Base'
+                            and candidate in tree.body and not candidate.keywords and not candidate.decorator_list):
+                        table = _bindings(ast.Module(body=candidate.body, type_ignores=[]))[0].get('__tablename__')
+                        if (not isinstance(table, (ast.Assign, ast.AnnAssign))
+                                or not isinstance(table.value, ast.Constant) or not isinstance(table.value.value, str)):
+                            continue
+                        relative = path.relative_to(root).as_posix()
+                        issues.append({'fieldPath': relative, 'reasonCode': 'MODEL_PRIMARY_KEY_MISSING',
+                                       'sourcePath': relative, 'lineNumber': candidate.lineno})
     for path in dict.fromkeys(_string_depends(trees)):
         issues.append({'fieldPath': path.relative_to(root).as_posix(), 'reasonCode': 'DEPENDS_TARGET_INVALID'})
     app = external_contract.get('app')

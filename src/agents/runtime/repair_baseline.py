@@ -92,7 +92,8 @@ def _restore_if_needed(services, execution, checkpoint, artifacts, previous):
     if run.fix_attempt != execution.fix_attempt:
         raise ValueError('REPAIR_BASELINE_ATTEMPT_CHANGED')
     active_request = PlannerRunDispatcher.build_fix_payload(
-        run, None, execution.plan, execution.scenario, issues, [source, build, *reports])['fixRequest']
+        run, None, execution.plan, execution.scenario, issues, [source, build, *reports],
+        repository=services._repository)['fixRequest']
     active_request['workingSourceArtifactId'] = str(source.artifact_id)
     active_request['gitParentSourceArtifactId'] = str(previous.artifact_id)
     checkpoint.restore_repair_baseline(snapshot, deadline_monotonic=execution.budget.deadline_monotonic)

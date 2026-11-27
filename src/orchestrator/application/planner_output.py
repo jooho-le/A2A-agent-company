@@ -21,6 +21,7 @@ from pydantic import (
 from orchestrator.domain.contract_validation import require_json_integer
 from orchestrator.application.output_envelope import validate_output_envelope
 from orchestrator.domain.states import AgentRole
+from orchestrator.domain.service_design import ServiceDesign
 
 
 class PlannerOutputValidationError(ValueError):
@@ -92,6 +93,7 @@ class PlannerPlan(_StrictModel):
     implementation_plan: list[ImplementationTask] = Field(
         alias="implementationPlan", min_length=1
     )
+    service_design: ServiceDesign | None = Field(default=None, alias="serviceDesign", exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_references(self) -> "PlannerPlan":

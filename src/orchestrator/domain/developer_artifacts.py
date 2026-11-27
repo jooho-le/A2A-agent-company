@@ -82,7 +82,7 @@ class ReportedPathEdit(ImmutableDomainModel):
 class ReadyReview(ImmutableDomainModel):
     """Host observations at submission time, before validation of this candidate."""
     working_base_commit: str = Field(alias="workingBaseCommit", pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
-    edits: tuple[ReadyEdit, ...] = Field(min_length=1)
+    edits: tuple[ReadyEdit, ...]
     rechecks: tuple[ReadyRecheck, ...]
     reported_path_edits: tuple[ReportedPathEdit, ...] = Field(
         default=(), alias="reportedPathEdits", exclude_if=lambda rows: not rows)
@@ -109,7 +109,7 @@ class ChangeReportArtifact(ImmutableDomainModel):
     summary: str = Field(min_length=1)
     ready_review: ReadyReview | None = Field(default=None, alias="readyReview", exclude_if=lambda v: v is None)
     artifact_uri: str = Field(default="", alias="artifactUri")
-    changes: tuple[ChangeReportFile, ...] = Field(min_length=1, alias="fileChanges")
+    changes: tuple[ChangeReportFile, ...] = Field(alias="fileChanges")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), alias="createdAt"
     )
@@ -155,6 +155,8 @@ class ChangeReportArtifact(ImmutableDomainModel):
         )
         if self.created_by != AgentRole.DEVELOPER:
             raise ValueError("a Change Report must be created by the Developer Agent")
+        if not self.changes and self.ready_review is None:
+            raise ValueError("an unchanged submission needs Host READY observations")
         paths = [change.path for change in self.changes]
         if len(paths) != len(set(paths)):
             raise ValueError("Change Report paths must be unique")

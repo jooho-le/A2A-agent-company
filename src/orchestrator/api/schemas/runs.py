@@ -36,6 +36,7 @@ class CreateRunRequest(APIModel):
     )
     scenario_id: UUID4 = Field(alias="scenarioId")
     request_text: str = Field(alias="requestText", min_length=1)
+    continuation_of: UUID4 | None = Field(default=None, alias='continuationOf')
     configuration: RunConfiguration = Field(default_factory=RunConfiguration)
 
     @field_validator("request_text")
@@ -94,6 +95,7 @@ class WorkflowStepResponse(APIModel):
     run_id: UUID4 = Field(alias="runId")
     agent_role: AgentRole = Field(alias="agentRole")
     status: WorkflowStepStatus
+    failure_code: str | None = Field(default=None, alias="failureCode")
     attempt: int
     a2a_task_id: str | None = Field(alias="a2aTaskId")
     a2a_task_state: A2ATaskState | None = Field(alias="a2aTaskState")
@@ -111,6 +113,7 @@ class WorkflowStepResponse(APIModel):
 
 
 class RunSubmissionResponse(APIModel):
+    continuation_of: UUID4 | None = Field(default=None, alias='continuationOf', exclude_if=lambda value: value is None)
     run: RunStatusResponse
     first_step: WorkflowStepResponse = Field(alias="firstStep")
     dispatch_status: Literal["SCHEDULED", "NOT_CONFIGURED"] = Field(

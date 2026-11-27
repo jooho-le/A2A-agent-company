@@ -15,6 +15,7 @@ from orchestrator.application.planner_output import PlannerPlan
 from orchestrator.core.security import redact_data
 from orchestrator.domain.scenario_registry import ScenarioDefinition
 from agents.roles.planner_diagnostics import diagnose_planner_failure
+from orchestrator.domain.service_design import service_policy, service_design_schema, validate_service_plan
 
 
 MAX_PLANNER_TASKS = 128
@@ -113,6 +114,11 @@ def build_planner_output_contract(scenario: ScenarioDefinition) -> StructuredOut
                     "items": {"type": "string", "minLength": 1, "maxLength": 1024}},
             },
         })
+        if service_policy(scenario.planner_contract()):
+            expanded = schema.to_dict()
+            expanded["required"].append("serviceDesign")
+            expanded["properties"]["serviceDesign"] = {"anyOf": [service_design_schema(scenario.planner_contract()), {"type": "null"}]}
+            schema = JsonSchema.from_dict(expanded)
         schema.require_openai_strict()
         output = StructuredOutput(name="planner_decision_v2", schema=schema)
     except Exception:
@@ -198,7 +204,9 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
                     "acceptanceCriteria": list(requirement.acceptance_criteria),
                 } for requirement in scenario.requirements],
                 "implementationPlan": tasks,
+                **({"serviceDesign": copied["serviceDesign"]} if "serviceDesign" in copied else {}),
             })
+            validate_service_plan(scenario.planner_contract(), plan)
             stage = "REQUIREMENTS"
             scenario.validate_planner_requirements(plan.requirements)
             payload = plan.model_dump(mode="json", by_alias=True)
@@ -215,12 +223,12 @@ def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> Plann
             stage = "DECISION_MODEL"
             result = PlannerDecision(kind=kind, plan=plan, questions=())
         elif kind == "INPUT_REQUIRED":
-            if tasks or not questions:
+            if tasks or not questions or copied.get("serviceDesign") is not None:
                 raise PlannerContractError()
             result = PlannerDecision(kind=kind, plan=None, questions=tuple(questions),
                                      unapproved_assumptions=tuple(assumptions))
         else:
-            if tasks or questions:
+            if tasks or questions or copied.get("serviceDesign") is not None:
                 raise PlannerContractError()
             result = PlannerDecision(kind="REJECTED", plan=None, questions=())
     except Exception:

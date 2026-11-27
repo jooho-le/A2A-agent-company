@@ -15,7 +15,7 @@ from agents.llm.recovery import CallRoute, CorrectionObservation, FailureRoute, 
 from agents.llm.budget import ExecutionBudget
 from agents.llm.content import sanitize_content, validate_source_fields
 from agents.llm.tool_wire import strict_tool_schema, project_tool_arguments, STRICT_TOOL_ARGUMENTS, PROJECT_TOOL_ARGUMENTS, pin_workspace_argument
-from agents.llm.validation import validate as validate_schema, policy_error, parse_candidate
+from agents.llm.validation import validate as validate_schema, policy_error, parse_candidate, LLMValidationReport
 from agents.llm.contracts import (
     LLMErrorCode, LLMProvider, LLMRequest, LLMResult, LLMRuntimeError,
     LLMResponse, SourceEditStatus, StructuredOutput, TokenUsage, ToolContext, ToolDefinition, ToolExecutor, UsageRecord,
@@ -128,18 +128,34 @@ class LLMEngine:
         restricted_paths = set()
         refresh_path_output = False
         last_development_rejection = None
+        last_role_validation = None
+        test_file_defects = {'GENERATED_TEST_FILE_MISSING', 'TEST_CLIENT_NOT_STARTED',
+            'GENERATED_TEST_SYNTAX_INVALID', 'GENERATED_TEST_NONE', 'ASYNC_TEST_IN_SYNC_CASE',
+            'TEST_IMPORT_NAME_MISSING', 'TEST_HOST_FIXTURE_REQUIRED',
+            'TEST_SERVICE_FIXTURE_REQUIRED', 'TEST_OUTPUT_ARGUMENT_INVALID'}
 
         def exhausted_qa_draft(validation=None):
             # Preserve the value-free cause when replacing the failure code
             # with its terminal recovery route; A2A/Host must still see it.
-            raise LLMRuntimeError(LLMErrorCode.VALIDATION_DRAFT, validation=validation)
+            raise LLMRuntimeError(LLMErrorCode.VALIDATION_DRAFT, validation=validation or last_role_validation)
 
         security_draft = (self._role is AgentRole.SECURITY or self._role is SingleAgentIdentity.SINGLE_AGENT
                           and self._single_phase is SinglePhase.SECURITY)
 
-        def missing_test_files(kind, issues):
+        def needs_test_file_repair(kind, issues):
             return (close_invalid_qa_draft and kind == 'GENERATED_TESTS_INVALID'
-                    and any(i['reasonCode'] == 'GENERATED_TEST_FILE_MISSING' for i in issues))
+                    and any(i['reasonCode'] in test_file_defects for i in issues))
+
+        def draft_issue_for(kind, issues):
+            if not close_invalid_qa_draft:
+                return None
+            if kind == 'GENERATED_TESTS_INVALID':
+                return next((code for code in ('GENERATED_TEST_FILE_MISSING', 'TEST_IN_FILE_NOT_DECLARED',
+                    'DECLARED_TEST_NOT_IN_FILE', *sorted(test_file_defects))
+                    if any(i['reasonCode'] == code for i in issues)), None)
+            if kind in ('OUTPUT_CONTRACT_INVALID', 'MODEL_OUTPUT_INVALID', 'CODE_REFERENCE_INVALID'):
+                return kind
+            return None
 
         def qa_draft_rejection(kind, issues):
             # Draft-format exhaustion that ends the step as a technical STOP (QA, and Security with
@@ -147,9 +163,7 @@ class LLMEngine:
             # step still never reaches semantic review with known-invalid evidence.
             return close_invalid_qa_draft and (kind in {
                 'MODEL_OUTPUT_INVALID', 'OUTPUT_CONTRACT_INVALID'} or
-                kind == 'GENERATED_TESTS_INVALID' and any(i['reasonCode'] in {
-                    'TEST_IN_FILE_NOT_DECLARED', 'DECLARED_TEST_NOT_IN_FILE',
-                    'GENERATED_TEST_FILE_MISSING'} for i in issues)
+                kind == 'GENERATED_TESTS_INVALID' and bool(issues)
                 or security_draft and kind == 'CODE_REFERENCE_INVALID')
 
         def source_status():
@@ -185,7 +199,7 @@ class LLMEngine:
 
         def decide_correction(sequence, kind, allowed, reason, *, qa_exhausted=False, draft_issue=None,
                               development_rejection=None, observation=None, unlinked_paths=(), path_evidence=(),
-                              failure_diagnostic=None):
+                              failure_diagnostic=None, validation_report=None):
             nonlocal pending_correction, decided_sequence, correction_attempt
             route = (FailureRoute(sequence=sequence, operationSequence=operation_sequence,
                 code=LLMErrorCode.VALIDATION_DRAFT.value, category='MODEL_FORMAT', action='STOP', reason=reason)
@@ -195,6 +209,8 @@ class LLMEngine:
                                                      failure_diagnostic=failure_diagnostic))
             if draft_issue is not None:
                 route = route.model_copy(update={'draft_issue': draft_issue})
+            if validation_report is not None:
+                route = route.model_copy(update={'validation_report': validation_report})
             if observation is not None:
                 route = route.model_copy(update={'observation': observation})
             if unlinked_paths:
@@ -207,8 +223,11 @@ class LLMEngine:
                 correction_attempt += 1
                 pending_correction = (sequence, kind, correction_attempt)
         try:
+            from agents.runtime.service_scope import is_service_envelope
+            service_request = (isinstance(prompt, (PreparedRolePrompt, PreparedSinglePrompt, PreparedSemanticPrompt))
+                and is_service_envelope(parse_json(prompt.input_json, max_bytes=budget.limits.max_json_bytes)))
             if self._semantic_review:
-                review_system = (build_single_system_prompt() if self._role is SingleAgentIdentity.SINGLE_AGENT
+                review_system = (build_single_system_prompt(service_request=service_request) if self._role is SingleAgentIdentity.SINGLE_AGENT
                                  else SEMANTIC_SYSTEM)
                 valid = (type(prompt) is PreparedSemanticPrompt and prompt.actor == self._role
                          and prompt.phase is self._single_phase and prompt.version == SEMANTIC_PROMPT_VERSION
@@ -217,12 +236,12 @@ class LLMEngine:
                 valid = (isinstance(prompt, PreparedSinglePrompt)
                          and prompt.identity is SingleAgentIdentity.SINGLE_AGENT
                          and prompt.phase is self._single_phase and prompt.version == SINGLE_PROMPT_VERSION
-                         and prompt.system_prompt == build_single_system_prompt()
+                         and prompt.system_prompt == build_single_system_prompt(service_request=service_request)
                          and prompt.draft_contract.output == output)
             else:
                 valid = (isinstance(prompt, PreparedRolePrompt) and prompt.role == self._role
                          and prompt.version == get_role_contract(self._role).version
-                         and prompt.system_prompt == build_system_prompt(self._role))
+                         and prompt.system_prompt == build_system_prompt(self._role, service_request=service_request))
             if development_rejection_check is not None and (self._semantic_review or source_progress_check is None
                     or not (self._role is AgentRole.DEVELOPER or self._role is SingleAgentIdentity.SINGLE_AGENT
                             and self._single_phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING))):
@@ -282,6 +301,12 @@ class LLMEngine:
             def correct(sequence, kind, *, issues, report=None, stage=None, tool_name=None,
                         output_text=None, tool_calls=None, development_rejection=None) -> bool:
                 """Append fixed feedback and allow one more model call, or refuse."""
+                nonlocal last_role_validation
+                if report is None and issues and stage is None:
+                    from agents.llm.validation import role_report
+                    report = role_report(output.schema, issues, sequence=sequence)
+                if isinstance(report, LLMValidationReport):
+                    last_role_validation = report
                 budget_for = reminders if kind == 'QUESTIONS_NOT_ANSWERED' else allowance
                 # Only an unexplained contract rejection is told apart by its output;
                 # coded mistakes (no change, cut-off, question) stay "same mistake once".
@@ -317,29 +342,31 @@ class LLMEngine:
                 feedback = correction_rules.feedback(kind, issues=issues, remaining=budget_for.remaining,
                                                      stage=stage, tool_name=tool_name, repair_brief=repair_brief)
                 if kind == 'GENERATED_TESTS_INVALID':
+                    from agents.runtime.qa_catalog import case_repair_targets
                     feedback['hostCorrection']['testRepairTargets'] = {
                         'missingRequiredWritePaths': catalog.get('missingRequiredWritePaths', [])[:16],
                         'catalogFilesSha256': catalog.get('filesSha256'),
                         'instruction': 'Use exact IDs from the latest hostTestIdCatalog already supplied. '
-                                       'Write the missing paths, not an unrelated unit file.'}
+                                       'Write the missing paths, not an unrelated unit file.',
+                        **case_repair_targets(catalog, output_text)}
                 if allowed and normal_correction:
                     from agents.runtime.normal_request_repair import priority_repair_evidence
                     evidence = priority_repair_evidence(task_input['taskInput'])
                     if evidence:
                         feedback['hostCorrection']['measuredFailure'] = evidence
                 if allowed and kind in ('READY_PRIORITY_REPAIR_NEEDED', 'READY_RUNTIME_REPAIR_REQUIRED',
-                                        'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'):
+                                        'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
                     # Source work and a subsequent truthful report share the existing Run budget.
                     messages = [*items, {'role': 'user', 'content': json_text(feedback, max_bytes=limit)}]
                     history = json.dumps(messages, ensure_ascii=False, separators=(',', ':'))
                     review_paths = (correction_rules.source_review_paths(issues)
-                                    if kind == 'READY_SIGNUP_QUALITY_REVIEW'
+                                    if kind in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW')
                                     and {'read_project_file', 'write_source_file'} <= self._definitions.keys() else ())
                     required_calls = 2 * len(review_paths) + 1 if review_paths else 2
                     required_tools = 2 * len(review_paths) if review_paths else 1
                     if (len(history.encode()) + len(prompt.system_prompt.encode()) > limit
                             or budget.limits.max_tool_calls - budget.tool_calls < required_tools
-                            or kind in ('READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW') and
+                            or kind in ('READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW') and
                             budget.limits.max_model_calls - budget.model_calls < required_calls):
                         # Fixing the incompatible call requires a source tool turn and a later READY turn.
                         allowed, reason = False, 'LIMIT_REACHED'
@@ -352,7 +379,8 @@ class LLMEngine:
                             allowed, reason = False, 'LIMIT_REACHED'
                 decide_correction(sequence, kind, allowed, reason,
                                   qa_exhausted=not allowed and qa_draft_rejection(kind, issues),
-                                  draft_issue='GENERATED_TEST_FILE_MISSING' if missing_test_files(kind, issues) else None,
+                                  draft_issue=draft_issue_for(kind, issues),
+                                  validation_report=report if isinstance(report, LLMValidationReport) else None,
                                   development_rejection=development_rejection,
                                   path_evidence=correction_rules.ready_path_trace(feedback['hostCorrection']),
                                   unlinked_paths=(tuple(dict.fromkeys(i['fieldPath'].split('/')[2] for i in issues))
@@ -692,12 +720,18 @@ class LLMEngine:
                                 capture(sequence, 'SOURCE_CREDENTIAL_DENIED', True, report, tool_calls=response.tool_calls)
                                 seen_calls.update(item.call_id for item in response.tool_calls
                                                   if isinstance(item.call_id, str) and item.call_id.strip())
-                                from agents.runtime.test_guidance import PASSWORD_FIXTURE_GUIDANCE
+                                from agents.runtime.test_guidance import PASSWORD_FIXTURE_GUIDANCE, unit_test_data_contract
+                                python_test = test_write and str(arguments.get('path', '')).endswith('.py')
                                 instruction = ('The rejected test file was NOT written. Generate a new tool call. '
                                     'Do not embed password, token or hash literals in test source, dictionaries, '
                                     'default arguments or f-strings. Generate synthetic test passwords at runtime. '
-                                    + PASSWORD_FIXTURE_GUIDANCE + ' '
+                                    + (PASSWORD_FIXTURE_GUIDANCE if python_test else
+                                       'Keep the selected target format. Do not paste Python imports into browser JSON. ') + ' '
                                     'Fix all reported locations and inspect the whole file, not only the first match. '
+                                    'credentialRepairPlan contains value-free AST site hints, never approval. '
+                                    'For password boundary cases the factory arguments describe length/kind only; '
+                                    'preserve the original test intent and assertions. Move generated defaults into '
+                                    'the current test body. Do not replace one fixed credential with another fixed string. '
                                     'Do not print credentials. Use the existing requirements unchanged.') if test_write else (
                                     'No call from your previous response was executed: the source write held a '
                                     'credential-like literal. Re-issue the calls you still need. Do not embed password, '
@@ -707,6 +741,10 @@ class LLMEngine:
                                 from orchestrator.core.source_credentials import source_credential_locations
                                 source_field = report.field_path.removeprefix('/') if call.name == 'edit_source_file' else 'content'
                                 locations = source_credential_locations(arguments.get(source_field))
+                                from agents.runtime.test_credential_repair import credential_repair_plan
+                                test_guidance = ({'testData': unit_test_data_contract(),
+                                                  'credentialRepairPlan': credential_repair_plan(arguments)}
+                                                 if python_test else {})
                                 items.append({'role': 'user', 'content': json_text({
                                     'hostToolFeedback': {
                                         'code': 'SOURCE_CREDENTIAL_DENIED', 'toolName': call.name,
@@ -715,6 +753,7 @@ class LLMEngine:
                                         'sourceIssues': locations['issues'],
                                         'sourceIssuesTruncated': locations['truncated'],
                                         'sourceIssuesCoverage': locations['coverage'],
+                                        **test_guidance,
                                         'instruction': instruction}})})
                                 correct_test_source = True
                                 break
@@ -1030,9 +1069,9 @@ class LLMEngine:
                                                     if issue['reasonCode'] == 'NO_LINKED_CODE_CHANGE')
                             refresh_path_output = bool(restricted_paths)
                         if not allowed and rejection['code'] in ('READY_PATH_EVIDENCE_MISMATCH', 'READY_RUNTIME_REPAIR_REQUIRED',
-                                                                 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW'):
+                                                                 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW', 'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
                             raise LLMRuntimeError(LLMErrorCode.SOURCE_REPAIR)
-                        if allowed and rejection['code'] == 'READY_SIGNUP_QUALITY_REVIEW':
+                        if allowed and rejection['code'] in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
                             paths = correction_rules.source_review_paths(rejection['issues'])
                             if paths and {'read_project_file', 'write_source_file'} <= self._definitions.keys():
                                 source_repair_path, *source_review_pending = paths
@@ -1058,7 +1097,7 @@ class LLMEngine:
                                 # already passed build and QA should not need a full rewrite.
                                 required_alternatives = (('edit_source_file',) if 'edit_source_file' in self._definitions
                                                          else ())
-                        if allowed and missing_test_files(rejection['code'], rejection['issues']):
+                        if allowed and needs_test_file_repair(rejection['code'], rejection['issues']):
                             if 'write_test_file' not in self._definitions:
                                 raise LLMRuntimeError(LLMErrorCode.CONFIGURATION)
                             required_tool = 'write_test_file'

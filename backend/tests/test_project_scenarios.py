@@ -7,9 +7,9 @@ from project_scenarios import _load_registry, is_supported_project_scenario
 
 class ProjectScenarioTests(unittest.TestCase):
     def test_registered_uuid_and_json_string_resolve_to_same_scenario(self):
-        scenario_id = _load_registry().SCN_001_ID
-        self.assertTrue(is_supported_project_scenario(scenario_id))
-        self.assertTrue(is_supported_project_scenario(str(scenario_id)))
+        for scenario_id in (_load_registry().SCN_001_ID, _load_registry().SERVICE_WEB_ID):
+            self.assertTrue(is_supported_project_scenario(scenario_id))
+            self.assertTrue(is_supported_project_scenario(str(scenario_id)))
 
     def test_unknown_and_invalid_identifiers_remain_unsupported(self):
         for value in (uuid4(), str(uuid4()), None, "", "SCN-001", "invalid"):

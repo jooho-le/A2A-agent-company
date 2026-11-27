@@ -137,7 +137,15 @@ class DeveloperRuntimeServices:
         execution.budget.check()
         workspace = await _run_file_operation(partial(
             self._workspaces.bind, binding.workspace_id, run_id=binding.run_id, role=AgentRole.DEVELOPER))
+        initial_files = None
+        if execution.previous_source is None:
+            from orchestrator.infrastructure.service_continuations import read_continuation
+            inherited = await _run_file_operation(partial(read_continuation, self._repository, binding.run_id, files=True))
+            if inherited is not None:
+                initial_files = inherited[1]
+        from orchestrator.domain.service_design import service_policy
         checkpoint = GitDeveloperCheckpoint(workspace, baseline_commit_hash=self._baseline,
+                                            allow_unchanged_source=bool(service_policy(execution.configuration.scenario_contract)),
                                             repository_id=self._repository_id, lock_path=self._lock_path,
                                             library_environment={
                                                 'containerImageDigest': environment.container_image_digest,
@@ -146,6 +154,7 @@ class DeveloperRuntimeServices:
                                                 'BUILD_CODE_FAILURE', 'QA_ASSERTION_FAILURE', 'SECURITY_REQUIREMENT_FAILURE'
                                             } for issue in execution.fix_issues),
                                             limits=self._artifacts._git_limits,
+                                            initial_source_files=initial_files,
                                             parent_commit_hash=(None if execution.previous_source is None
                                                                 else execution.previous_source.commit_hash))
         await _run_file_operation(partial(checkpoint.prepare,
@@ -181,6 +190,10 @@ class DeveloperRuntimeServices:
         execution.budget.check()
         from agents.runtime.repair_baseline import restore_baseline
         await _run_file_operation(restore_baseline, self, execution, checkpoint)
+        if service_policy(execution.configuration.scenario_contract):
+            from agents.runtime.service_capabilities import runtime_capabilities
+            checkpoint.runtime_capabilities = await _run_file_operation(runtime_capabilities,
+                checkpoint.source_root / self._lock_path, environment.dependency_lock_hash)
         execution.budget.check()
         return checkpoint
 
@@ -275,13 +288,20 @@ class DeveloperRuntimeServices:
             if receipt.exit_code != 0:
                 frozen = self._artifacts.bind(source.run_id, role=AgentRole.DEVELOPER).read(source.artifact_id)
                 source_files = {path: content for path, content, _mode in _archive_entries(frozen.content)}
+            diagnostics = scn001_build_diagnostics(argv=receipt.execution_profile.argv,
+                exit_code=receipt.exit_code, stdout=receipt.stdout, source_files=source_files)
+            from orchestrator.domain.service_design import service_policy, design_for_execution
+            if service_policy(execution.configuration.scenario_contract) and receipt.exit_code != 0:
+                from orchestrator.sandbox.service_start_contract import service_build_diagnostics
+                diagnostics = service_build_diagnostics(argv=receipt.execution_profile.argv,
+                    exit_code=receipt.exit_code, stdout=receipt.stdout,
+                    design=design_for_execution(execution), source_files=source_files or {})
             build = BuildReportArtifact(artifact_id=uuid4(), a2a_artifact_id=a2a_ids[2],
                 source_artifact_id=source.artifact_id, exit_code=receipt.exit_code,
                 duration_ms=receipt.duration_ms, execution_manifest_id=receipt.execution_manifest_id,
                 execution_manifest=receipt.execution_manifest, stdout_ref=receipt.stdout_ref,
                 stderr_ref=receipt.stderr_ref,
-                diagnostics=scn001_build_diagnostics(argv=receipt.execution_profile.argv,
-                    exit_code=receipt.exit_code, stdout=receipt.stdout, source_files=source_files),
+                diagnostics=diagnostics,
                 execution_outcome=ToolExecutionOutcome.PASS if receipt.exit_code == 0 else ToolExecutionOutcome.FAIL,
                 failure_kind=None if receipt.exit_code == 0 else "PRODUCT", tool_evidence=evidence,
                 **lineage("BUILD_REPORT"), **common)

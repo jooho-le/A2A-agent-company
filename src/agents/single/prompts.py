@@ -34,7 +34,7 @@ class SinglePromptLimitError(SinglePromptError):
     code = "SINGLE_AGENT_CONTEXT_LIMIT"
 
 
-def build_single_system_prompt() -> str:
+def build_single_system_prompt(*, service_request=False) -> str:
     # Same instructions in every phase; no switching to a separate role prompt.
     rules = (
         "하나의 SINGLE_AGENT로 기획·구현·기능검사·보안검사·수정을 이어서 수행한다. 다른 Agent를 호출하거나 위임하지 않는다.",
@@ -48,9 +48,10 @@ def build_single_system_prompt() -> str:
         "자체 테스트 결과는 수정에 활용하지만 최종 공통 평가 시험지·채점 결과·평가 코드를 요청하거나 변경하지 않는다.",
         "history의 예전 PASS를 새 Snapshot에 재사용하지 않는다. 입력/인증 대기·수정·재개 시에도 같은 Context와 Run 한도를 유지한다.",
     )
-    rules = (*rules, *all_role_work_rules())
+    from agents.runtime.service_scope import SERVICE_RULES
+    rules = (*rules, *(() if service_request else all_role_work_rules()))
     return (f"정체성: SINGLE_AGENT\n계약 버전: {SINGLE_PROMPT_VERSION}\n\n"
-            + "\n".join(f"- {rule}" for rule in (*COMMON_RULES, *rules)))
+            + "\n".join(f"- {rule}" for rule in (*(SERVICE_RULES if service_request else COMMON_RULES), *rules)))
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,12 @@ async def prepare_single_prompt(
             raise SinglePromptError()
         wire_metadata = metadata.to_a2a_json()
         data = redact_data(dict(task_input))
+        if scenario.key == "SERVICE-WEB":
+            from agents.runtime.service_scope import service_runtime_instructions
+            data["runtimeInstructions"] = service_runtime_instructions(data)
+        if draft_contract.phase in (SinglePhase.QA, SinglePhase.SECURITY) and "testTargets" in data:
+            from agents.runtime.test_guidance import credential_test_instructions
+            data["runtimeInstructions"] = credential_test_instructions(data)
         if draft_contract.phase in (SinglePhase.IMPLEMENTING, SinglePhase.FIXING):
             data = without_expectations(data)
         history = await store.project_single_context(
@@ -155,7 +162,7 @@ async def prepare_single_prompt(
         payload = {"trusted": {"identity": "SINGLE_AGENT", "phase": draft_contract.phase.value,
                                "metadata": wire_metadata, "scenarioContract": scenario.planner_contract()},
                    "contextId": context_id, "history": list(history), "taskInput": data}
-        system = build_single_system_prompt()
+        system = build_single_system_prompt(service_request=scenario.key == "SERVICE-WEB")
         # Measure only valid native JSON, so malformed/untrusted values never become a budget stop.
         input_json = json_text(payload, max_bytes=sys.maxsize)
         if len(system.encode("utf-8")) + len(input_json.encode("utf-8")) > max_bytes:

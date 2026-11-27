@@ -686,6 +686,13 @@ def _apply_task(
         "agent_context_id": effective_context_id,
         "a2a_artifact_ids": artifact_ids,
     }
+    if state in (A2ATaskState.FAILED, A2ATaskState.REJECTED):
+        from orchestrator.domain.agent_failures import public_failure_code
+        data = MessageToDict(task.status).get("message", {}).get("parts", [])
+        code = data[0].get("data", {}).get("code") if len(data) == 1 else None
+        changes["failure_code"] = public_failure_code(code)
+    else:
+        changes["failure_code"] = None
     changed = any(getattr(step, key) != value for key, value in changes.items())
     updated_step_data = step.model_dump(mode="python")
     updated_step_data.update(changes)

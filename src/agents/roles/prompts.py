@@ -69,13 +69,15 @@ class PreparedRolePrompt:
     input_json: str = field(repr=False)
 
 
-def build_system_prompt(role: AgentRole) -> str:
+def build_system_prompt(role: AgentRole, *, service_request=False) -> str:
     """Only trusted static contract data enters these system instructions."""
     contract = get_role_contract(role)
+    from agents.runtime.service_scope import SERVICE_RULES
+    rules = SERVICE_RULES if service_request else COMMON_RULES
     sections = [
         f"역할: {contract.role.value}\n역할 계약 버전: {contract.version}\n목표: {contract.purpose}",
-        "공통 규칙:\n" + "\n".join(f"- {rule}" for rule in COMMON_RULES),
-        "업무 수행·자체 점검:\n" + "\n".join(f"- {rule}" for rule in role_work_rules(role)),
+        "공통 규칙:\n" + "\n".join(f"- {rule}" for rule in rules),
+        "업무 수행·자체 점검:\n" + "\n".join(f"- {rule}" for rule in (() if service_request else role_work_rules(role))),
         "입력:\n" + "\n".join(f"- {value}" for value in contract.inputs),
         "책임:\n" + "\n".join(f"- {value}" for value in contract.responsibilities),
         "금지:\n" + "\n".join(f"- {value}" for value in contract.prohibitions),
@@ -108,6 +110,13 @@ def prepare_role_prompt(
         if not isinstance(task_input, Mapping) or not task_input:
             raise ValueError("A nonempty JSON object is required")
         payload = json.loads(json.dumps(dict(task_input), allow_nan=False))
+        from agents.runtime.service_scope import is_service_input, service_runtime_instructions
+        if is_service_input(payload):
+            payload["runtimeInstructions"] = service_runtime_instructions(payload)
+        if role in (AgentRole.QA, AgentRole.SECURITY):
+            from agents.runtime.test_guidance import credential_test_instructions
+            if "testTargets" in payload:
+                payload["runtimeInstructions"] = credential_test_instructions(payload)
         metadata_json = A2AWorkflowMetadata.model_validate(metadata.model_dump()).to_a2a_json()
         input_json = json.dumps(
             {"metadata": metadata_json, "taskInput": redact_data(payload)},
@@ -117,5 +126,5 @@ def prepare_role_prompt(
         raise RolePromptInputError("Role input must contain valid workflow metadata and JSON data") from None
     return PreparedRolePrompt(
         role=contract.role, version=contract.version,
-        system_prompt=build_system_prompt(contract.role), input_json=input_json,
+        system_prompt=build_system_prompt(contract.role, service_request=is_service_input(payload)), input_json=input_json,
     )

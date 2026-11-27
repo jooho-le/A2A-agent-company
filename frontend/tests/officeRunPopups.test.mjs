@@ -116,6 +116,21 @@ test('Step FAILED는 검증 FAIL과 별도로 Agent 실행 실패라고 표시�
   assert.equal(rows(f.snapshot)[2].expression, 'worried')
 })
 
+test('Host의 닫힌 실패 코드만 쉬운 원인으로 표시한다', () => {
+  for (const [code, expected] of [
+    ['LLM_VALIDATION_DRAFT_EXHAUSTED', /교정 한도/],
+    ['LLM_DEVELOPMENT_NO_PROGRESS', /실제 코드 변경 없이/],
+    ['LLM_BUDGET_EXHAUSTED', /실행 한도/],
+    ['unknown-private-provider-text', /원인은.*제공되지/],
+  ]) {
+    const f = fixture({ states: ['SUCCEEDED', 'SUCCEEDED', 'FAILED', 'RUNNING'] })
+    f.snapshot.agents[2].step.failureCode = code
+    const card = render(f)[2]
+    assert.match(card.detail, expected)
+    assert.ok(!card.detail.includes('unknown-private-provider-text'))
+  }
+})
+
 test('Security 미검증·의심 발견을 확정된 취약점이나 통과로 바꾸지 않는다', () => {
   const f = fixture({ states: ['SUCCEEDED', 'SUCCEEDED', 'SUCCEEDED', 'SUCCEEDED'], artifacts: [report(3, 'SECURITY_REPORT', {
     requirementResults: [{ outcome: 'UNVERIFIED' }], findings: [{ disposition: 'SUSPECTED', severity: 'HIGH', description: '접근 제한을 추가 확인해야 합니다.' }],

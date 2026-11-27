@@ -33,6 +33,7 @@ from agents.runtime.developer import _host_factory
 from agents.runtime.planner import _message_data, _same_json, _TERMINAL
 from agents.runtime.qa_context import QAContextError, QAExecutionContext
 from agents.runtime.qa_services import QARuntimeServices, QAServicesError
+from agents.runtime.service_scope import service_input
 from agents.runtime.test_fix import TestFixRequired, same_cases
 from mcp_tools.tools.files import _run_file_operation
 from mcp_tools.execution_runtime import TrackedMCPError
@@ -54,6 +55,7 @@ class _QAInputError(ValueError):
 
 
 _PROTECTED = frozenset({
+    "serviceContract", "sourceInterface",
     "publicObservationPlan",
     "request", "snapshot", "workspaceId", "scenario", "runConfiguration", "plan", "sourceArtifact",
     "outputContract", "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds",
@@ -95,7 +97,7 @@ def _prepare_input(context, execution):
             answers.append(redact_data(answer))
         scope = build_requirement_scope(execution.configuration, execution.requirement_artifact, metadata, AgentRole.QA)
         assigned = {str(item.requirement_id) for item in scope.requirements}
-        return {**expected, "clarifications": answers,
+        return {**expected, **service_input(execution), "clarifications": answers,
             "fileAccess": build_file_access(execution.configuration.scenario_contract, AgentRole.QA),
             "requirementAuthority": scope.authority.to_prompt_json(),
             "requirementScope": scope.to_prompt_json(),
@@ -128,13 +130,13 @@ def _prepare_input(context, execution):
         raise _QAInputError() from None
 
 
-def _test_targets(services):
+def _test_targets(services, execution=None):
     """Only generated test paths; never disclose protected suite bytes/bindings."""
     targets = []
     unit = services.configuration.unit_test_configuration
     browser = services.configuration.browser_test_configuration
     if unit is not None:
-        targets.extend(unit_test_targets(unit, "qa"))
+        targets.extend(unit_test_targets(unit, "qa", scenario_key=execution.scenario.key if execution else None))
     if browser is not None:
         targets.extend({"toolName": "run_browser_tests", "selector": suite.name,
                         "path": "outputs/qa/" + suite.suite_path, "format": "browser-suite-v1", "required": True,
@@ -230,7 +232,11 @@ class QAAgentExecutor(AgentExecutor):
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.QA, context, execution, self._usage_sink)
             await services.prepare(execution)
-            task_input["testSelectors"], task_input["testTargets"] = services.selectors, _test_targets(services)
+            from orchestrator.infrastructure.run_feedback import feedback_input
+            task_input.update(await _run_file_operation(feedback_input, services, execution))
+            task_input["testSelectors"], task_input["testTargets"] = services.selectors, _test_targets(services, execution)
+            if execution.scenario.key == 'SERVICE-WEB':
+                task_input['sourceInterface'] = await services.source_interface(execution)
             async with services.client_factory(services.configuration) as client:
                 tracked = services.tracked(client, execution)
                 if telemetry is not None:
@@ -258,7 +264,11 @@ class QAAgentExecutor(AgentExecutor):
                             validation_failed_sink=telemetry.llm_validation if telemetry is not None else None,
                             recovery_sink=telemetry.llm_recovery if telemetry is not None else None,
                             input_observed_sink=telemetry.model_input if telemetry is not None else None)
-                    return await (text_engine if text_only else engine).run(prompt=prepare_role_prompt(
+                    from agents.runtime.test_fix import available_report_tools
+                    selected_tools = available_report_tools(tools, model_input)
+                    active_engine = engine if selected_tools == tools else LLMEngine(
+                        role=AgentRole.QA, provider=self._provider, tools=selected_tools, tool_executor=tracked)
+                    return await (text_engine if text_only else active_engine).run(prompt=prepare_role_prompt(
                         AgentRole.QA, task_input=model_input, metadata=execution.metadata),
                         model=execution.model,
                         output=with_expected_results(build_qa_output_contract(execution.metadata.requirement_ids,

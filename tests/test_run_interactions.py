@@ -2,6 +2,7 @@
 import asyncio
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -14,7 +15,7 @@ from pydantic import SecretStr
 from orchestrator.api.dependencies import get_workflow_controls
 from orchestrator.application.run_interactions import interaction_revision
 from orchestrator.core.config import Settings
-from orchestrator.domain import A2ATaskState, AgentRole, SCN_001_ID, WorkflowRun, WorkflowStep, WorkflowStatus, WorkflowStepStatus
+from orchestrator.domain import A2ATaskState, AgentRole, FinalVerdict, SCN_001_ID, WorkflowRun, WorkflowStep, WorkflowStatus, WorkflowStepStatus
 from orchestrator.infrastructure import SQLiteWorkflowRepository
 from orchestrator.infrastructure.run_commands import CommandConflict, RunCommandStore
 from orchestrator.main import create_app
@@ -82,6 +83,28 @@ class InteractionTests(unittest.TestCase):
         self.remote.context = "another-context"
         self.assertEqual(self.request("GET", "/interaction").json()["requests"][0]["replyMode"], "UNAVAILABLE")
 
+    def test_old_host_policy_never_advertises_or_admits_a_resumable_question(self):
+        from agents.platform.host_policy_store import HostPolicyStore
+        with self.repository._transaction() as db:
+            HostPolicyStore._schema(db)
+            db.execute('INSERT INTO run_host_policies VALUES(?,?)',(str(self.run.run_id),'a'*64))
+        self.app.state.host_policy_sha256 = 'b'*64
+        data = self.request('GET','/interaction').json()
+        self.assertEqual(data['requests'][0]['replyMode'],'NEW_RUN')
+        self.assertEqual(data['requests'][0]['questions'],[])
+        response = self.request('POST','/commands',body=self.body(),key=uuid4())
+        self.assertEqual((response.status_code,response.json()['detail']),(409,'QUESTION_NOT_ACTIONABLE'))
+        self.assertEqual(self.calls,[])
+        self.assertEqual(self.repository.get_run(self.run.run_id),self.run)
+
+    def test_missing_policy_binding_does_not_advertise_a_legacy_question(self):
+        self.app.state.host_policy_sha256 = 'b'*64
+        data = self.request('GET','/interaction').json()
+        self.assertEqual(data['requests'][0]['replyMode'],'NEW_RUN')
+        self.assertIn('실행 규칙 기록',data['continuationUnavailable'])
+        self.assertEqual(self.request('POST','/commands',body=self.body(),key=uuid4()).status_code,409)
+        self.assertEqual(self.calls,[])
+
     def test_resume_receipt_replays_once_and_conflicts_with_changed_input(self):
         key = uuid4(); body = self.body()
         self.assertEqual(self.request("POST", "/commands", body=body, key=key).status_code, 202)
@@ -91,6 +114,20 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][2], {"step_id": self.step.workflow_step_id, "input_data": {"clarification": body["clarification"]}})
         self.assertEqual(self.request("POST", "/commands", body={**body, "clarification": "다른 답변"}, key=key).status_code, 409)
+
+    def test_terminal_or_active_run_never_advertises_a_historical_question(self):
+        for status in (WorkflowStatus.FINISHED, WorkflowStatus.ABORTED, WorkflowStatus.VALIDATING):
+            with self.subTest(status=status):
+                run = self.run.model_copy(update={"status": status, "resume_state": None,
+                    "verdict": FinalVerdict.UNVERIFIED if status is WorkflowStatus.FINISHED else None,
+                    "termination_reason": "사용자 중단" if status is WorkflowStatus.ABORTED else None})
+                self.repository.save_run_update(run, ())
+                with mock.patch.object(self.remote, "get_task", side_effect=AssertionError("stale Task read")):
+                    data = self.request("GET", "/interaction").json()
+                self.assertEqual(data["status"], status.value)
+                self.assertEqual(data["requests"], [])
+                self.assertEqual(self.request("POST", "/commands", body=self.body(), key=uuid4()).status_code, 409)
+        self.assertEqual(self.calls, [])
 
     def test_stale_final_wrong_step_and_new_run_policy_do_not_resume(self):
         for patch in ({"revision": "0" * 64}, {"workflowStepId": str(uuid4())}):

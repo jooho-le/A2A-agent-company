@@ -14,7 +14,9 @@ async function json(path, options = {}) {
   return { data, status: response.status }
 }
 
-export const officeScenarioId = 'f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76'
+export const officeScenarioId = '03d94bc5-1a31-473b-8527-c4acf8ea58a1'
+// Old experiment receipts remain recoverable; new product requests use SERVICE-WEB.
+const receiptScenarios = new Set([officeScenarioId, 'f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76'])
 
 export async function loadOfficeApproval(signal) {
   const scenarioId = officeScenarioId
@@ -24,36 +26,45 @@ export async function loadOfficeApproval(signal) {
   return { scenarioId, configurationId: approved.configurationId }
 }
 
-function validateReceipt(data, key, status) {
+function validateReceipt(data, key, status, expectedScenarioId = null) {
   if (data?.requestId !== key || !runUuid.test(data.projectId)
+    || data.continuationOf != null && !runUuid.test(data.continuationOf)
     || !['PENDING', 'UNKNOWN', 'REJECTED', 'CREATED'].includes(data.submissionStatus)
     || ![200, 201, 202].includes(status)
     || status === 201 && data.submissionStatus !== 'CREATED'
     || status === 202 && data.submissionStatus === 'CREATED'
     || data.submissionStatus === 'CREATED' && (!runUuid.test(data.run?.runId)
-      || data.run.scenarioId !== officeScenarioId || !['SCHEDULED', 'NOT_CONFIGURED'].includes(data.dispatchStatus)
+      || !receiptScenarios.has(data.run.scenarioId)
+      || expectedScenarioId != null && data.run.scenarioId !== expectedScenarioId
+      || !['SCHEDULED', 'NOT_CONFIGURED'].includes(data.dispatchStatus)
       || data.firstStep?.runId != null && data.firstStep.runId !== data.run.runId)) {
     throw new Error('접수 결과를 확인할 수 없습니다. 접수 상태를 다시 조회해 주세요.')
   }
   const receipt = { requestId: data.requestId, projectId: data.projectId, submissionStatus: data.submissionStatus, httpStatus: status }
   // UNKNOWN에 Run 형태의 데이터가 섞여 있어도 UI/3D에 연결하지 않습니다.
   return data.submissionStatus === 'CREATED'
-    ? { ...receipt, run: data.run, firstStep: data.firstStep, dispatchStatus: data.dispatchStatus } : receipt
+    ? { ...receipt, run: data.run, firstStep: data.firstStep, dispatchStatus: data.dispatchStatus,
+      ...(data.continuationOf ? { continuationOf: data.continuationOf } : {}) } : receipt
 }
 
 export async function submitOfficeWork(body, key, { confirmed = false } = {}) {
-  if (!body || Object.keys(body).some(field => !['projectName', 'projectId', 'scenarioId', 'configurationId', 'requestText'].includes(field))
+  if (!body || Object.keys(body).some(field => !['projectName', 'projectId', 'scenarioId', 'configurationId', 'requestText', 'continuationOf'].includes(field))
     || !runUuid.test(key) || body.scenarioId !== officeScenarioId || !/^[0-9a-f]{64}$/.test(body.configurationId)
     || body.projectId != null && !runUuid.test(body.projectId)
+    || body.continuationOf != null && (!runUuid.test(body.continuationOf) || !runUuid.test(body.projectId))
     || typeof body.projectName !== 'string' || !body.projectName.trim() || body.projectName.length > 60
     || typeof body.requestText !== 'string' || !body.requestText.trim() || body.requestText.length > 20000) {
     throw new ProductRunRequestError('업무 요청과 승인 설정 식별자를 확인해 주세요.', 'INVALID_ARGUMENT')
   }
-  const { projectName, projectId, scenarioId, configurationId, requestText } = body
+  const { projectName, projectId, scenarioId, configurationId, requestText, continuationOf } = body
   const { data, status } = await json('/api/v1/runs', { method: 'POST', confirmed,
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-    body: JSON.stringify({ projectName, ...(projectId == null ? {} : { projectId }), scenarioId, configurationId, requestText }) })
-  return validateReceipt(data, key, status)
+    body: JSON.stringify({ projectName, ...(projectId == null ? {} : { projectId }), scenarioId, configurationId, requestText,
+      ...(continuationOf == null ? {} : { continuationOf }) }) })
+  if (data.submissionStatus === 'CREATED' && continuationOf != null && data.continuationOf !== continuationOf) {
+    throw new ProductRunRequestError('이전 작업 연결을 확인하지 못했어요. 접수 상태를 확인해주세요.', 'CONTINUATION_RECEIPT_INVALID')
+  }
+  return validateReceipt(data, key, status, scenarioId)
 }
 
 export async function lookupOfficeWork(key) {

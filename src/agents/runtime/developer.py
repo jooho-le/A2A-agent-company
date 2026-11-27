@@ -18,6 +18,7 @@ from agents.api.validation import parse_workflow_metadata
 from agents.llm.contracts import LLMErrorCode, LLMRuntimeError, json_text
 from agents.llm.corrections import contract_check, development_check
 from agents.runtime.start_precheck import start_precheck_for
+from mcp_tools.tools.files import _run_file_operation
 from agents.runtime.signup_quality_precheck import signup_quality_precheck_for
 from agents.llm.engine import LLMEngine
 from agents.llm.development_rejection import rejection_check
@@ -30,6 +31,8 @@ from agents.runtime.developer_context import DeveloperContextError, DeveloperExe
 from agents.runtime.developer_services import DeveloperRuntimeServices, DeveloperServicesError
 from agents.runtime.developer_workspace import DeveloperCheckpointError
 from agents.runtime.requirement_scope import signup_observation_plan, build_requirement_scope
+from agents.runtime.service_scope import service_input
+from agents.runtime.service_interface import service_interface_check
 from agents.runtime.file_access import build_file_access, constrain_workspace_file_tools
 from agents.runtime.planner import _host_factory, _message_data, _same_json, _TERMINAL
 from mcp_tools.execution_runtime import TrackedMCPError
@@ -51,6 +54,7 @@ class _DeveloperInputError(ValueError):
 
 
 _PROTECTED = frozenset({
+    "serviceContract", "sourceInterface",
     "publicObservationPlan",
     "workspaceId", "scenario", "runConfiguration", "plan", "sourceArtifact", "outputContract",
     "metadata", "runId", "workflowStepId", "scenarioId", "requirementIds", "projectArtifactIds",
@@ -92,7 +96,7 @@ def _prepare_input(context, execution):
             answers.append(redact_data(answer))
         scope = build_requirement_scope(execution.configuration, execution.requirement_artifact,
                                         metadata, AgentRole.DEVELOPER)
-        return {**expected, "clarifications": answers,
+        return {**expected, **service_input(execution), "clarifications": answers,
             "fileAccess": build_file_access(execution.configuration.scenario_contract, AgentRole.DEVELOPER),
             "requirementAuthority": scope.authority.to_prompt_json(),
             "requirementScope": scope.to_prompt_json(),
@@ -225,6 +229,10 @@ class DeveloperAgentExecutor(AgentExecutor):
             telemetry, usage_sink, call_started_sink = bind_runtime_telemetry(
                 self._telemetry_factory, AgentRole.DEVELOPER, context, execution, self._usage_sink)
             checkpoint = await services.prepare(execution)
+            from orchestrator.infrastructure.run_feedback import feedback_input
+            task_input.update(await _run_file_operation(feedback_input, services, execution))
+            if getattr(checkpoint, 'runtime_capabilities', None) is not None:
+                task_input['runtimeCapabilities'] = checkpoint.runtime_capabilities
             from agents.runtime.development_failure import failure_reader
             read_failure = failure_reader(services, execution)
             from agents.runtime.repair_baseline import with_repair_baseline
@@ -253,6 +261,8 @@ class DeveloperAgentExecutor(AgentExecutor):
                                    tools=tools, tool_executor=tracked)
                 text_engine = LLMEngine(role=AgentRole.DEVELOPER, provider=self._provider)
                 precheck = start_precheck_for(checkpoint, execution.configuration.scenario_contract)
+                from orchestrator.domain.service_design import service_policy
+                allow_unchanged = bool(service_policy(execution.configuration.scenario_contract))
 
                 async def run_model(model_input, *, text_only=False, output_override=None):
                     # text_only: the semantic rewrite (docs/live-api/05 15절) runs without any tool,
@@ -287,11 +297,14 @@ class DeveloperAgentExecutor(AgentExecutor):
                         deadline_monotonic=execution.budget.deadline_monotonic),
                     correction_candidates=checkpoint.correction_candidates if paths and not text_only else None,
                     output_check=contract_check(validate) if text_only else development_check(
-                        validate, precheck=precheck, path_check=checkpoint.ready_path_issues if paths else None,
+                        validate, precheck=precheck, allow_unchanged_source=allow_unchanged,
+                        path_check=checkpoint.ready_path_issues if paths else None,
                         library_type_check=checkpoint.library_type_issues,
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
                             if execution.budget.limits.max_output_corrections else None,
-                        priority_check=checkpoint.pending_priority_paths if paths else None))
+                        priority_check=checkpoint.pending_priority_paths if paths else None,
+                        service_interface_check=service_interface_check(checkpoint, execution.configuration.scenario_contract,
+                            task_input.get('serviceDesign'))))
                 result = await run_model(task_input)
                 decision = validate(result.data)
                 if decision.kind == "READY" and self._semantic_reviewer is not None:

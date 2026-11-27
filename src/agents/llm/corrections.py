@@ -32,7 +32,7 @@ from agents.llm.recovery import ReadyPathEvidence, ready_comparison_reason, safe
 
 CORRECTABLE_SCHEMA_STAGES = frozenset({'TOOL_ARGUMENTS_WIRE', 'TOOL_ARGUMENTS', 'MODEL_OUTPUT', 'MODEL_OUTPUT_REDACTED'})
 CORRECTABLE_POLICY_REASONS = frozenset({'TOOL_NOT_OFFERED', 'WORKSPACE_MISMATCH'})
-DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V8'
+DRAFT_PRECHECK_POLICY = 'SHARED_INVENTORY_AND_TYPED_SOURCE_REPAIR_V11'
 
 VALIDATION_ERROR_GUIDANCE = (
     'HTTPException does not catch RequestValidationError: FastAPI rejects invalid request bodies before '
@@ -49,6 +49,12 @@ VALIDATION_ERROR_GUIDANCE = (
     'This is public framework API guidance, not a measured finding, hidden test or permission to change requirements.')
 
 INSTRUCTIONS = {
+    'READY_SERVICE_INTERFACE_REVIEW': (
+        'The Host read your service source and found the listed startup, dependency or interface issues. '
+        'Read each sourcePath at source/<sourcePath>, fix the actual reasonCode and return READY again. '
+        'Follow the shared serviceDesign: API work needs its API and readiness response, not a new HTML UI. '
+        'Preserve main.app, lifespan, approved dependencies and the original database connection. '
+        'Do not change user requirements or tests to hide defects. This static check is not a PASS verdict.'),
     'READY_SIGNUP_QUALITY_REVIEW': (
         'The Host found reviewable source paths against the public signup contract; these are static warnings, '
         'not measured security findings or proof of product success. Read the listed sourcePath and lineNumber. '
@@ -128,14 +134,16 @@ INSTRUCTIONS = {
         'acceptance sentence in each assigned requirement. Fix the listed fields and return the corrected final JSON; keep the test file you wrote '
         'unless a listed case needs a different test.'),
     'GENERATED_TESTS_INVALID': (
-        'Your generated tests do not match your cases yet; nothing has run. GENERATED_TEST_FILE_MISSING: write '
+        'Your generated tests do not match your cases yet; this READY has not been accepted for Host validation. '
+        'Previously completed tool calls remain valid. GENERATED_TEST_FILE_MISSING: write '
         'the test file for each generated test scope with write_test_file (use testTargets) before READY. '
         'This includes every required browser suite JSON, even when all signup cases use unit tests. '
         'BROWSER_SUITE_INVALID: write valid browser-suite-v1 JSON using only testTargets.allowedActions. '
         'Declare every browser testId under its exact run_browser_tests selector. '
         'BROWSER_SUITE_PATH_INVALID: use only the approved testTargets path inside your QA scratch; never symlinks. '
         'TEST_IN_FILE_NOT_DECLARED: every test method in your test files is run and must be declared as one case '
-        'whose testId is module.Class.method exactly; declare it or remove the extra method. '
+        'whose testId is module.Class.method exactly. Add the missing case bindings listed in testRepairTargets; '
+        'preserve required tests instead of deleting them to shorten the result. '
         'DECLARED_TEST_NOT_IN_FILE: choose a matching selector and exact testId from hostTestIdCatalog; '
         'never guess or add a tests. prefix. Do not remove required coverage. '
         'GENERATED_TEST_SYNTAX_INVALID: a test file is not valid Python; rewrite it. Never place an actual '
@@ -148,7 +156,21 @@ INSTRUCTIONS = {
         'a name the product module does not define (database.get_db is not in main); import each name from the '
         'module that defines it. TEST_HOST_FIXTURE_REQUIRED: for SCN-001 subclass the Host AppTestCase '
         'from _host_app_test, use self.client/self.db/self.User in test methods, and remove product imports '
-        'at module level and custom setup/teardown. The Host handles isolated DB and lifespan; it does not '
+        'at module level and custom setup/teardown. TEST_SERVICE_FIXTURE_REQUIRED: for SERVICE-WEB import '
+        'ServiceTestCase from _host_service_test, subclass it and use self.client. Remove TestClient construction, '
+        'top-level main/database/models imports and custom setup/teardown/run; testTargets.appFixture describes '
+        'the generic lifecycle. It assumes no User model and supplies no grading answers. '
+        'TEST_OUTPUT_ARGUMENT_INVALID: check_http_output(client, method, path, sensitive=sample, json=payload) '
+        'or self.check_http_output(method, path, sensitive=sample, json=payload) uses an actual current-test '
+        'new_password() STRING for complete observations, never the name "password", a list, a dict or a password keyword. '
+        'The bound self method supplies its own started client; omit client there. If client=self.client is '
+        'explicitly supplied it must be exactly the same started self.client, never a replacement. '
+        'For empty/missing/null negative input, keep the invalid input and use the empty runtime sample or '
+        'sensitive=None. Empty/None executes the request with NO_SAMPLE observations, not CHECKED. '
+        'Nonempty short samples and lost/truncated outputs remain INCOMPLETE. '
+        'Include a real current-test synthetic sample in a positive request to observe output channels; '
+        'never turn an invalid-input case into a valid one or treat missing observation as PASS. '
+        'The Host handles isolated DB and lifespan; it does not '
         'create missing product tables. TEST_HOST_MEMBER_MISSING: self.fresh_email and self.new_password are not '
         'Host members; create a local fresh_email (for example with uuid4) and import new_password from '
         '_host_test_data. Respect explicitly defined custom helpers. TEST_HOST_RETURN_MISUSED: '
@@ -310,6 +332,12 @@ def _issue(item, *, start_precheck=False) -> dict | None:
             and not source_path.startswith('/') and all(p not in ('', '.', '..') for p in source_path.split('/'))
             and redact_text(source_path) == source_path and type(line) is int and 0 < line <= 1048576):
         issue.update(sourcePath=source_path, lineNumber=line)
+        if code == 'GENERATED_TEST_SYNTAX_INVALID' and item.get('syntaxKind') in (
+                'INDENTATION', 'UNTERMINATED_STRING', 'MISSING_DELIMITER', 'EXPECTED_COLON',
+                'INVALID_CHARACTER', 'INVALID_SYNTAX', 'NULL_BYTE'):
+            column = item.get('columnNumber')
+            if type(column) is int and 0 < column <= 1_000_000:
+                issue.update(columnNumber=column, syntaxKind=item['syntaxKind'])
     repair_path = item.get('repairSourcePath')
     if _safe_review_file(repair_path):
         issue['repairSourcePath'] = repair_path
@@ -478,10 +506,24 @@ def ready_path_trace(feedback):
 def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_name=None, repair_brief=None) -> dict:
     reasons = {item['reasonCode'] for item in issues}
     instruction = INSTRUCTIONS[kind]
+    if kind == 'READY_SERVICE_INTERFACE_REVIEW':
+        if 'WEB_UI_NOT_IMPLEMENTED' in reasons:
+            instruction += ' The requested WEB delivery is missing its usable local HTML/CSS/JavaScript screen. Implement it and connect its actions to the real application.'
+        if 'SERVICE_DEPENDENCY_UNAVAILABLE' in reasons:
+            instruction += ' An import or parser is absent from runtimeCapabilities. Use approved installed packages; editing the dependency lock or adding a screen cannot install it.'
+        if 'MODEL_PRIMARY_KEY_MISSING' in reasons:
+            instruction += ' The reported SQLAlchemy model lacks a primary key and fails while being imported. Define an appropriate primary key on that model, preserving its existing fields and constraints. An engine import or create_tables() function cannot fix mapper configuration.'
     if kind == 'GENERATED_TESTS_INVALID' and stage == 'TOOL_ARGUMENTS':
         instruction += (' No tool call in this rejected batch was executed. Previously successful writes remain. '
                         'Fix all listed source issues together and reissue only the still-needed calls. '
                         'Source has not been automatically escaped, normalized or modified by the Host.')
+        syntax_kinds = {row.get('syntaxKind') for row in issues}
+        if 'UNTERMINATED_STRING' in syntax_kinds:
+            instruction += ' An indicated quoted string is not closed. Keep literal line breaks out of single-line quotes; use an escaped newline or a properly closed triple-quoted literal.'
+        if 'MISSING_DELIMITER' in syntax_kinds:
+            instruction += ' Balance the bracket, parenthesis or brace at the indicated line and column. Check the complete method before reissuing the file.'
+        if 'INDENTATION' in syntax_kinds:
+            instruction += ' Use consistent spaces and a correctly indented complete class/method body. Do not mix tabs and spaces.'
     if (kind in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_OUTPUT_SAFETY_REVIEW')
             and 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' in reasons):
         instruction += ' ' + VALIDATION_ERROR_GUIDANCE
@@ -598,7 +640,7 @@ def checked_rejection(value) -> dict | None:
                     'READY_WITHOUT_CHANGES', 'START_CONTRACT_PRECHECK_FAILED', 'CASE_EXPECTATION_INVALID',
                     'GENERATED_TESTS_INVALID', 'CODE_REFERENCE_INVALID', 'READY_PATH_EVIDENCE_MISMATCH', 'READY_PRIORITY_REPAIR_NEEDED',
                     'READY_RUNTIME_REPAIR_REQUIRED', 'READY_LIBRARY_TYPE_MISMATCH', 'READY_OUTPUT_SAFETY_REVIEW',
-                    'READY_SIGNUP_QUALITY_REVIEW'):
+                    'READY_SIGNUP_QUALITY_REVIEW', 'READY_SERVICE_INTERFACE_REVIEW'):
         return None
     raw = value.get('issues') or []
     issues = []
@@ -713,14 +755,17 @@ class ExecutedTools(tuple):
         return result
 
 
-def source_change_check(validate):
-    """READY requires Host-confirmed net change in Multi and Single development.
+def source_change_check(validate, *, allow_unchanged_source=False):
+    """Measured development requires net change; services may submit existing code.
 
     Production engines populate ExecutedTools.source_changed from the checkpoint
     inventory against the immutable parent. Legacy tuple-only checks are for
     isolated callers; they do not provide evidence for workflow termination.
-    The engine forces a corrective write or stops before semantic publication.
+    With the service-only allowance, unchanged bytes still go through the other
+    READY checks and a fresh Host Build/QA/Security; this is not a PASS verdict.
     """
+    if type(allow_unchanged_source) is not bool:
+        raise ValueError('invalid source submission policy')
     contract = contract_check(validate)
 
     def check(data, executed_tools=()):
@@ -729,7 +774,8 @@ def source_change_check(validate):
             return rejection
         changed = (executed_tools.source_changed if isinstance(executed_tools, ExecutedTools)
                    else bool(set(executed_tools) & SOURCE_WRITE_TOOLS))
-        if isinstance(data, dict) and data.get('kind') == 'READY' and not changed:
+        if (isinstance(data, dict) and data.get('kind') == 'READY'
+                and not changed and not allow_unchanged_source):
             issues = ([{'fieldPath': '/source', 'reasonCode': 'UNUSED_TEXT_REWRITE'}]
                       if getattr(executed_tools, 'unused_rewrite', False) else [])
             return {'code': 'READY_WITHOUT_CHANGES', 'issues': issues}
@@ -779,18 +825,23 @@ def case_expectation_check(validate, expectation_issues=None, *, explain=None, e
 
 
 def development_check(validate, precheck=None, path_check=None, priority_check=None, library_type_check=None,
-                      output_safety_check=None, signup_quality_check=None):
-    """``source_change_check`` plus the Host's read-only start-contract precheck for READY.
+                      output_safety_check=None, signup_quality_check=None, service_interface_check=None,
+                      *, allow_unchanged_source=False):
+    """Source submission policy plus read-only prerequisite checks for READY.
 
     ``precheck`` returns closed issues for start failures that the Host build would
     report for certain (``agents.runtime.start_precheck``). Multi Developer and the
     Single IMPLEMENTING/FIXING phases use the same rule and the same limit. The
     precheck is advisory: if it fails, the existing Host build decides as before.
     """
-    change = source_change_check(validate)
+    change = source_change_check(validate, allow_unchanged_source=allow_unchanged_source)
 
     def check(data, executed_tools=()):
         rejection = change(data, executed_tools)
+        if rejection is None and isinstance(data, dict) and data.get('kind') == 'READY' and service_interface_check is not None:
+            issues = service_interface_check()
+            if issues:
+                return {'code': 'READY_SERVICE_INTERFACE_REVIEW', 'issues': issues}
         if (library_type_check is not None and isinstance(data, dict) and data.get('kind') == 'READY'
                 and (not rejection or rejection['code'] == 'READY_WITHOUT_CHANGES')):
             issues = library_type_check()

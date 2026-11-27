@@ -288,10 +288,12 @@ class SecurityRuntimeServices:
         rows = [row for row in (data.get("testCases") or []) if isinstance(row, dict)] if isinstance(data, dict) else []
         source = Path(workspace.record.root_path) / "source"
         from orchestrator.domain import SCN_001_ID
+        from orchestrator.domain.scenario_registry import SERVICE_WEB_ID
         run = self._repository.get_run(binding.run_id)
         return inspect_generated_tests(Path(workspace.record.root_path) / "outputs" / "security" / "tests",
                                        scopes, rows, "testCases", source_root=source if source.is_dir() else None,
-                                       host_app_fixture=run is not None and run.scenario_id == SCN_001_ID)
+                                       host_app_fixture=run is not None and run.scenario_id == SCN_001_ID,
+                                       service_fixture=run is not None and run.scenario_id == SERVICE_WEB_ID)
 
     def reference_issues(self, measured, data):
         """The ``_anchors`` rules that a draft can still fix (handoff P5, point 5).
@@ -802,6 +804,11 @@ class SecurityRuntimeServices:
         from orchestrator.domain.validation_feedback import case_feedback, measured_test_version
         rows, technical = {}, set()
         contract = execution.configuration.scenario_contract
+        service_design = None
+        if contract.get('scenarioKey') == 'SERVICE-WEB':
+            from orchestrator.domain.service_design import design_for_execution
+            design = design_for_execution(execution)
+            service_design = design.model_dump(mode='json', by_alias=True) if design is not None else None
         requirement_keys = {r['requirementId']: r['key'] for r in contract['requirements']
                             if contract.get('scenarioKey') == 'SCN-001'}
         hash_policy = contract.get('securityPolicy', {}).get('passwordHashPolicy')
@@ -859,6 +866,9 @@ class SecurityRuntimeServices:
             key = requirement_keys.get(str(requirement_id))
             generated = [row for row in cases_measured if row['testId'].split(':', 2)[1] in self._test_selectors]
             coverage, gaps = generated_requirement_coverage(key, generated, hash_policy)
+            if service_design is not None:
+                from agents.runtime.security_test_scope import service_output_coverage
+                coverage, gaps = service_output_coverage(service_design, generated)
             protected = [row for row in cases_measured if row['testId'].split(':', 2)[1] not in self._test_selectors]
             only_missing_observations = generated and all(
                 row['outcome'] == 'PASS' or (row['outcome'] == 'UNVERIFIED'
