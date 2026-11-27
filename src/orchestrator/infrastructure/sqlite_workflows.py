@@ -86,6 +86,7 @@ class SQLiteWorkflowRepository:
         run_configuration=None,
         workspace=None,
         submission: RunSubmissionRecord | None = None,
+        continuation=None,
     ) -> tuple[RunSubmissionRecord, bool] | None:
         _validate_bundle(run, steps, events)
         if run_configuration is None:
@@ -118,6 +119,9 @@ class SQLiteWorkflowRepository:
                 "VALUES (?, ?, ?, ?, ?)",
                 _run_row(run),
             )
+            if continuation is not None:
+                from orchestrator.infrastructure.service_continuations import insert_continuation
+                insert_continuation(connection, run, continuation)
             for step in steps:
                 _insert_step(connection, step)
             for event in events:
@@ -2079,6 +2083,8 @@ class SQLiteWorkflowRepository:
             if "owner_pid" not in lease_columns:
                 connection.execute("ALTER TABLE control_leases ADD COLUMN owner_pid INTEGER")
             self._backfill_run_resources(connection)
+            from orchestrator.infrastructure.service_continuations import ensure_schema
+            ensure_schema(connection)
 
     def _backfill_run_resources(self, connection: sqlite3.Connection) -> None:
         """Materialize a stable workspace ID once for payloads saved before this version."""

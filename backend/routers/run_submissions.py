@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, UUID4
+from pydantic import BaseModel, ConfigDict, Field, UUID4, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ from database import get_db
 from approved_configuration import public_approved_configuration
 from host_reads import HOST_KEY, HostReadClient, HostRunNotFound, HostRejected, HostUnavailable, get_host_read_client
 from host_reads import HostAuthenticationFailed, HostResponse, require_host_reads_enabled
+from host_reads import CONTINUATION_REJECTIONS
 from models import Project, ProjectRun, RetiredSubmissionKey, RunSubmission, User
 from project_scenarios import ScenarioRegistryUnavailable, is_supported_project_scenario
 from routers.auth import read_current_user
@@ -101,6 +102,13 @@ class RunRequest(BaseModel):
     scenarioId: UUID4
     configurationId: str = Field(pattern=r"^[0-9a-f]{64}$")
     requestText: str = Field(min_length=1, max_length=20000)
+    continuationOf: UUID4 | None = None
+
+    @model_validator(mode='after')
+    def continuation_needs_project(self):
+        if self.continuationOf is not None and self.projectId is None:
+            raise ValueError('이어서 수정할 프로젝트와 작업을 먼저 선택해주세요.')
+        return self
 
 
 def existing(db, user_id, key):
@@ -121,8 +129,12 @@ def lock_submission_keys(db):
 
 def receipt(row, response=None):
     data = json.loads(row.response_json) if row.response_json else {}
-    if response is not None and row.state == "REJECTED" and data.get("detail") == "IDEMPOTENCY_KEY_CONFLICT":
-        response.status_code = 409
+    if response is not None and row.state == "REJECTED":
+        if data.get('detail') in CONTINUATION_REJECTIONS:
+            response.status_code = 422 if data['detail'] == 'CONTINUATION_TARGET_REQUIRED' else 409
+            response.headers['X-Submission-Status'] = 'NOT_ACCEPTED'
+        elif data.get("detail") == "IDEMPOTENCY_KEY_CONFLICT":
+            response.status_code = 409
     return {**data, "submissionStatus": row.state, "requestId": row.client_key, "projectId": row.project_id}
 
 
@@ -147,6 +159,8 @@ def link_result(db, row, data):
         run_id = str(UUID(run["runId"], version=4))
         if (run_id != run["runId"] or run.get("scenarioId") != original["scenarioId"]
                 or data.get("dispatchStatus") not in ("SCHEDULED", "NOT_CONFIGURED")):
+            raise ValueError()
+        if original.get('continuationOf') is not None and data.get('continuationOf') != original['continuationOf']:
             raise ValueError()
         first_step = data.get("firstStep")
         if isinstance(first_step, dict) and "runId" in first_step and first_step["runId"] != run_id:
@@ -201,7 +215,10 @@ def submit(payload: RunRequest, request: Request, response: Response,
     response.headers["Cache-Control"] = "no-store"
     if len(request.headers.getlist("idempotency-key")) != 1:
         raise HTTPException(422, "요청 식별자는 한 개여야 합니다.")
-    request_hash = digest(payload.model_dump(mode="json"))
+    submitted_body = payload.model_dump(mode='json')
+    if payload.continuationOf is None:
+        submitted_body.pop('continuationOf')  # Preserve existing idempotency fingerprints.
+    request_hash = digest(submitted_body)
     with project_storage(db):
         lock_submission_keys(db)
         row = existing(db, user.id, idempotency_key)
@@ -213,6 +230,11 @@ def submit(payload: RunRequest, request: Request, response: Response,
             raise HTTPException(409, "SUBMISSION_KEY_RETIRED")
         # 타 사용자 프로젝트는 Host I/O 전에 404입니다.
         project = owned_project(db, payload.projectId, user.id) if payload.projectId else None
+        if payload.continuationOf is not None:
+            parent = db.scalar(select(ProjectRun).where(ProjectRun.project_id == project.project_id,
+                ProjectRun.run_id == str(payload.continuationOf), ProjectRun.host_key == HOST_KEY))
+            if parent is None:
+                raise HTTPException(404, '이 프로젝트에 속한 수정 대상 작업을 찾을 수 없습니다.')
         if project and project.scenario_id != str(payload.scenarioId):
             raise HTTPException(422, "프로젝트 시나리오와 요청이 일치하지 않습니다.")
         try:
@@ -228,6 +250,8 @@ def submit(payload: RunRequest, request: Request, response: Response,
             db.flush()
         host_body = {"scenarioId": str(payload.scenarioId), "requestText": payload.requestText,
                      "configuration": approved["configuration"]}
+        if payload.continuationOf is not None:
+            host_body['continuationOf'] = str(payload.continuationOf)
         row = RunSubmission(internal_key=str(uuid4()), owner_user_id=user.id, client_key=str(idempotency_key),
             project_id=project.project_id, request_sha256=request_hash, host_request_sha256=digest(host_body),
             host_request_json=canonical(host_body), configuration_id=approved["configurationId"], state="PENDING")
@@ -264,9 +288,9 @@ def send_submission(db, row, client, host_body, response):
     lock_submission(db, row)
     if row.state in ("CREATED", "REJECTED"):
         return receipt(row, response)
-    if failure and failure.status == 409 and failure.code == "IDEMPOTENCY_KEY_CONFLICT":
+    if failure and failure.code in CONTINUATION_REJECTIONS | {'IDEMPOTENCY_KEY_CONFLICT'}:
         row.state = "REJECTED"
-        row.response_json = canonical({"detail": "IDEMPOTENCY_KEY_CONFLICT"})
+        row.response_json = canonical({"detail": failure.code})
         db.commit()
         return receipt(row, response)
     row.state = "REJECTED" if failure and failure.status in (400, 404, 405, 413, 415, 422, 429) else "UNKNOWN"
@@ -369,12 +393,16 @@ def frozen_host_body(row, project):
 
     try:
         body = json.loads(row.host_request_json, object_pairs_hook=unique_object)
-        if (not isinstance(body, dict) or set(body) != {"scenarioId", "requestText", "configuration"}
+        if (not isinstance(body, dict) or set(body) - {'continuationOf'} != {"scenarioId", "requestText", "configuration"}
                 or digest(body) != row.host_request_sha256
                 or body["scenarioId"] != project.scenario_id
                 or not isinstance(body["requestText"], str) or not 1 <= len(body["requestText"]) <= 20000
                 or str(UUID(row.internal_key, version=4)) != row.internal_key):
             raise ValueError()
+        if 'continuationOf' in body:
+            parent = str(UUID(body['continuationOf'], version=4))
+            if parent != body['continuationOf']:
+                raise ValueError()
         public_approved_configuration({"scenarioId": body["scenarioId"], "configurationId": row.configuration_id,
                                        "configuration": body["configuration"]}, project.scenario_id)
         return body

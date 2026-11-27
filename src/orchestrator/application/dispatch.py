@@ -1010,9 +1010,10 @@ class PlannerRunDispatcher:
             if artifact.artifact_id in input_artifact_ids
             or artifact.artifact_id in {issue.report_artifact_id for issue in stored_issues}
         ]
-        payload = self.build_fix_payload(fixing_run, step, plan, scenario, stored_issues, input_artifacts)
-        payload["runConfiguration"] = self._run_configuration_payload(run.run_id)
         try:
+            payload = self.build_fix_payload(fixing_run, step, plan, scenario, stored_issues, input_artifacts,
+                                             repository=self._repository)
+            payload["runConfiguration"] = self._run_configuration_payload(run.run_id)
             async with self._client_factory(developer_url) as client:
                 await client.resolve_agent_card()
                 result = await A2ATaskRunner(client).submit_and_wait(
@@ -1102,7 +1103,7 @@ class PlannerRunDispatcher:
         return get_scenario(run.scenario_id)
 
     @staticmethod
-    def build_fix_payload(run, step, plan, scenario, issues, input_artifacts):
+    def build_fix_payload(run, step, plan, scenario, issues, input_artifacts, *, repository=None):
         """Create a recoverable Fix Request with scrubbed, actionable evidence."""
         from orchestrator.domain.validation_feedback import validation_feedback, without_expectations
         payload = {
@@ -1151,6 +1152,13 @@ class PlannerRunDispatcher:
                 artifact['record'] = without_expectations(artifact['record'])
         from orchestrator.domain.protected_feedback import append_protected_feedback
         append_protected_feedback(fix, issues, input_artifacts)
+        if repository is not None:
+            sources = [a for a in input_artifacts if a.artifact_type == 'SOURCE']
+            if len(sources) == 1:
+                from orchestrator.infrastructure.repair_reproduction import generated_reproduction
+                reproduction = generated_reproduction(repository, sources[0], fix['validationFeedback'])
+                if reproduction:
+                    fix['reproduction'] = reproduction
         return payload
 
     @staticmethod

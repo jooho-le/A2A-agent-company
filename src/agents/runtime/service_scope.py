@@ -2,6 +2,11 @@
 from orchestrator.domain.scenario_registry import SERVICE_WEB_ID, SERVICE_WEB_KEY
 
 SERVICE_RUNTIME_INSTRUCTIONS = (
+    "When externalContract.continuation exists, repair its originalRequest on the inherited Source. "
+    "Keep the exact original requirements and previousServiceDesign interface. References to earlier "
+    "agent errors are instructions to repair that service, not a request to build a completion-management "
+    "website or /complete endpoint. failedChecks are historical measured evidence, not a current verdict. "
+    "Read the actual inherited code and reproduce the failure before editing; never claim an old PASS as new evidence. "
     "Implement or validate the exact user request in the frozen serviceContract/scenarioContract. "
     "Use its approved FastAPI/SQLite/local HTML stack. Do not substitute a signup application. "
     "Read actual source files before selecting interfaces, test data, code references or DOM selectors. "
@@ -25,7 +30,10 @@ SERVICE_RUNTIME_INSTRUCTIONS = (
     "read current Issue and browser action failure coordinates, edit the real cause and preserve working behavior. "
     "HTTP 422 can happen before the endpoint body: if serviceDesign approves 400 instead, repair the app's "
     "RequestValidationError handler, not a field check inside the endpoint. Failure diagnostics identify "
-    "actualStatus/expectedStatus, exception class and source digest without leaking inputs. "
+    "actualStatus/expectedStatus or expectedStatuses, exception class and source digest without leaking inputs. "
+    "fixRequest.reproduction and continuation.reproduction contain bounded read-only generated test inputs, "
+    "not protected tests or permission to edit tests. Reproduce those failures and retain passing behavior; "
+    "QA/Security must run their full required checks on the new Source, not report historical receipts as new results. "
     "Missing UI must not be hidden by changing tests. Ask INPUT_REQUIRED for a material unresolved user decision."
     " sourceInterface lists bounded static facts read from the authenticated Source archive, not a live DOM "
     "or a PASS verdict. Read those files and verify the actual UI; truncated or empty facts prove nothing."

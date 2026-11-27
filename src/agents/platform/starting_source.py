@@ -319,7 +319,7 @@ class RegisteredSourcePreparer:
 
     def _receipt(self, run, status):
         source = self._starting_source
-        return {
+        receipt = {
             "schemaVersion": 1, "runId": str(run.run_id), "workspaceId": str(run.workspace_id),
             "repositoryId": source.configuration.repository_id, "commitHash": source.configuration.commit_hash,
             "treeHash": source.export.snapshot.tree_hash, "gitObjectFormat": source.export.snapshot.git_object_format,
@@ -328,6 +328,17 @@ class RegisteredSourcePreparer:
             "environmentSha256": hashlib.sha256(_encode(source.environment.model_dump(mode="json", by_alias=True))).hexdigest(),
             "status": status,
         }
+        from orchestrator.infrastructure.service_continuations import read_continuation
+        continuation = read_continuation(self._repository, run.run_id)
+        if continuation is not None:
+            receipt['continuationSeedSha256'] = continuation['seedSha256']
+        return receipt
+
+    def _files(self, run_id):
+        from orchestrator.infrastructure.service_continuations import read_continuation
+        continuation = read_continuation(self._repository, run_id, files=True)
+        return (GitDeveloperCheckpoint._snapshot_files(self._starting_source.export.snapshot)
+                if continuation is None else continuation[1])
 
     def _verify_destination(self, workspace, source_fd, deadline):
         source = self._starting_source
@@ -341,7 +352,7 @@ class RegisteredSourcePreparer:
         checkpoint = GitDeveloperCheckpoint(workspace, baseline_commit_hash=source.configuration.commit_hash,
             lock_path=source.configuration.lock_path, repository_id=source.configuration.repository_id, limits=limits)
         # Already under the same Developer inode lock: do not reacquire flock.
-        if checkpoint._inventory(source_fd, deadline) != checkpoint._snapshot_files(snapshot):
+        if checkpoint._inventory(source_fd, deadline) != self._files(workspace.record.run_id):
             raise SourcePreparationError("SOURCE_PREPARATION_CONFLICT")
 
     def prepare(self, run_id, *, deadline_monotonic=None):
@@ -376,7 +387,7 @@ class RegisteredSourcePreparer:
                     else:
                         raise SourcePreparationError("SOURCE_PREPARATION_CONFLICT")
                     _write(root_fd, (_MARKER,), _encode(self._receipt(run, "STARTED")), deadline=deadline)
-                    for name, content, mode in _archive_entries(source.export.snapshot.archive):
+                    for name, (content, mode) in self._files(run_id).items():
                         _write(source_fd, tuple(name.split("/")), content, mode=mode, deadline=deadline)
                     with walk_directory(source_fd, (".git", "objects"), create=True):
                         pass

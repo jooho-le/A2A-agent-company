@@ -1382,13 +1382,19 @@ class _Result(unittest.TestResult):
                 'exceptionType': name if name in allowed else 'OTHER', 'origin': self._origin(err[2])}
         if name == 'OperationalError' and 'no such table:' in str(err[1]):
             data['cause'] = 'DATABASE_TABLE_MISSING'
-        trace, frames, equality = err[2], [], None
+        trace, frames, equality, membership = err[2], [], None, None
         while trace is not None and len(frames) < 256:
             frames.append(trace)
             if trace.tb_frame.f_code is unittest.TestCase.assertEqual.__code__:
                 first, second = (trace.tb_frame.f_locals.get(k) for k in ('first', 'second'))
                 if all(type(v) is int and 100 <= v <= 599 for v in (first, second)):
                     equality = first, second
+            elif trace.tb_frame.f_code is unittest.TestCase.assertIn.__code__:
+                member, container = (trace.tb_frame.f_locals.get(k) for k in ('member', 'container'))
+                if (type(member) is int and 100 <= member <= 599
+                        and type(container) in (tuple, list, set, frozenset) and 1 <= len(container) <= 16
+                        and all(type(v) is int and 100 <= v <= 599 for v in container)):
+                    membership = member, sorted(set(container))
             trace = trace.tb_next
         for frame in frames:
             try:
@@ -1399,12 +1405,24 @@ class _Result(unittest.TestResult):
                     continue
                 raw = path.read_bytes()
                 data['location'] = {'sourceSha256': hashlib.sha256(raw).hexdigest(), 'line': frame.tb_lineno}
-                if max(matches)[1] != 'TEST' or equality is None or self.capture_observations:
+                if max(matches)[1] != 'TEST' or self.capture_observations:
                     continue
                 for node in ast.walk(ast.parse(raw)):
                     if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute)
-                            or node.func.attr != 'assertEqual' or len(node.args) < 2
+                            or node.func.attr not in ('assertEqual', 'assertIn') or len(node.args) < 2
                             or not node.lineno <= frame.tb_lineno <= node.end_lineno):
+                        continue
+                    if node.func.attr == 'assertIn' and membership is not None:
+                        argument, expected = node.args[:2]
+                        if (isinstance(argument, ast.Attribute) and argument.attr == 'status_code'
+                                and isinstance(expected, (ast.Tuple, ast.List, ast.Set))
+                                and 1 <= len(expected.elts) <= 16
+                                and all(isinstance(v, ast.Constant) and type(v.value) is int
+                                        and 100 <= v.value <= 599 for v in expected.elts)
+                                and sorted(set(v.value for v in expected.elts)) == membership[1]):
+                            data['comparison'] = {'actualStatus': membership[0], 'expectedStatuses': membership[1]}
+                        continue
+                    if node.func.attr != 'assertEqual' or equality is None:
                         continue
                     for index, argument in enumerate(node.args[:2]):
                         expected = node.args[1 - index]

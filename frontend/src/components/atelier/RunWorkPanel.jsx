@@ -54,9 +54,12 @@ function ReplyEditor({ runId, role, target, controls }) {
   </form>
 }
 
-export default function RunWorkPanel({ runId, projectName, displayState, controls, selectedRole, onSelectRole, onResults, onNew }) {
+export default function RunWorkPanel({ runId, projectName, displayState, controls, selectedRole, onSelectRole, onResults, onNew, onContinue, onChooseWork, continuationBusy, continuationError }) {
   const [confirmStop, setConfirmStop] = useState(false)
   const [memoOpen, setMemoOpen] = useState(false)
+  const [continueOpen, setContinueOpen] = useState(false)
+  const [continueNote, setContinueNote] = useState('')
+  const continueInput = useId()
   const data = controls.data
   const final = [displayState.run?.status, data?.status].some(status => ['FINISHED', 'ABORTED'].includes(status))
   const requests = !final && ['WAITING_INPUT', 'HUMAN_REVIEW'].includes(data?.status) ? data?.requests || [] : []
@@ -103,7 +106,7 @@ export default function RunWorkPanel({ runId, projectName, displayState, control
       {popup && !target && !failure && <div className="run-person-result"><h4>{popup.title}</h4>{popup.source === 'report' ? <p>{popup.detail}</p>
         : <details><summary>현재 작업 자세히</summary><p>{popup.detail}</p></details>}</div>}
       {target && <div className="run-question"><strong>{target.reason}</strong><ul>{target.questions.map((question, i) => <li key={i}>{question}</li>)}</ul>
-        {target.replyMode === 'NEW_RUN' && <><p>이 작업은 새 요청으로 시작해야 해요.</p><button type="button" className="button" onClick={onNew}>새 작업 만들기<Icon name="arrow" /></button></>}
+        {target.replyMode === 'NEW_RUN' && <p>이전 실행을 직접 재개할 수 없어요. 아래에서 기존 코드를 이어받아 수정·재시도할 수 있어요.</p>}
         {target.replyMode === 'UNAVAILABLE' && <button className="button" type="button" onClick={controls.refresh}>질문 다시 확인</button>}
       </div>}
       {(target?.replyMode === 'ANSWER' || (memoOpen && !final && !target)) && <ReplyEditor key={runId + ':' + (target?.workflowStepId || role)} runId={runId} role={role} target={target} controls={controls} />}
@@ -118,8 +121,27 @@ export default function RunWorkPanel({ runId, projectName, displayState, control
     <footer className="run-work-actions">
       <button type="button" className="button" onClick={onResults}><Icon name="file" />만든 결과</button>
       {!final && !target && data?.canAnnotate && <button type="button" className="button" aria-expanded={memoOpen} onClick={() => setMemoOpen(value => !value)}><Icon name="plan" />추가 의견</button>}
-      {(final || failures.some(item => !item.recovering && item.nextAction === 'REVIEW_OR_NEW_RUN') || data?.continuationUnavailable) && <button type="button" className="button start" onClick={onNew}>새 작업 만들기</button>}
+      {data?.continuation?.available && onContinue && <button type="button" className="button start" disabled={continuationBusy}
+        aria-expanded={continueOpen} onClick={() => setContinueOpen(value => !value)}>
+        {continuationBusy ? '이전 작업을 연결하고 있어요…' : '이어서 수정·재시도'}</button>}
+      {data?.continuation?.reason && !data.continuation.available && (final || data.status === 'HUMAN_REVIEW')
+        && <p className="run-draft-hint">{data.continuation.reason}</p>}
+      {data?.continuation && !data.continuation.available && (final || data.status === 'HUMAN_REVIEW') && onChooseWork
+        && <button type="button" className="button" onClick={onChooseWork}>수정할 작업 선택</button>}
+      {(final || data?.continuationUnavailable) && <button type="button" className="button" onClick={onNew}>다른 작업 만들기</button>}
     </footer>
+    {continueOpen && data?.continuation?.available && <form className="run-reply" onSubmit={event => {
+      event.preventDefault()
+      onContinue(continueNote.trim() || '원래 요구사항과 인터페이스를 유지하고, 기록된 실패를 수정한 뒤 재검증해주세요.')
+    }}>
+      <p>이전 코드·요구사항·검사 기록을 이어받아요. 기존 기록은 남고 에이전트가 다시 실행돼요.</p>
+      <label htmlFor={continueInput}>덧붙일 설명 <small>(선택)</small></label>
+      <textarea id={continueInput} value={continueNote} onChange={event => setContinueNote(event.target.value)}
+        maxLength={4000} disabled={continuationBusy} placeholder="설명 없이도 기록된 오류를 바탕으로 다시 진행해요." />
+      {continuationError && <p role="alert">{continuationError}</p>}
+      <button className="button start" type="submit" disabled={continuationBusy}>
+        {continuationBusy ? '연결 중…' : '이전 작업에서 이어서 시작'}</button>
+    </form>}
     {confirmStop && <StopDialog onClose={() => setConfirmStop(false)} onConfirm={() => { setConfirmStop(false); controls.cancel() }} />}
   </section>
 }

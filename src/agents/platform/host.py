@@ -325,6 +325,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
         from orchestrator.domain import service_design
         from orchestrator.sandbox import service_start_contract
         from orchestrator.infrastructure import run_feedback
+        from orchestrator.infrastructure import service_continuations, repair_reproduction
+        from agents.runtime import developer_context
         from orchestrator.application import work_failures
         from agents.runtime import test_credential_repair
         from orchestrator.core import source_credentials
@@ -361,6 +363,8 @@ def inspect_host_configuration(*, runtime_file, tools_file, source_file, protect
                                      ('scenarioRegistry', scenario_registry),
                                      ('serviceDesign', service_design), ('serviceRuntimeCapabilities', service_capabilities),
                                      ('serviceStartContract', service_start_contract), ('serviceFeedback', run_feedback),
+                                     ('serviceContinuations', service_continuations), ('repairReproduction', repair_reproduction),
+                                     ('developerContextAdmission', developer_context),
                                      ('workFailureDescriptions', work_failures),
                                      ('generatedTestInventory', generated_test_inventory), ('qaIdCatalog', qa_catalog),
                                      ('toolWire', tool_wire),
@@ -556,6 +560,7 @@ async def create_host(*, runtime_file, tools_file, source_file, protected_cases_
             original_control(run_id)
 
         platform.orchestrator_app.state.submission_validator = validate_submission
+        platform.orchestrator_app.state.service_source_configuration = plan.source.configuration
         platform.orchestrator_app.state.control_preflight = control_preflight
         install_package_service(platform, repository)
         # Host-only assembly metadata, not a new HTTP/Artifact/Trace contract.

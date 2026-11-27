@@ -105,14 +105,25 @@ async def read_interactions(repository, controls, run_id, *, expected_policy_sha
     from orchestrator.infrastructure.run_feedback import read_feedback
     from orchestrator.application.work_failures import read_work_failures
     from orchestrator.domain.service_design import service_policy
+    from orchestrator.infrastructure.service_continuations import public_continuation
     configuration = repository.get_run_configuration(run_id)
     feedback = read_feedback(repository, run_id)
     can_annotate = (continuation_unavailable is None and len(feedback) < 16
                     and configuration is not None and service_policy(configuration.scenario_contract)
                     and current.status not in (*paused, WorkflowStatus.FINISHED, WorkflowStatus.ABORTED))
+    continuation = public_continuation(repository, current)
+    if continuation_unavailable and continuation and continuation['available']:
+        continuation_unavailable = '이전 실행 규칙의 작업은 그대로 재개할 수 없어요. 아래 이어서 수정·재시도로 코드와 요구사항을 이어받아주세요.'
+        requests = [{**question, 'reason': continuation_unavailable} for question in requests]
+    failures = await read_work_failures(repository, controls, current, latest)
+    if continuation and continuation['available']:
+        for failure in failures:
+            if not failure['recovering']:
+                failure['instruction'] = '이어서 수정·재시도를 선택하면 기존 코드·요구사항·실패 기록을 연결해 다시 진행해요. 기존 기록은 보존돼요.'
     return {"runId": str(run_id), "revision": revision, "status": current.status.value,
+            'continuation': continuation,
             "canAnnotate": can_annotate, "feedback": feedback,
             "continuationUnavailable": continuation_unavailable,
-            "failures": await read_work_failures(repository, controls, current, latest),
+            "failures": failures,
             "requestText": redact_text(current.request_text)[:20000], "requests": requests,
             "canCancel": current.status not in (WorkflowStatus.FINISHED, WorkflowStatus.ABORTED)}

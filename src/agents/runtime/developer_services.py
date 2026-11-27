@@ -137,6 +137,12 @@ class DeveloperRuntimeServices:
         execution.budget.check()
         workspace = await _run_file_operation(partial(
             self._workspaces.bind, binding.workspace_id, run_id=binding.run_id, role=AgentRole.DEVELOPER))
+        initial_files = None
+        if execution.previous_source is None:
+            from orchestrator.infrastructure.service_continuations import read_continuation
+            inherited = await _run_file_operation(partial(read_continuation, self._repository, binding.run_id, files=True))
+            if inherited is not None:
+                initial_files = inherited[1]
         checkpoint = GitDeveloperCheckpoint(workspace, baseline_commit_hash=self._baseline,
                                             repository_id=self._repository_id, lock_path=self._lock_path,
                                             library_environment={
@@ -146,6 +152,7 @@ class DeveloperRuntimeServices:
                                                 'BUILD_CODE_FAILURE', 'QA_ASSERTION_FAILURE', 'SECURITY_REQUIREMENT_FAILURE'
                                             } for issue in execution.fix_issues),
                                             limits=self._artifacts._git_limits,
+                                            initial_source_files=initial_files,
                                             parent_commit_hash=(None if execution.previous_source is None
                                                                 else execution.previous_source.commit_hash))
         await _run_file_operation(partial(checkpoint.prepare,

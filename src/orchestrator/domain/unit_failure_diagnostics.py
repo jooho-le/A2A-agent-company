@@ -17,8 +17,13 @@ def validate_failure_diagnostic(value):
         raise ValueError('UNIT_FAILURE_DIAGNOSTIC_INVALID')
     if 'comparison' in value:
         row = value['comparison']
-        if (type(row) is not dict or set(row) != {'actualStatus', 'expectedStatus'}
-                or any(type(v) is not int or not 100 <= v <= 599 for v in row.values())):
+        if (type(row) is not dict or set(row) not in ({'actualStatus', 'expectedStatus'}, {'actualStatus', 'expectedStatuses'})
+                or type(row['actualStatus']) is not int or not 100 <= row['actualStatus'] <= 599):
+            raise ValueError('UNIT_FAILURE_DIAGNOSTIC_INVALID')
+        expected = row.get('expectedStatuses', [row.get('expectedStatus')])
+        if (type(expected) is not list or not 1 <= len(expected) <= 16
+                or any(type(v) is not int or not 100 <= v <= 599 for v in expected)
+                or len(set(expected)) != len(expected)):
             raise ValueError('UNIT_FAILURE_DIAGNOSTIC_INVALID')
     if 'location' in value:
         row = value['location']

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getRunInteraction } from '../src/api/runInteraction.js'
 import { runApiTransport } from '../src/api/productRunRequest.js'
+import { createProductRunFetch } from '../src/api/productRunRequest.js'
 
 const runId = '70000000-0000-4000-8000-000000000001'
 const stepId = '70000000-0000-4000-8000-000000000002'
@@ -33,5 +34,24 @@ for (const damage of ['issues-shape', 'issue-reason', 'retry-count', 'state-type
     if (damage === 'unknown-action') row.nextAction = 'RESTART_WITHOUT_APPROVAL'
     t.mock.method(runApiTransport, 'fetch', async () => Response.json(payload(row)))
     await assert.rejects(getRunInteraction(runId), /실패 원인을 읽을 수 없어요/)
+  })
+}
+
+test('연결 대상이 다른 이어서 수정 응답은 거절한다', async t => {
+  const data = {...payload(failure()), continuation:{available:true,parentRunId:stepId,preservesHistory:true}}
+  t.mock.method(runApiTransport,'fetch',async () => Response.json(data))
+  await assert.rejects(getRunInteraction(runId),/실패 원인을 읽을 수 없어요/)
+})
+
+for (const confirmed of [false,true]) {
+  test(`수정 충돌은 제품 서버가 미접수를 확정한 경우만 새 접수 허용: ${confirmed}`, async () => {
+    const request=createProductRunFetch({productApiReady:true,runSubmissionEnabled:true,readAccessToken:()=> 'mock-token',
+      fetchImpl:async () => Response.json({detail:'CONTINUATION_ALREADY_ACTIVE'}, {status:409,
+        headers:confirmed ? {'X-Submission-Status':'NOT_ACCEPTED'} : {}})})
+    await assert.rejects(request('/api/v1/runs',{method:'POST',confirmed:true}), error => {
+      assert.equal(error.submissionNotAccepted,confirmed)
+      assert.equal(error.code,'CONTINUATION_ALREADY_ACTIVE')
+      return true
+    })
   })
 }

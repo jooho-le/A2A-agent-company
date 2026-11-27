@@ -69,23 +69,53 @@ export default function useOfficeRunSubmission(_legacyApproval, onCreated) {
     if (!uncertain) remember(null)
     if (result.submissionStatus === 'CREATED') onCreated({ ...result, projectName: name, requestText })
   }
-  async function submit(name, requestText, { projectId } = {}) {
+  async function submit(name, requestText, { projectId, continuationOf } = {}) {
     if (!hasStoredAccessToken()) { setState(value => ({ ...value, error: loginRequired().message, authenticationRequired: true })); return false }
-    if (pending.current || blocked.current || state.locked || !configuration.value || !name.trim() || !requestText.trim()) return false
+    const continuation = runUuid.test(continuationOf) && runUuid.test(projectId)
+    const canReplaceReceipt = continuation && (requestId.current || !state.uncertain && state.result?.submissionStatus === 'CREATED')
+    if (pending.current || (blocked.current || state.locked) && !canReplaceReceipt
+      || !configuration.value && !continuation || !name.trim() || !requestText.trim()) return false
     pending.current = true
     const sequence = ++lifecycle.current.sequence
-    const key = crypto.randomUUID()
-    remember(key)
-    setState(value => ({ ...value, busy: true, error: '', name: name.trim(), requestText: requestText.trim() }))
+    let attemptedPost = false
+    let checkingPrevious = false
+    setState(value => ({ ...value, busy: true, error: '' }))
     try {
-      const result = await submitOfficeWork({ ...configuration.value, ...(projectId ? { projectId } : {}),
+      if (continuation && requestId.current) {
+        checkingPrevious = true
+        const previous = await lookupOfficeWork(requestId.current)
+        if (!lifecycle.current.mounted || sequence !== lifecycle.current.sequence) return false
+        if (!['CREATED', 'REJECTED'].includes(previous.submissionStatus)) {
+          setState(value => ({ ...value, busy: false, locked: true, uncertain: true,
+            error: '이전 접수를 아직 확인 중이에요. 접수 상태를 확인한 뒤 이어서 수정해주세요.' }))
+          return false
+        }
+        // Settling an old receipt must not select its Run over the project the
+        // user explicitly chose to repair. Never POST the old request again.
+        remember(null)
+        blocked.current = false
+        checkingPrevious = false
+      }
+      const approved = continuation ? await loadOfficeApproval() : configuration.value
+      if (!lifecycle.current.mounted || sequence !== lifecycle.current.sequence) return false
+      const key = crypto.randomUUID()
+      remember(key)
+      setState(value => ({ ...value, name: name.trim(), requestText: requestText.trim(), result: null }))
+      attemptedPost = true
+      const result = await submitOfficeWork({ ...approved, ...(projectId ? { projectId } : {}),
+        ...(continuation ? { continuationOf } : {}),
         projectName: name.trim(), requestText: requestText.trim() }, key, { confirmed: true })
       if (lifecycle.current.mounted && sequence === lifecycle.current.sequence) accept(result, name.trim(), requestText.trim())
     } catch (error) {
       if (lifecycle.current.mounted && sequence === lifecycle.current.sequence) {
+        if (checkingPrevious) {
+          setState(value => ({ ...value, busy: false, locked: true, uncertain: true,
+            authenticationRequired: error.status === 401, error: error.message + ' 이전 접수 상태를 먼저 확인해주세요.' }))
+          return false
+        }
         const changed = error.code === 'CONFIGURATION_CHANGED'
         const localRefusal = ['RUN_SUBMISSION_DISABLED', 'EXPLICIT_SUBMISSION_REQUIRED', 'INVALID_ARGUMENT', 'PRODUCT_API_NOT_READY'].includes(error.code)
-        const uncertain = !error.submissionNotAccepted && !changed && !localRefusal
+        const uncertain = attemptedPost && !error.submissionNotAccepted && !changed && !localRefusal
           && ![400, 401, 403, 404, 413, 415, 422, 429].includes(error.status)
         blocked.current = uncertain
         if (!uncertain) remember(null)

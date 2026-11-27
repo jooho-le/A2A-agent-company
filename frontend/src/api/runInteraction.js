@@ -44,6 +44,9 @@ export async function getRunInteraction(runId, signal) {
     throw new Error('직원의 확인 요청을 읽을 수 없어요.')
   }
   if ((data.canAnnotate !== undefined && typeof data.canAnnotate !== 'boolean')
+      || (data.continuation != null && (typeof data.continuation.available !== 'boolean'
+        || data.continuation.parentRunId !== runId || data.continuation.preservesHistory !== true
+        || data.continuation.reason != null && (typeof data.continuation.reason !== 'string' || data.continuation.reason.length > 600)))
       || (data.continuationUnavailable != null && (typeof data.continuationUnavailable !== 'string'
         || data.continuationUnavailable.length > 600))
       || (data.feedback !== undefined && (!Array.isArray(data.feedback) || data.feedback.length > 16

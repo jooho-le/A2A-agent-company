@@ -114,6 +114,19 @@ def validate_service_plan(contract, plan):
         raise ValueError('SERVICE_API_REQUEST_REQUIRES_API_DELIVERY')
     if contract.get("scenarioKey") != "SERVICE-WEB" and plan.service_design is not None:
         raise ValueError("EXPERIMENT_DESIGN_OVERRIDE_DENIED")
+    prior = contract.get('externalContract', {}).get('continuation', {}).get('previousServiceDesign')
+    if prior is not None and plan.service_design is not None:
+        def interface(design):
+            value = design.model_dump(mode='json', by_alias=True)
+            endpoints = []
+            for endpoint in value['endpoints']:
+                endpoint = dict(endpoint)
+                for key in ('requestFields', 'successStatuses', 'rejectionStatuses'):
+                    endpoint[key] = sorted(endpoint[key])
+                endpoints.append(endpoint)
+            return value['delivery'], value['storage'], sorted(endpoints, key=lambda e:(e['method'],e['path']))
+        if interface(ServiceDesign.model_validate(prior)) != interface(plan.service_design):
+            raise ValueError('CONTINUATION_INTERFACE_CHANGED')
 
 
 def design_for_execution(execution):

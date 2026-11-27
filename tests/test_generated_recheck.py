@@ -50,6 +50,16 @@ class GeneratedRecheckTests(unittest.IsolatedAsyncioTestCase):
         issue, = [i for i in issues if i.code_version == 1 and i.reporter is AgentRole.QA]
         prior = next(a for a in artifacts if a.artifact_id == issue.report_artifact_id)
         old = next(r for r in validation_feedback([prior]) if r['testId'] == issue.reference_id)
+        from orchestrator.infrastructure.repair_reproduction import generated_reproduction
+        old_source = next(a for a in artifacts if a.artifact_id == issue.source_artifact_id)
+        reproduction = generated_reproduction(repo, old_source, validation_feedback([old_source, prior]))
+        self.assertEqual(len(reproduction), 1)
+        self.assertTrue(reproduction[0]['readOnly'])
+        self.assertEqual(reproduction[0]['testIds'], [issue.reference_id])
+        self.assertTrue(all(f['path'] != '_unit_runner.py' for f in reproduction[0]['files']))
+        self.assertNotIn('different scratch', json.dumps(reproduction))
+        self.assertEqual(generated_reproduction(repo, old_source,
+            [{**f, 'runId': str(UUID(int=1))} for f in validation_feedback([old_source, prior])]), [])
         current = chosen['QA_REPORT']
         new = next(r for r in validation_feedback([current]) if r['testId'] == issue.reference_id)
         self.assertNotEqual(old['testVersion'],new['testVersion'])

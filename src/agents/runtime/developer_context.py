@@ -231,6 +231,7 @@ class DeveloperExecutionContext:
     previous_source: CodeSnapshotArtifact | None = field(default=None, repr=False)
     previous_artifacts: tuple = field(default=(), repr=False)
     fix_issues: tuple[IssueRecord, ...] = field(default=(), repr=False)
+    reproduction_json: str = field(default='[]', repr=False)
     _initial_payload_json: str = field(init=False, repr=False)
 
     def __post_init__(self):
@@ -301,6 +302,12 @@ class DeveloperExecutionContext:
                         code_version=self.previous_source.code_version),
                     None, plan, scenario, self.fix_issues, self.previous_artifacts)
                 payload["runConfiguration"] = configuration.to_artifact_json()
+                reproduction = _json(self.reproduction_json)
+                if type(reproduction) is not list:
+                    raise ValueError
+                if reproduction:
+                    sanitize_content({'reproduction': reproduction}, reject_secrets=True)
+                    payload['fixRequest']['reproduction'] = reproduction
             object.__setattr__(self, "_initial_payload_json", json_text(payload))
         except LLMRuntimeError as error:
             if error.code is LLMErrorCode.BUDGET:
@@ -420,11 +427,17 @@ class SQLiteDeveloperContextLoader:
                     or step.a2a_task_id is not None and step.a2a_task_id != context.task_id
                     or step.agent_context_id is not None and step.agent_context_id != context.context_id):
                 raise ValueError
+            reproduction = []
+            if previous_source is not None:
+                from orchestrator.infrastructure.repair_reproduction import generated_reproduction
+                from orchestrator.domain.validation_feedback import validation_feedback
+                reproduction = generated_reproduction(self._repository, previous_source, validation_feedback(previous_artifacts))
             return DeveloperExecutionContext(
                 metadata=metadata, configuration=configuration,
                 budget=self._budget_resolver(configuration), request_text=run.request_text,
                 requirement_artifact=artifact, fix_attempt=run.fix_attempt,
                 previous_source=previous_source, previous_artifacts=previous_artifacts, fix_issues=fix_issues,
+                reproduction_json=json_text(reproduction),
             )
         except LLMRuntimeError as error:
             if error.code is LLMErrorCode.BUDGET:

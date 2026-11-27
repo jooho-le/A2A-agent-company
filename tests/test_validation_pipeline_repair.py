@@ -45,6 +45,37 @@ def test_status_mismatch_survives_runner_receipt_and_fix_feedback_without_raw_er
     assert parse_unit_report(json.dumps(report.to_dict()), 1) == report
 
 
+@pytest.mark.parametrize('protected', [False, True])
+def test_membership_status_mismatch_carries_actual_and_allowed_statuses_only_for_generated_tests(protected):
+    class Fixture(unittest.TestCase):
+        def test_status(self):
+            response = N(status_code=200)
+            self.assertIn(response.status_code, (400, 422))
+    suite = unittest.TestSuite([Fixture('test_status')])
+    result = unit_runner._Result(unit_runner._expected_cases(suite), capture_observations=protected,
+        roots=(('TEST', str(Path(__file__).parent.resolve())),))
+    suite.run(result)
+    report = parse_unit_report(json.dumps(result.report()), 1)
+    diagnostic = _feedback(case_feedback(report.tests[0]))['failureDiagnostic']
+    if protected:
+        assert 'comparison' not in diagnostic
+    else:
+        assert diagnostic['comparison'] == {'actualStatus':200, 'expectedStatuses':[400, 422]}
+        from agents.runtime.developer_input import compact_fix_input
+        from test_developer_input_projection import DeveloperInputProjectionTests
+        task = DeveloperInputProjectionTests('runTest').input()
+        next(r for r in task['fixRequest']['validationFeedback'] if r['testId'] == 'FAIL')['failureDiagnostic'] = diagnostic
+        assert compact_fix_input(task)['activeRepairFocus']['brief']['unitFailureDiagnostics'][0]['failureDiagnostic'] == diagnostic
+
+
+@pytest.mark.parametrize('expected', [[], [True], [400]*2, [99], [600], list(range(400, 417))])
+def test_membership_diagnostic_schema_rejects_invented_or_unbounded_status_lists(expected):
+    from orchestrator.domain.unit_failure_diagnostics import validate_failure_diagnostic
+    with pytest.raises(ValueError):
+        validate_failure_diagnostic({'kind':'ASSERTION', 'exceptionType':'AssertionError', 'origin':'TEST',
+            'comparison':{'actualStatus':200, 'expectedStatuses':expected}})
+
+
 @pytest.mark.parametrize('damage', ['unknown_field', 'raw_message', 'bool_status', 'pass_diagnostic'])
 def test_failure_diagnostics_reject_untrusted_values(damage):
     facts = {'kind': 'ASSERTION', 'exceptionType': 'AssertionError', 'origin': 'TEST'}
