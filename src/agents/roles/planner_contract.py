@@ -1,0 +1,241 @@
+"""Bounded model decisions assembled into the existing protected Plan contract.
+
+The model can divide work or ask questions, but cannot supply Requirements,
+project IDs, Artifact metadata, model settings, Tool results or a product
+verdict. Canonical Requirements come only from the trusted Host scenario.
+"""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from jsonschema import Draft202012Validator, FormatChecker
+
+from agents.llm.contracts import JsonSchema, StructuredOutput, json_text, parse_json
+from orchestrator.application.planner_output import PlannerPlan
+from orchestrator.core.security import redact_data
+from orchestrator.domain.scenario_registry import ScenarioDefinition
+from agents.roles.planner_diagnostics import diagnose_planner_failure
+from orchestrator.domain.service_design import service_policy, service_design_schema, validate_service_plan
+
+
+MAX_PLANNER_TASKS = 128
+MAX_PLANNER_QUESTIONS = 8
+MAX_PLANNER_ASSUMPTIONS = 8
+MAX_PLANNER_JSON_BYTES = 1_048_576
+_KINDS = frozenset({"PLAN", "INPUT_REQUIRED", "REJECTED"})
+_SCHEMA_PATH = Path(__file__).absolute().parents[3] / "schemas" / "project" / "planner_output.schema.json"
+
+
+class PlannerContractError(ValueError):
+    """Stable error plus closed diagnostics; no submitted text or exception body."""
+
+    code = "PLANNER_OUTPUT_INVALID"
+
+    def __init__(self, validation=None):
+        self.validation = validation or diagnose_planner_failure(None, None)
+        super().__init__(self.code)
+
+
+def _text(value, maximum):
+    if (type(value) is not str or not value.strip() or len(value) > maximum
+            or any(ord(char) < 32 and char not in "\n\t" or 127 <= ord(char) <= 159 for char in value)
+            or redact_data(value) != value):
+        raise PlannerContractError()
+    return value
+
+
+@dataclass(frozen=True, kw_only=True)
+class PlannerDecision:
+    kind: str
+    plan: PlannerPlan | None = field(repr=False)
+    questions: tuple[str, ...] = field(repr=False)
+    unapproved_assumptions: tuple[str, ...] = field(default=(), repr=False)
+
+    def __post_init__(self):
+        if (type(self.kind) is not str or self.kind not in _KINDS or type(self.questions) is not tuple
+                or len(self.questions) > MAX_PLANNER_QUESTIONS):
+            raise PlannerContractError()
+        for question in self.questions:
+            _text(question, 1024)
+        if (type(self.unapproved_assumptions) is not tuple
+                or len(self.unapproved_assumptions) > MAX_PLANNER_ASSUMPTIONS
+                or self.unapproved_assumptions and self.kind != "INPUT_REQUIRED"):
+            raise PlannerContractError()
+        for assumption in self.unapproved_assumptions:
+            _text(assumption, 1024)
+        if len(set(self.unapproved_assumptions)) != len(self.unapproved_assumptions):
+            raise PlannerContractError()
+        if ((self.kind == "PLAN" and (not isinstance(self.plan, PlannerPlan) or self.questions))
+                or (self.kind == "INPUT_REQUIRED" and (self.plan is not None or not self.questions))
+                or (self.kind == "REJECTED" and (self.plan is not None or self.questions))):
+            raise PlannerContractError()
+
+
+def _scenario_ids(scenario):
+    if not isinstance(scenario, ScenarioDefinition):
+        raise PlannerContractError()
+    values = [str(value) for value in scenario.requirement_ids]
+    if not values or len(values) > MAX_PLANNER_TASKS or len(values) != len(set(values)):
+        raise PlannerContractError()
+    return values
+
+
+def build_planner_output_contract(scenario: ScenarioDefinition) -> StructuredOutput:
+    """All-required closed decision schema compatible with provider strict mode.
+
+    This deliberately is not a weakened copy of the Artifact Schema: the
+    smaller model decision is validated and Host-assembled into that contract.
+    Host scenario admission/authenticity belongs to the context capability.
+    """
+    invalid = False
+    try:
+        requirement_ids = _scenario_ids(scenario)
+        task_key = {"type": "string", "pattern": r"^TASK-[A-Z0-9_-]{1,64}$", "minLength": 6, "maxLength": 69}
+        schema = JsonSchema.from_dict({
+            "type": "object", "additionalProperties": False,
+            "required": ["kind", "implementationPlan", "questions", "unapprovedAssumptions"],
+            "properties": {
+                "kind": {"type": "string", "enum": ["PLAN", "INPUT_REQUIRED", "REJECTED"]},
+                "implementationPlan": {"type": "array", "maxItems": MAX_PLANNER_TASKS, "items": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["taskId", "title", "description", "requirementIds", "dependsOn"],
+                    "properties": {
+                        "taskId": task_key,
+                        "title": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "description": {"type": "string", "minLength": 1, "maxLength": 4096},
+                        "requirementIds": {"type": "array", "minItems": 1, "maxItems": len(requirement_ids),
+                            "items": {"type": "string", "enum": requirement_ids}},
+                        "dependsOn": {"type": "array", "maxItems": MAX_PLANNER_TASKS, "items": task_key},
+                    },
+                }},
+                "questions": {"type": "array", "maxItems": MAX_PLANNER_QUESTIONS,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 1024}},
+                "unapprovedAssumptions": {"type": "array", "maxItems": MAX_PLANNER_ASSUMPTIONS,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 1024}},
+            },
+        })
+        if service_policy(scenario.planner_contract()):
+            expanded = schema.to_dict()
+            expanded["required"].append("serviceDesign")
+            expanded["properties"]["serviceDesign"] = {"anyOf": [service_design_schema(scenario.planner_contract()), {"type": "null"}]}
+            schema = JsonSchema.from_dict(expanded)
+        schema.require_openai_strict()
+        output = StructuredOutput(name="planner_decision_v2", schema=schema)
+    except Exception:
+        invalid = True
+    if invalid:
+        raise PlannerContractError() from None
+    return output
+
+
+def _canonical_schema():
+    """Read only the shipped project schema; never resolve model-supplied URLs.
+
+    The repository's existing schema is the Artifact contract, including its
+    local $defs/refs. A missing/corrupt shipped asset fails closed. Its $id is
+    an identifier, not a location fetched by this validator.
+    """
+    schema = parse_json(_SCHEMA_PATH.read_text(encoding="utf-8"), max_bytes=MAX_PLANNER_JSON_BYTES)
+
+    def local_only(node):
+        if type(node) is dict:
+            if "$dynamicRef" in node or "$recursiveRef" in node:
+                raise PlannerContractError()
+            if "$ref" in node and (type(node["$ref"]) is not str or not node["$ref"].startswith("#")):
+                raise PlannerContractError()
+            for value in node.values():
+                local_only(value)
+        elif type(node) is list:
+            for value in node:
+                local_only(value)
+
+    local_only(schema)
+    Draft202012Validator.check_schema(schema)
+    return schema
+
+
+def validate_planner_decision(data: dict, scenario: ScenarioDefinition) -> PlannerDecision:
+    """Validate a model decision without persisting it or completing a Task.
+
+    Recognizable credential assignments/hashes/tokens are rejected rather than
+    silently rewritten into a different planning decision. This recognition is
+    not a guarantee that arbitrary prose contains no secret. LLM wire output
+    must already cross its existing redaction boundary as well.
+    """
+    invalid = False
+    stage, copied, candidate_json, schema = "CONTRACT_SETUP", None, None, None
+    artifact_error_paths = ()
+    try:
+        contract = build_planner_output_contract(scenario)
+        schema = contract.schema.to_dict()
+        # Round-trip bounded native JSON so returned Plan/list objects do not
+        # alias a mutable submitted decision. Duplicate JSON wire keys and
+        # nonfinite numbers are rejected by the earlier LLM decoder too.
+        stage = "JSON"
+        candidate_json = json_text(data, max_bytes=MAX_PLANNER_JSON_BYTES)
+        copied = parse_json(candidate_json, max_bytes=MAX_PLANNER_JSON_BYTES)
+        stage = "MODEL_SCHEMA"
+        contract.schema.validate(copied)
+        stage = "TEXT"
+        if redact_data(copied) != copied:
+            raise PlannerContractError()
+        kind = copied["kind"]
+        tasks, questions = copied["implementationPlan"], copied["questions"]
+        assumptions = copied["unapprovedAssumptions"]
+        for task in tasks:
+            _text(task["title"], 256)
+            _text(task["description"], 4096)
+        for question in questions:
+            _text(question, 1024)
+        for assumption in assumptions:
+            _text(assumption, 1024)
+        stage = "DECISION"
+        if len(set(assumptions)) != len(assumptions) or assumptions and kind != "INPUT_REQUIRED":
+            raise PlannerContractError()
+        if kind == "PLAN":
+            if not tasks or questions:
+                raise PlannerContractError()
+            stage = "PLAN_MODEL"
+            plan = PlannerPlan.model_validate({
+                "schemaVersion": 1,
+                "requirements": [{
+                    "requirementId": str(requirement.requirement_id),
+                    "key": requirement.key, "description": requirement.description,
+                    "acceptanceCriteria": list(requirement.acceptance_criteria),
+                } for requirement in scenario.requirements],
+                "implementationPlan": tasks,
+                **({"serviceDesign": copied["serviceDesign"]} if "serviceDesign" in copied else {}),
+            })
+            validate_service_plan(scenario.planner_contract(), plan)
+            stage = "REQUIREMENTS"
+            scenario.validate_planner_requirements(plan.requirements)
+            payload = plan.model_dump(mode="json", by_alias=True)
+            stage = "ARTIFACT_SAFETY"
+            if redact_data(payload) != payload:
+                raise PlannerContractError()
+            stage = "ARTIFACT_SCHEMA_LOAD"
+            validator = Draft202012Validator(_canonical_schema(), format_checker=FormatChecker())
+            stage = "ARTIFACT_SCHEMA"
+            errors = list(validator.iter_errors(payload))
+            if errors:
+                artifact_error_paths = tuple(tuple(error.absolute_path) for error in errors)
+                raise PlannerContractError()
+            stage = "DECISION_MODEL"
+            result = PlannerDecision(kind=kind, plan=plan, questions=())
+        elif kind == "INPUT_REQUIRED":
+            if tasks or not questions or copied.get("serviceDesign") is not None:
+                raise PlannerContractError()
+            result = PlannerDecision(kind=kind, plan=None, questions=tuple(questions),
+                                     unapproved_assumptions=tuple(assumptions))
+        else:
+            if tasks or questions or copied.get("serviceDesign") is not None:
+                raise PlannerContractError()
+            result = PlannerDecision(kind="REJECTED", plan=None, questions=())
+    except Exception:
+        invalid = True
+    if invalid:
+        # Outside except: no raw Pydantic/JSONSchema content in __context__.
+        report = diagnose_planner_failure(copied, scenario, stage=stage, schema=schema,
+            candidate_json=candidate_json, artifact_error_paths=artifact_error_paths)
+        raise PlannerContractError(report) from None
+    return result

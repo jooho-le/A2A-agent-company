@@ -1,0 +1,117 @@
+"""Request-scoped access to the lazily initialized persistence adapter."""
+
+from fastapi import HTTPException, Request
+
+from orchestrator.a2a import A2AAgentClient, A2AAgentRegistry
+from orchestrator.application import PlannerRunDispatcher
+from orchestrator.application.workflow_controls import WorkflowControlService
+from orchestrator.artifacts.service import ArtifactStore
+from orchestrator.domain import AgentRole
+from orchestrator.infrastructure import SQLiteWorkflowRepository
+from orchestrator.workspaces.registry import WorkspaceRegistry
+from orchestrator.workspaces.policy import WorkspaceAccessError
+
+
+def get_workflow_repository(request: Request) -> SQLiteWorkflowRepository:
+    repository = request.app.state.workflow_repository
+    if repository is not None:
+        return repository
+
+    with request.app.state.repository_lock:
+        repository = request.app.state.workflow_repository
+        if repository is None:
+            settings = request.app.state.settings
+            repository = SQLiteWorkflowRepository(settings.database_path)
+            request.app.state.workflow_repository = repository
+    return repository
+
+
+def get_workspace_registry(request: Request) -> WorkspaceRegistry:
+    """Lazy trusted registry; import/app construction never provisions folders."""
+    repository = get_workflow_repository(request)
+    with request.app.state.workspace_registry_lock:
+        registry = request.app.state.workspace_registry
+        if registry is None:
+            try:
+                registry = WorkspaceRegistry(repository, request.app.state.settings.workspace_root)
+            except WorkspaceAccessError as error:
+                raise HTTPException(status_code=503, detail=error.code.value) from None
+            request.app.state.workspace_registry = registry
+    return registry
+
+
+def get_run_dispatcher(request: Request) -> PlannerRunDispatcher | None:
+    dispatcher = request.app.state.run_dispatcher
+    if dispatcher is not None:
+        return dispatcher
+
+    settings = request.app.state.settings
+    registry = A2AAgentRegistry.from_settings(settings)
+    if registry.get_base_url(AgentRole.PLANNER) is None:
+        return None
+
+    repository = get_workflow_repository(request)
+    with request.app.state.dispatcher_lock:
+        dispatcher = request.app.state.run_dispatcher
+        if dispatcher is None:
+            dispatcher = PlannerRunDispatcher(
+                repository, registry, client_factory=(
+                    getattr(request.app.state, "agent_client_factory", None)
+                    or agent_client_factory(settings)
+                ),
+            )
+            request.app.state.run_dispatcher = dispatcher
+    return dispatcher
+
+
+def agent_client_factory(settings, *, trust_env=True):
+    """Keep configured credentials in HTTP headers, never in Task payloads."""
+    if type(trust_env) is not bool:
+        raise ValueError("A2A_CLIENT_CONFIGURATION_INVALID")
+    credentials = {}
+    for role in AgentRole:
+        prefix = role.value.lower()
+        configured_url = getattr(settings, f"{prefix}_agent_url")
+        url = configured_url.strip().rstrip("/") if configured_url else None
+        secret = getattr(settings, f"{prefix}_bearer_token")
+        if url and secret:
+            if url in credentials and credentials[url] != secret.get_secret_value():
+                raise ValueError("Roles sharing an endpoint must use the same HTTP credential")
+            credentials[url] = secret.get_secret_value()
+
+    def create_client(url):
+        token = credentials.get(url.strip().rstrip("/"))
+        return A2AAgentClient(
+            url, headers={"Authorization": f"Bearer {token}"} if token else None,
+            **({"trust_env": False} if not trust_env else {}),
+        )
+
+    return create_client
+
+
+def get_artifact_store(request: Request) -> ArtifactStore:
+    """Reuse the Host's exact content store and limits; never provision folders."""
+    with request.app.state.artifact_store_lock:
+        store = request.app.state.artifact_store
+        if store is None:
+            store = ArtifactStore(get_workflow_repository(request), get_workspace_registry(request))
+            request.app.state.artifact_store = store
+    return store
+
+
+def get_workflow_controls(request: Request) -> WorkflowControlService:
+    repository = get_workflow_repository(request)
+    settings = request.app.state.settings
+    registry = A2AAgentRegistry.from_settings(settings)
+    factory = getattr(request.app.state, "agent_client_factory", None) or agent_client_factory(settings)
+    dispatcher = get_run_dispatcher(request)
+    if dispatcher is None:
+        dispatcher = PlannerRunDispatcher(repository, registry, client_factory=factory)
+    return WorkflowControlService(
+        repository, registry, dispatcher, client_factory=factory,
+        authenticated_roles=frozenset(
+            role for role in AgentRole
+            if getattr(settings, f"{role.value.lower()}_bearer_token")
+        ),
+        preflight=getattr(request.app.state, "control_preflight", None),
+    )

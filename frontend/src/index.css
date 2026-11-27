@@ -1,0 +1,63 @@
+/* 모든 화면에서 공유하는 다크 테마의 기본 설정입니다. */
+:root {
+  --text: #aebad0;
+  --text-h: #f0f4fc;
+  --bg: #10151f;
+  --surface: #1b2433;
+  --border: #344258;
+  --accent: #a6bfff;
+  --primary: #4268cc;
+  --social-bg: #253146;
+  --radius: 12px;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+
+  font: 14px/1.6 var(--sans);
+  color-scheme: dark;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.aio-monogram-image {
+  display: block;
+  max-width: 70%;
+  height: auto;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+h1, h2, h3 {
+  margin: 0;
+  color: var(--text-h);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.5px;
+}
+
+p {
+  margin: 0;
+}
+
+code {
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--text-h);
+  background: var(--surface);
+  font: 13px/1.5 var(--mono);
+}

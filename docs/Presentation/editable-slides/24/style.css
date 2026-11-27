@@ -1,0 +1,40 @@
+/* 24페이지 · 사업전략 v08
+   글자·표: index.html / 색·크기·배치: style.css / 발표 설명: notes.html
+   원문: https://www.notion.so/422d062130a981808105eeab1024e130 */
+#deck > .slide[data-editable-page="24"] {
+  --page-background: #030407; --accent: #d4ff24; --blue: #1558c9;
+  --ink: #f0f2ec; --muted: #aaaeb8; --v08-cream: #f3e5ab;
+  --page-title-size: 57px; --page-title-offset: none; --page-content-offset: none;
+  padding: 38px 64px 26px;
+  background-color: var(--page-background);
+  background-image: radial-gradient(ellipse at 100% 0%, #1558c912, transparent 47%);
+}
+
+#deck > .slide[data-editable-page="24"] .slide-top { height:26px; margin-bottom:25px; }
+#deck > .slide[data-editable-page="24"] > h2 { font-size:var(--page-title-size); line-height:1.2; letter-spacing:-2.2px; font-weight:780; translate:var(--page-title-offset); }
+#deck > .slide[data-editable-page="24"] > .subtitle { margin:15px 0 0; font-size:24px; line-height:1.5; color:var(--muted); }
+#deck > .slide[data-editable-page="24"] > .content { display:flex; flex-direction:column; justify-content:center; gap:24px; padding-top:24px; min-height:0; translate:var(--page-content-offset); }
+#deck > .slide[data-editable-page="24"] h3 { font-size:30px; line-height:1.35; font-weight:720; letter-spacing:-.8px; margin:0; }
+#deck > .slide[data-editable-page="24"] p { margin:0; line-height:1.5; }
+#deck > .slide[data-editable-page="24"] .slide-foot { margin-top:20px; padding-top:14px; font-size:14px; min-height:34px; color:#858e9d; }
+#deck > .slide[data-editable-page="24"] .slide-foot .folio { margin-left:auto; flex:0 0 auto; white-space:nowrap; }
+#deck > .slide[data-editable-page="24"] .v08-eyebrow { display:block; color:var(--accent); font-size:15px; font-weight:700; line-height:1.4; letter-spacing:1px; }
+#deck > .slide[data-editable-page="24"] .v08-rail { display:flex; align-items:center; gap:18px; border:1px solid #344052; border-left:4px solid var(--accent); border-radius:10px; padding:17px 22px; background:#141d29; font-size:23px; line-height:1.5; color:var(--ink); }
+#deck > .slide[data-editable-page="24"] .v08-rail strong { color:var(--accent); }
+#deck > .slide[data-editable-page="24"] .v08-table { border-collapse:separate; border-spacing:0; width:100%; overflow:hidden; border:1px solid #303c4b; border-radius:14px; font-variant-numeric:tabular-nums; }
+#deck > .slide[data-editable-page="24"] .v08-table th, #deck > .slide[data-editable-page="24"] .v08-table td { padding:22px 24px; text-align:left; border-bottom:1px solid #303b4b; font-size:25px; line-height:1.35; white-space:nowrap; }
+#deck > .slide[data-editable-page="24"] .v08-table thead th { background:#232e3d; color:#d5e5ff; font-size:19px; font-weight:650; }
+#deck > .slide[data-editable-page="24"] .v08-table tbody th { color:var(--ink); font-weight:700; }
+#deck > .slide[data-editable-page="24"] .v08-table tbody td { color:#c5cedc; }
+#deck > .slide[data-editable-page="24"] .v08-table tbody tr { background:#121922; }
+#deck > .slide[data-editable-page="24"] .v08-table tbody tr:last-child > * { border-bottom:0; }
+#deck > .slide[data-editable-page="24"] .v08-table .v08-money { color:var(--accent); font-weight:750; font-size:34px; }
+#deck > .slide[data-editable-page="24"] > h2 { font-size:55px; }
+#deck > .slide[data-editable-page="24"] .v08-approval-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:20px; }
+#deck > .slide[data-editable-page="24"] .v08-approval-grid article { position:relative;border:1px solid #384556;border-radius:14px;background:#141c27;padding:23px 26px;min-height:194px; }
+#deck > .slide[data-editable-page="24"] .v08-approval-grid article > b { display:block;font-size:22px;color:var(--accent);font-weight:650; }
+#deck > .slide[data-editable-page="24"] .v08-approval-grid h3 { margin-top:12px;font-size:29px; }
+#deck > .slide[data-editable-page="24"] .v08-approval-grid p { margin-top:10px;font-size:21px;color:#b1bdcf; }
+#deck > .slide[data-editable-page="24"] .v08-approval-grid article:nth-child(3), #deck > .slide[data-editable-page="24"] .v08-approval-grid article:nth-child(4) { border-color:#5d762f;background:linear-gradient(150deg,#202b26,#131e2a); }
+#deck > .slide[data-editable-page="24"] .v08-rail { font-size:20px; }
+#deck > .slide[data-editable-page="24"] .v08-rail strong { font-size:24px;white-space:nowrap; }

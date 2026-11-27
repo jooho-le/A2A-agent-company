@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 440" role="img" aria-label="긴 생머리의 여성 오케스트레이터">
+  <defs>
+    <linearGradient id="hair" x2=".8" y2="1"><stop stop-color="#45363e"/><stop offset="1" stop-color="#201c26"/></linearGradient>
+    <linearGradient id="skin" x2=".7" y2="1"><stop stop-color="#f0c9a8"/><stop offset="1" stop-color="#c48e70"/></linearGradient>
+    <linearGradient id="jacket" x2="1" y2="1"><stop stop-color="#63748a"/><stop offset="1" stop-color="#35445c"/></linearGradient>
+  </defs>
+  <ellipse cx="200" cy="415" rx="99" ry="13" fill="#17212a" opacity=".16"/>
+  <rect x="126" y="300" width="61" height="105" rx="24" fill="#514954"/><rect x="213" y="300" width="61" height="105" rx="24" fill="#514954"/>
+  <ellipse cx="156" cy="403" rx="36" ry="16" fill="#34313a"/><ellipse cx="244" cy="403" rx="36" ry="16" fill="#34313a"/>
+  <path d="M101 134Q94 29 200 28T299 134L298 299Q274 328 245 305H147Q117 326 100 299Z" fill="url(#hair)"/>
+  <rect x="122" y="211" width="156" height="121" rx="36" fill="url(#jacket)"/>
+  <path d="M179 210h42l-21 71Z" fill="#ece6d6"/><path d="m180 215-24 16 35 44 9-35-9 35 53-44-24-16" fill="#2d3e55"/>
+  <rect x="101" y="227" width="38" height="104" rx="19" fill="url(#jacket)" transform="rotate(8 120 279)"/><rect x="261" y="227" width="38" height="104" rx="19" fill="url(#jacket)" transform="rotate(-8 280 279)"/>
+  <circle cx="113" cy="328" r="18" fill="url(#skin)"/><circle cx="287" cy="328" r="18" fill="url(#skin)"/>
+  <ellipse cx="200" cy="133" rx="89" ry="85" fill="url(#skin)"/>
+  <path d="M110 128Q103 32 200 29q96 0 90 99Q257 123 226 108Q177 88 153 61Q146 109 110 128" fill="url(#hair)"/>
+  <path d="M113 119q-12 53 4 132M287 119q12 53-4 132" fill="none" stroke="#2d232c" stroke-width="21" stroke-linecap="round"/>
+  <ellipse cx="166" cy="138" rx="10" ry="15" fill="#282421"/><ellipse cx="234" cy="138" rx="10" ry="15" fill="#282421"/>
+  <circle cx="163" cy="133" r="4" fill="#fff4dc"/><circle cx="231" cy="133" r="4" fill="#fff4dc"/>
+  <path d="m155 112 19-4m52 0 19 4" fill="none" stroke="#453039" stroke-width="5" stroke-linecap="round"/>
+  <ellipse cx="151" cy="166" rx="12" ry="5" fill="#c88e7c"/><ellipse cx="249" cy="166" rx="12" ry="5" fill="#c88e7c"/>
+  <ellipse cx="200" cy="157" rx="8" ry="7" fill="#dba887"/><path d="M183 179q17 12 34 0" fill="none" stroke="#81513f" stroke-width="4" stroke-linecap="round"/>
+  <rect x="140" y="273" width="120" height="35" rx="6" fill="#edece4"/><path d="M147 280v21" stroke="#c7aa68" stroke-width="4"/>
+  <text x="203" y="295" text-anchor="middle" fill="#17212a" font-family="system-ui,sans-serif" font-size="12" font-weight="600">오케스트레이터</text>
+</svg>

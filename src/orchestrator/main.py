@@ -1,0 +1,71 @@
+from threading import Lock
+from collections.abc import Callable
+
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+
+from orchestrator.api.errors import request_validation_error_handler
+from orchestrator.api.routes.health import router as health_router
+from orchestrator.api.routes.host import router as host_router
+from orchestrator.api.host_access import HostServiceAuthenticationMiddleware
+from orchestrator.api.routes.runs import router as runs_router
+from orchestrator.api.routes.scenarios import router as scenarios_router
+from orchestrator.api.routes.submissions import router as submissions_router
+from orchestrator.api.routes.downloads import router as downloads_router
+from orchestrator.api.routes.interactions import router as interactions_router
+from orchestrator.application import PlannerRunDispatcher
+from orchestrator.core.config import Settings, get_settings
+from orchestrator.core.logging import configure_logging
+from orchestrator.infrastructure import SQLiteWorkflowRepository
+from orchestrator.domain.run_configuration import RunConfiguration
+
+
+def create_app(
+    repository: SQLiteWorkflowRepository | None = None,
+    dispatcher: PlannerRunDispatcher | None = None,
+    settings: Settings | None = None,
+    *,
+    submission_validator: Callable[[RunConfiguration], None] | None = None,
+) -> FastAPI:
+    settings = settings or get_settings()
+    configure_logging(settings.log_level)
+
+    app = FastAPI(
+        title=settings.app_name,
+        version="0.1.0",
+        description="Coordinates A2A agents and their workflow state.",
+    )
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+    app.state.settings = settings
+    app.state.workflow_repository = repository
+    app.state.repository_lock = Lock()
+    app.state.workspace_registry = None
+    app.state.workspace_registry_lock = Lock()
+    app.state.artifact_store = None
+    app.state.artifact_store_lock = Lock()
+    app.state.run_dispatcher = dispatcher
+    app.state.agent_client_factory = None
+    app.state.control_preflight = None
+    app.state.telemetry_store = None
+    # Only create_host enables the authenticated service entrypoint. The
+    # standalone local bootstrap remains an explicitly separate development app.
+    app.state.host_api_auth_required = False
+    app.state.host_api_token = None
+    app.state.require_idempotency_key = False
+    app.state.approved_configuration_provider = None
+    app.add_middleware(HostServiceAuthenticationMiddleware)
+    if submission_validator is not None and not callable(submission_validator):
+        raise ValueError("OWNED_AGENT_CONFIGURATION_INVALID")
+    app.state.submission_validator = submission_validator
+    app.state.dispatcher_lock = Lock()
+    app.include_router(health_router)
+    app.include_router(runs_router, prefix=settings.api_prefix)
+    app.include_router(scenarios_router, prefix=settings.api_prefix)
+    app.include_router(host_router, prefix=settings.api_prefix)
+    app.include_router(submissions_router, prefix=settings.api_prefix)
+    app.include_router(downloads_router, prefix=settings.api_prefix)
+    app.include_router(interactions_router, prefix=settings.api_prefix)
+    return app
+
+
+app = create_app()

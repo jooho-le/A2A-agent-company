@@ -1,0 +1,99 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "artifactId": {
+      "format": "uuid4",
+      "title": "Artifactid",
+      "type": "string"
+    },
+    "artifactType": {
+      "const": "REQUIREMENT",
+      "default": "REQUIREMENT",
+      "title": "Artifacttype",
+      "type": "string"
+    },
+    "artifactVersion": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Artifactversion",
+      "type": "integer"
+    },
+    "previousArtifactId": {
+      "anyOf": [
+        {
+          "format": "uuid4",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Previousartifactid"
+    },
+    "runId": {
+      "format": "uuid4",
+      "title": "Runid",
+      "type": "string"
+    },
+    "workflowStepId": {
+      "format": "uuid4",
+      "title": "Workflowstepid",
+      "type": "string"
+    },
+    "a2aTaskId": {
+      "minLength": 1,
+      "title": "A2Ataskid",
+      "type": "string"
+    },
+    "a2aArtifactId": {
+      "minLength": 1,
+      "title": "A2Aartifactid",
+      "type": "string"
+    },
+    "createdBy": {
+      "const": "PLANNER",
+      "default": "PLANNER",
+      "title": "Createdby",
+      "type": "string"
+    },
+    "requirementIds": {
+      "items": {
+        "format": "uuid4",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Requirementids",
+      "type": "array"
+    },
+    "artifactUri": {
+      "minLength": 1,
+      "title": "Artifacturi",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "createdAt": {
+      "format": "date-time",
+      "title": "Createdat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifactId",
+    "runId",
+    "workflowStepId",
+    "a2aTaskId",
+    "a2aArtifactId",
+    "requirementIds",
+    "artifactUri",
+    "payload"
+  ],
+  "title": "RequirementArtifact",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "requirement_artifact.schema.json"
+}

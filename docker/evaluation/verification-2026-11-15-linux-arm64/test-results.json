@@ -1,0 +1,107 @@
+{
+  "date": "2026-11-15",
+  "scope": "ALL_EVALUATION_AND_39_INTEGRATION_TEST_FILES",
+  "verificationMethod": "FULL_SCOPE_RUN_PLUS_AFFECTED_FILES_RECHECK",
+  "fullRun": {
+    "counts": {
+      "tests": 2518,
+      "passed": 2517,
+      "failure": 1,
+      "error": 0,
+      "skipped": 0
+    },
+    "durationSeconds": 1228.122,
+    "junitPath": "/tmp/capstone-part4-docker-verified-20261115.xml",
+    "junitSha256": "bd890bfec353778d960aae98a21d0a34d34e277c38e852f90fd247db242c43dc",
+    "logPath": "/tmp/capstone-part4-docker-verified-20261115.log",
+    "logSha256": "9d3dae206420d1b3effabccca922f9ab15f5961f1baa86a2f1aa9e965bc9d263"
+  },
+  "followupRun": {
+    "counts": {
+      "tests": 89,
+      "passed": 89,
+      "failure": 0,
+      "error": 0,
+      "skipped": 0
+    },
+    "durationSeconds": 41.141,
+    "junitPath": "/tmp/capstone-part4-docker-followup-20261115.xml",
+    "junitSha256": "37664dbb5f281794d8482f2a02a76aba0370f7021873932faf42bf457d5fce5b",
+    "logPath": "/tmp/capstone-part4-docker-followup-20261115.log",
+    "logSha256": "e454050cf3fc347ea5483373b42321c81b3e4d78984d73f033420fe9e6988f41"
+  },
+  "finalDistinctCasesVerified": 2518,
+  "unresolvedFailures": 0,
+  "realDockerChecks": 10,
+  "realDockerTestNames": [
+    "test_real_docker_rejects_defective_signup[plaintext_storage-FAIL-SEC-SIGNUP-002]",
+    "test_real_docker_rejects_defective_signup[weak_argon2_memory-FAIL-SEC-SIGNUP-002]",
+    "test_real_docker_rejects_defective_signup[missing_bootstrap-UNVERIFIED-QA-SIGNUP-001]",
+    "test_real_docker_pilot_suite",
+    "test_real_docker_image_lock_mismatch_blocks_exam",
+    "test_real_docker_replays_private_inputs_under_restrictive_umask",
+    "test_real_docker_confirms_regression_with_two_replays_per_version",
+    "test_real_docker_enforces_execution_restrictions",
+    "test_real_docker_timeout_removes_its_containers",
+    "test_real_container_run"
+  ],
+  "resolvedFailures": [
+    {
+      "className": "tests.evaluation.test_review_safeguards",
+      "name": "test_killed_docker_process_must_not_produce_pass",
+      "cause": "OUTDATED_TEST_DOUBLE_MISSING_IMAGE_LOCK_PROBE"
+    }
+  ],
+  "selectedPaths": [
+    "tests/evaluation",
+    "tests/test_snapshot_handoff.py",
+    "tests/test_git_snapshot.py",
+    "tests/test_host_services.py",
+    "tests/test_single_agent_host.py",
+    "tests/test_host_policy_store.py",
+    "tests/test_validation_revalidation_contexts.py",
+    "tests/test_package_production_api.py",
+    "tests/test_mcp_execution_runtime.py",
+    "tests/test_owned_agent_pipeline.py",
+    "tests/test_owned_dispatch_controls.py",
+    "tests/test_scenario_external_contract.py",
+    "tests/test_mcp_execution_policy.py",
+    "tests/test_owned_host.py",
+    "tests/test_owned_host_cli.py",
+    "tests/test_priced_host.py",
+    "tests/test_evaluation_policy_pinning.py",
+    "tests/test_priced_telemetry.py",
+    "tests/test_single_agent_evaluation_export.py",
+    "tests/test_planner_developer_continuation.py",
+    "tests/test_owned_agent_fix_pipeline.py",
+    "tests/test_owned_host_security_cases.py",
+    "tests/test_owned_agent_telemetry.py",
+    "tests/test_owned_platform_tcp.py",
+    "tests/test_owned_agent_controls.py",
+    "tests/test_llm_runtime_telemetry.py",
+    "tests/test_owned_controls_tcp.py",
+    "tests/test_agent_continuation_response.py",
+    "tests/test_owned_agent_composition.py",
+    "tests/test_model_input_evidence.py",
+    "tests/test_owned_observation_pipeline.py",
+    "tests/test_security_host.py",
+    "tests/test_host_package_service.py",
+    "tests/test_single_agent_priced_telemetry.py",
+    "tests/test_mcp_execution_trace.py",
+    "tests/test_validation_revalidation_services.py",
+    "tests/test_product_semantic_review.py",
+    "tests/test_single_agent_pipeline.py",
+    "tests/test_single_agent_fix_pipeline.py",
+    "tests/test_single_agent_mcp.py"
+  ],
+  "gitHead": "ea06d1293dc451e91b495039bed43bfa88f4ed82",
+  "workingTreeSourceSha256": "734b7b08575b408df4302febf3855cf948c5911574ea4c46e4b277ac08e49463",
+  "productionSourceUnchangedSinceFullRun": true,
+  "sourceChangesAfterFullRun": [
+    "tests/evaluation/test_review_safeguards.py"
+  ],
+  "sourceFilesChecked": 528,
+  "paidModelCalls": 0,
+  "officialComparisonExperimentPerformed": false,
+  "note": "Full suite was not rerun after the test-double-only correction. The 89-case affected-file recheck includes the existing real Docker normal-service test. Counts are not added across overlapping runs."
+}

@@ -1,0 +1,127 @@
+/*
+ * 사용자 화면 글자 크기의 단일 기준. main.jsx에서 테마 CSS 다음에 불러옵니다.
+ * px 정수값을 사용하며 좁은 화면에서도 같은 단계와 크기를 유지합니다.
+ * index.css의 루트 14px는 그대로 두어 rem 기반 패널 크기·여백은 유지합니다.
+ */
+:root {
+  --text-page-title: 32px; /* 페이지 제목 */
+  --text-section-title: 24px; /* 섹션 제목 */
+  --text-card-title: 20px; /* 카드 제목 */
+  --text-body: 18px; /* 본문·입력 내용·중요 오류 */
+  --text-control: 16px; /* 버튼·메뉴·보조 본문 */
+  --text-meta: 14px; /* 날짜·개수·추가 및 부가 정보 */
+}
+
+/* 기존 화면별 px/rem/clamp 및 모바일 재정의를 이 계층으로 대체합니다.
+ * SVG 내부의 그림·문자와 3D 캔버스는 UI 글자 크기 정리 대상이 아닙니다.
+ * #root 범위로 우선순위를 확보하므로 !important는 필요하지 않습니다.
+ */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash) {
+  font-size: var(--text-body);
+}
+
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash)
+  :where(*:not(svg, svg *, .startup-door, .startup-door *)) {
+  font-size: inherit;
+}
+
+/* 1. 페이지 제목: 내 프로젝트·진행 상황·결과물·직원 소개·로그인·회원가입 */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash) h1 {
+  font-size: var(--text-page-title);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* 2. 섹션 제목의 기본값. 카드에 쓰인 h2는 아래 카드 제목으로 분류합니다. */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash) h2 {
+  font-size: var(--text-section-title);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* 3. 카드 제목: 프로젝트 카드·산출물·직원 이름·현재 작업 카드 */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash)
+  :is(h3, h4, h5, h6, .project-card h2, .employee-name, .run-person-heading strong,
+    .workflow-event-list strong, .saved-run-heading strong,
+    .leadership-leader strong, .leadership-member strong, .studio-flowboard li strong) {
+  font-size: var(--text-card-title);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* 2. 섹션 제목: 업무 요청창·현재 프로젝트·상세 대화상자·작업 기록 */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash)
+  :is(.composer-top label, .run-work-panel > header h3,
+    .saved-project-detail > h3, .detail-section-title, .team-story > summary,
+    .team-story-copy h3, .startup-welcome strong, .leadership-heading strong) {
+  font-size: var(--text-section-title);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* 4. 본문: 사용자 입력·작업 설명·인증/접수/오류 안내 */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash)
+  :is(input, textarea, .project-card > p, .employee-quote, .agent-task,
+    .run-person-purpose, .run-person-result p, .run-question,
+    .composer-feedback, .auth-message, .run-control-error,
+    .run-command-notice, .workflow-status, .office3d-error,
+    .office3d-popup-notice, .office3d-work-popup p, .document-message,
+    .pipeline-run-error, [role=alert]) {
+  font-size: var(--text-body);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+/* 5. 버튼·보조 본문: 내비게이션·직원 선택 카드·진행 상태·3D 이름표 */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash)
+  :is(button, .button, .app-button, select, label, summary,
+    .company-name, .company-monogram, .owner-profile strong, .owner-avatar,
+    .office-auth-brand, .office-auth-monogram, .product-brand, .startup-wordmark,
+    .breadcrumb, .auth-switch, .employee-link, .request-scope,
+    .project-card-footer, .project-agent-states, .run-work-kicker,
+    .run-person-heading > span, .run-waiting-work, .run-attention,
+    .toolbar-note, .badge, .agent-status, .handoff-state,
+    .office3d-agent-label, .office3d-popup-heading,
+    .office3d-caption, .office3d-loading, .office3d-lead-summary,
+    .workflow-people, .workflow-event-list p, .activity-text) {
+  font-size: var(--text-control);
+}
+
+/* label/summary로 구현한 제목에도 동일한 제목 크기를 적용합니다. */
+#root .atelier-dashboard :is(.composer-top label, .team-story > summary) {
+  font-size: var(--text-section-title);
+}
+
+/* 6. 추가·부가 정보: 날짜·ID·개수·역할·보충 설명 (중요한 오류는 본문 크기) */
+#root :is(.atelier-dashboard, .office-auth, .document-page, .pipeline-page, .startup-splash)
+  :is(small, time, .eyebrow, .nav-caption, .nav-count,
+    .count-pill, .section-note, .project-card-meta, .file-owner, .file-type,
+    .file-path, .artifact-details, .view-footnote, .dialog-note, .page-footer,
+    .employee-role, .personality-tag, .leader-rank, .leader-portrait-badge,
+    .office3d-lead-tag, .office3d-agent-label small, .office3d-disclaimer,
+    .office3d-hint, .office3d-mock, .office3d-track span, .office3d-step span,
+    .run-draft-hint, .activity-meta, .team-story-role, .team-story-count,
+    .studio-banner-label, .office-date, .preview-label, .leadership-note,
+    .office-auth-form-label, .office-auth-footer, .startup-eyebrow,
+    .startup-signature, .startup-header-note, .startup-roster-heading,
+    .startup-person, .startup-footer, .pipeline-mock-label, [id=password-hint]) {
+  font-size: var(--text-meta);
+}
+
+/* 긴 이름은 축소하지 않고 줄바꿈하여 좁은 화면에서도 직원 카드를 유지합니다. */
+#root .atelier-dashboard :is(.run-employee-picker span, .nav-button, .company-name,
+  .project-card h2, .run-work-panel h3, .saved-project-detail h3, .output-card h3) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 커진 글자가 고정 높이 팝업에서 잘리지 않도록 내부 스크롤을 허용합니다. */
+#root .atelier-dashboard .office3d-work-popup {
+  overflow: auto;
+}
+#root .atelier-dashboard .office3d-work-popup :is(h4, p) {
+  display: block;
+  white-space: normal;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}

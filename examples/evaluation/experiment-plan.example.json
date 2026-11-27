@@ -1,0 +1,43 @@
+{
+  "experimentId": null,
+  "scenarioKey": "SCN-001",
+  "source": {
+    "repositoryPath": null,
+    "commitHash": null,
+    "lockPath": "requirements.lock"
+  },
+  "image": null,
+  "model": {
+    "provider": "openai",
+    "modelId": null,
+    "modelRevision": null,
+    "temperature": 0,
+    "seed": null
+  },
+  "limits": {
+    "modelCalls": null,
+    "runtimeBudgetMs": null,
+    "maxFixAttempts": 3,
+    "maxToolRetries": 2
+  },
+  "plannedRuns": {
+    "SINGLE_AGENT": null,
+    "MULTI_AGENT": null
+  },
+  "loopPolicy": null,
+  "executionOrder": "ALTERNATING",
+  "warmupState": null,
+  "hardwareProfile": null,
+  "hostConfigurations": {
+    "SINGLE_AGENT": {
+      "runtime": null,
+      "tools": null,
+      "source": null
+    },
+    "MULTI_AGENT": {
+      "runtime": null,
+      "tools": null,
+      "source": null
+    }
+  }
+}

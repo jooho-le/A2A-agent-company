@@ -1,0 +1,232 @@
+/* 모든 메뉴가 같은 프레임을 사용하고 오피스의 3D 장면만 전체 화면에 펼칩니다. */
+.atelier-dashboard.workspace-shell {
+  --office-rail: 200px;
+  --office-console: 328px;
+  --office-glass: rgb(9 13 20 / 28%);
+  --office-glass-border: rgb(255 255 255 / 16%);
+  --office-popup-top-min: 148px;
+  --stroke: 1px;
+  --stroke-divider: 1px;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  letter-spacing: -.015em;
+}
+.atelier-dashboard.workspace-shell .app { max-width: none; height: 100dvh; }
+.atelier-dashboard.workspace-shell .titlebar { display: none; }
+.atelier-dashboard.workspace-shell .layout { display: block; height: 100dvh; min-height: 100dvh; background: transparent; }
+.atelier-dashboard.workspace-shell .main { height: 100dvh; margin-left: calc(var(--office-rail) + 40px); background: transparent; }
+.atelier-dashboard.workspace-shell .content { max-width: none; height: 100%; padding: 108px 28px 32px 0; overflow-y: auto; scrollbar-gutter: stable; }
+.atelier-dashboard.office-immersive .content { padding: 0; overflow: hidden; scrollbar-gutter: auto; }
+.office-immersive .page-header,
+.office-immersive .page-footer {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  clip-path: inset(50%); overflow: hidden; white-space: nowrap;
+}
+.atelier-dashboard.workspace-shell .sidebar,
+.atelier-dashboard.workspace-shell .topbar,
+.office-immersive .office3d-console,
+.office-immersive .office3d-tools,
+.office-immersive .office3d-panel-toggle {
+  background: linear-gradient(140deg, rgb(255 255 255 / 4%), transparent 48%), var(--office-glass);
+  border: 1px solid var(--office-glass-border);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+.atelier-dashboard.workspace-shell .sidebar {
+  position: fixed; inset: 20px auto 20px 20px; z-index: 40;
+  display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0;
+  width: var(--office-rail); height: calc(100dvh - 40px); max-height: calc(100dvh - 40px);
+  padding: 24px 12px 14px; border-radius: 28px; overflow-y: auto; scrollbar-width: thin;
+}
+.atelier-dashboard.workspace-shell .sidebar .company-name { margin: 0 4px 30px; padding: 0 0 22px; border-top: 0; border-bottom: 1px solid var(--office-glass-border); font-size: 13px; }
+.atelier-dashboard.workspace-shell .company-monogram { width: 34px; height: 34px; flex-shrink: 0; border: 1px solid #ffffff30; background: #ffffff0c; border-radius: 12px; }
+.atelier-dashboard.workspace-shell .nav-caption { padding-inline: 14px; color: #ffffff90; font-size: 9px; letter-spacing: .14em; }
+.atelier-dashboard.workspace-shell .nav { gap: 6px; }
+.atelier-dashboard.workspace-shell .nav-button { min-height: 44px; padding: 11px 14px; border-radius: 999px; font-size: 12px; border: 0; }
+.atelier-dashboard.workspace-shell .nav-button:not([aria-current]):hover { background: #ffffff0e; }
+.atelier-dashboard.workspace-shell .nav-button[aria-current] { color: #182000; background: var(--selected); }
+.atelier-dashboard.workspace-shell .nav-button svg { width: 17px; height: 17px; }
+.atelier-dashboard.workspace-shell .sidebar-memo { margin-top: auto; padding: 22px 10px; color: #ffffff90; }
+.atelier-dashboard.workspace-shell .sidebar-memo p { font-size: 11px; line-height: 1.8; }
+.atelier-dashboard.workspace-shell .owner-profile { border-top: 1px solid var(--office-glass-border); padding: 16px 5px 0; }
+.atelier-dashboard.workspace-shell .atelier-account-menu { background: rgb(12 17 25 / 58%); border: 1px solid var(--office-glass-border); border-radius: 20px; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.atelier-dashboard.workspace-shell .topbar {
+  position: fixed; z-index: 40; top: 20px; left: calc(var(--office-rail) + 40px); right: 20px;
+  height: 56px; min-height: 56px; padding: 0 20px; border-radius: 999px;
+}
+.atelier-dashboard.workspace-shell .breadcrumb { gap: 12px; font-size: 12px; }
+.atelier-dashboard.workspace-shell .topbar-actions { gap: 10px; }
+.atelier-dashboard.workspace-shell .topbar .preview-label { color: #ffffff90; font-size: 10px; }
+.atelier-dashboard.workspace-shell .topbar .button,
+.atelier-dashboard.workspace-shell .topbar .motion-switch { min-height: 34px; padding: 7px 13px; border: 1px solid #ffffff1c; border-radius: 999px; background: #ffffff07; font-size: 11px; }
+.atelier-dashboard.workspace-shell .topbar .button { border-color: #d4ff2440; color: var(--selected); }
+
+.atelier-dashboard.office-immersive .agent-office-3d,
+.atelier-dashboard.office-immersive .agent-office-3d:fullscreen {
+  position: fixed; inset: 0; width: 100%; height: 100dvh; margin: 0;
+  display: block; border: 0; border-radius: 0; background: var(--background); overflow: hidden;
+}
+.atelier-dashboard.office-immersive .office3d-stage,
+.atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-stage {
+  position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0;
+  background: #030407 url('/agent-office-3d/office-background.png') center / cover no-repeat;
+}
+.office-immersive .office3d-stage canvas { width: 100%; height: 100%; }
+.office-immersive .office3d-loading { background: #03040780; font-size: 13px; }
+.office-immersive .office3d-tools {
+  position: absolute; z-index: 10; top: 96px; left: calc(var(--office-rail) + 40px);
+  display: flex; gap: 4px; padding: 5px; border-radius: 999px;
+}
+.atelier-dashboard.office-immersive .office3d-tools button { padding: 8px 13px; background: transparent; border: 0; border-radius: 999px; font-size: 11px; }
+.atelier-dashboard.office-immersive .office3d-tools button:hover,
+.atelier-dashboard.office-immersive .office3d-tools button[aria-pressed=true] { background: #ffffff12; }
+.atelier-dashboard.office-immersive .office3d-panel-toggle {
+  position: absolute; top: 96px; right: 20px; z-index: 21;
+  display: flex; gap: 9px; align-items: center; min-height: 38px;
+  padding: 8px 14px; border-radius: 999px; font-size: 11px;
+}
+.office-immersive .office3d-panel-toggle svg { width: 15px; height: 15px; }
+.office-immersive .office3d-panel-toggle[aria-expanded=true] svg:last-child { rotate: 180deg; }
+.office-immersive .office3d-console {
+  position: absolute; z-index: 20; top: 148px; bottom: 20px; right: 20px;
+  width: var(--office-console); padding: 22px 20px; border-radius: 28px;
+  overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #ffffff2a transparent;
+}
+.office-immersive .office3d-console-heading { padding-bottom: 22px; }
+.office-immersive .office3d-console-heading .eyebrow { color: #ffffff70; font-size: 9px; letter-spacing: .13em; }
+.office-immersive .office3d-console-heading h2 { margin: 9px 0 7px; font-size: 25px; font-weight: 600; letter-spacing: -.04em; line-height: 1.2; }
+.office-immersive .office3d-console-heading p { margin: 0; color: #ffffff90; font-size: 11px; line-height: 1.6; }
+.office-immersive .request-composer { overflow: visible; min-height: 0; margin: 0 0 24px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.office-immersive .composer-top { display: block; padding: 0; }
+.office-immersive .composer-top label { font-size: 12px; }
+.office-immersive .composer-top > span { display: block; margin-top: 5px; font-size: 10px; color: #ffffff70; }
+.office-immersive .composer-office { display: none; }
+.office-immersive .request-name,
+.office-immersive .request-text { display: block; width: 100%; margin: 12px 0 0; padding: 11px 12px; border: 1px solid #ffffff16; border-radius: 14px; font-size: 12px; }
+.office-immersive .request-name { min-height: 40px; height: auto; background: #ffffff08; }
+.office-immersive .request-text { min-height: 98px; max-height: 200px; margin-top: 8px; background: var(--request); border-color: #ffffff15; line-height: 1.75; }
+.office-immersive .request-name::placeholder { color: #ffffff70; }
+.office-immersive .request-text::placeholder { color: #ffffffad; }
+.office-immersive .composer-bottom { flex-direction: column; align-items: stretch; gap: 10px; margin-top: 12px; padding-top: 0; border: 0; }
+.office-immersive .composer-bottom p { order: 2; margin: 0; font-size: 10px; line-height: 1.6; color: #ffffff80; }
+.office-immersive .composer-bottom .mini-avatar { width: 22px; height: 22px; min-width: 22px; }
+.office-immersive .composer-bottom .start { justify-content: center; width: 100%; min-height: 40px; padding: 10px 16px; border: 0; border-radius: 999px; color: #182000; background: var(--selected); font-size: 12px; }
+.office-immersive .composer-feedback { margin-top: 10px; }
+.office-immersive .composer-feedback p { font-size: 10px; line-height: 1.65; }
+.office-immersive .office3d-inspector { border-top: 1px solid var(--office-glass-border); }
+.office-immersive .office3d-inspector > summary,
+.office-immersive .office3d-advanced > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 0; cursor: pointer; list-style: none; font-size: 12px; font-weight: 600; }
+.office-immersive summary::-webkit-details-marker { display: none; }
+.office-immersive details[open] > summary > svg { rotate: 90deg; }
+.office-immersive summary:focus-visible { outline: 2px solid var(--selected); outline-offset: 3px; border-radius: 6px; }
+.office-immersive .office3d-heading { padding: 0; margin: 0 0 12px; }
+.office-immersive .office3d-heading h3 { margin: 0; font-size: 12px; }
+.office-immersive .office3d-heading p { display: none; }
+.office-immersive .office3d-mode { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; gap: 4px; border: 1px solid #ffffff10; border-radius: 999px; background: #ffffff05; }
+.atelier-dashboard.office-immersive .office3d-mode button { padding: 7px 8px; border: 1px solid transparent; border-radius: 999px; background: transparent; font-size: 11px; }
+.atelier-dashboard.office-immersive .office3d-mode button[aria-pressed=true] { background: #d4ff2410; border-color: #d4ff2428; }
+.office-immersive .office3d-disclaimer { padding: 0; margin: 10px 0 16px; color: #ffffff70; font-size: 10px; line-height: 1.7; }
+.office-immersive .office3d-lead-summary { margin: 0 0 12px; padding: 10px; border: 1px solid #d6bc7b26; border-radius: 14px; background: #d6bc7b06; }
+.office-immersive .office3d-lead-summary > span { font-size: 10px; }
+.office-immersive .office3d-workflow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 0; }
+.office-immersive .office3d-workflow [data-agent-index="4"] { grid-column: 1 / -1; }
+.atelier-dashboard.office-immersive .office3d-step { justify-content: flex-start; padding: 9px 8px; border: 1px solid #ffffff12; border-radius: 12px; font-size: 10px; }
+.office-immersive .office3d-step span { width: 18px; height: 18px; font-size: 9px; }
+.office-immersive [data-display-mode=mock] .office3d-handoff-note { display: none; }
+.office-immersive .office3d-player { margin-top: 14px; padding: 14px 0 0; background: transparent; border-top: 1px solid #ffffff12; }
+.office-immersive .office3d-caption { flex-direction: column; gap: 5px; }
+.office-immersive .office3d-caption p { font-size: 11px; }
+.office-immersive .office3d-controls { display: grid; grid-template-columns: 1fr 85px; gap: 12px; }
+.office-immersive .office3d-track { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+.atelier-dashboard.office-immersive .office3d-play { height: 36px; min-width: 0; border-radius: 999px; }
+.office-immersive .office3d-speed select { width: 100%; height: 36px; }
+.atelier-dashboard.office-immersive .agent-office-3d select,
+.atelier-dashboard.office-immersive .office3d-demo-controls button { border-radius: 999px; background: #ffffff08; }
+.office-immersive .office3d-advanced { margin-top: 16px; border-top: 1px solid #ffffff12; }
+.office-immersive .office3d-advanced > summary { padding-bottom: 0; color: #ffffff90; font-size: 11px; font-weight: 400; }
+.office-immersive .office3d-advanced .office3d-demo-controls { align-items: flex-start; }
+.office-immersive .office3d-hint:empty { display: none; }
+.office-immersive .office3d-live-summary { margin: 12px 0; padding: 12px; border-color: #ffffff20; border-radius: 14px; }
+.office-immersive .office3d-actual-popups { padding: 12px 0; }
+.office-immersive .office3d-popup-grid { grid-template-columns: 1fr; }
+.office-immersive .office3d-work-popup { min-height: 136px; height: auto; background: #ffffff05; }
+.office-immersive .office3d-status { left: calc(var(--office-rail) + 40px); bottom: 24px; border-radius: 20px; }
+.office-immersive .office3d-error { padding: 14px 0; }
+.atelier-dashboard.office-immersive .agent-office-3d:fullscreen { --office-popup-top-min: 76px; }
+.atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-tools { top: 20px; left: 20px; }
+.atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-panel-toggle { top: 20px; }
+.atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-console { top: 76px; }
+.atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-status { left: 20px; }
+
+@media (max-width: 1100px) {
+  .atelier-dashboard.workspace-shell { --office-rail: 176px; --office-console: 300px; }
+  .atelier-dashboard.workspace-shell .sidebar { padding-inline: 8px; }
+  .atelier-dashboard.workspace-shell .company-name { font-size: 10px; }
+  .atelier-dashboard.workspace-shell .topbar .preview-label { display: none; }
+}
+@media (max-width: 760px) {
+  .atelier-dashboard.office-immersive { --office-popup-top-min: 136px; }
+  /* 가로 장면을 잘라내지 않고 다섯 직원을 화면 폭 안에 함께 담습니다. */
+  .atelier-dashboard.office-immersive .office3d-stage,
+  .atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-stage {
+    left: 0; right: 0; width: 100%; transform: none;
+  }
+  .atelier-dashboard.workspace-shell .sidebar { inset: 16px auto 16px 16px; z-index: 60; width: min(252px, 85vw); height: calc(100dvh - 32px); max-height: calc(100dvh - 32px); padding: 24px 16px 16px; transform: translateX(calc(-100% - 32px)); }
+  .atelier-dashboard.workspace-shell.nav-open .sidebar { transform: translateX(0); }
+  .atelier-dashboard.workspace-shell .sidebar-dismiss { z-index: 55; background: #03040780; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+  .atelier-dashboard.workspace-shell .topbar { top: 16px; left: 16px; right: 16px; height: 52px; min-height: 52px; padding: 0 12px; }
+  .atelier-dashboard.workspace-shell .breadcrumb { gap: 8px; font-size: 11px; }
+  .atelier-dashboard.workspace-shell .breadcrumb > span,
+  .atelier-dashboard.workspace-shell .breadcrumb > svg { display: none; }
+  .atelier-dashboard.workspace-shell .topbar-actions { gap: 6px; }
+  .atelier-dashboard.workspace-shell .topbar .button,
+  .atelier-dashboard.workspace-shell .topbar .motion-switch { padding: 6px 10px; font-size: 10px; }
+  .office-immersive .office3d-tools { top: 84px; left: 16px; padding: 4px; }
+  .atelier-dashboard.office-immersive .office3d-tools button { padding: 8px 12px; font-size: 10px; }
+  .atelier-dashboard.office-immersive .office3d-panel-toggle { top: auto; bottom: max(20px, env(safe-area-inset-bottom)); right: 16px; min-height: 44px; padding: 10px 16px; }
+  .office-immersive .office3d-console { top: 140px; bottom: 80px; left: 16px; right: 16px; width: auto; padding: 20px; background: rgb(9 13 20 / 38%); }
+  .office-immersive .office3d-status { left: 16px; right: 16px; bottom: 80px; max-width: none; width: auto; }
+  .atelier-dashboard.office-immersive .agent-office-3d:fullscreen .office3d-panel-toggle { top: auto; }
+}
+
+/* 입력창의 크기 안쪽에 포커스를 표시해 글라스 패널 가장자리에서 잘리지 않게 합니다. */
+.atelier-dashboard.office-immersive .request-composer::after { display: none; }
+.atelier-dashboard.office-immersive .request-composer :is(.request-name, .request-text) {
+  box-sizing: border-box; max-width: 100%; outline-offset: -2px !important;
+}
+.atelier-dashboard.office-immersive .request-composer :is(.request-name, .request-text):focus {
+  outline: 2px solid var(--selected);
+}
+.atelier-dashboard.office-immersive .office3d-live-summary,
+.atelier-dashboard.office-immersive .office3d-work-popup,
+.atelier-dashboard.office-immersive .office3d-status,
+.atelier-dashboard.office-immersive .office3d-step,
+.atelier-dashboard.office-immersive .office3d-celebration,
+.atelier-dashboard.office-immersive .office3d-agent-label {
+  background: rgb(9 13 20 / 24%);
+  border-color: var(--office-glass-border);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  backdrop-filter: blur(14px) saturate(120%);
+}
+.atelier-dashboard.office-immersive .request-text { background: rgb(21 88 201 / 80%); }
+.atelier-dashboard.office-immersive .agent-office-3d .office3d-agent-label {
+  background: rgb(9 13 20 / 26%);
+  padding: .55rem .7rem;
+  gap: .45rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.atelier-dashboard.office-immersive .office3d-agent-label small { font-size: .85rem; }
+.atelier-dashboard.office-immersive .office3d-lead-tag { font-size: .8rem; }
+.atelier-dashboard.office-immersive .office3d-celebration { border-color: #d4ff2488; }
+@media (max-width: 760px) {
+  .atelier-dashboard.office-immersive .agent-office-3d .office3d-agent-label {
+    padding-inline: .35rem;
+    gap: .25rem;
+  }
+  .atelier-dashboard.workspace-shell .main { margin-left: 0; }
+  .atelier-dashboard.workspace-shell .content { padding: 100px 16px 24px; }
+  .atelier-dashboard.office-immersive .content { padding: 0; }
+}

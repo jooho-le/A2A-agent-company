@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- 25페이지 발표자 메모입니다. 이 파일의 글자는 장표 본문에 나오지 않습니다. -->
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIO · 25페이지 발표자 메모</title>
+<style>:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;color:#f0f2ec;background:#111318}body{margin:0;padding:6px;line-height:1.8;font-size:16px}h4{color:#d4ff24}a{color:#b5cdf5}p{margin:0 0 18px}table{width:100%;border-collapse:collapse;margin:12px 0 20px}th,td{text-align:left;padding:7px 9px;border:1px solid #344052}th{background:#1e2b3d}</style>
+</head><body>
+<!-- [발표자 메모 수정 영역] 장표 화면을 바꾸려면 index.html의 [화면 글자]를 수정하세요. -->
+<!-- AIO:NOTES:START -->
+
+<h4>3인 개발팀, 월 10건의 업무에서 약 16시간 절감 가능성</h4>
+<p><strong>전제:</strong> 3인 웹 개발팀이 기존에도 Codex·Claude로 코드를 작성하며,월10건의 작은 기능 수정 업무를 처리하는 가상 시나리오다. 업무별 시간과 월10건은 실측 평균이 아닌 발표용 추정 가정이다. 임금 단가만 공식 통계다.3명은 팀 구성 조건이며 모든 시간에 다시3을 곱하지 않는다. 표는 팀 전체의 사람 투입시간을 합산한 값이고 프로젝트의 벽시계 완료시간과 다르다.</p>
+<h4>1. 업무별 시간 가정</h4>
+<table><thead><tr><th>업무</th><th>기존</th><th>AIO</th><th>절약</th></tr></thead><tbody><tr><td>PM·요구사항 정리</td><td>45분</td><td>25분</td><td>20분</td></tr><tr><td>Developer 구현·수정</td><td>150분</td><td>135분</td><td>15분</td></tr><tr><td>QA 테스트·재검증</td><td>60분</td><td>30분</td><td>30분</td></tr><tr><td>Security 검사·확인</td><td>30분</td><td>20분</td><td>10분</td></tr><tr><td>고객 변경 대응·인수 보고</td><td>45분</td><td>25분</td><td>20분</td></tr><tr><th>총합</th><td>330분=5시간30분</td><td>235분=3시간55분</td><td>95분=1시간35분</td></tr></tbody></table>
+<p>기존에도 AI코딩 도구를 사용하므로 Developer 절감은15분으로 작게 잡고 AIO가 연결하는PM·QA·고객 변경 대응에서 더 많은 절감 효과를 가정했다. 업무시간 감소율=(330−235)/330×100=28.7878…%,약28.8%다. 이는 AIO 실측 성능·생산성 개선율이 아니다.</p>
+<h4>2. 공식 임금과 적용 방식</h4>
+<p>한국인공지능·소프트웨어산업협회 「2026년 적용 SW기술자 평균임금 공표(조사년도2025년)」를2026-11-25 확인했다. 공표일2025-12-19,적용기간2026-01-01~2026-12-31이다.</p>
+<table><thead><tr><th>직무</th><th>공식 시간평균임금</th></tr></thead><tbody><tr><td>IT PM</td><td>61,505원</td></tr><tr><td>응용 SW 개발자</td><td>47,281원</td></tr><tr><td>IT 테스터</td><td>24,714원</td></tr><tr><td>정보보안전문가</td><td>63,486원</td></tr></tbody></table>
+<p>소규모 개발팀은 개발자가 여러 역할을 겸한다고 가정해 모든 업무에 응용SW개발자47,281원/시간을 일괄 적용했다. 역할별 단가를 가중해 합산하지 않는다. 공표 임금은 기본급·제수당·상여금·퇴직급여충당금·법인부담금을 포함한 평균이며 모든 소규모 개발팀의 실제 인건비가 같다는 뜻은 아니다.</p>
+<h4>3. 월10건 계산</h4>
+<p>기존330분×10/60=55시간,55×47,281=2,600,455원 상당. 도입 후235분×10/60=39시간10분,금액1,851,839.166…원,반올림1,851,839원 상당이다. 절약시간95분×10=950분=15시간50분,약15.8시간 또는 약16시간이다.</p>
+<p><strong>월 예상 시간 기회가치</strong> =950/60×47,281=748,615.833…원,반올림748,616원(약75만원). Team월구독129,000원을 차감하면619,615.833…원,반올림619,616원(약62만원)이다. 원 단위 반올림 전 값으로 계산한다.</p>
+<h4>4. 월 작업량 민감도</h4>
+<table><thead><tr><th>월 작업</th><th>절약시간</th><th>시간 가치</th><th>129,000원 차감 후</th></tr></thead><tbody><tr><td>5건</td><td>7시간55분(약7.9h)</td><td>374,308원(약37만원)</td><td>245,308원(약25만원)</td></tr><tr><td>10건</td><td>15시간50분(약15.8h)</td><td>748,616원(약75만원)</td><td>619,616원(약62만원)</td></tr><tr><td>15건</td><td>23시간45분(약23.8h)</td><td>1,122,924원(약112만원)</td><td>993,924원(약99만원)</td></tr></tbody></table>
+<p>월10건은 주당2~3건의 작은 변경 업무라는 시나리오다. 시간·금액은 같은 시간 절감 가정을 건수에 비례 적용했다. 실제 추가 사용료가 달라지는 영향을 위 민감도에 포함하지 않았다.</p>
+<h4>5. 실행 예산과 한계</h4>
+<p>Team의 월 포함 직접 실행원가 예산은45,000원이다. 월10건을 이 한도 안에서 처리하려면 평균 직접 실행원가가45,000/10=4,500원/건 이하여야 한다. 이는 운영자가 계측하는 모델·Sandbox·도구 등 직접 실행원가에 대한 조건이며 고객에게 청구하는 건당 판매가격이 아니다. 실제 API·도구·재시도 로그로 검증해야 하고10건 처리 보장이 아니다.</p>
+<p>AI추가사용료·교육·온보딩·기존 도구의 증분 지출은 미포함했다. 인건비는 고정 급여일 수 있어 시간 절약이 곧 현금 절감·영업이익·인력 대체가 되지는 않는다. 확보한 시간을 추가 프로젝트에 투입하거나 초과근무를 줄일 때 가치가 실현될 수 있다. 실제 AIO평가에서는 사람 개입시간,월 작업 건수,실제 실행원가를 측정해 가정을 교체해야 한다.</p>
+<p>출처: <a href="https://www.sw.or.kr/site/sw/ex/board/View.do?bcIdx=64717&amp;cbIdx=304&amp;searchExt1=" target="_blank" rel="noopener">협회 공식 2026년 적용 SW기술자 평균임금</a> · <a href="https://www.notion.so/422d062130a981808105eeab1024e130" target="_blank" rel="noopener">사업전략 v08의 Team129,000원·포함예산45,000원</a>. 업무별 시간표·월 작업량은 사용자가 제공한 시뮬레이션 가정이다.</p>
+<!-- AIO:NOTES:END -->
+</body></html>

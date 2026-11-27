@@ -1,0 +1,182 @@
+{
+  "scenarioId": "31275f8c-a81b-4c68-9f05-1c743c123193",
+  "scenarioKey": "SCN-002",
+  "name": "전자문서 제출·조회 기능 자동 개발·검증",
+  "requirements": [
+    {
+      "requirementId": "710aced3-e89f-4b2b-8f67-dcbd456cc2ea",
+      "key": "REQ-001",
+      "category": "FUNCTIONAL",
+      "description": "로그인한 사용자가 등록된 담당자 한 명을 지정해 PDF 파일 한 개를 제출할 수 있어야 함",
+      "acceptanceCriteria": [
+        "정상 PDF 한 개와 등록된 담당자로 제출하면 제출 건 1건과 원본 파일이 저장되고 성공 응답"
+      ],
+      "validators": [
+        "QA"
+      ]
+    },
+    {
+      "requirementId": "6260b9cb-8966-43c8-98f5-9f22c1f86032",
+      "key": "REQ-002",
+      "category": "FUNCTIONAL",
+      "description": "파일·담당자 누락, 복수 파일, 등록되지 않은 담당자, 비허용 형식 요청을 거부해야 함",
+      "acceptanceCriteria": [
+        "잘못된 제출 요청은 오류 응답이며 제출 건으로 저장되지 않음"
+      ],
+      "validators": [
+        "QA"
+      ]
+    },
+    {
+      "requirementId": "2897ccf3-98a3-4d80-865b-a2fb7f221fa2",
+      "key": "REQ-003",
+      "category": "FUNCTIONAL",
+      "description": "10MiB 이하 파일은 허용하고 초과 파일은 거부해야 함",
+      "acceptanceCriteria": [
+        "10,485,760바이트 이하 PDF는 저장되고 10,485,761바이트 이상은 거부"
+      ],
+      "validators": [
+        "QA"
+      ]
+    },
+    {
+      "requirementId": "8fdd9dd9-77d5-4c47-980a-337b6c06f5ae",
+      "key": "REQ-004",
+      "category": "FUNCTIONAL",
+      "description": "실제 처리 결과에 맞는 성공 여부와 실패 이유를 표시해야 함",
+      "acceptanceCriteria": [
+        "성공은 성공으로, 거부는 실패와 그 이유로 응답"
+      ],
+      "validators": [
+        "QA"
+      ]
+    },
+    {
+      "requirementId": "bd108f70-f98b-4d08-8848-0ced5875271b",
+      "key": "REQ-005",
+      "category": "FUNCTIONAL_DATA",
+      "description": "같은 이름의 파일을 다시 제출해도 각 제출 건과 파일 내용이 보존되어야 함",
+      "acceptanceCriteria": [
+        "내용이 다른 같은 이름 PDF 두 개가 각각 저장되고 각 제출 건에서 해당 원본이 내려받아짐"
+      ],
+      "validators": [
+        "QA"
+      ]
+    },
+    {
+      "requirementId": "033d6d9b-4eb3-4852-bf54-1d4db15a9785",
+      "key": "REQ-006",
+      "category": "FUNCTIONAL",
+      "description": "제출자와 지정 담당자의 문서 목록에 해당 문서와 제출 정보가 정확히 표시되어야 함",
+      "acceptanceCriteria": [
+        "제출자 목록과 담당자 목록의 파일명·제출자·담당자·제출 시각이 제출 건과 일치"
+      ],
+      "validators": [
+        "QA"
+      ]
+    },
+    {
+      "requirementId": "4bb0b461-4369-4861-8f55-a744a1b483b8",
+      "key": "REQ-007",
+      "category": "FUNCTIONAL_DATA",
+      "description": "권한 있는 사용자가 내려받은 파일은 제출한 원본과 같아야 함",
+      "acceptanceCriteria": [
+        "제출자와 지정 담당자가 내려받은 파일의 SHA-256이 제출한 원본과 일치"
+      ],
+      "validators": [
+        "QA"
+      ]
+    },
+    {
+      "requirementId": "8b5107dc-21cb-443c-a0ac-ea46cc450bb8",
+      "key": "REQ-008",
+      "category": "SECURITY",
+      "description": "인증되지 않은 문서 등록·조회·다운로드 요청을 거부해야 함",
+      "acceptanceCriteria": [
+        "로그인하지 않은 등록·목록·다운로드 요청은 거부되고 문서 정보가 노출되지 않음"
+      ],
+      "validators": [
+        "SECURITY"
+      ]
+    },
+    {
+      "requirementId": "e00566df-c7a8-4f02-9c52-f332c546ac8e",
+      "key": "REQ-009",
+      "category": "SECURITY",
+      "description": "제출자와 지정 담당자 이외의 사용자에게 문서 목록 정보와 파일 내용을 제공하지 않아야 함",
+      "acceptanceCriteria": [
+        "무관한 사용자에게 다른 사람 문서의 목록 정보와 파일 내용이 제공되지 않음"
+      ],
+      "validators": [
+        "SECURITY"
+      ]
+    },
+    {
+      "requirementId": "70c6fefc-c48b-4afc-942c-ef2dae4c4a3c",
+      "key": "REQ-010",
+      "category": "SECURITY",
+      "description": "요청의 식별자나 제출자 정보를 조작해도 타인 문서에 접근하거나 타인 명의로 제출할 수 없어야 함",
+      "acceptanceCriteria": [
+        "식별자·제출자 값을 바꾼 요청으로 타인 문서 접근과 타인 명의 제출이 모두 불가"
+      ],
+      "validators": [
+        "SECURITY"
+      ]
+    },
+    {
+      "requirementId": "f927a45e-5709-454b-aff9-49b792319712",
+      "key": "REQ-011",
+      "category": "SECURITY",
+      "description": "파일명 조작으로 지정된 저장 영역 밖의 파일을 만들거나 읽을 수 없어야 함",
+      "acceptanceCriteria": [
+        "경로를 조작한 파일명으로 저장 영역 밖 파일이 생성되거나 조회되지 않음"
+      ],
+      "validators": [
+        "SECURITY"
+      ]
+    },
+    {
+      "requirementId": "361a4edc-f4ae-447a-b378-e52bbf648f3f",
+      "key": "REQ-012",
+      "category": "SECURITY",
+      "description": "확장자·요청 형식 정보를 위장해도 서버의 파일 형식 검사를 우회할 수 없어야 함",
+      "acceptanceCriteria": [
+        "확장자나 Content-Type만 PDF로 바꾼 비허용 파일은 거부"
+      ],
+      "validators": [
+        "SECURITY"
+      ]
+    },
+    {
+      "requirementId": "54ea91a0-955c-4511-96fe-66649f892890",
+      "key": "REQ-013",
+      "category": "OBSERVABILITY",
+      "description": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함",
+      "acceptanceCriteria": [
+        "Trace를 통해 전체 연결 관계 복원 가능"
+      ],
+      "validators": [
+        "ORCHESTRATOR"
+      ]
+    }
+  ],
+  "excludedFeatures": [
+    "심사·승인 절차",
+    "담당자 변경",
+    "문서 수정·버전 관리",
+    "전자서명",
+    "OCR",
+    "AI 내용 분석",
+    "악성코드 탐지"
+  ],
+  "securityPolicy": {
+    "fileSizeLimitBytes": 10485760,
+    "allowedFileType": "application/pdf",
+    "fileTypeCheck": "서버가 파일 내용으로 판별한다. 확장자·Content-Type만으로 허용하지 않는다.",
+    "accessControl": "등록·목록·다운로드는 로그인 사용자만, 문서 정보와 파일은 제출자와 지정 담당자만",
+    "submitterIdentity": "제출자는 서버가 로그인 계정으로 기록한다. 요청 값으로 정하지 않는다.",
+    "storage": "서버가 만든 식별자로 지정된 저장 영역 안에만 저장한다. 같은 이름 파일을 덮어쓰지 않는다.",
+    "secretExposure": "문서 내용·내부 저장 경로·다른 사용자 정보가 권한 없는 응답과 로그에 노출되지 않아야 한다."
+  },
+  "emailPolicy": {}
+}

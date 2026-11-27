@@ -1,0 +1,6 @@
+# 생성 코드가 쓸 수 있는 패키지 후보(초안). 실제 잠금 파일은 dev 실행 이미지·평가 이미지와 같은 한 벌이어야 한다.
+fastapi
+uvicorn
+sqlalchemy
+argon2-cffi
+httpx

@@ -1,0 +1,424 @@
+{
+  "fields": {
+    "/implementationPlan/0/title": "Validate Email Format",
+    "/implementationPlan/0/description": "Implement email validation according to the agreed email parser rules to reject invalid email formats and return error responses without storing invalid emails in the database.",
+    "/implementationPlan/1/title": "Enforce Email Canonicalization and Uniqueness",
+    "/implementationPlan/1/description": "Implement email canonicalization rules (lowercase domain and local part, no gmail dot removal or plus tag removal, trim whitespace) and enforce uniqueness constraint at the database level to prevent duplicate accounts even under concurrent requests.",
+    "/implementationPlan/2/title": "Validate Password Length",
+    "/implementationPlan/2/description": "Implement password validation to reject passwords shorter than 8 characters and accept passwords of 8 characters or longer.",
+    "/implementationPlan/3/title": "Implement Password Hashing",
+    "/implementationPlan/3/description": "Store passwords using the approved password hash policy (argon2id with specified parameters), ensuring no plaintext or general SHA hashes are stored.",
+    "/implementationPlan/4/title": "Create User Account and Return Success Response",
+    "/implementationPlan/4/description": "Create a user account with validated email and hashed password, ensuring one user record is created per valid signup and return a success response without including password or password hash in the response body.",
+    "/implementationPlan/5/title": "Handle Signup Failure Responses",
+    "/implementationPlan/5/description": "Return appropriate failure responses (4xx) for input validation failures or duplicate email attempts, ensuring the response matches the actual signup processing result.",
+    "/implementationPlan/6/title": "Implement Traceability for Signup Process",
+    "/implementationPlan/6/description": "Implement tracing to enable full reconstruction of the requirement-to-development-to-verification-to-issue-to-fix-to-reverification lifecycle for the signup feature."
+  },
+  "basis": {
+    "requirements": [
+      {
+        "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+        "description": "유효한 이메일과 비밀번호로 계정을 생성할 수 있어야 함",
+        "acceptanceCriteria": [
+          "정상 입력 시 사용자 1건 생성 및 성공 응답"
+        ]
+      },
+      {
+        "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+        "description": "잘못된 이메일 형식을 거부해야 함",
+        "acceptanceCriteria": [
+          "합의한 이메일 파서에서 invalid인 값이 DB에 저장되지 않고 오류 응답"
+        ]
+      },
+      {
+        "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+        "description": "동일한 canonical email로 중복 계정을 만들 수 없어야 함",
+        "acceptanceCriteria": [
+          "애플리케이션 사전검사와 별개로 DB UNIQUE 제약이 존재하며 동시 요청에서도 중복 생성 불가"
+        ]
+      },
+      {
+        "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+        "description": "비밀번호는 최소 8자 이상이어야 함",
+        "acceptanceCriteria": [
+          "7자 이하는 거부, 8자 이상 정상 처리"
+        ]
+      },
+      {
+        "requirementId": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+        "description": "비밀번호는 승인된 Password Hash 정책으로 저장해야 함",
+        "acceptanceCriteria": [
+          "승인한 알고리즘·파라미터 충족, 평문/일반 SHA 계열 저장 없음"
+        ]
+      },
+      {
+        "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+        "description": "평문 비밀번호와 Password Hash가 API 응답, A2A Message/Artifact, 일반 로그, Trace에 노출되지 않아야 함",
+        "acceptanceCriteria": [
+          "지정 출력 전체에서 비밀번호 및 저장 Hash 미노출"
+        ]
+      },
+      {
+        "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+        "description": "실제 가입 처리 결과와 사용자 응답이 일치해야 함",
+        "acceptanceCriteria": [
+          "성공은 성공으로, 검증/중복 실패는 실패로 응답"
+        ]
+      },
+      {
+        "requirementId": "4876a535-23e1-4059-941f-bf49441f2276",
+        "description": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함",
+        "acceptanceCriteria": [
+          "Trace를 통해 전체 연결 관계 복원 가능"
+        ]
+      }
+    ],
+    "policies": {
+      "excludedFeatures": [
+        "로그인",
+        "OAuth",
+        "이메일 인증",
+        "비밀번호 찾기",
+        "프로필 관리"
+      ],
+      "securityPolicy": {
+        "passwordHashPolicy": {
+          "algorithm": "argon2id",
+          "iterations": 2,
+          "memoryKiB": 19456,
+          "parallelism": 1,
+          "storage": "encoded-library-hash",
+          "uniqueSalt": true
+        },
+        "secretExposure": "Passwords and password hashes must not appear in API, A2A, logs or Trace."
+      },
+      "emailPolicy": {
+        "canonicalEmailUniqueConstraint": true,
+        "domainCase": "lowercase",
+        "gmailDotRemoval": false,
+        "localPartCase": "lowercase",
+        "plusTagRemoval": false,
+        "trimWhitespace": true
+      },
+      "externalContract": {
+        "app": {
+          "attribute": "app",
+          "framework": "FastAPI",
+          "module": "main",
+          "readyCheck": "GET / 요청에 2xx 응답",
+          "serve": "uvicorn main:app"
+        },
+        "database": {
+          "access": "요청 처리의 DB 접근은 모두 Depends(get_db)로 한다",
+          "dependency": "get_db",
+          "engine": "SQLite에서 동작해야 한다",
+          "kind": "동기 함수(async 아님)",
+          "module": "database",
+          "urlEnv": "DATABASE_URL"
+        },
+        "packages": "실행 이미지에 설치된 패키지만 사용한다",
+        "responseRule": "응답 본문에 password와 password_hash 값을 넣지 않는다",
+        "signupApi": {
+          "bodyFields": [
+            "email",
+            "password"
+          ],
+          "bodyFormat": "JSON",
+          "method": "POST",
+          "path": "/api/auth/signup",
+          "rejected": "4xx (입력 검증 실패, 중복)",
+          "success": "2xx"
+        },
+        "startingFiles": [
+          "main.py",
+          "database.py",
+          "models.py",
+          "tests/test_health.py",
+          "requirements.lock"
+        ],
+        "userModel": {
+          "class": "User",
+          "columns": [
+            "email",
+            "password_hash"
+          ],
+          "module": "models",
+          "orm": "SQLAlchemy",
+          "uniqueInModel": [
+            "email"
+          ]
+        }
+      }
+    },
+    "policyEvidence": {
+      "schemaVersion": 1,
+      "quotes": [
+        "/emailPolicy/canonicalEmailUniqueConstraint = true",
+        "/emailPolicy/domainCase = \"lowercase\"",
+        "/emailPolicy/gmailDotRemoval = false",
+        "/emailPolicy/localPartCase = \"lowercase\"",
+        "/emailPolicy/plusTagRemoval = false",
+        "/emailPolicy/trimWhitespace = true",
+        "/excludedFeatures/0 = \"로그인\"",
+        "/excludedFeatures/1 = \"OAuth\"",
+        "/excludedFeatures/2 = \"이메일 인증\"",
+        "/excludedFeatures/3 = \"비밀번호 찾기\"",
+        "/excludedFeatures/4 = \"프로필 관리\"",
+        "/externalContract/app/attribute = \"app\"",
+        "/externalContract/app/framework = \"FastAPI\"",
+        "/externalContract/app/module = \"main\"",
+        "/externalContract/app/readyCheck = \"GET / 요청에 2xx 응답\"",
+        "/externalContract/app/serve = \"uvicorn main:app\"",
+        "/externalContract/database/access = \"요청 처리의 DB 접근은 모두 Depends(get_db)로 한다\"",
+        "/externalContract/database/dependency = \"get_db\"",
+        "/externalContract/database/engine = \"SQLite에서 동작해야 한다\"",
+        "/externalContract/database/kind = \"동기 함수(async 아님)\"",
+        "/externalContract/database/module = \"database\"",
+        "/externalContract/database/urlEnv = \"DATABASE_URL\"",
+        "/externalContract/packages = \"실행 이미지에 설치된 패키지만 사용한다\"",
+        "/externalContract/responseRule = \"응답 본문에 password와 password_hash 값을 넣지 않는다\"",
+        "/externalContract/signupApi/bodyFields/0 = \"email\"",
+        "/externalContract/signupApi/bodyFields/1 = \"password\"",
+        "/externalContract/signupApi/bodyFormat = \"JSON\"",
+        "/externalContract/signupApi/method = \"POST\"",
+        "/externalContract/signupApi/path = \"/api/auth/signup\"",
+        "/externalContract/signupApi/rejected = \"4xx (입력 검증 실패, 중복)\"",
+        "/externalContract/signupApi/success = \"2xx\"",
+        "/externalContract/startingFiles/0 = \"main.py\"",
+        "/externalContract/startingFiles/1 = \"database.py\"",
+        "/externalContract/startingFiles/2 = \"models.py\"",
+        "/externalContract/startingFiles/3 = \"tests/test_health.py\"",
+        "/externalContract/startingFiles/4 = \"requirements.lock\"",
+        "/externalContract/userModel/class = \"User\"",
+        "/externalContract/userModel/columns/0 = \"email\"",
+        "/externalContract/userModel/columns/1 = \"password_hash\"",
+        "/externalContract/userModel/module = \"models\"",
+        "/externalContract/userModel/orm = \"SQLAlchemy\"",
+        "/externalContract/userModel/uniqueInModel/0 = \"email\"",
+        "/securityPolicy/passwordHashPolicy/algorithm = \"argon2id\"",
+        "/securityPolicy/passwordHashPolicy/iterations = 2",
+        "/securityPolicy/passwordHashPolicy/memoryKiB = 19456",
+        "/securityPolicy/passwordHashPolicy/parallelism = 1",
+        "/securityPolicy/passwordHashPolicy/storage = \"encoded-library-hash\"",
+        "/securityPolicy/passwordHashPolicy/uniqueSalt = true",
+        "/securityPolicy/secretExposure = \"Passwords and password hashes must not appear in API, A2A, logs or Trace.\""
+      ]
+    }
+  },
+  "fieldReviews": {
+    "/implementationPlan/0/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+          "quote": "잘못된 이메일 형식을 거부해야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/0/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+          "quote": "합의한 이메일 파서에서 invalid인 값이 DB에 저장되지 않고 오류 응답"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/1/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "동일한 canonical email로 중복 계정을 만들 수 없어야 함"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/canonicalEmailUniqueConstraint = true"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/domainCase = \"lowercase\""
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/localPartCase = \"lowercase\""
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/trimWhitespace = true"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/1/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+          "quote": "애플리케이션 사전검사와 별개로 DB UNIQUE 제약이 존재하며 동시 요청에서도 중복 생성 불가"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/canonicalEmailUniqueConstraint = true"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/domainCase = \"lowercase\""
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/localPartCase = \"lowercase\""
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/emailPolicy/trimWhitespace = true"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/2/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+          "quote": "비밀번호는 최소 8자 이상이어야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/2/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+          "quote": "7자 이하는 거부, 8자 이상 정상 처리"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/3/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+          "quote": "비밀번호는 승인된 Password Hash 정책으로 저장해야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/3/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+          "quote": "승인한 알고리즘·파라미터 충족, 평문/일반 SHA 계열 저장 없음"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/securityPolicy/passwordHashPolicy/algorithm = \"argon2id\""
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/securityPolicy/passwordHashPolicy/iterations = 2"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/securityPolicy/passwordHashPolicy/memoryKiB = 19456"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/securityPolicy/passwordHashPolicy/parallelism = 1"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/securityPolicy/passwordHashPolicy/storage = \"encoded-library-hash\""
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/securityPolicy/passwordHashPolicy/uniqueSalt = true"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/4/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+          "quote": "유효한 이메일과 비밀번호로 계정을 생성할 수 있어야 함"
+        },
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "실제 가입 처리 결과와 사용자 응답이 일치해야 함"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/externalContract/responseRule = \"응답 본문에 password와 password_hash 값을 넣지 않는다\""
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/4/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+          "quote": "정상 입력 시 사용자 1건 생성 및 성공 응답"
+        },
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "성공은 성공으로, 검증/중복 실패는 실패로 응답"
+        },
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "/externalContract/responseRule = \"응답 본문에 password와 password_hash 값을 넣지 않는다\""
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/5/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "실제 가입 처리 결과와 사용자 응답이 일치해야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/5/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+          "quote": "성공은 성공으로, 검증/중복 실패는 실패로 응답"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/6/title": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "요구사항→개발→검증→Issue→수정→재검증을 추적할 수 있어야 함"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    },
+    "/implementationPlan/6/description": {
+      "status": "SUPPORTED",
+      "evidence": [
+        {
+          "sourceRef": "4876a535-23e1-4059-941f-bf49441f2276",
+          "quote": "Trace를 통해 전체 연결 관계 복원 가능"
+        }
+      ],
+      "reasonCode": "DIRECT_SUPPORT"
+    }
+  },
+  "expectedQuoteFailures": 17
+}

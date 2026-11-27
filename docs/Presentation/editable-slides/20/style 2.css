@@ -1,0 +1,43 @@
+/* 20페이지 · 사업전략 v08
+   글자·표: index.html / 색·크기·배치: style.css / 발표 설명: notes.html
+   원문: https://www.notion.so/422d062130a981808105eeab1024e130 */
+#deck > .slide[data-editable-page="20"] {
+  --page-background: #030407; --accent: #d4ff24; --blue: #1558c9;
+  --ink: #f0f2ec; --muted: #aaaeb8; --v08-cream: #f3e5ab;
+  --page-title-size: 57px; --page-title-offset: none; --page-content-offset: none;
+  padding: 38px 64px 26px;
+  background-color: var(--page-background);
+  background-image: radial-gradient(ellipse at 100% 0%, #1558c912, transparent 47%);
+}
+
+#deck > .slide[data-editable-page="20"] .slide-top { height:26px; margin-bottom:25px; }
+#deck > .slide[data-editable-page="20"] > h2 { font-size:var(--page-title-size); line-height:1.2; letter-spacing:-2.2px; font-weight:780; translate:var(--page-title-offset); }
+#deck > .slide[data-editable-page="20"] > .subtitle { margin:15px 0 0; font-size:24px; line-height:1.5; color:var(--muted); }
+#deck > .slide[data-editable-page="20"] > .content { display:flex; flex-direction:column; justify-content:center; gap:24px; padding-top:24px; min-height:0; translate:var(--page-content-offset); }
+#deck > .slide[data-editable-page="20"] h3 { font-size:30px; line-height:1.35; font-weight:720; letter-spacing:-.8px; margin:0; }
+#deck > .slide[data-editable-page="20"] p { margin:0; line-height:1.5; }
+#deck > .slide[data-editable-page="20"] .slide-foot { margin-top:20px; padding-top:14px; font-size:14px; min-height:34px; color:#858e9d; }
+#deck > .slide[data-editable-page="20"] .slide-foot .folio { margin-left:auto; flex:0 0 auto; white-space:nowrap; }
+#deck > .slide[data-editable-page="20"] .v08-eyebrow { display:block; color:var(--accent); font-size:15px; font-weight:700; line-height:1.4; letter-spacing:1px; }
+#deck > .slide[data-editable-page="20"] .v08-rail { display:flex; align-items:center; gap:18px; border:1px solid #344052; border-left:4px solid var(--accent); border-radius:10px; padding:17px 22px; background:#141d29; font-size:23px; line-height:1.5; color:var(--ink); }
+#deck > .slide[data-editable-page="20"] .v08-rail strong { color:var(--accent); }
+#deck > .slide[data-editable-page="20"] .v08-table { border-collapse:separate; border-spacing:0; width:100%; overflow:hidden; border:1px solid #303c4b; border-radius:14px; font-variant-numeric:tabular-nums; }
+#deck > .slide[data-editable-page="20"] .v08-table th, #deck > .slide[data-editable-page="20"] .v08-table td { padding:22px 24px; text-align:left; border-bottom:1px solid #303b4b; font-size:25px; line-height:1.35; white-space:nowrap; }
+#deck > .slide[data-editable-page="20"] .v08-table thead th { background:#232e3d; color:#d5e5ff; font-size:19px; font-weight:650; }
+#deck > .slide[data-editable-page="20"] .v08-table tbody th { color:var(--ink); font-weight:700; }
+#deck > .slide[data-editable-page="20"] .v08-table tbody td { color:#c5cedc; }
+#deck > .slide[data-editable-page="20"] .v08-table tbody tr { background:#121922; }
+#deck > .slide[data-editable-page="20"] .v08-table tbody tr:last-child > * { border-bottom:0; }
+#deck > .slide[data-editable-page="20"] .v08-table .v08-money { color:var(--accent); font-weight:750; font-size:34px; }
+#deck > .slide[data-editable-page="20"] .v08-customer-layout { display:grid;grid-template-columns:460px 1fr;gap:58px;align-items:center; }
+#deck > .slide[data-editable-page="20"] .v08-customer-hero { padding:32px 34px;background:#1558c9;border:1px solid #417cdb;border-radius:22px; }
+#deck > .slide[data-editable-page="20"] .v08-customer-hero .v08-eyebrow { color:#caddff; }
+#deck > .slide[data-editable-page="20"] .v08-customer-hero > strong { display:block;font-size:160px;line-height:1.12;letter-spacing:-8px;margin:18px 0;color:white; }
+#deck > .slide[data-editable-page="20"] .v08-customer-hero > strong > span { font-size:40px;letter-spacing:-1px;margin-left:8px; }
+#deck > .slide[data-editable-page="20"] .v08-customer-hero h3 { font-size:29px;color:white; }
+#deck > .slide[data-editable-page="20"] .v08-customer-hero p { color:#d4e4ff;font-size:23px;margin-top:18px; }
+#deck > .slide[data-editable-page="20"] .v08-customer-criteria { display:flex;flex-direction:column;gap:0; }
+#deck > .slide[data-editable-page="20"] .v08-customer-criteria article { display:flex;align-items:flex-start;gap:24px;padding:22px 0;border-bottom:1px solid #2c3440; }
+#deck > .slide[data-editable-page="20"] .v08-customer-criteria article:last-child { border-bottom:0; }
+#deck > .slide[data-editable-page="20"] .v08-customer-criteria article > span { color:var(--accent);font-size:26px;font-weight:750;line-height:1.5; }
+#deck > .slide[data-editable-page="20"] .v08-customer-criteria p { font-size:21px;color:var(--muted);margin-top:7px; }

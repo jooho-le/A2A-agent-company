@@ -1,0 +1,155 @@
+.document-content {
+  max-width: 800px;
+}
+
+.document-card {
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.document-form,
+.document-field {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.document-field {
+  gap: 8px;
+}
+
+.document-field label {
+  color: var(--text-h);
+  font-weight: 500;
+}
+
+.document-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-h);
+  background: var(--bg);
+  font: inherit;
+}
+
+.document-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.document-field input::file-selector-button {
+  margin-right: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-h);
+  background: var(--social-bg);
+  font: inherit;
+}
+
+.document-field p {
+  font-size: 12px;
+}
+
+.document-message {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.document-message--error {
+  color: #fca5a5;
+  border-color: #78404d;
+  background: #482b34;
+}
+
+.document-message--success {
+  color: #a4dfbd;
+  border-color: #3e6857;
+  background: #213d32;
+}
+
+.document-message h2 {
+  color: inherit;
+  font-size: 16px;
+}
+
+.document-result {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 16px 0 0;
+}
+
+.document-result dd {
+  margin: 0;
+}
+
+.document-history {
+  margin-top: 28px;
+}
+
+.document-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.document-history-heading h2 {
+  font-size: 20px;
+}
+
+.document-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.document-tab[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--primary);
+  background: #293c60;
+}
+
+.document-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.document-list-item {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+
+.document-list-item h3 {
+  font-size: 16px;
+}
+
+.document-download-actions {
+  margin-top: 16px;
+}
+
+.document-list-item > .document-message {
+  margin-top: 12px;
+}
+
+@media (max-width: 480px) {
+  .document-card {
+    padding: 24px 20px;
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "date": "2026-11-23",
+  "task": 99,
+  "architecture": "MULTI_AGENT",
+  "loopPolicy": "IN_LOOP_AND_FINAL",
+  "requestedNewRuns": 1,
+  "newRunsSubmitted": 1,
+  "automaticResubmission": false,
+  "runId": "6b628ab6-b791-4a1c-99e8-ade7a3a913f1",
+  "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "model": {
+    "provider": "openai",
+    "modelId": "gpt-4.1-mini-2025-04-14",
+    "modelRevision": null,
+    "temperature": 0.0,
+    "seed": null
+  },
+  "roleContractVersion": "8",
+  "singlePromptVersion": "8",
+  "runStartedAtKst": "2026-11-23T05:59:29.193165+09:00",
+  "hostStatus": "FINISHED",
+  "hostVerdict": "FAIL",
+  "registeredCodeVersion": 2,
+  "terminalAgentCode": "LLM_DEVELOPMENT_NO_PROGRESS",
+  "productVerdict": "FAIL",
+  "independentEvaluationAvailable": true,
+  "plannedFinalChecks": 9,
+  "finalChecksPassed": 8,
+  "finalChecksFailed": 1,
+  "finalCheckPassRate": 0.8888888888888888,
+  "requirementSatisfaction": 0.8571428571428571,
+  "requirementsPassed": 6,
+  "requirementsTotal": 7,
+  "requirementWeightedCheckScore": 0.9523809523809523,
+  "finalChecks": [
+    {
+      "checkId": "QA-SIGNUP-001",
+      "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-002",
+      "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-003",
+      "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-004",
+      "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-005",
+      "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+      "status": "PASS"
+    },
+    {
+      "checkId": "QA-SIGNUP-006",
+      "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+      "status": "PASS"
+    },
+    {
+      "checkId": "SEC-SIGNUP-002",
+      "title": "SEC-SIGNUP-002 비밀번호 저장값",
+      "status": "PASS"
+    },
+    {
+      "checkId": "SEC-SIGNUP-003",
+      "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+      "status": "FAIL"
+    },
+    {
+      "checkId": "SEC-SIGNUP-005",
+      "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+      "status": "PASS"
+    }
+  ],
+  "failedCheckDetails": [
+    {
+      "checkId": "SEC-SIGNUP-003",
+      "observationCounts": {
+        "PASS": 13,
+        "FAIL": 2,
+        "NOT_RUN": 2,
+        "UNVERIFIED": 2
+      },
+      "failedObservations": [
+        {
+          "caseId": "variant_trail",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "actual": 422,
+          "status": "FAIL",
+          "reason": "EXPECTATION_MISMATCH"
+        },
+        {
+          "caseId": "variant_swap_lead",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "actual": 422,
+          "status": "FAIL",
+          "reason": "EXPECTATION_MISMATCH"
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "totalMs": 393190,
+    "successfulProductVerdictMs": null,
+    "firstBuildPassMs": 117123,
+    "fixAttempts": 2,
+    "registeredRepairCandidates": 1,
+    "modelCalls": 50,
+    "toolCalls": 53,
+    "inputTokens": 1011223,
+    "outputTokens": 31088,
+    "totalTokens": 1042311,
+    "costUsd": "0.2911836",
+    "costComplete": true,
+    "usageComplete": true
+  },
+  "settledToolAttempts": 53,
+  "unknownToolResults": 0,
+  "builds": [
+    {
+      "codeVersion": 1,
+      "executionOutcome": "PASS",
+      "exitCode": 0
+    },
+    {
+      "codeVersion": 2,
+      "executionOutcome": "PASS",
+      "exitCode": 0
+    }
+  ],
+  "sourceObservations": [
+    {
+      "codeVersion": 1,
+      "mainSha256": "a9b45c6a0abe3c8174af44a7c4764e11b7e607255c8b5a6853fbc2236ebec207",
+      "startupInitializationObserved": true,
+      "applicationLifespanObserved": true,
+      "emailStripCallObserved": false
+    },
+    {
+      "codeVersion": 2,
+      "mainSha256": "fd8ed7145ded1d7875f315700223fd75fa75fdf63d23f6ba9b0ed15fbda1362b",
+      "startupInitializationObserved": true,
+      "applicationLifespanObserved": true,
+      "emailStripCallObserved": false
+    }
+  ],
+  "normalizationFunctionUnchangedBetweenV1V2": true,
+  "recoveryDecisions": [
+    {
+      "sequence": 11,
+      "code": "START_CONTRACT_PRECHECK_FAILED",
+      "category": "MODEL_FORMAT",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    },
+    {
+      "sequence": 18,
+      "code": "READY_SIGNUP_QUALITY_REVIEW",
+      "category": "MODEL_EXECUTION",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    },
+    {
+      "sequence": 25,
+      "code": "SOURCE_CREDENTIAL_DENIED",
+      "category": "MODEL_FORMAT",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    },
+    {
+      "sequence": 29,
+      "code": "OUTPUT_CONTRACT_INVALID",
+      "category": "MODEL_FORMAT",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    },
+    {
+      "sequence": 34,
+      "code": "READY_WITHOUT_CHANGES",
+      "category": "MODEL_FORMAT",
+      "action": "REGENERATE",
+      "reason": "ALLOWED"
+    },
+    {
+      "sequence": 50,
+      "code": "READY_WITHOUT_CHANGES",
+      "category": "MODEL_FORMAT",
+      "action": "STOP",
+      "reason": "REPEATED"
+    }
+  ],
+  "outcomeCause": "COMPLETED_FAIL",
+  "comparisonValidity": "VALID",
+  "runRecordPrivacyStatus": "UNVERIFIED",
+  "runRecordTraceStatus": "PASS",
+  "implementationUnchanged": true,
+  "manuallyRepairedGeneratedSource": false,
+  "sourceDirectory": ".data/experiments/scn001-multi-ver1-post98-20261123",
+  "evaluationDirectory": ".data/experiments/scn001-multi-ver1-post98-20261123/evaluation/6b628ab6-b791-4a1c-99e8-ade7a3a913f1",
+  "limitations": [
+    "Single, Multi Ver2 and repeated samples were not run.",
+    "No final all-check-passing candidate; elapsed time is a FAIL verdict time.",
+    "Run-record privacy remains UNVERIFIED despite passing the product response/log check.",
+    "The two repair requests produced only one registered repaired candidate."
+  ]
+}

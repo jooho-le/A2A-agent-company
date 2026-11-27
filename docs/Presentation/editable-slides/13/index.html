@@ -1,0 +1,102 @@
+<!doctype html>
+<!--
+========== 13페이지 수정 안내 ==========
+1. 실제 장표 글자: 아래 [화면 글자] 주석 바로 다음의 태그 사이를 수정하세요.
+2. 색·크기·위치: 같은 폴더의 style.css를 수정하세요.
+3. 발표자 메모: notes.html에 따로 있습니다. 장표 화면에는 나오지 않습니다.
+4. 이 파일을 열어 보면 저장·새로고침으로 바로 반영됩니다.
+   capstone-presentation-draft.html(통합본)을 보고 있다면 build.py로 다시 합쳐야 합니다.
+검색 단축키로 "[화면 글자" 또는 "큰 제목"을 찾으면 수정할 곳으로 바로 갈 수 있습니다.
+=========================================
+-->
+<html lang="ko">
+<head>
+<!-- [미리보기 설정] 브라우저 탭·디자인 연결입니다. 장표 본문 글자가 아닙니다. -->
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AIO · 13페이지 개별 편집</title>
+<link rel="stylesheet" href="../shared/global.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../shared/preview.css">
+</head>
+<body class="page-preview">
+<!-- [상단 도구] 미리보기 버튼입니다. PDF 장표 내용이 아닙니다. -->
+<header class="toolbar"><a href="../index.html">전체 페이지 목록</a>
+<span class="preview-title">개별 원본: editable-slides/13/index.html · 저장 후 이 페이지 새로고침</span>
+<a href="../../capstone-presentation-draft.html#slide-13">통합본 ↗ (다시 합쳐야 반영)</a>
+<button id="notes-button" aria-expanded="false">발표 노트</button><button id="print-page">이 페이지만 PDF</button></header>
+<main class="workspace" id="workspace"><div class="stage" id="stage"><div class="deck" id="deck">
+<!-- ============================================================
+     [여기부터 실제 장표 화면]
+     [화면 글자] 주석 아래의 태그 사이 문구를 수정하세요.
+     주의: section의 data-title은 목록용 제목입니다. 화면의 큰 제목이 아닙니다.
+     ============================================================ -->
+<!-- AIO:SLIDE:START -->
+<section class="slide compact" data-chapter="2" data-editable-page="13" data-source-page="13"
+  data-title="Ver1·Ver2의 검증 의도와 비교표 결론">
+<div class="slide-top"><span class="kicker"><!-- [화면 글자 01 | 상단 분류] --><span class="p13-element-001">03 / EXPERIMENT SUMMARY</span></span><span class="tag"><!-- [화면 글자 02 | 해석 범위] -->비교 예시 해석</span></div>
+<h2><!-- [화면 글자 03 | 큰 제목] --><span class="p13-element-003">Ver1·Ver2의 검증 의도와 비교표 결론</span></h2>
+<p class="subtitle"><!-- [화면 글자 04 | 제목 아래 설명] --><span class="p13-element-004">같은 모델·요구사항·시작 코드·예산에서, 구조와 실패 피드백의 효과를 나눠 확인합니다.</span></p>
+<div class="content">
+  <div class="summary-intents">
+    <article class="summary-intent ver1">
+      <!-- [화면 글자 05 | Ver1 조건] --><span class="summary-intent-label">VER1 · 공통 보호시험·피드백 제공</span>
+      <!-- [화면 글자 06 | Ver1에서 알고자 한 것] --><h3>같은 피드백을 받아도<br>어떤 구조가 더 잘 수정할까?</h3>
+      <!-- [화면 글자 07 | Ver1 의도] --><p>공통 검증 결과와 실패 근거를 알려준 뒤,<br>Single·Multi의 수정·재검증 성과를 비교합니다.</p>
+    </article>
+    <article class="summary-intent ver2">
+      <!-- [화면 글자 08 | Ver2 조건] --><span class="summary-intent-label">VER2 · 공통 보호시험·피드백 미제공</span>
+      <!-- [화면 글자 09 | Ver2에서 알고자 한 것] --><h3>스스로 검사할 때<br>역할 분리가 누락을 줄일까?</h3>
+      <!-- [화면 글자 10 | Ver2 의도] --><p>양쪽 모두 자체 QA·Security 시험을 수행하고,<br>동일한 최종 10개 시험으로 결과를 비교합니다.</p>
+    </article>
+  </div>
+  <div>
+    
+    <table class="summary-results" aria-label="11·12페이지 가정 예시의 구조 효과와 피드백 효과 해석">
+      <colgroup><col style="width:28%"><col style="width:30%"><col style="width:42%"></colgroup>
+      <thead><tr><!-- [화면 글자 12 | 표 머리글] --><th>비교하는 효과</th><th>최종 10개 전체 통과율</th><th>판정 시간 · 모델 비용 · 수정 횟수</th></tr></thead>
+      <tbody>
+        <tr>
+          <th scope="row"><!-- [화면 글자 13 | 구조 비교] -->Single → Multi<small>같은 Ver에서 역할 분리 효과</small></th>
+          <td><!-- [화면 글자 14 | 구조 비교 결과] --><strong>두 조건 모두 +20%p</strong><small>Ver1: 60→80% · Ver2: 50→70%</small></td>
+          <td><!-- [화면 글자 15 | 구조 비교 효율] -->통과건 평균 60초 짧음<small>모델 비용 약 13~18%↓ · 수정 0.6회↓</small></td>
+        </tr>
+        <tr>
+          <th scope="row"><!-- [화면 글자 16 | 피드백 비교] -->Ver2 → Ver1<small>같은 Agent 구조에서 피드백 효과</small></th>
+          <td><!-- [화면 글자 17 | 피드백 비교 결과] --><strong>두 구조 모두 +10%p</strong><small>Single: 50→60% · Multi: 70→80%</small></td>
+          <td><!-- [화면 글자 18 | 피드백 비교 효율] -->통과건 평균 40초 짧음<small>모델 비용 약 7~12%↓ · 수정 0.4회↓</small></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <!-- [화면 글자 19 | 결론 요약] --><div class="summary-takeaway">실험에서는<strong> 역할 분리와 공통 실패 피드백 모두</strong> 품질·효율 지표가 더 좋게 나타납니다.</div>
+</div>
+<footer class="slide-foot"><span aria-hidden="true"></span><span class="folio">13 / 28</span></footer>
+</section>
+<!-- AIO:SLIDE:END -->
+<!-- ================= [실제 장표 화면 끝] ================= -->
+</div></div></main>
+
+<!-- [하단 도구] 페이지 이동용입니다. PDF 장표 내용이 아닙니다. -->
+<footer class="navigation"><div class="preview-navigation"><a data-previous-page="" href="../12/index.html">← 이전 페이지</a></div><span>PDF 13 / 28</span><div class="preview-navigation"><a data-next-page="" href="../14/index.html">다음 페이지 →</a></div></footer>
+
+<!-- [발표자 메모 창] 메모 내용은 notes.html에서 수정합니다. 장표 본문과 별개입니다. -->
+<aside id="notes-panel" class="notes" hidden>
+<div class="notes-heading"><h2 id="notes-title">13 · 발표 노트</h2><button id="notes-close" aria-label="노트 닫기">×</button></div>
+<div id="notes-content"><iframe class="notes-frame" src="notes.html" title="13페이지 발표자 메모"></iframe></div>
+</aside>
+
+<!-- [공통 아이콘] 도형 정의입니다. 보이는 글자를 수정하는 곳이 아닙니다. -->
+<svg aria-hidden="true" class="diagram-symbols" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="deck-icon-document" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M9 3h10l6 6v20H7V3h2zM19 3v7h6M11 15h10M11 20h10M11 25h6"></path></g></symbol>
+<symbol id="deck-icon-code" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="m11 10-7 6 7 6m10-12 7 6-7 6M18 6l-4 20"></path></g></symbol>
+<symbol id="deck-icon-check" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="m16 3 11 4v9c0 6-5 10-11 13C10 26 5 22 5 16V7zM10 16l4 4 8-9"></path></g></symbol>
+<symbol id="deck-icon-repeat" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="M25 13a10 10 0 0 0-18-4L4 13m0-7v7h7M7 19a10 10 0 0 0 18 4l3-4m0 7v-7h-7"></path></g></symbol>
+<symbol id="deck-icon-network" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><circle cx="16" cy="7" r="4"></circle><circle cx="7" cy="25" r="4"></circle><circle cx="25" cy="25" r="4"></circle><path d="m14 11-5 10m9-10 5 10M11 25h10"></path></g></symbol>
+<symbol id="deck-icon-building" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M6 29V5h20v24M3 29h26M12 29v-7h8v7M11 10h2m6 0h2m-10 6h2m6 0h2"></path></g></symbol>
+<symbol id="deck-icon-chat" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><path d="M5 5h22v18H15l-8 6v-6H5zM10 11h12M10 17h8"></path></g></symbol>
+<symbol id="deck-icon-payment" viewbox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"><rect height="20" rx="3" width="26" x="3" y="6"></rect><path d="M3 13h26M8 20h7m7 0h2"></path></g></symbol>
+</defs></svg>
+<!-- [미리보기 실행 코드] 본문 글자를 수정하는 곳이 아닙니다. -->
+<script src="../shared/preview.js"></script>
+</body></html>
