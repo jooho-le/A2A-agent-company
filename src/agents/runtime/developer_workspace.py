@@ -143,11 +143,12 @@ def _failure(error):
 
 
 class GitDeveloperCheckpoint:
-    """Inert Host capability: prepare once, then commit one actual nonempty diff."""
+    """Freeze real working bytes; a service can resubmit an unchanged candidate."""
 
     def __init__(self, workspace: BoundWorkspace, *, baseline_commit_hash,
                  lock_path, repository_id, limits=GitSnapshotLimits(), parent_commit_hash=None,
-                 runtime_repair=False, library_environment=None, initial_source_files=None):
+                 runtime_repair=False, library_environment=None, initial_source_files=None,
+                 allow_unchanged_source=False):
         invalid = False
         try:
             if (not isinstance(workspace, BoundWorkspace) or workspace.role is not AgentRole.DEVELOPER
@@ -160,7 +161,8 @@ class GitDeveloperCheckpoint:
                     or len(repository_id.encode("utf-8")) > 256
                     or any(ord(char) < 32 or ord(char) == 127 for char in repository_id)
                     or redact_text(repository_id) != repository_id
-                    or not isinstance(limits, GitSnapshotLimits)):
+                    or not isinstance(limits, GitSnapshotLimits)
+                    or type(allow_unchanged_source) is not bool):
                 raise ValueError
             _validate_source_path(lock_path)
             copied_limits = GitSnapshotLimits(**asdict(limits))
@@ -198,6 +200,7 @@ class GitDeveloperCheckpoint:
             _validate_inventory(initial_source_files)
             self._initial_files = dict(initial_source_files)
         self._runtime_repair = runtime_repair or self._initial_files is not None
+        self._allow_unchanged_source = allow_unchanged_source
         self._library_environment = dict(library_environment or {})
         self._library_type_issues = ()
         self.observed_output_repair = False
@@ -637,9 +640,9 @@ class GitDeveloperCheckpoint:
                         for path in sorted(set(before) | set(files), key=lambda value: value.encode("utf-8"))
                         if before.get(path) != files.get(path))
                     base = self._progress_base if self._progress_base is not None else before
-                    if not changes or files == base or (
+                    if not self._allow_unchanged_source and (not changes or files == base or (
                             self._runtime_repair and not _repair_changes_code(
-                                base, files, check_unused_rewrite=self.observed_output_repair)):
+                                base, files, check_unused_rewrite=self.observed_output_repair))):
                         raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_NO_CHANGES")
                     if self._check_library_types(files):
                         raise DeveloperCheckpointError("DEVELOPER_CHECKPOINT_LIBRARY_TYPE_MISMATCH")
@@ -652,7 +655,14 @@ class GitDeveloperCheckpoint:
                         verified = tuple(row.with_host_comparison(
                             indirect=row.source_ref in indirect.get(row.path, ())
                         ) for row in reported_path_edits)
-                    commit = self._commit(files, deadline)
+                    # Reuse the authenticated parent/continuation seed when its bytes match.
+                    # Do not invent a change or create an empty checkpoint commit.
+                    if self._allow_unchanged_source and files == base:
+                        commit = self._working_base_commit
+                    elif self._allow_unchanged_source and files == before:
+                        commit = parent.commit_hash
+                    else:
+                        commit = self._commit(files, deadline)
                     candidate = self._builder(deadline).build(commit, self._lock_path)
                     if (self._snapshot_files(candidate) != files or self._inventory(source_fd, deadline) != files
                             or candidate.dependency_lock_hash != baseline.dependency_lock_hash):

@@ -20,6 +20,12 @@
     "fileChanges",
     "createdAt"
   ],
+  "allOf": [
+    {
+      "if": {"properties": {"fileChanges": {"maxItems": 0}}, "required": ["fileChanges"]},
+      "then": {"required": ["readyReview"]}
+    }
+  ],
   "properties": {
     "artifactId": {
       "type": "string",
@@ -87,7 +93,7 @@
     },
     "fileChanges": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -139,7 +145,7 @@
         },
         "edits": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "items": {
             "type": "object",
             "additionalProperties": false,

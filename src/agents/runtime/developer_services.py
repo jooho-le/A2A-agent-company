@@ -143,7 +143,9 @@ class DeveloperRuntimeServices:
             inherited = await _run_file_operation(partial(read_continuation, self._repository, binding.run_id, files=True))
             if inherited is not None:
                 initial_files = inherited[1]
+        from orchestrator.domain.service_design import service_policy
         checkpoint = GitDeveloperCheckpoint(workspace, baseline_commit_hash=self._baseline,
+                                            allow_unchanged_source=bool(service_policy(execution.configuration.scenario_contract)),
                                             repository_id=self._repository_id, lock_path=self._lock_path,
                                             library_environment={
                                                 'containerImageDigest': environment.container_image_digest,
@@ -188,7 +190,6 @@ class DeveloperRuntimeServices:
         execution.budget.check()
         from agents.runtime.repair_baseline import restore_baseline
         await _run_file_operation(restore_baseline, self, execution, checkpoint)
-        from orchestrator.domain.service_design import service_policy
         if service_policy(execution.configuration.scenario_contract):
             from agents.runtime.service_capabilities import runtime_capabilities
             checkpoint.runtime_capabilities = await _run_file_operation(runtime_capabilities,

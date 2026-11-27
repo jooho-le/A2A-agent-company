@@ -80,23 +80,33 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         self.registry = WorkspaceRegistry(self.repository, self.directory / "workspaces")
         self.artifacts = ArtifactStore(self.repository, self.registry)
         self.scenario = SCENARIO_REGISTRY[SCN_001_ID]
+        service_request = getattr(self, 'service_request', None)
+        if service_request:
+            from orchestrator.domain.scenario_registry import ScenarioDefinition, service_request_contract
+            self.scenario = ScenarioDefinition.from_contract(service_request_contract(service_request))
         self.model = ModelConfiguration(provider="fake", model_id="fake-model", temperature=0, seed=17)
-        self.run = WorkflowRun(scenario_id=SCN_001_ID, request_text="보호된 회원가입 요구사항을 구현해줘.",
+        self.run = WorkflowRun(scenario_id=self.scenario.scenario_id,
+                               request_text=service_request or "보호된 회원가입 요구사항을 구현해줘.",
                                status=WorkflowStatus.PLANNING)
         self.planner_step = WorkflowStep(run_id=self.run.run_id, agent_role=AgentRole.PLANNER,
             status=WorkflowStepStatus.SUCCEEDED, a2a_task_state=A2ATaskState.COMPLETED,
             a2a_task_id="planner-opaque-task", agent_context_id="planner-opaque-context",
             a2a_artifact_ids=["planner-opaque-artifact"])
         self.requirement_artifact_id = uuid4()
-        self.plan = validate_planner_decision({
+        service_plan = {}
+        if service_request:
+            from service_test_helpers import service_design
+            service_plan = {'serviceDesign': service_design('API')}
+        self.plan = validate_planner_decision({**service_plan,
             "kind": "PLAN", "questions": [], "unapprovedAssumptions": [], "implementationPlan": [{
                 "taskId": "TASK-001", "title": "회원가입 구현", "description": "보호된 모든 기준을 구현한다.",
                 "requirementIds": [str(value) for value in self.scenario.requirement_ids], "dependsOn": [],
             }],
         }, self.scenario).plan
-        self.lock_bytes = b"trusted-inert-fixture==1.0\n"
+        self.lock_bytes = b"fastapi==0.135.0\n" if service_request else b"trusted-inert-fixture==1.0\n"
         self.configuration = RunConfigurationArtifact(run_id=self.run.run_id,
-            workspace_id=self.run.workspace_id, scenario_id=SCN_001_ID,
+            workspace_id=self.run.workspace_id, scenario_id=self.scenario.scenario_id,
+            **({'frozen_scenario_contract_json': json.dumps(self.scenario.planner_contract())} if service_request else {}),
             configuration=RunConfiguration(model=self.model, limits=ExecutionLimits(runtime_budget_ms=60000),
                 environment=ExecutionBaseline(container_image_digest=IMAGE_ID,
                     dependency_lock_hash="sha256:" + hashlib.sha256(self.lock_bytes).hexdigest(),
@@ -111,8 +121,11 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
         (self.source / "requirements.lock").write_bytes(self.lock_bytes)
         self.initial_source = "def signup():\n    return 'trusted-fixture-baseline'\n"
         (self.source / "signup.py").write_text(self.initial_source, encoding="utf-8")
+        if service_request:
+            (self.source / 'main.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n'
+                '@app.get("/")\ndef ready(): return {"status":"ok"}\n')
         self.git("init", "--object-format=sha1")
-        self.git("add", "requirements.lock", "signup.py")
+        self.git("add", "requirements.lock", "signup.py", *(['main.py'] if service_request else []))
         self.git("commit", "-m", "trusted inert fixture baseline")
         self.baseline_commit = self.git("rev-parse", "HEAD").strip()
         self.run, self.step = self.repository.create_developer_step_from_plan(
@@ -121,7 +134,7 @@ class DeveloperAgentTests(unittest.IsolatedAsyncioTestCase):
             project_artifact_id=self.requirement_artifact_id, developer_configured=True,
             requirement_payload=self.plan.model_dump(mode="json", by_alias=True))
         self.metadata = A2AWorkflowMetadata(run_id=self.run.run_id, workflow_step_id=self.step.workflow_step_id,
-            scenario_id=SCN_001_ID, attempt=0, requirement_ids=self.scenario.requirement_ids,
+            scenario_id=self.scenario.scenario_id, attempt=0, requirement_ids=self.scenario.requirement_ids,
             code_version=1, project_artifact_ids=(self.requirement_artifact_id,))
         # 60초: 세 번의 수정 후보를 만드는 시험이 혼자서도 약 11초라, 바쁜 전체·병렬 실행에서 15초 시간 예산이
         # 먼저 끝나 결과가 흔들렸다(2026-11-18). 시간 만료를 확인하는 시험은 이 값에 의존하지 않는다.

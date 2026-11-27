@@ -184,6 +184,7 @@ class SingleAgentExecutor(AgentExecutor):
             output_check=(contract_check(contract.validate) if text_only and phase in (
                               SinglePhase.IMPLEMENTING, SinglePhase.FIXING)
                           else development_check(contract.validate, precheck=precheck, path_check=path_check,
+                                                 allow_unchanged_source=execution.scenario.key == 'SERVICE-WEB',
                                                  priority_check=priority_check, library_type_check=library_type_check,
                                                  output_safety_check=output_safety_check,
                                                  signup_quality_check=signup_quality_check, service_interface_check=service_ui_check)

@@ -134,14 +134,16 @@ INSTRUCTIONS = {
         'acceptance sentence in each assigned requirement. Fix the listed fields and return the corrected final JSON; keep the test file you wrote '
         'unless a listed case needs a different test.'),
     'GENERATED_TESTS_INVALID': (
-        'Your generated tests do not match your cases yet; nothing has run. GENERATED_TEST_FILE_MISSING: write '
+        'Your generated tests do not match your cases yet; this READY has not been accepted for Host validation. '
+        'Previously completed tool calls remain valid. GENERATED_TEST_FILE_MISSING: write '
         'the test file for each generated test scope with write_test_file (use testTargets) before READY. '
         'This includes every required browser suite JSON, even when all signup cases use unit tests. '
         'BROWSER_SUITE_INVALID: write valid browser-suite-v1 JSON using only testTargets.allowedActions. '
         'Declare every browser testId under its exact run_browser_tests selector. '
         'BROWSER_SUITE_PATH_INVALID: use only the approved testTargets path inside your QA scratch; never symlinks. '
         'TEST_IN_FILE_NOT_DECLARED: every test method in your test files is run and must be declared as one case '
-        'whose testId is module.Class.method exactly; declare it or remove the extra method. '
+        'whose testId is module.Class.method exactly. Add the missing case bindings listed in testRepairTargets; '
+        'preserve required tests instead of deleting them to shorten the result. '
         'DECLARED_TEST_NOT_IN_FILE: choose a matching selector and exact testId from hostTestIdCatalog; '
         'never guess or add a tests. prefix. Do not remove required coverage. '
         'GENERATED_TEST_SYNTAX_INVALID: a test file is not valid Python; rewrite it. Never place an actual '
@@ -330,6 +332,12 @@ def _issue(item, *, start_precheck=False) -> dict | None:
             and not source_path.startswith('/') and all(p not in ('', '.', '..') for p in source_path.split('/'))
             and redact_text(source_path) == source_path and type(line) is int and 0 < line <= 1048576):
         issue.update(sourcePath=source_path, lineNumber=line)
+        if code == 'GENERATED_TEST_SYNTAX_INVALID' and item.get('syntaxKind') in (
+                'INDENTATION', 'UNTERMINATED_STRING', 'MISSING_DELIMITER', 'EXPECTED_COLON',
+                'INVALID_CHARACTER', 'INVALID_SYNTAX', 'NULL_BYTE'):
+            column = item.get('columnNumber')
+            if type(column) is int and 0 < column <= 1_000_000:
+                issue.update(columnNumber=column, syntaxKind=item['syntaxKind'])
     repair_path = item.get('repairSourcePath')
     if _safe_review_file(repair_path):
         issue['repairSourcePath'] = repair_path
@@ -509,6 +517,13 @@ def feedback(kind: str, *, issues: list[dict], remaining: int, stage=None, tool_
         instruction += (' No tool call in this rejected batch was executed. Previously successful writes remain. '
                         'Fix all listed source issues together and reissue only the still-needed calls. '
                         'Source has not been automatically escaped, normalized or modified by the Host.')
+        syntax_kinds = {row.get('syntaxKind') for row in issues}
+        if 'UNTERMINATED_STRING' in syntax_kinds:
+            instruction += ' An indicated quoted string is not closed. Keep literal line breaks out of single-line quotes; use an escaped newline or a properly closed triple-quoted literal.'
+        if 'MISSING_DELIMITER' in syntax_kinds:
+            instruction += ' Balance the bracket, parenthesis or brace at the indicated line and column. Check the complete method before reissuing the file.'
+        if 'INDENTATION' in syntax_kinds:
+            instruction += ' Use consistent spaces and a correctly indented complete class/method body. Do not mix tabs and spaces.'
     if (kind in ('READY_SIGNUP_QUALITY_REVIEW', 'READY_OUTPUT_SAFETY_REVIEW')
             and 'DEFAULT_VALIDATION_MAY_ECHO_CREDENTIALS' in reasons):
         instruction += ' ' + VALIDATION_ERROR_GUIDANCE
@@ -740,14 +755,17 @@ class ExecutedTools(tuple):
         return result
 
 
-def source_change_check(validate):
-    """READY requires Host-confirmed net change in Multi and Single development.
+def source_change_check(validate, *, allow_unchanged_source=False):
+    """Measured development requires net change; services may submit existing code.
 
     Production engines populate ExecutedTools.source_changed from the checkpoint
     inventory against the immutable parent. Legacy tuple-only checks are for
     isolated callers; they do not provide evidence for workflow termination.
-    The engine forces a corrective write or stops before semantic publication.
+    With the service-only allowance, unchanged bytes still go through the other
+    READY checks and a fresh Host Build/QA/Security; this is not a PASS verdict.
     """
+    if type(allow_unchanged_source) is not bool:
+        raise ValueError('invalid source submission policy')
     contract = contract_check(validate)
 
     def check(data, executed_tools=()):
@@ -756,7 +774,8 @@ def source_change_check(validate):
             return rejection
         changed = (executed_tools.source_changed if isinstance(executed_tools, ExecutedTools)
                    else bool(set(executed_tools) & SOURCE_WRITE_TOOLS))
-        if isinstance(data, dict) and data.get('kind') == 'READY' and not changed:
+        if (isinstance(data, dict) and data.get('kind') == 'READY'
+                and not changed and not allow_unchanged_source):
             issues = ([{'fieldPath': '/source', 'reasonCode': 'UNUSED_TEXT_REWRITE'}]
                       if getattr(executed_tools, 'unused_rewrite', False) else [])
             return {'code': 'READY_WITHOUT_CHANGES', 'issues': issues}
@@ -806,15 +825,16 @@ def case_expectation_check(validate, expectation_issues=None, *, explain=None, e
 
 
 def development_check(validate, precheck=None, path_check=None, priority_check=None, library_type_check=None,
-                      output_safety_check=None, signup_quality_check=None, service_interface_check=None):
-    """``source_change_check`` plus the Host's read-only start-contract precheck for READY.
+                      output_safety_check=None, signup_quality_check=None, service_interface_check=None,
+                      *, allow_unchanged_source=False):
+    """Source submission policy plus read-only prerequisite checks for READY.
 
     ``precheck`` returns closed issues for start failures that the Host build would
     report for certain (``agents.runtime.start_precheck``). Multi Developer and the
     Single IMPLEMENTING/FIXING phases use the same rule and the same limit. The
     precheck is advisory: if it fails, the existing Host build decides as before.
     """
-    change = source_change_check(validate)
+    change = source_change_check(validate, allow_unchanged_source=allow_unchanged_source)
 
     def check(data, executed_tools=()):
         rejection = change(data, executed_tools)

@@ -29,12 +29,21 @@ def inspect(source, path='outputs/qa/tests/test_case.py'):
     return inspect_test_write({'path': path, 'content': source})
 
 
-@pytest.mark.parametrize('source', ['value = "\x00"\n', 'def incomplete(\n'])
-def test_invalid_python_is_detected_with_only_safe_coordinates(source):
+@pytest.mark.parametrize(('source', 'column', 'kind'), [
+    ('value = "\x00"\n', 10, 'NULL_BYTE'),
+    ('def incomplete(\n', 15, 'MISSING_DELIMITER'),
+    ('value = "PRIVATE_UNTERMINATED\n', 9, 'UNTERMINATED_STRING'),
+    ('def incomplete()\n', 17, 'EXPECTED_COLON'),
+    ('def example():\npass\n', 1, 'INDENTATION'),
+])
+def test_invalid_python_is_detected_with_only_safe_coordinates(source, column, kind):
     issues = inspect(source)
     assert issues == [{'fieldPath': '/content', 'reasonCode': 'GENERATED_TEST_SYNTAX_INVALID',
-                      'sourcePath': 'outputs/qa/tests/test_case.py', 'lineNumber': 1}]
+                      'sourcePath': 'outputs/qa/tests/test_case.py',
+                      'lineNumber': 2 if kind == 'INDENTATION' else 1,
+                      'columnNumber': column, 'syntaxKind': kind}]
     assert '\x00' not in json.dumps(issues)
+    assert 'PRIVATE_UNTERMINATED' not in json.dumps(issues)
 
 
 def test_runtime_control_character_data_and_browser_json_are_preserved():
@@ -121,6 +130,14 @@ def test_whole_batch_is_rejected_before_first_side_effect_then_corrected(actor, 
     assert budget.tool_calls == 1 and budget.model_calls == 3
     assert 'PRIVATE_CONTENT_SENTINEL' not in provider.requests[1].input_items_json
     assert 'GENERATED_TESTS_INVALID' in provider.requests[1].input_items_json
+    if '\x00' in source:
+        feedbacks = [json.loads(row['content'])['hostCorrection']
+                     for row in json.loads(provider.requests[1].input_items_json)
+                     if row.get('role') == 'user' and 'hostCorrection' in row.get('content', '')]
+        syntax = next(row for row in feedbacks[-1]['issues']
+                      if row['reasonCode'] == 'GENERATED_TEST_SYNTAX_INVALID')
+        assert syntax['syntaxKind'] == 'NULL_BYTE'
+        assert syntax['lineNumber'] == 4 and syntax['columnNumber'] > 0
 
 
 @pytest.mark.parametrize('corrections,model_calls', [(0, 1), (1, 2)])

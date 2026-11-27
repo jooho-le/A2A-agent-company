@@ -145,6 +145,28 @@ class ServiceContinuationTests(fixtures._SourceFixture, unittest.TestCase):
             self.record(second.request_text, bundle=second_bundle, run=second)
         assert self.repository.get_run(second.run_id) is None
 
+    def test_unchanged_service_inheritance_reuses_its_authenticated_seed(self):
+        from agents.runtime.developer_workspace import GitDeveloperCheckpoint
+        from agents.llm.contracts import SourceEditStatus
+        child, bundle = self.capture()
+        run, _, root = self.record(child.request_text, bundle=bundle,
+            run=child.model_copy(update={'status': WorkflowStatus.PLANNING}))
+        self.registry.provision(run.workspace_id, run_id=run.run_id)
+        self.preparer()(run.run_id)
+        pinned = read_continuation(self.repository, run.run_id, files=True)[1]
+        bound = self.registry.bind(run.workspace_id, run_id=run.run_id, role=AgentRole.DEVELOPER)
+        checkpoint = GitDeveloperCheckpoint(bound, baseline_commit_hash=self.commit,
+            repository_id=self.verified.configuration.repository_id, lock_path='requirements.lock',
+            initial_source_files=pinned, allow_unchanged_source=True)
+        checkpoint.prepare()
+        assert checkpoint.source_edit_status() is SourceEditStatus.UNCHANGED
+        with patch.object(checkpoint, '_commit', side_effect=AssertionError('do not create a fake change')):
+            result = checkpoint.checkpoint()
+        assert result.edits == () and result.commit_hash == result.working_base_commit
+        assert result.commit_hash != self.commit  # pinned inherited bytes differ from approved starter
+        assert (root / 'source/main.py').read_bytes() == pinned['main.py'][0]
+        assert self.git('rev-parse', 'HEAD', cwd=root / 'source').strip() == self.commit
+
     def test_foreign_environment_modified_inventory_and_unsafe_paths_fail_closed(self):
         with self.assertRaisesRegex(ContinuationConflict, 'CONTINUATION_BASELINE_CHANGED'):
             self.capture(configuration=self.approved.model_copy(update={'starting_commit_hash': 'f'*40}))

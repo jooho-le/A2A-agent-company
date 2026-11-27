@@ -342,11 +342,13 @@ class LLMEngine:
                 feedback = correction_rules.feedback(kind, issues=issues, remaining=budget_for.remaining,
                                                      stage=stage, tool_name=tool_name, repair_brief=repair_brief)
                 if kind == 'GENERATED_TESTS_INVALID':
+                    from agents.runtime.qa_catalog import case_repair_targets
                     feedback['hostCorrection']['testRepairTargets'] = {
                         'missingRequiredWritePaths': catalog.get('missingRequiredWritePaths', [])[:16],
                         'catalogFilesSha256': catalog.get('filesSha256'),
                         'instruction': 'Use exact IDs from the latest hostTestIdCatalog already supplied. '
-                                       'Write the missing paths, not an unrelated unit file.'}
+                                       'Write the missing paths, not an unrelated unit file.',
+                        **case_repair_targets(catalog, output_text)}
                 if allowed and normal_correction:
                     from agents.runtime.normal_request_repair import priority_repair_evidence
                     evidence = priority_repair_evidence(task_input['taskInput'])

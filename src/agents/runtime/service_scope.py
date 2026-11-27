@@ -14,6 +14,9 @@ SERVICE_RUNTIME_INSTRUCTIONS = (
     "Developer: read the frozen dependency lock before choosing imports. runtimeCapabilities lists its "
     "approved packages and versions; editing a requirements file cannot install packages. The Host "
     "freezes the complete candidate and measures its startup; READY is not product success. "
+    "If current Source already implements the request or an issue concerns a validator instead of product code, "
+    "submit READY with an honest no-change summary. A source write is not required merely to proceed. "
+    "The Host will freeze the actual existing bytes and run a fresh Build, QA and Security; no old PASS is reused. "
     "For required credential input, distinguish a missing field from an empty string. A Pydantic str "
     "annotation alone accepts an empty string; implement the agreed presence validation before hashing "
     "or persistence and preserve its agreed error status. Do not invent a password length requirement. "
@@ -31,8 +34,11 @@ SERVICE_RUNTIME_INSTRUCTIONS = (
     "HTTP 422 can happen before the endpoint body: if serviceDesign approves 400 instead, repair the app's "
     "RequestValidationError handler, not a field check inside the endpoint. Failure diagnostics identify "
     "actualStatus/expectedStatus or expectedStatuses, exception class and source digest without leaking inputs. "
-    "fixRequest.reproduction and continuation.reproduction contain bounded read-only generated test inputs, "
-    "not protected tests or permission to edit tests. Reproduce those failures and retain passing behavior; "
+    "fixRequest.reproduction and continuation.reproduction contain bounded read-only generated test references "
+    "and static request-shape hints, not raw test Source, protected tests or permission to edit tests. "
+    "Static hints describe possible code paths, not measured requests or new requirements. Use the bound "
+    "failureDiagnostic and validationFeedback for observed outcomes. The Host retains original test bytes "
+    "for replay. Address those failures and retain passing behavior; "
     "QA/Security must run their full required checks on the new Source, not report historical receipts as new results. "
     "Missing UI must not be hidden by changing tests. Ask INPUT_REQUIRED for a material unresolved user decision."
     " sourceInterface lists bounded static facts read from the authenticated Source archive, not a live DOM "
@@ -105,6 +111,6 @@ SERVICE_RULES = (
     "일반 앱 HTTP 시험은 _host_service_test.ServiceTestCase를 상속하고 self.client를 사용한다. 앱 시작·종료와 임시 DB·모듈 정리는 Host가 담당한다. TestClient 생성·setUp/tearDown/run 재정의·모듈 최상단 main/database/models import를 하지 않는다. 제품의 빠진 테이블을 시험이 대신 생성하지 않는다. SCN-001 전용 AppTestCase·self.User·signup helper를 사용하지 않는다.",
     "보안은 실제 구현의 입력·데이터 접근·예외 출력 경계를 검사한다. 계정 기능이 없는 앱에 Password Hash 검사를 강요하지 않는다. 비밀정보·원문 비밀번호·저장 해시·인증값은 출력하지 않으며 합성 자격증명은 런타임에 생성한다.",
     "응답 내용만 검사하고 로그나 DB 저장값까지 확인했다고 주장하지 않는다. 실제 비밀 입력이 있는 일반 앱은 _host_test_data.check_http_output과 현재 시험에서 생성한 new_password를 사용해 응답·헤더·Python 로그를 관찰한다. 저장 해시·권한 검증은 실제 Source를 읽고 별도 검사하며, 관찰하지 못한 경계는 UNVERIFIED로 남긴다.",
-    "수정은 활성 Issue와 validationFeedback의 실제 실패 동작을 읽고 원인 파일을 변경한다. 변경 없이 READY를 제출하거나 시험·요구사항을 바꾸어 실패를 숨기지 않는다. 수정 후 같은 기능을 재검증한다.",
+    "수정은 활성 Issue와 validationFeedback의 실제 실패 동작을 읽고 제품의 원인이 있으면 해당 파일을 변경한다. 현재 코드로 충분하거나 검사 준비 문제라면 무변경 사유를 사실대로 적고 READY를 제출해 재검증을 요청할 수 있다. 변경 자체는 서비스 완료 조건이 아니다. 시험·요구사항을 바꿔 실패를 숨기지 않고, Host의 새 빌드·QA·보안 결과로 완료 여부를 판단한다.",
     "응답은 Host의 닫힌 JSON 출력 계약을 지킨다. 코드·Tool evidence·검사 수·시간·해시·최종 성공 판정을 꾸며내지 않는다.",
 )

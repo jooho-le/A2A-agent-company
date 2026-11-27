@@ -1,8 +1,8 @@
 """A bounded Developer model decision, not Source or execution evidence.
 
 The model may describe its work or ask for clarification. The trusted Host
-must independently observe actual file changes, freeze a real candidate and
-assemble the unchanged Source/Change/Build Artifact contracts from receipts.
+must independently observe actual file changes (including none for a service),
+freeze a real candidate and assemble Source/Change/Build Artifacts from receipts.
 READY alone proves neither a file mutation, a successful Build nor a verdict.
 """
 
@@ -136,7 +136,7 @@ def build_developer_output_contract(repair_paths=()) -> StructuredOutput:
                 "kind": {"type": "string", "enum": ["READY", "INPUT_REQUIRED", "REJECTED"],
                     "description": "READY submits work for Host verification; INPUT_REQUIRED asks for clarification; REJECTED declines the task. Follow the branch rules on summary and questions."},
                 "summary": {"type": "string", "maxLength": MAX_DEVELOPER_SUMMARY_LENGTH,
-                    "description": "For READY, describe the path actually changed, how the edit reaches observable behavior, and untouched or pending work. The Host records changed files and Build separately. For INPUT_REQUIRED or REJECTED, this must be exactly the empty string."},
+                    "description": "For READY, describe actual changes and pending work. A service may submit existing Source without edits: state that honestly and request fresh validation, never claim an unmeasured PASS. The Host records changed files and Build separately. For INPUT_REQUIRED or REJECTED, this must be exactly the empty string."},
                 "questions": {"type": "array", "maxItems": MAX_DEVELOPER_QUESTIONS,
                     "description": "For INPUT_REQUIRED, provide 1 to 8 nonblank questions. For READY or REJECTED, this must be an empty array.",
                     "items": {"type": "string", "minLength": 1, "maxLength": MAX_DEVELOPER_QUESTION_LENGTH}},

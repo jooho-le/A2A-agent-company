@@ -147,6 +147,13 @@ def parse_developer_output(
         if build_report.execution_manifest != source.execution_manifest():
             raise ValueError("Build Report Manifest differs from the Source Snapshot")
         review = change_report.ready_review
+        if not change_report.changes or review is not None and not review.edits:
+            from orchestrator.domain.scenario_registry import SERVICE_WEB_ID
+            if run.scenario_id != SERVICE_WEB_ID or review is None:
+                raise ValueError("only a service submission may reuse unchanged Source")
+            if not review.edits and (review.working_base_commit != source.commit_hash
+                    or any(row.edit is not None or row.source_ref is not None for row in review.reported_path_edits)):
+                raise ValueError("unchanged Source must match its authenticated working base")
         if review is not None and (
             review.source_artifact_id != source.artifact_id or review.build_report_id != build_report.artifact_id
             or any(r.requirement_id not in expected_requirements for r in review.rechecks)

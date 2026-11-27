@@ -261,6 +261,8 @@ class DeveloperAgentExecutor(AgentExecutor):
                                    tools=tools, tool_executor=tracked)
                 text_engine = LLMEngine(role=AgentRole.DEVELOPER, provider=self._provider)
                 precheck = start_precheck_for(checkpoint, execution.configuration.scenario_contract)
+                from orchestrator.domain.service_design import service_policy
+                allow_unchanged = bool(service_policy(execution.configuration.scenario_contract))
 
                 async def run_model(model_input, *, text_only=False, output_override=None):
                     # text_only: the semantic rewrite (docs/live-api/05 15절) runs without any tool,
@@ -295,7 +297,8 @@ class DeveloperAgentExecutor(AgentExecutor):
                         deadline_monotonic=execution.budget.deadline_monotonic),
                     correction_candidates=checkpoint.correction_candidates if paths and not text_only else None,
                     output_check=contract_check(validate) if text_only else development_check(
-                        validate, precheck=precheck, path_check=checkpoint.ready_path_issues if paths else None,
+                        validate, precheck=precheck, allow_unchanged_source=allow_unchanged,
+                        path_check=checkpoint.ready_path_issues if paths else None,
                         library_type_check=checkpoint.library_type_issues,
                         signup_quality_check=signup_quality_precheck_for(checkpoint, execution.configuration.scenario_contract)
                             if execution.budget.limits.max_output_corrections else None,

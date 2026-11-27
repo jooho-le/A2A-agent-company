@@ -22,7 +22,7 @@ _CAUSES = {
     'LLM_SECURITY_REFERENCE_INVALID': ('보안 직원이 검사 결과에 필요한 소스 근거를 연결하지 못했어요.', 'VALIDATOR'),
     'LLM_VALIDATION_DRAFT_EXHAUSTED': ('검사 준비 또는 결과서 작성에 문제가 생겼어요.', 'VALIDATOR'),
     'LLM_TOOL_POLICY_VIOLATION': ('허용되지 않은 도구 입력이 차단됐어요.', 'OPERATOR'),
-    'DEVELOPER_CONTEXT_DENIED': ('개발 작업의 실행 정보가 승인 조건과 일치하지 않아요.', 'OPERATOR'),
+    'DEVELOPER_CONTEXT_DENIED': ('개발 작업의 입력 자료를 확인하지 못했어요.', 'OPERATOR'),
     'DEVELOPER_INPUT_INVALID': ('개발 요청을 실행 규격에 맞게 읽지 못했어요.', 'OPERATOR'),
     'DEVELOPER_SERVICES_DENIED': ('개발 도구의 실행 설정을 준비하지 못했어요.', 'OPERATOR'),
 }
@@ -118,16 +118,31 @@ async def read_work_failures(repository, controls, run, steps):
                     stored = db.execute('''SELECT payload_json FROM agent_runtime_events
                         WHERE run_id=? AND workflow_step_id=? ORDER BY sequence DESC LIMIT 32''',
                         (str(run.run_id), str(step.workflow_step_id))).fetchall()
-                from agents.llm.validation import LLMValidationReport
+                from agents.llm.validation import LLMValidationReport, REASONS, ValidationIssue
                 for record in stored:
-                    detail = json.loads(record[0]).get('detail', {})
-                    validation = detail.get('llmValidation') or detail.get('recovery', {}).get('llmValidation')
-                    if validation:
-                        validation = {k: v for k, v in validation.items() if k != 'schemaVersion'}
-                        validation['issues'] = [{k: v for k, v in row.items() if k != 'reason'}
-                                                for row in validation.get('issues', [])]
-                        result['validationIssues'] = LLMValidationReport.model_validate(
-                            validation).public()['issues']
+                    try:
+                        detail = json.loads(record[0]).get('detail', {})
+                        recovery = detail.get('recovery', {})
+                        recovery = recovery if isinstance(recovery, dict) else {}
+                        validation = detail.get('llmValidation') or recovery.get('llmValidation')
+                        if isinstance(validation, dict) and validation.get('stage') != 'TOOL_POLICY':
+                            validation = {k: v for k, v in validation.items() if k != 'schemaVersion'}
+                            validation['issues'] = [{k: v for k, v in row.items() if k != 'reason'}
+                                                    for row in validation.get('issues', [])]
+                            result['validationIssues'] = LLMValidationReport.model_validate(
+                                validation).public()['issues']
+                            break
+                    except (TypeError, ValueError, AttributeError):
+                        continue  # One policy/malformed record must not hide older Host diagnostics.
+                    # Pre-write syntax rejection is a policy report, not a JSON-schema report.
+                    # Its closed Host STOP record retains the cause without the rejected code.
+                    cause = recovery.get('draftIssue')
+                    if (recovery.get('code') == 'LLM_VALIDATION_DRAFT_EXHAUSTED'
+                            and recovery.get('kind') == 'DECISION' and isinstance(cause, str) and cause in REASONS):
+                        path = '/content' if cause == 'GENERATED_TEST_SYNTAX_INVALID' else (
+                            '/testCases' if step.agent_role.value == 'SECURITY' else '/cases')
+                        result['validationIssues'] = [ValidationIssue(
+                            fieldPath=path, reasonCode=cause, actualType='unknown').public()]
                         break
             except Exception:
                 pass
