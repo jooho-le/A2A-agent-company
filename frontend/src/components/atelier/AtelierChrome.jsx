@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import aioLogo from '../../assets/aio-logo.webp'
 import { Icon } from './AtelierArtwork'
 import { viewCopy } from './atelierMock'
 
@@ -73,12 +74,12 @@ export function AtelierSidebar({ view, mode, count, onView, mobile, open, onClos
     }
   }, [open, mobile, onClose])
   return <aside ref={sidebarRef} className="sidebar" id="company-sidebar" aria-label="회사 메뉴" inert={mobile && !open ? true : undefined}>
-    <a className="company-name" href="#/home" onClick={(event) => { event.preventDefault(); onView('home') }} aria-label="AI 에이전트 회사 홈"><span className="company-monogram">A</span><span>AI 에이전트 회사</span></a>
+    <a className="company-name" href="#/home" onClick={(event) => { event.preventDefault(); onView('home') }} aria-label="AIO 홈"><span className="company-monogram"><img className="aio-monogram-image" src={aioLogo} alt="" width="28" height="28" /></span><span>AIO</span></a>
     <span className="nav-caption">내 작업</span>
     <nav className="nav" aria-label="주 메뉴">{[['home', 'grid'], ['projects', 'folder'], ['workflow', 'arrow'], ['outputs', 'file']].map(([name, icon]) => <button key={name} type="button" className="nav-button" data-view={name} aria-current={view === name ? 'page' : undefined} onClick={() => onView(name)}><Icon name={icon} /><span>{viewCopy[name][0]}</span>{name === 'projects' && count > 0 && <span className="nav-count">{String(count).padStart(2, '0')}</span>}{name === 'team' && <span className="nav-count">{mode === 'single' ? '01' : '05'}</span>}</button>)}</nav>
     <button type="button" className="nav-button nav-secondary" data-view="team" aria-current={view === 'team' ? 'page' : undefined} onClick={() => onView('team')}><Icon name="team" />직원 소개</button>
     <div className="atelier-account">
-      <button type="button" className="owner-profile" aria-expanded={hasAccessToken ? accountOpen : undefined} aria-controls={hasAccessToken ? 'atelier-account-menu' : undefined} onClick={() => hasAccessToken ? setAccountOpen(!accountOpen) : onLogin?.()}><span className="owner-avatar">A</span><span><strong>{hasAccessToken ? '내 계정' : '로그인'}</strong></span></button>
+      <button type="button" className="owner-profile" aria-expanded={hasAccessToken ? accountOpen : undefined} aria-controls={hasAccessToken ? 'atelier-account-menu' : undefined} onClick={() => hasAccessToken ? setAccountOpen(!accountOpen) : onLogin?.()}><span className="owner-avatar"><img className="aio-monogram-image" src={aioLogo} alt="" width="28" height="28" /></span><span><strong>{hasAccessToken ? '내 계정' : '로그인'}</strong></span></button>
       {hasAccessToken && accountOpen && <div className="atelier-account-menu" id="atelier-account-menu"><p>내 계정</p><button type="button" onClick={() => { setAccountOpen(false); onLogin?.() }}>{hasAccessToken ? '다시 로그인' : '로그인'}</button><button type="button" onClick={() => { setAccountOpen(false); onRunScenario?.() }}>새 업무 맡기기</button><button type="button" onClick={() => { setAccountOpen(false); onOpenDocuments?.() }}>전자문서 관리</button>{hasAccessToken && <button type="button" onClick={onLogout}>로그아웃</button>}</div>}
     </div>
   </aside>

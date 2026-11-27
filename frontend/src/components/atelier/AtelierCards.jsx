@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import aioLogo from '../../assets/aio-logo.webp'
 import { ModeSelector } from './ModeSelector'
 import { StudioObject } from './StudioVisuals'
 import { roleLabel } from './roleLabels'

@@ -133,7 +133,7 @@ export default function AtelierDashboard({ active = true, onOpenDocuments, onLog
     return () => { window.removeEventListener('hashchange', restore); window.removeEventListener('popstate', restore) }
   }, [])
   useEffect(() => {
-    document.title = copy[0] + ' — AI 에이전트 회사'
+    document.title = copy[0] + ' — AIO'
     rootRef.current?.querySelector('.content')?.scrollTo({ top: 0, behavior: 'instant' })
     rootRef.current?.querySelector('#page-title')?.focus({ preventScroll: true })
   }, [copy])

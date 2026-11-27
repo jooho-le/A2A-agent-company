@@ -122,7 +122,7 @@ export function WorkflowView({ project, activeStep, onStep, onEmployee, presenta
     <header className="handoff-heading"><div><p className="eyebrow">FROM ONE DESK TO THE NEXT.</p><h2 id={presentation.handoffTitleId || 'handoff-title'}>{presentation.workflowTitle || '다섯 명의 에이전트, 함께 일하는 하나의 팀.'}</h2><p>{project.name} · {presentation.workflowDescription || '프로젝트 목업의 역할 안내 · 실제 호출 순서는 Run Event로 확인합니다.'}</p></div><span className="scroll-cue" aria-hidden="true"><i />SCROLL TO FOLLOW</span></header>
     <AgentLeadership />
     <div className="handoff-layout"><div className="handoff-sticky">
-      <div className="handoff-scene-top"><span className="office-floor-label">AI 에이전트 회사 / TEAM DESK</span><span>{String(currentIndex + 1).padStart(2, '0')} / {String(steps.length).padStart(2, '0')}</span></div>
+      <div className="handoff-scene-top"><span className="office-floor-label">AIO / TEAM DESK</span><span>{String(currentIndex + 1).padStart(2, '0')} / {String(steps.length).padStart(2, '0')}</span></div>
       <div className="handoff-office" data-role={currentIndex}><OfficeDesk role={current.role === 'Orchestrator' ? 'Planner' : current.role} /></div>
       <div className="handoff-scene-info" key={currentIndex}><p className="eyebrow">역할 안내 · 프로젝트 목업</p><h3>{current.name}</h3><p>{current.purpose}</p></div>
       <div className="handoff-tabs" role="group" aria-label="리더와 작업 역할 살펴보기" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0,1fr))` }}>{steps.map(({ employee }, index) => <button type="button" className="handoff-tab" data-focus-step={index} onClick={onStep} aria-pressed={index === currentIndex} key={employee.id}><span>{String(index + 1).padStart(2, '0')}</span>{detail(employee).label}</button>)}</div>

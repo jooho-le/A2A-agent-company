@@ -1,5 +1,6 @@
 // 실제 조회 상태만 관리합니다. 목업 타임라인·API·저장소·세리머니에 접근하지 않습니다.
 export const officeAgentRoles = ['PLANNER', 'DEVELOPER', 'QA', 'SECURITY']
+export const minimumOfficeWorkSeconds = 3
 const confirmedStates = new Set(['idle', 'pending', 'working', 'succeeded', 'failed', 'waiting_input', 'canceled'])
 
 export function createOfficeRunController() {
@@ -9,7 +10,7 @@ export function createOfficeRunController() {
     runId = nextId
     records = officeAgentRoles.map(agentRole => ({
       agentRole, confirmed: null, shown: { agentRole, displayState: 'idle', label: '기본 대기', step: null },
-      identity: null, motionTime: 0, poseState: 'waiting', blocked: false, refreshing: false,
+      identity: null, motionTime: 0, poseState: 'waiting', presentedPose: 'waiting', blocked: false, refreshing: false,
     }))
   }
   reset(null)
@@ -30,12 +31,13 @@ export function createOfficeRunController() {
       const agent = queryFailed ? null : snapshot?.agents?.find(item => item.agentRole === record.agentRole)
       if (!agent || !confirmedStates.has(agent.displayState)) {
         record.blocked = true
+        record.identity = null
         record.shown = { agentRole: record.agentRole, displayState: 'unknown', label: '상태 확인 불가', step: null, reason: agent?.reason }
         continue
       }
       // 같은 Run·Step·재시도·상태의 재조회는 작업 모션을 처음부터 시작하지 않습니다.
       const identity = JSON.stringify([agent.step?.workflowStepId, agent.step?.attempt, agent.step?.codeVersion, agent.displayState])
-      if (record.identity !== identity) record.motionTime = 0
+      if (record.identity !== identity) { record.motionTime = 0; record.presentedPose = 'waiting' }
       record.identity = identity
       record.confirmed = { ...agent }
       record.shown = record.confirmed
@@ -48,12 +50,15 @@ export function createOfficeRunController() {
     const elapsed = Number.isFinite(delta) ? Math.max(0, delta) : 0
     return records.map(record => {
       if (motionEnabled && !record.blocked && record.shown.displayState === 'working') record.motionTime += elapsed
+      const pendingWork = record.shown.displayState === 'working' && record.motionTime < minimumOfficeWorkSeconds
+      if (!record.blocked) record.presentedPose = pendingWork ? 'waiting' : record.poseState
       return {
         ...record.shown, refreshing: record.refreshing,
+        ...(pendingWork ? { displayState: 'pending', label: '작업 확인 중' } : {}),
         hasConfirmedState: record.confirmed !== null,
         motionTime: record.motionTime,
-        poseTime: record.poseState === 'working' ? record.motionTime : 0,
-        poseState: record.poseState,
+        poseTime: record.presentedPose === 'working' ? Math.max(0, record.motionTime - minimumOfficeWorkSeconds) * .6 : 0,
+        poseState: record.presentedPose,
         expression: record.shown.displayState === 'failed' ? 'worried' : 'normal',
       }
     })
