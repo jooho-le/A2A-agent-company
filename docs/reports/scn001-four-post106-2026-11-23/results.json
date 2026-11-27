@@ -1,0 +1,1030 @@
+{
+  "date": "2026-11-23",
+  "task": 107,
+  "experimentId": "d811c81a-de6a-4bbb-ac45-52f6eda16266",
+  "requestedRuns": 4,
+  "submittedRuns": 4,
+  "completedRuns": 4,
+  "stoppedReason": "THREE_CONSECUTIVE_PAUSED_RUNS",
+  "repetitionsPerCondition": 1,
+  "automaticResubmission": false,
+  "manuallyRepairedGeneratedSource": false,
+  "model": {
+    "provider": "openai",
+    "modelId": "gpt-4.1-mini-2025-04-14",
+    "modelRevision": null,
+    "temperature": 0,
+    "seed": null
+  },
+  "llmLimits": {
+    "max_model_calls": 200,
+    "max_tool_calls": 200,
+    "max_output_tokens": 8192,
+    "max_total_tokens": 2000000,
+    "model_timeout_seconds": 120,
+    "tool_timeout_seconds": 120,
+    "max_json_bytes": 1048576,
+    "max_output_corrections": 2,
+    "max_question_reminders": 1,
+    "max_provider_retries": 1
+  },
+  "requestText": "이메일과 비밀번호로 회원가입 기능을 만들어줘.",
+  "rows": [
+    {
+      "condition": "multi-ver1",
+      "runId": "817b6f30-85bb-4a47-b9c0-0e7f7b35afde",
+      "runStatus": "ABORTED",
+      "hostVerdict": null,
+      "terminationReason": "DEVELOPMENT_NO_PROGRESS_EXHAUSTED",
+      "codeVersion": null,
+      "evaluationAvailable": false,
+      "evaluationVerdict": null,
+      "manifestCheck": null,
+      "accuracy": null,
+      "finalChecks": [],
+      "metrics": {
+        "verdictMs": null,
+        "totalMs": 80636,
+        "firstBuildPassMs": null,
+        "fixAttempts": 0,
+        "modelCalls": 13,
+        "toolCalls": 12,
+        "inputTokens": 214955,
+        "outputTokens": 8037,
+        "totalTokens": 222992,
+        "knownInputTokens": 214955,
+        "knownOutputTokens": 8037,
+        "knownTotalTokens": 222992,
+        "costUsd": "0.0700028",
+        "knownCostUsd": "0.0700028",
+        "costComplete": true,
+        "tokenBreakdownComplete": true,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "ENDED"
+      },
+      "agentServerRoles": [
+        "developer",
+        "planner",
+        "qa",
+        "security"
+      ],
+      "steps": [
+        {
+          "role": "PLANNER",
+          "status": "SUCCEEDED",
+          "codeVersion": null
+        },
+        {
+          "role": "DEVELOPER",
+          "status": "FAILED",
+          "codeVersion": 1
+        }
+      ],
+      "failedAgentTasks": [
+        {
+          "server": "developer",
+          "codes": [
+            "LLM_DEVELOPMENT_NO_PROGRESS"
+          ]
+        }
+      ],
+      "buildExecutions": [],
+      "generatedTestExecutions": [],
+      "modelErrorEvents": [],
+      "toolErrorEvents": [
+        {
+          "toolName": "write_source_file",
+          "errorKind": "WRITE_CONFLICT",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        }
+      ],
+      "failedDetailedChecks": [],
+      "originalDirectory": ".data/experiments/scn001-four-post106-20261123/01-multi-ver1-r01"
+    },
+    {
+      "condition": "single-ver1",
+      "runId": "2cf95278-5a0b-476d-8104-9fc4ea63d986",
+      "runStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "terminationReason": null,
+      "codeVersion": 3,
+      "evaluationAvailable": true,
+      "evaluationVerdict": "FAIL",
+      "manifestCheck": {
+        "errorCode": null,
+        "mismatchedFields": [],
+        "metadataMatches": true
+      },
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 6,
+        "failedRequirements": 1,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 0.8571428571428571,
+        "fullSatisfactionUpper": 0.8571428571428571,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 1,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "FAIL"
+          }
+        ],
+        "productPass": false,
+        "reason": null
+      },
+      "finalChecks": [
+        {
+          "testId": "28f5b695-2d40-4c9d-acb2-7ef682cfacf8",
+          "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+          "status": "PASS"
+        },
+        {
+          "testId": "dbc502d9-5e40-4a03-9ea1-a38924a3a2ce",
+          "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+          "status": "PASS"
+        },
+        {
+          "testId": "d15c2dfa-81ec-4d71-873f-a87ec68c77fb",
+          "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+          "status": "PASS"
+        },
+        {
+          "testId": "720c082c-a1f5-4147-ad53-14a27a60deaf",
+          "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+          "status": "PASS"
+        },
+        {
+          "testId": "cc579a2d-11d4-4d79-b4a5-169a99ef90b3",
+          "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+          "status": "PASS"
+        },
+        {
+          "testId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+          "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+          "status": "PASS"
+        },
+        {
+          "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+          "title": "SEC-SIGNUP-002 비밀번호 저장값",
+          "status": "PASS"
+        },
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "status": "PASS"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "status": "FAIL"
+        }
+      ],
+      "metrics": {
+        "verdictMs": null,
+        "totalMs": 710475,
+        "firstBuildPassMs": 70559,
+        "fixAttempts": 3,
+        "modelCalls": 62,
+        "toolCalls": 64,
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "knownInputTokens": 1328478,
+        "knownOutputTokens": 36122,
+        "knownTotalTokens": 1364600,
+        "costUsd": null,
+        "knownCostUsd": "0.4280984",
+        "costComplete": false,
+        "tokenBreakdownComplete": false,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "PAUSED"
+      },
+      "agentServerRoles": [
+        "single_agent"
+      ],
+      "steps": [
+        {
+          "role": "PLANNER",
+          "status": "SUCCEEDED",
+          "codeVersion": null
+        },
+        {
+          "role": "DEVELOPER",
+          "status": "SUCCEEDED",
+          "codeVersion": 1
+        },
+        {
+          "role": "QA",
+          "status": "SUCCEEDED",
+          "codeVersion": 1
+        },
+        {
+          "role": "SECURITY",
+          "status": "SUCCEEDED",
+          "codeVersion": 1
+        },
+        {
+          "role": "DEVELOPER",
+          "status": "SUCCEEDED",
+          "codeVersion": 2
+        },
+        {
+          "role": "QA",
+          "status": "SUCCEEDED",
+          "codeVersion": 2
+        },
+        {
+          "role": "SECURITY",
+          "status": "SUCCEEDED",
+          "codeVersion": 2
+        },
+        {
+          "role": "DEVELOPER",
+          "status": "SUCCEEDED",
+          "codeVersion": 3
+        },
+        {
+          "role": "QA",
+          "status": "SUCCEEDED",
+          "codeVersion": 3
+        },
+        {
+          "role": "SECURITY",
+          "status": "SUCCEEDED",
+          "codeVersion": 3
+        },
+        {
+          "role": "DEVELOPER",
+          "status": "FAILED",
+          "codeVersion": 4
+        }
+      ],
+      "failedAgentTasks": [
+        {
+          "server": "single_agent",
+          "codes": [
+            "LLM_PROVIDER_ERROR"
+          ]
+        }
+      ],
+      "buildExecutions": [
+        {
+          "codeVersion": 1,
+          "exitCode": 0,
+          "durationMs": 3980,
+          "codes": [
+            "SCN001_START_CONTRACT_OK"
+          ]
+        },
+        {
+          "codeVersion": 2,
+          "exitCode": 0,
+          "durationMs": 2067,
+          "codes": [
+            "SCN001_START_CONTRACT_OK"
+          ]
+        },
+        {
+          "codeVersion": 3,
+          "exitCode": 0,
+          "durationMs": 2246,
+          "codes": [
+            "SCN001_START_CONTRACT_OK"
+          ]
+        }
+      ],
+      "generatedTestExecutions": [
+        {
+          "manifestId": "bd6e9338-2657-4d78-91dd-5babc6eccbf9",
+          "role": "QA",
+          "codeVersion": 1,
+          "total": 7,
+          "passed": 6,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "93a40d7f-baad-4776-991c-99369e0ffd3a",
+          "role": "SECURITY",
+          "codeVersion": 1,
+          "total": 3,
+          "passed": 2,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "cfbd2a14-6e8c-4172-94ab-fcc97b5d0ae3",
+          "role": "SECURITY",
+          "codeVersion": 1,
+          "total": 3,
+          "passed": 1,
+          "failed": 1,
+          "skipped": 1,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "43df778a-c0b0-4a10-a4f0-4f9561b60943",
+          "role": "QA",
+          "codeVersion": 2,
+          "total": 7,
+          "passed": 6,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "fd56a492-45af-42a4-92a2-ae307ce14819",
+          "role": "SECURITY",
+          "codeVersion": 2,
+          "total": 3,
+          "passed": 1,
+          "failed": 1,
+          "skipped": 1,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "6cf55d90-aed3-4c64-8e62-7f6bbcb999cb",
+          "role": "SECURITY",
+          "codeVersion": 2,
+          "total": 3,
+          "passed": 2,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "936ded81-8194-4f80-9e6a-7f7cfbfe9fea",
+          "role": "QA",
+          "codeVersion": 3,
+          "total": 7,
+          "passed": 6,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "0c489465-cdf7-4e36-989d-98ab89665f81",
+          "role": "SECURITY",
+          "codeVersion": 3,
+          "total": 3,
+          "passed": 3,
+          "failed": 0,
+          "skipped": 0,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "3e2aa5b7-9cd6-4531-b1ad-8fa8fd51bf07",
+          "role": "SECURITY",
+          "codeVersion": 3,
+          "total": 3,
+          "passed": 1,
+          "failed": 1,
+          "skipped": 1,
+          "closedDiagnosticCodes": []
+        },
+        {
+          "manifestId": "871bbf79-2b93-47a8-8285-07da91e7da17",
+          "role": "SECURITY",
+          "codeVersion": 3,
+          "total": 3,
+          "passed": 2,
+          "failed": 1,
+          "skipped": 0,
+          "closedDiagnosticCodes": []
+        }
+      ],
+      "modelErrorEvents": [
+        {
+          "sequence": 36,
+          "outcome": "LLM_PROVIDER_ERROR"
+        },
+        {
+          "sequence": 61,
+          "outcome": "LLM_PROVIDER_ERROR"
+        },
+        {
+          "sequence": 62,
+          "outcome": "LLM_PROVIDER_ERROR"
+        }
+      ],
+      "toolErrorEvents": [
+        {
+          "toolName": "edit_source_file",
+          "errorKind": "EDIT_TARGET_MISSING",
+          "outcome": "UNVERIFIED",
+          "resultUnknown": false
+        }
+      ],
+      "failedDetailedChecks": [
+        {
+          "caseId": "malformed_list",
+          "itemId": "password_exposed",
+          "status": "FAIL",
+          "reason": "EXPECTATION_MISMATCH"
+        }
+      ],
+      "originalDirectory": ".data/experiments/scn001-four-post106-20261123/02-single-ver1-r01"
+    },
+    {
+      "condition": "single-ver2",
+      "runId": "f12aba79-8c2b-4e6c-953d-82d53707e8c9",
+      "runStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "terminationReason": null,
+      "codeVersion": 1,
+      "evaluationAvailable": true,
+      "evaluationVerdict": "PASS",
+      "manifestCheck": {
+        "errorCode": null,
+        "mismatchedFields": [],
+        "metadataMatches": true
+      },
+      "accuracy": {
+        "requirementCount": 7,
+        "passedRequirements": 7,
+        "failedRequirements": 0,
+        "unverifiedRequirements": 0,
+        "unverifiedWithConfirmedFailures": 0,
+        "unverifiedWithConfirmedFailureRequirementIds": [],
+        "fullSatisfactionLower": 1.0,
+        "fullSatisfactionUpper": 1.0,
+        "checkCount": 9,
+        "decidedChecks": 9,
+        "checkDecidability": 1.0,
+        "qaPassRate": 1.0,
+        "blockingSecurityFindings": 0,
+        "securityChecks": [
+          {
+            "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+            "status": "PASS"
+          },
+          {
+            "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+            "status": "PASS"
+          },
+          {
+            "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+            "status": "PASS"
+          }
+        ],
+        "productPass": true,
+        "reason": null
+      },
+      "finalChecks": [
+        {
+          "testId": "28f5b695-2d40-4c9d-acb2-7ef682cfacf8",
+          "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+          "status": "PASS"
+        },
+        {
+          "testId": "dbc502d9-5e40-4a03-9ea1-a38924a3a2ce",
+          "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+          "status": "PASS"
+        },
+        {
+          "testId": "d15c2dfa-81ec-4d71-873f-a87ec68c77fb",
+          "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+          "status": "PASS"
+        },
+        {
+          "testId": "720c082c-a1f5-4147-ad53-14a27a60deaf",
+          "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+          "status": "PASS"
+        },
+        {
+          "testId": "cc579a2d-11d4-4d79-b4a5-169a99ef90b3",
+          "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+          "status": "PASS"
+        },
+        {
+          "testId": "2cb82dc4-1340-4217-8598-e58c4b1d6caf",
+          "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+          "status": "PASS"
+        },
+        {
+          "testId": "f89deb22-b22f-4482-8892-768d25b62d84",
+          "title": "SEC-SIGNUP-002 비밀번호 저장값",
+          "status": "PASS"
+        },
+        {
+          "testId": "ce772a4c-1ca3-4b12-b736-e594ada73b59",
+          "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+          "status": "PASS"
+        },
+        {
+          "testId": "671b1b75-b082-4ea8-9fc0-cb6ccad661d4",
+          "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+          "status": "PASS"
+        }
+      ],
+      "metrics": {
+        "verdictMs": null,
+        "totalMs": 436272,
+        "firstBuildPassMs": null,
+        "fixAttempts": 1,
+        "modelCalls": 17,
+        "toolCalls": 15,
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "knownInputTokens": 293850,
+        "knownOutputTokens": 7206,
+        "knownTotalTokens": 301056,
+        "costUsd": null,
+        "knownCostUsd": "0.0839496",
+        "costComplete": false,
+        "tokenBreakdownComplete": false,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "PAUSED"
+      },
+      "agentServerRoles": [
+        "single_agent"
+      ],
+      "steps": [
+        {
+          "role": "PLANNER",
+          "status": "SUCCEEDED",
+          "codeVersion": null
+        },
+        {
+          "role": "DEVELOPER",
+          "status": "SUCCEEDED",
+          "codeVersion": 1
+        },
+        {
+          "role": "DEVELOPER",
+          "status": "FAILED",
+          "codeVersion": 2
+        }
+      ],
+      "failedAgentTasks": [
+        {
+          "server": "single_agent",
+          "codes": [
+            "LLM_EXECUTION_TIMEOUT"
+          ]
+        }
+      ],
+      "buildExecutions": [
+        {
+          "codeVersion": 1,
+          "exitCode": 1,
+          "durationMs": 4386,
+          "codes": [
+            "SCN001_READY_ENDPOINT_REQUIRED"
+          ]
+        }
+      ],
+      "generatedTestExecutions": [],
+      "modelErrorEvents": [
+        {
+          "sequence": 17,
+          "outcome": "LLM_EXECUTION_TIMEOUT"
+        }
+      ],
+      "toolErrorEvents": [],
+      "failedDetailedChecks": [],
+      "originalDirectory": ".data/experiments/scn001-four-post106-20261123/03-single-ver2-r01"
+    },
+    {
+      "condition": "multi-ver2",
+      "runId": "9db4c26f-ef67-4373-af48-3d32fa8fc06b",
+      "runStatus": "HUMAN_REVIEW",
+      "hostVerdict": null,
+      "terminationReason": null,
+      "codeVersion": null,
+      "evaluationAvailable": false,
+      "evaluationVerdict": null,
+      "manifestCheck": null,
+      "accuracy": null,
+      "finalChecks": [],
+      "metrics": {
+        "verdictMs": null,
+        "totalMs": 2682,
+        "firstBuildPassMs": null,
+        "fixAttempts": 0,
+        "modelCalls": 2,
+        "toolCalls": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 0,
+        "knownInputTokens": 0,
+        "knownOutputTokens": 0,
+        "knownTotalTokens": 0,
+        "costUsd": null,
+        "knownCostUsd": "0",
+        "costComplete": false,
+        "tokenBreakdownComplete": true,
+        "priceBook": {
+          "currency": "USD",
+          "priceBookId": "scn001-openai-global-text",
+          "priceBookVersion": "2026-11-15",
+          "priceBookSha256": "39b33c1b8e2ab823a262a11e2613123e083686426bbe5595bba3decb7d63d7bd",
+          "calculationVersion": "USD_PER_MILLION_V1"
+        },
+        "endedBy": "PAUSED"
+      },
+      "agentServerRoles": [
+        "developer",
+        "planner",
+        "qa",
+        "security"
+      ],
+      "steps": [
+        {
+          "role": "PLANNER",
+          "status": "FAILED",
+          "codeVersion": null
+        }
+      ],
+      "failedAgentTasks": [
+        {
+          "server": "planner",
+          "codes": [
+            "LLM_PROVIDER_ERROR"
+          ]
+        }
+      ],
+      "buildExecutions": [],
+      "generatedTestExecutions": [],
+      "modelErrorEvents": [
+        {
+          "sequence": 1,
+          "outcome": "LLM_PROVIDER_ERROR"
+        },
+        {
+          "sequence": 2,
+          "outcome": "LLM_PROVIDER_ERROR"
+        }
+      ],
+      "toolErrorEvents": [],
+      "failedDetailedChecks": [],
+      "originalDirectory": ".data/experiments/scn001-four-post106-20261123/04-multi-ver2-r01"
+    }
+  ],
+  "knownCostUsd": "0.5820508",
+  "costComplete": false,
+  "parity": {
+    "ver1-architecture": {
+      "schemaVersion": 1,
+      "groupBy": "architecture",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "staticToolUnion",
+          "status": "PASS",
+          "missingInSingle": [],
+          "extraInSingle": [],
+          "phaseToolsBeyondSingle": [],
+          "phaseDifferences": {
+            "IMPLEMENTING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            },
+            "FIXING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            }
+          }
+        },
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "2cf95278-5a0b-476d-8104-9fc4ea63d986"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "817b6f30-85bb-4a47-b9c0-0e7f7b35afde"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    },
+    "ver2-architecture": {
+      "schemaVersion": 1,
+      "groupBy": "architecture",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "staticToolUnion",
+          "status": "PASS",
+          "missingInSingle": [],
+          "extraInSingle": [],
+          "phaseToolsBeyondSingle": [],
+          "phaseDifferences": {
+            "IMPLEMENTING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            },
+            "FIXING": {
+              "moreThanRole": [
+                "read_security_report",
+                "read_test_report"
+              ],
+              "fewerThanRole": []
+            }
+          }
+        },
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "note": "BOTH_ABSENT"
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "f12aba79-8c2b-4e6c-953d-82d53707e8c9"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "9db4c26f-ef67-4373-af48-3d32fa8fc06b"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    },
+    "single-versions": {
+      "schemaVersion": 1,
+      "groupBy": "loopPolicy",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedScopes",
+          "status": "PASS",
+          "ver1": [
+            "protected-signup-qa",
+            "protected-signup-security"
+          ],
+          "ver2": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "ver1Present": true,
+          "ver2Present": false
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "2cf95278-5a0b-476d-8104-9fc4ea63d986"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "f12aba79-8c2b-4e6c-953d-82d53707e8c9"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "architecture": "SINGLE_AGENT",
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    },
+    "multi-versions": {
+      "schemaVersion": 1,
+      "groupBy": "loopPolicy",
+      "status": "PASS",
+      "checks": [
+        {
+          "check": "runtimeLimits",
+          "status": "PASS",
+          "differingFields": [],
+          "llmLimits": {
+            "max_model_calls": 200,
+            "max_tool_calls": 200,
+            "max_output_tokens": 8192,
+            "max_total_tokens": 2000000,
+            "model_timeout_seconds": 120,
+            "tool_timeout_seconds": 120,
+            "max_json_bytes": 1048576,
+            "max_output_corrections": 2,
+            "max_question_reminders": 1,
+            "max_provider_retries": 1
+          }
+        },
+        {
+          "check": "toolConfiguration",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedScopes",
+          "status": "PASS",
+          "ver1": [
+            "protected-signup-qa",
+            "protected-signup-security"
+          ],
+          "ver2": []
+        },
+        {
+          "check": "startingSource",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "protectedCases",
+          "status": "PASS",
+          "ver1Present": true,
+          "ver2Present": false
+        },
+        {
+          "check": "priceBook",
+          "status": "PASS",
+          "differingFields": []
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "817b6f30-85bb-4a47-b9c0-0e7f7b35afde"
+        },
+        {
+          "check": "pinnedPolicy",
+          "status": "PASS",
+          "runId": "9db4c26f-ef67-4373-af48-3d32fa8fc06b"
+        }
+      ],
+      "pinnedPolicyChecked": true,
+      "architecture": "MULTI_AGENT",
+      "limitations": [
+        "Run별 고정 해시를 주지 않으면 설정 파일 비교만 한 것이며, 각 Run이 그 파일로 돌았다는 증명은 아니다.",
+        "단계별 도구 차이(phaseDifferences)는 합집합 규칙 위반이 아니라 참고 정보다."
+      ]
+    }
+  },
+  "verification": {
+    "implementationUnchanged": true,
+    "maximumNewRuns": 4,
+    "repetitionsPerCondition": 1,
+    "automaticResubmission": false,
+    "manuallyRepairedGeneratedSource": false,
+    "listeningExperimentPorts": {
+      "18002": false,
+      "18101": false,
+      "18102": false,
+      "18103": false,
+      "18104": false
+    }
+  },
+  "limitations": [
+    "Each condition has exactly one observation; not a repeated-run average.",
+    "No registered Source is unscored, not a zero quality score.",
+    "Elapsed time until abort or pause is not successful verdict time.",
+    "Model cost is computed from the pinned price book, not a billing invoice.",
+    "Previous implementation cohorts are not pooled with these results."
+  ],
+  "originalResultsDirectory": ".data/experiments/scn001-four-post106-20261123"
+}

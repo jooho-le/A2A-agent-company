@@ -1,0 +1,51 @@
+/* PDF 01 · 코드는 빨리나오지만, 왜 일은 끝나지 않을까요?
+   이 파일은 이 페이지에만 적용됩니다. 내용은 같은 폴더의 index.html에서 수정합니다.
+   공통 배경·강조색은 아래 변수로, 원본 텍스트 색은 page-color 색상표로 바꿉니다. */
+#deck > .slide[data-editable-page="01"] {
+  --page-background: #030407;
+  --accent: #d4ff24;
+  --blue: #1558c9;
+  --ink: #f0f2ec;
+  --muted: #aaaeb8;
+  --page-padding: 38px 64px 26px;
+  --page-title-size: 87px;
+  --page-title-line-height: 102.66px;
+  --page-title-letter-spacing: -3.5px;
+  --page-title-offset: none; /* 예: 20px 0px = 제목을 오른쪽으로 20px */
+  --page-content-offset: none; /* 예: 0px 20px = 본문을 아래로 20px */
+  --page-color-01: #d4ff24;
+  --page-color-02: #858b98;
+  --page-color-03: #f0f2ec;
+  --page-color-04: #aaaeb8;
+  --page-color-05: #ffffff;
+  background-color: var(--page-background);
+  padding: var(--page-padding);
+}
+#deck > .slide[data-editable-page="01"] :is(h1,h2) {
+  font-size: var(--page-title-size);
+  line-height: var(--page-title-line-height);
+  letter-spacing: var(--page-title-letter-spacing);
+  translate: var(--page-title-offset);
+}
+#deck > .slide[data-editable-page="01"] > .content { translate: var(--page-content-offset); }
+
+/* 기존 요소별 스타일: 원래 HTML 안의 색상·폭·위치 값을 여기로 옮겼습니다. */
+#deck > .slide[data-editable-page="01"] .p01-element-001 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-002 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-003 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-004 { color:var(--page-color-04)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-005 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-006 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-007 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-008 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-009 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-010 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-011 { color:var(--page-color-05)!important }
+#deck > .slide[data-editable-page="01"] .p01-element-012 { color:var(--page-color-02)!important }
+
+/* 페이지 전용 추가 스타일. 선택자 앞의 페이지 번호는 유지하세요.
+#deck > .slide[data-editable-page="01"] .원하는요소클래스 {
+  font-size: 32px;
+  margin-top: 20px;
+}
+*/

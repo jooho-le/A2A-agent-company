@@ -1,0 +1,270 @@
+{
+  "testId": "run_unit_tests:protected-signup-security:practice_security.PracticeSecurityChecks.test_sec_signup_005_password_and_hash_not_exposed",
+  "testVersion": "practice:c815b0128b1d83e7c93ea95a90701124ddba1de836160658aa02fdcb0c55cf07",
+  "snapshots": {
+    "2": "d449ed5efbb6e8f0544e9c91c3483b391f4dda445439358bee3b3ecb07f1af38",
+    "3": "68455ad9e71aade92b2c83fc9f6965114acb124a3431480711a918ee30d99f67",
+    "4": "6dbcc61d44b89cc40414d7d7fdc5bf783623772cace9bf2f173aab3c3d54bbc0"
+  },
+  "v2Observations": [
+    {
+      "caseId": "setup",
+      "itemId": "ready",
+      "kind": "precondition",
+      "actual": true,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "precondition",
+      "itemId": "http_status",
+      "kind": "precondition",
+      "actual": 201,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "db_error",
+      "itemId": "injected",
+      "kind": "precondition",
+      "actual": true,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "success",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": 201,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "invalid_email",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": 400,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "short_password",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": 400,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "duplicate",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": 409,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "malformed_missing_email",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": 422,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "malformed_list",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": 422,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "malformed_misspelled",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": 422,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "db_error",
+      "itemId": "response_status",
+      "kind": "precondition",
+      "actual": null,
+      "status": "UNVERIFIED",
+      "reason": "UNHANDLED_APP_EXCEPTION"
+    },
+    {
+      "caseId": "success",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "success",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "invalid_email",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "invalid_email",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "short_password",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "short_password",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "duplicate",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "duplicate",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "malformed_missing_email",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": true,
+      "status": "FAIL",
+      "reason": "EXPECTATION_MISMATCH"
+    },
+    {
+      "caseId": "malformed_missing_email",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "malformed_list",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": true,
+      "status": "FAIL",
+      "reason": "EXPECTATION_MISMATCH"
+    },
+    {
+      "caseId": "malformed_list",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "malformed_misspelled",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": true,
+      "status": "FAIL",
+      "reason": "EXPECTATION_MISMATCH"
+    },
+    {
+      "caseId": "malformed_misspelled",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "db_error",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": null,
+      "status": "UNVERIFIED",
+      "reason": "UNHANDLED_APP_EXCEPTION"
+    },
+    {
+      "caseId": "db_error",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": null,
+      "status": "UNVERIFIED",
+      "reason": "UNHANDLED_APP_EXCEPTION"
+    },
+    {
+      "caseId": "application_logs",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "application_logs",
+      "itemId": "hash_exposed",
+      "kind": "assertion",
+      "actual": true,
+      "status": "FAIL",
+      "reason": "EXPECTATION_MISMATCH"
+    },
+    {
+      "caseId": "application_logs",
+      "itemId": "password_in_crash",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    },
+    {
+      "caseId": "application_logs",
+      "itemId": "hash_in_crash",
+      "kind": "assertion",
+      "actual": true,
+      "status": "FAIL",
+      "reason": "EXPECTATION_MISMATCH"
+    }
+  ],
+  "v3Changes": [
+    {
+      "caseId": "malformed_missing_email",
+      "itemId": "password_exposed",
+      "kind": "assertion",
+      "actual": false,
+      "status": "PASS",
+      "reason": null
+    }
+  ],
+  "v4Changes": []
+}

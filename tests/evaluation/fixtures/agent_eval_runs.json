@@ -1,0 +1,1968 @@
+{
+ "source": "dev 시험 하네스(가짜 LLM·가짜 docker, 생성 코드 실행 없음)로 2026-11-05에 만든 Run을 dev evaluation_export로 꺼낸 뒤 agent_eval이 읽는 칸만 남김. multiFix = Multi, QA 실패 → 수정 → 재검증 → SUCCESS (tests/test_owned_agent_fix_pipeline.py _FixHarness 기본값). single = Single, 한 번에 SUCCESS (tests/test_single_agent_pipeline.py, measured_security=True).",
+ "multiFix": {
+  "bundle": {
+   "run": {
+    "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+    "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+    "status": "FINISHED",
+    "verdict": "SUCCESS",
+    "codeVersion": 2,
+    "fixAttempt": 1
+   },
+   "usage": {
+    "records": [
+     {
+      "binding": {
+       "role": "PLANNER",
+       "workflowStepId": "564defcc-58d5-459f-8adf-54b759f0126f"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "DEVELOPER",
+       "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "DEVELOPER",
+       "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 0,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "QA",
+       "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SECURITY",
+       "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 0,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SECURITY",
+       "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 0,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "QA",
+       "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "DEVELOPER",
+       "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "DEVELOPER",
+       "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "QA",
+       "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 2,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "QA",
+       "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 0,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SECURITY",
+       "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 0,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SECURITY",
+       "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 23,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     }
+    ]
+   },
+   "issues": [
+    {
+     "issueId": "cbd0d048-6255-4204-81d3-7bccd3c8ad38",
+     "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+     "codeVersion": 1,
+     "reportArtifactId": "befea979-3ce9-416f-ba2b-ca6ca3905469",
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9"
+     ],
+     "reporter": "QA",
+     "category": "QA_ASSERTION_FAILURE",
+     "newCodeVersion": 2
+    }
+   ]
+  },
+  "trace": {
+   "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+   "artifacts": [
+    {
+     "artifactId": "07a29b67-a853-4e4a-9520-42c8da3eb8e8",
+     "artifactType": "REQUIREMENT",
+     "workflowStepId": "564defcc-58d5-459f-8adf-54b759f0126f",
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "payload": {
+      "requirements": [
+       {
+        "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+        "key": "REQ-001"
+       },
+       {
+        "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+        "key": "REQ-002"
+       },
+       {
+        "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+        "key": "REQ-003"
+       },
+       {
+        "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+        "key": "REQ-004"
+       },
+       {
+        "requirementId": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+        "key": "REQ-005"
+       },
+       {
+        "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+        "key": "REQ-006"
+       },
+       {
+        "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+        "key": "REQ-007"
+       },
+       {
+        "requirementId": "4876a535-23e1-4059-941f-bf49441f2276",
+        "key": "REQ-008"
+       }
+      ],
+      "implementationPlan": [
+       {
+        "taskId": "TASK-001",
+        "title": "동결 회원가입 기준 구현",
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+         "4876a535-23e1-4059-941f-bf49441f2276"
+        ],
+        "dependsOn": []
+       }
+      ]
+     }
+    },
+    {
+     "artifactId": "941281bb-c544-4320-aae3-eef80dab8931",
+     "artifactType": "SOURCE",
+     "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ]
+    },
+    {
+     "artifactId": "c1cb3e29-2dc4-41ab-9464-c95d5e8b9a2a",
+     "artifactType": "CHANGE_REPORT",
+     "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ]
+    },
+    {
+     "artifactId": "bb563889-804e-42e6-9784-5ad66b3dca6e",
+     "artifactType": "BUILD_REPORT",
+     "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "executionOutcome": "PASS",
+     "executionManifest": {
+      "projectArtifactId": "941281bb-c544-4320-aae3-eef80dab8931"
+     }
+    },
+    {
+     "artifactId": "befea979-3ce9-416f-ba2b-ca6ca3905469",
+     "artifactType": "QA_REPORT",
+     "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "tests": [
+      {
+       "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+       "outcome": "FAIL"
+      },
+      {
+       "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+       "outcome": "PASS"
+      }
+     ],
+     "executionManifest": {
+      "projectArtifactId": "941281bb-c544-4320-aae3-eef80dab8931"
+     }
+    },
+    {
+     "artifactId": "ea162a9f-ab2a-476a-bd3c-5ed320e98fed",
+     "artifactType": "SECURITY_REPORT",
+     "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a",
+     "codeVersion": 1,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "requirementResults": [
+      {
+       "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+       "outcome": "PASS"
+      }
+     ],
+     "executionManifest": {
+      "projectArtifactId": "941281bb-c544-4320-aae3-eef80dab8931"
+     }
+    },
+    {
+     "artifactId": "7fded561-ea7f-48ba-8177-62a0183cdea0",
+     "artifactType": "SOURCE",
+     "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ]
+    },
+    {
+     "artifactId": "0eff0803-1cea-4d52-88c4-982eadd135a4",
+     "artifactType": "CHANGE_REPORT",
+     "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ]
+    },
+    {
+     "artifactId": "481f481b-7921-4dea-9da3-72a6736d135b",
+     "artifactType": "BUILD_REPORT",
+     "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "executionOutcome": "PASS",
+     "executionManifest": {
+      "projectArtifactId": "7fded561-ea7f-48ba-8177-62a0183cdea0"
+     }
+    },
+    {
+     "artifactId": "49ac2654-5b12-4358-9150-7f7a10dc4c2f",
+     "artifactType": "QA_REPORT",
+     "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097",
+     "codeVersion": 2,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "tests": [
+      {
+       "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+       "outcome": "PASS"
+      }
+     ],
+     "executionManifest": {
+      "projectArtifactId": "7fded561-ea7f-48ba-8177-62a0183cdea0"
+     }
+    },
+    {
+     "artifactId": "8073c11e-9c92-4246-bb94-c570b9aaafd4",
+     "artifactType": "SECURITY_REPORT",
+     "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7",
+     "codeVersion": 2,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "requirementResults": [
+      {
+       "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+       "outcome": "PASS"
+      }
+     ],
+     "executionManifest": {
+      "projectArtifactId": "7fded561-ea7f-48ba-8177-62a0183cdea0"
+     }
+    }
+   ],
+   "telemetry": [
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+      "occurredAt": "2026-11-04T15:55:10.598212Z"
+     },
+     "detail": {
+      "attemptId": "efd2285f-bf53-4c85-80be-33c63ba9d89b",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+      "occurredAt": "2026-11-04T15:55:10.612117Z"
+     },
+     "detail": {
+      "attemptId": "efd2285f-bf53-4c85-80be-33c63ba9d89b",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+      "occurredAt": "2026-11-04T15:55:11.244451Z"
+     },
+     "detail": {
+      "attemptId": "0d5df181-a950-4cbb-b28a-24519ee34f8e",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+      "occurredAt": "2026-11-04T15:55:11.457301Z"
+     },
+     "detail": {
+      "attemptId": "0d5df181-a950-4cbb-b28a-24519ee34f8e",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a",
+      "occurredAt": "2026-11-04T15:55:12.873042Z"
+     },
+     "detail": {
+      "attemptId": "f616cfc5-2d64-4c37-8902-5b011d6f0d79",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a",
+      "occurredAt": "2026-11-04T15:55:13.166890Z"
+     },
+     "detail": {
+      "attemptId": "f616cfc5-2d64-4c37-8902-5b011d6f0d79",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a",
+      "occurredAt": "2026-11-04T15:55:13.251012Z"
+     },
+     "detail": {
+      "attemptId": "5650dec7-cb86-4ab2-93b0-249e889a334c",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a",
+      "occurredAt": "2026-11-04T15:55:13.289440Z"
+     },
+     "detail": {
+      "attemptId": "5650dec7-cb86-4ab2-93b0-249e889a334c",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0",
+      "occurredAt": "2026-11-04T15:55:13.483590Z"
+     },
+     "detail": {
+      "attemptId": "f7680948-f359-4475-a585-2d8d88e07d00",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0",
+      "occurredAt": "2026-11-04T15:55:13.502306Z"
+     },
+     "detail": {
+      "attemptId": "f7680948-f359-4475-a585-2d8d88e07d00",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0",
+      "occurredAt": "2026-11-04T15:55:13.789252Z"
+     },
+     "detail": {
+      "attemptId": "80f79954-8830-494c-a7e1-a21b62243f6c",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0",
+      "occurredAt": "2026-11-04T15:55:14.126447Z"
+     },
+     "detail": {
+      "attemptId": "80f79954-8830-494c-a7e1-a21b62243f6c",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+      "occurredAt": "2026-11-04T15:55:15.300499Z"
+     },
+     "detail": {
+      "attemptId": "c46d7899-45f4-402b-8f6d-c096d554544d",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+      "occurredAt": "2026-11-04T15:55:15.315796Z"
+     },
+     "detail": {
+      "attemptId": "c46d7899-45f4-402b-8f6d-c096d554544d",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+      "occurredAt": "2026-11-04T15:55:16.064790Z"
+     },
+     "detail": {
+      "attemptId": "d1b22eda-258a-4d2b-8d42-f28e59d442c0",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+      "occurredAt": "2026-11-04T15:55:16.270249Z"
+     },
+     "detail": {
+      "attemptId": "d1b22eda-258a-4d2b-8d42-f28e59d442c0",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7",
+      "occurredAt": "2026-11-04T15:55:17.413036Z"
+     },
+     "detail": {
+      "attemptId": "cd5eff66-1170-4e92-bc5f-48104b86dcb8",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097",
+      "occurredAt": "2026-11-04T15:55:17.237072Z"
+     },
+     "detail": {
+      "attemptId": "83a6a207-9a5e-4f30-ab21-fcf605decfb8",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097",
+      "occurredAt": "2026-11-04T15:55:17.636039Z"
+     },
+     "detail": {
+      "attemptId": "83a6a207-9a5e-4f30-ab21-fcf605decfb8",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7",
+      "occurredAt": "2026-11-04T15:55:17.779786Z"
+     },
+     "detail": {
+      "attemptId": "cd5eff66-1170-4e92-bc5f-48104b86dcb8",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7",
+      "occurredAt": "2026-11-04T15:55:17.912205Z"
+     },
+     "detail": {
+      "attemptId": "868e1973-1843-4f07-8c30-17d22872785b",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7",
+      "occurredAt": "2026-11-04T15:55:17.991457Z"
+     },
+     "detail": {
+      "attemptId": "868e1973-1843-4f07-8c30-17d22872785b",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097",
+      "occurredAt": "2026-11-04T15:55:18.147674Z"
+     },
+     "detail": {
+      "attemptId": "bef6165e-93db-4935-80dc-e95d18ca9617",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097",
+      "occurredAt": "2026-11-04T15:55:18.470744Z"
+     },
+     "detail": {
+      "attemptId": "bef6165e-93db-4935-80dc-e95d18ca9617",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    }
+   ]
+  },
+  "a2a": {
+   "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+   "roles": {
+    "PLANNER": {
+     "tasks": [
+      {
+       "taskId": "c44e60be-42a4-441d-9cd3-664188aca379",
+       "metadata": {
+        "attempt": 0,
+        "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "564defcc-58d5-459f-8adf-54b759f0126f"
+       }
+      }
+     ],
+     "events": [
+      {
+       "taskId": "c44e60be-42a4-441d-9cd3-664188aca379",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T15:55:09.110177Z"
+        }
+       }
+      },
+      {
+       "taskId": "c44e60be-42a4-441d-9cd3-664188aca379",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T15:55:09.134192Z"
+        }
+       }
+      },
+      {
+       "taskId": "c44e60be-42a4-441d-9cd3-664188aca379",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T15:55:09.155571Z"
+        }
+       }
+      }
+     ]
+    },
+    "DEVELOPER": {
+     "tasks": [
+      {
+       "taskId": "45f4e0b0-bf57-47cb-8ec1-8be04f9a4883",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 2,
+        "projectArtifactIds": [
+         "941281bb-c544-4320-aae3-eef80dab8931",
+         "c1cb3e29-2dc4-41ab-9464-c95d5e8b9a2a",
+         "bb563889-804e-42e6-9784-5ad66b3dca6e",
+         "befea979-3ce9-416f-ba2b-ca6ca3905469",
+         "ea162a9f-ab2a-476a-bd3c-5ed320e98fed"
+        ],
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+         "4876a535-23e1-4059-941f-bf49441f2276"
+        ],
+        "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d"
+       }
+      },
+      {
+       "taskId": "f34afee7-af8b-4789-a152-10af42a83bc4",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 1,
+        "projectArtifactIds": [
+         "07a29b67-a853-4e4a-9520-42c8da3eb8e8"
+        ],
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+         "4876a535-23e1-4059-941f-bf49441f2276"
+        ],
+        "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af"
+       }
+      }
+     ],
+     "events": [
+      {
+       "taskId": "45f4e0b0-bf57-47cb-8ec1-8be04f9a4883",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T15:55:14.716915Z"
+        }
+       }
+      },
+      {
+       "taskId": "45f4e0b0-bf57-47cb-8ec1-8be04f9a4883",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T15:55:14.790494Z"
+        }
+       }
+      },
+      {
+       "taskId": "45f4e0b0-bf57-47cb-8ec1-8be04f9a4883",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T15:55:16.342410Z"
+        }
+       }
+      },
+      {
+       "taskId": "f34afee7-af8b-4789-a152-10af42a83bc4",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T15:55:10.243415Z"
+        }
+       }
+      },
+      {
+       "taskId": "f34afee7-af8b-4789-a152-10af42a83bc4",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T15:55:10.275595Z"
+        }
+       }
+      },
+      {
+       "taskId": "f34afee7-af8b-4789-a152-10af42a83bc4",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T15:55:11.532020Z"
+        }
+       }
+      }
+     ]
+    },
+    "QA": {
+     "tasks": [
+      {
+       "taskId": "8aa5c8a2-fca1-4b84-bab9-80aded07ee5a",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 1,
+        "projectArtifactIds": [
+         "941281bb-c544-4320-aae3-eef80dab8931"
+        ],
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+        ],
+        "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0"
+       }
+      },
+      {
+       "taskId": "ab758ebc-5ad2-496b-ba6f-8fc6c248cf53",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 2,
+        "projectArtifactIds": [
+         "7fded561-ea7f-48ba-8177-62a0183cdea0"
+        ],
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+        ],
+        "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097"
+       }
+      }
+     ],
+     "events": [
+      {
+       "taskId": "8aa5c8a2-fca1-4b84-bab9-80aded07ee5a",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T15:55:12.451223Z"
+        }
+       }
+      },
+      {
+       "taskId": "8aa5c8a2-fca1-4b84-bab9-80aded07ee5a",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T15:55:12.534177Z"
+        }
+       }
+      },
+      {
+       "taskId": "8aa5c8a2-fca1-4b84-bab9-80aded07ee5a",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T15:55:14.296381Z"
+        }
+       }
+      },
+      {
+       "taskId": "ab758ebc-5ad2-496b-ba6f-8fc6c248cf53",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T15:55:16.939529Z"
+        }
+       }
+      },
+      {
+       "taskId": "ab758ebc-5ad2-496b-ba6f-8fc6c248cf53",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T15:55:17.045404Z"
+        }
+       }
+      },
+      {
+       "taskId": "ab758ebc-5ad2-496b-ba6f-8fc6c248cf53",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T15:55:18.793083Z"
+        }
+       }
+      }
+     ]
+    },
+    "SECURITY": {
+     "tasks": [
+      {
+       "taskId": "51a18ebf-f8ae-4698-904f-56cb3db87af1",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 2,
+        "projectArtifactIds": [
+         "7fded561-ea7f-48ba-8177-62a0183cdea0"
+        ],
+        "requirementIds": [
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        ],
+        "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7"
+       }
+      },
+      {
+       "taskId": "d94d16fc-8d23-4f51-873f-9bdfaabf8b18",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 1,
+        "projectArtifactIds": [
+         "941281bb-c544-4320-aae3-eef80dab8931"
+        ],
+        "requirementIds": [
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        ],
+        "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a"
+       }
+      }
+     ],
+     "events": [
+      {
+       "taskId": "51a18ebf-f8ae-4698-904f-56cb3db87af1",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T15:55:16.989243Z"
+        }
+       }
+      },
+      {
+       "taskId": "51a18ebf-f8ae-4698-904f-56cb3db87af1",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T15:55:17.058028Z"
+        }
+       }
+      },
+      {
+       "taskId": "51a18ebf-f8ae-4698-904f-56cb3db87af1",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T15:55:18.755759Z"
+        }
+       }
+      },
+      {
+       "taskId": "d94d16fc-8d23-4f51-873f-9bdfaabf8b18",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T15:55:12.488852Z"
+        }
+       }
+      },
+      {
+       "taskId": "d94d16fc-8d23-4f51-873f-9bdfaabf8b18",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T15:55:12.546550Z"
+        }
+       }
+      },
+      {
+       "taskId": "d94d16fc-8d23-4f51-873f-9bdfaabf8b18",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T15:55:13.450555Z"
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "handoff": {
+   "runId": "4b5eeeed-6bf0-4fc0-9d0b-41d619a60ed1",
+   "architecture": "MULTI_AGENT",
+   "runStatus": "FINISHED",
+   "orchestratorVerdict": "SUCCESS",
+   "coverage": {
+    "missingStores": [],
+    "missingTaskIds": [],
+    "mismatchedTaskIds": [],
+    "unboundTaskIds": [],
+    "a2aComplete": true
+   },
+   "steps": [
+    {
+     "workflowStepId": "564defcc-58d5-459f-8adf-54b759f0126f",
+     "agentIdentity": "PLANNER",
+     "phase": "PLANNING",
+     "a2aTaskId": "c44e60be-42a4-441d-9cd3-664188aca379",
+     "agentContextId": "3428fae6-a623-42a3-b000-3e9eb7a3fa7c",
+     "attempt": 0,
+     "codeVersion": null,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "2a5c64bb-e206-4474-95cb-ebae82c485af",
+     "agentIdentity": "DEVELOPER",
+     "phase": "IMPLEMENTING",
+     "a2aTaskId": "f34afee7-af8b-4789-a152-10af42a83bc4",
+     "agentContextId": "78bba00d-764a-47c7-aae9-35eddb4eeb80",
+     "attempt": 0,
+     "codeVersion": 1,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "b3dccf5a-549d-4558-b9b8-1ffa624930a0",
+     "agentIdentity": "QA",
+     "phase": "QA",
+     "a2aTaskId": "8aa5c8a2-fca1-4b84-bab9-80aded07ee5a",
+     "agentContextId": "a065c338-2ff4-4af1-85fb-41ccede0eed8",
+     "attempt": 0,
+     "codeVersion": 1,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "b0aeb785-1074-4766-b512-1f48f560ac4a",
+     "agentIdentity": "SECURITY",
+     "phase": "SECURITY",
+     "a2aTaskId": "d94d16fc-8d23-4f51-873f-9bdfaabf8b18",
+     "agentContextId": "06686793-f34d-48b9-999d-fc4a5fbcc009",
+     "attempt": 0,
+     "codeVersion": 1,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "f3d2029e-3a73-4694-be36-3a856b87e58d",
+     "agentIdentity": "DEVELOPER",
+     "phase": "FIXING",
+     "a2aTaskId": "45f4e0b0-bf57-47cb-8ec1-8be04f9a4883",
+     "agentContextId": "78bba00d-764a-47c7-aae9-35eddb4eeb80",
+     "attempt": 0,
+     "codeVersion": 2,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "263aab89-74c6-4072-ad80-8835b1cac097",
+     "agentIdentity": "QA",
+     "phase": "QA",
+     "a2aTaskId": "ab758ebc-5ad2-496b-ba6f-8fc6c248cf53",
+     "agentContextId": "a065c338-2ff4-4af1-85fb-41ccede0eed8",
+     "attempt": 0,
+     "codeVersion": 2,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "edd00fe6-36fa-45dc-a229-d90cbe621cf7",
+     "agentIdentity": "SECURITY",
+     "phase": "SECURITY",
+     "a2aTaskId": "51a18ebf-f8ae-4698-904f-56cb3db87af1",
+     "agentContextId": "06686793-f34d-48b9-999d-fc4a5fbcc009",
+     "attempt": 0,
+     "codeVersion": 2,
+     "status": "SUCCEEDED"
+    }
+   ]
+  }
+ },
+ "single": {
+  "bundle": {
+   "run": {
+    "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+    "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+    "status": "FINISHED",
+    "verdict": "SUCCESS",
+    "codeVersion": 1,
+    "fixAttempt": 0
+   },
+   "usage": {
+    "records": [
+     {
+      "binding": {
+       "role": "SINGLE_AGENT",
+       "workflowStepId": "1282f597-1dce-47b7-bbfb-597122ef8696"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SINGLE_AGENT",
+       "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SINGLE_AGENT",
+       "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 0,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SINGLE_AGENT",
+       "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SINGLE_AGENT",
+       "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SINGLE_AGENT",
+       "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     },
+     {
+      "binding": {
+       "role": "SINGLE_AGENT",
+       "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa"
+      },
+      "detail": {
+       "outcome": "completed",
+       "durationMs": 1,
+       "inputTokens": 10,
+       "outputTokens": 5,
+       "costUsd": null
+      }
+     }
+    ]
+   },
+   "issues": []
+  },
+  "trace": {
+   "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+   "artifacts": [
+    {
+     "artifactId": "296c846d-5a49-427a-8bcd-8f0f67f993a2",
+     "artifactType": "REQUIREMENT",
+     "workflowStepId": "1282f597-1dce-47b7-bbfb-597122ef8696",
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "payload": {
+      "requirements": [
+       {
+        "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+        "key": "REQ-001"
+       },
+       {
+        "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+        "key": "REQ-002"
+       },
+       {
+        "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+        "key": "REQ-003"
+       },
+       {
+        "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+        "key": "REQ-004"
+       },
+       {
+        "requirementId": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+        "key": "REQ-005"
+       },
+       {
+        "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+        "key": "REQ-006"
+       },
+       {
+        "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+        "key": "REQ-007"
+       },
+       {
+        "requirementId": "4876a535-23e1-4059-941f-bf49441f2276",
+        "key": "REQ-008"
+       }
+      ],
+      "implementationPlan": [
+       {
+        "taskId": "TASK-001",
+        "title": "동결 회원가입 기준 구현",
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+         "4876a535-23e1-4059-941f-bf49441f2276"
+        ],
+        "dependsOn": []
+       }
+      ]
+     }
+    },
+    {
+     "artifactId": "cd134e19-e559-45d4-a7d0-9e72dbcc257b",
+     "artifactType": "SOURCE",
+     "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ]
+    },
+    {
+     "artifactId": "4259a879-dae1-4200-9773-138626d08509",
+     "artifactType": "CHANGE_REPORT",
+     "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ]
+    },
+    {
+     "artifactId": "a9185a4c-0c1a-4988-84e1-86ecfa220942",
+     "artifactType": "BUILD_REPORT",
+     "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+      "4876a535-23e1-4059-941f-bf49441f2276"
+     ],
+     "executionOutcome": "PASS",
+     "executionManifest": {
+      "projectArtifactId": "cd134e19-e559-45d4-a7d0-9e72dbcc257b"
+     }
+    },
+    {
+     "artifactId": "b00872bf-9c4a-4df7-8ca8-a09306a16e81",
+     "artifactType": "QA_REPORT",
+     "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83",
+     "codeVersion": 1,
+     "requirementIds": [
+      "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+      "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+      "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+     ],
+     "tests": [
+      {
+       "requirementId": "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+       "outcome": "PASS"
+      }
+     ],
+     "executionManifest": {
+      "projectArtifactId": "cd134e19-e559-45d4-a7d0-9e72dbcc257b"
+     }
+    },
+    {
+     "artifactId": "4bd8e9c1-13e3-4b35-9535-0d0a69684533",
+     "artifactType": "SECURITY_REPORT",
+     "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+     "codeVersion": 1,
+     "requirementIds": [
+      "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+      "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+      "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+     ],
+     "requirementResults": [
+      {
+       "requirementId": "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+       "outcome": "PASS"
+      },
+      {
+       "requirementId": "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+       "outcome": "PASS"
+      }
+     ],
+     "executionManifest": {
+      "projectArtifactId": "cd134e19-e559-45d4-a7d0-9e72dbcc257b"
+     }
+    }
+   ],
+   "telemetry": [
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+      "occurredAt": "2026-11-04T16:01:21.762285Z"
+     },
+     "detail": {
+      "attemptId": "d5faf182-a430-4a6c-a5fd-ba66a43e4ade",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+      "occurredAt": "2026-11-04T16:01:21.779903Z"
+     },
+     "detail": {
+      "attemptId": "d5faf182-a430-4a6c-a5fd-ba66a43e4ade",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+      "occurredAt": "2026-11-04T16:01:22.384109Z"
+     },
+     "detail": {
+      "attemptId": "61e5ab90-0cb5-4172-8761-3d545f986004",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+      "occurredAt": "2026-11-04T16:01:22.586138Z"
+     },
+     "detail": {
+      "attemptId": "61e5ab90-0cb5-4172-8761-3d545f986004",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83",
+      "occurredAt": "2026-11-04T16:01:23.729450Z"
+     },
+     "detail": {
+      "attemptId": "b2c6dd21-8ab6-49d2-b824-090daee9c9e1",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83",
+      "occurredAt": "2026-11-04T16:01:23.756198Z"
+     },
+     "detail": {
+      "attemptId": "b2c6dd21-8ab6-49d2-b824-090daee9c9e1",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83",
+      "occurredAt": "2026-11-04T16:01:23.993645Z"
+     },
+     "detail": {
+      "attemptId": "b59f246f-63b6-4e49-969b-e6684562f322",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83",
+      "occurredAt": "2026-11-04T16:01:24.330253Z"
+     },
+     "detail": {
+      "attemptId": "b59f246f-63b6-4e49-969b-e6684562f322",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+      "occurredAt": "2026-11-04T16:01:25.023324Z"
+     },
+     "detail": {
+      "attemptId": "a97e19fd-b4c9-4092-affb-da810e63bf86",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+      "occurredAt": "2026-11-04T16:01:25.367864Z"
+     },
+     "detail": {
+      "attemptId": "a97e19fd-b4c9-4092-affb-da810e63bf86",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+      "occurredAt": "2026-11-04T16:01:25.483039Z"
+     },
+     "detail": {
+      "attemptId": "6e64ba69-820a-46d8-a6d8-5d4c70edd1bb",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+      "occurredAt": "2026-11-04T16:01:25.510826Z"
+     },
+     "detail": {
+      "attemptId": "6e64ba69-820a-46d8-a6d8-5d4c70edd1bb",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_CALLED",
+      "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+      "occurredAt": "2026-11-04T16:01:25.742714Z"
+     },
+     "detail": {
+      "attemptId": "b0dd42fa-332d-4fb2-b54d-5a8eb2e35fdf",
+      "toolAttempt": 0
+     }
+    },
+    {
+     "binding": {
+      "eventType": "MCP_TOOL_FINISHED",
+      "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+      "occurredAt": "2026-11-04T16:01:26.083812Z"
+     },
+     "detail": {
+      "attemptId": "b0dd42fa-332d-4fb2-b54d-5a8eb2e35fdf",
+      "toolAttempt": 0,
+      "outcome": "PASS"
+     }
+    }
+   ]
+  },
+  "a2a": {
+   "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+   "roles": {
+    "SINGLE_AGENT": {
+     "tasks": [
+      {
+       "taskId": "2ef65cc3-6db0-4152-981d-08ce01b4be25",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 1,
+        "projectArtifactIds": [
+         "296c846d-5a49-427a-8bcd-8f0f67f993a2"
+        ],
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531",
+         "4876a535-23e1-4059-941f-bf49441f2276"
+        ],
+        "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031"
+       }
+      },
+      {
+       "taskId": "314c174b-3bd7-44d9-811d-1fde8dbaf642",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 1,
+        "projectArtifactIds": [
+         "cd134e19-e559-45d4-a7d0-9e72dbcc257b"
+        ],
+        "requirementIds": [
+         "f2bf2881-d327-4e67-aa24-45fda73e34a9",
+         "b5e5c035-a4d1-43e6-9f97-d51b84f022dd",
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "c1f65c66-a2b6-47f0-8c76-d7ff06133ce3",
+         "ac22dde4-83ac-45ab-b6dc-dd51b8984531"
+        ],
+        "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83"
+       }
+      },
+      {
+       "taskId": "a6adafda-5afa-4f4e-8499-14b3a058b7fb",
+       "metadata": {
+        "attempt": 0,
+        "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "1282f597-1dce-47b7-bbfb-597122ef8696"
+       }
+      },
+      {
+       "taskId": "fb2de1d4-8943-464c-a53a-0a5b700af2ea",
+       "metadata": {
+        "attempt": 0,
+        "codeVersion": 1,
+        "projectArtifactIds": [
+         "cd134e19-e559-45d4-a7d0-9e72dbcc257b"
+        ],
+        "requirementIds": [
+         "c74fdf11-fe18-4664-9e19-db2e43d0127e",
+         "e3d8975a-5a3f-433e-8da5-e98b9c559166",
+         "df6ac4a0-7f90-4783-939f-4d3b568b5c39"
+        ],
+        "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+        "scenarioId": "f7f9e5c3-ffc3-4b3f-918b-21e1b956ce76",
+        "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa"
+       }
+      }
+     ],
+     "events": [
+      {
+       "taskId": "2ef65cc3-6db0-4152-981d-08ce01b4be25",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T16:01:21.382603Z"
+        }
+       }
+      },
+      {
+       "taskId": "2ef65cc3-6db0-4152-981d-08ce01b4be25",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T16:01:21.411900Z"
+        }
+       }
+      },
+      {
+       "taskId": "2ef65cc3-6db0-4152-981d-08ce01b4be25",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T16:01:22.658856Z"
+        }
+       }
+      },
+      {
+       "taskId": "314c174b-3bd7-44d9-811d-1fde8dbaf642",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T16:01:23.578526Z"
+        }
+       }
+      },
+      {
+       "taskId": "314c174b-3bd7-44d9-811d-1fde8dbaf642",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T16:01:23.616925Z"
+        }
+       }
+      },
+      {
+       "taskId": "314c174b-3bd7-44d9-811d-1fde8dbaf642",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T16:01:24.499905Z"
+        }
+       }
+      },
+      {
+       "taskId": "a6adafda-5afa-4f4e-8499-14b3a058b7fb",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T16:01:20.229614Z"
+        }
+       }
+      },
+      {
+       "taskId": "a6adafda-5afa-4f4e-8499-14b3a058b7fb",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T16:01:20.252927Z"
+        }
+       }
+      },
+      {
+       "taskId": "a6adafda-5afa-4f4e-8499-14b3a058b7fb",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T16:01:20.282015Z"
+        }
+       }
+      },
+      {
+       "taskId": "fb2de1d4-8943-464c-a53a-0a5b700af2ea",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_SUBMITTED",
+         "timestamp": "2026-11-04T16:01:24.666621Z"
+        }
+       }
+      },
+      {
+       "taskId": "fb2de1d4-8943-464c-a53a-0a5b700af2ea",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_WORKING",
+         "timestamp": "2026-11-04T16:01:24.703757Z"
+        }
+       }
+      },
+      {
+       "taskId": "fb2de1d4-8943-464c-a53a-0a5b700af2ea",
+       "eventType": "TaskStatusUpdateEvent",
+       "event": {
+        "status": {
+         "state": "TASK_STATE_COMPLETED",
+         "timestamp": "2026-11-04T16:01:26.270420Z"
+        }
+       }
+      }
+     ]
+    }
+   },
+   "schemaVersion": 2,
+   "architecture": "SINGLE_AGENT"
+  },
+  "handoff": {
+   "runId": "548c0e6a-08d2-4b4e-bfc0-da114b6e1b94",
+   "architecture": "SINGLE_AGENT",
+   "runStatus": "FINISHED",
+   "orchestratorVerdict": "SUCCESS",
+   "coverage": {
+    "missingStores": [],
+    "missingTaskIds": [],
+    "mismatchedTaskIds": [],
+    "unboundTaskIds": [],
+    "a2aComplete": true
+   },
+   "steps": [
+    {
+     "workflowStepId": "1282f597-1dce-47b7-bbfb-597122ef8696",
+     "agentIdentity": "SINGLE_AGENT",
+     "phase": "PLANNING",
+     "a2aTaskId": "a6adafda-5afa-4f4e-8499-14b3a058b7fb",
+     "agentContextId": "d1f43047-293b-4485-a278-0346dc7e4696",
+     "attempt": 0,
+     "codeVersion": null,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "ae299f12-0b0b-4d87-b5d9-68278ede1031",
+     "agentIdentity": "SINGLE_AGENT",
+     "phase": "IMPLEMENTING",
+     "a2aTaskId": "2ef65cc3-6db0-4152-981d-08ce01b4be25",
+     "agentContextId": "d1f43047-293b-4485-a278-0346dc7e4696",
+     "attempt": 0,
+     "codeVersion": 1,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "88137b6f-c7b9-4e21-9a14-949fb0466d83",
+     "agentIdentity": "SINGLE_AGENT",
+     "phase": "QA",
+     "a2aTaskId": "314c174b-3bd7-44d9-811d-1fde8dbaf642",
+     "agentContextId": "d1f43047-293b-4485-a278-0346dc7e4696",
+     "attempt": 0,
+     "codeVersion": 1,
+     "status": "SUCCEEDED"
+    },
+    {
+     "workflowStepId": "28a889ec-f6af-4d1f-b4e0-4efaed69f7fa",
+     "agentIdentity": "SINGLE_AGENT",
+     "phase": "SECURITY",
+     "a2aTaskId": "fb2de1d4-8943-464c-a53a-0a5b700af2ea",
+     "agentContextId": "d1f43047-293b-4485-a278-0346dc7e4696",
+     "attempt": 0,
+     "codeVersion": 1,
+     "status": "SUCCEEDED"
+    }
+   ]
+  }
+ }
+}

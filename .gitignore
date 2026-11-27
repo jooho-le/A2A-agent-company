@@ -1,0 +1,24 @@
+.env
+configs/*.local.json
+configs/experiment/
+
+# Operator-prepared sandbox packages/browser binaries, not source code.
+docker/sandbox/prepared/
+.data/
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Evaluation experiments: keep scored results, never the exported Snapshot tar files.
+experiments/**/export/
+
+# Evaluator-only concrete inputs and immutable replay baselines.
+.private-inputs/
+.evaluation-history/

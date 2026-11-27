@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "priceBookId": null,
+  "priceBookVersion": null,
+  "sourceRef": "https://developers.openai.com/api/docs/pricing",
+  "currency": "USD",
+  "billingScope": "OPENAI_RESPONSES_GLOBAL_TEXT",
+  "entries": []
+}

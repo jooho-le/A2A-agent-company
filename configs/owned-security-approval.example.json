@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "verifierId": null,
+  "verifierVersion": null,
+  "criteriaRef": null,
+  "scenarioContractSha256": null,
+  "criteria": null,
+  "implementationSha256": null,
+  "implementationFiles": []
+}

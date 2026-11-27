@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "page_numbering": "Current presentation PDF export order, not archived presentation.pdf source pages.",
+  "pages": [
+    {
+      "folder": "01",
+      "pdf_page": 1,
+      "source_page": "1",
+      "title": "코드는 빨리나오지만, 왜 일은 끝나지 않을까요?"
+    },
+    {
+      "folder": "02",
+      "pdf_page": 2,
+      "source_page": "2",
+      "title": "코드 생성 이후에도, 사람이 연결해야 할 일이 남습니다."
+    },
+    {
+      "folder": "03",
+      "pdf_page": 3,
+      "source_page": "3",
+      "title": "작은 팀에서는 개발자가 PM과 QA까지 겸합니다."
+    },
+    {
+      "folder": "04",
+      "pdf_page": 4,
+      "source_page": "4",
+      "title": "AIO"
+    },
+    {
+      "folder": "05",
+      "pdf_page": 5,
+      "source_page": "5",
+      "title": "사용자는 일을 맡기고, 팀의 진행과 결과를 확인합니다."
+    },
+    {
+      "folder": "06",
+      "pdf_page": 6,
+      "source_page": "6",
+      "title": "관리는 Orchestrator, 실제 업무는 네 Agent가 맡습니다."
+    },
+    {
+      "folder": "07",
+      "pdf_page": 7,
+      "source_page": "7",
+      "title": "7개 요구사항, 9개 보호 검사로 확인합니다."
+    },
+    {
+      "folder": "08",
+      "pdf_page": 8,
+      "source_page": "8",
+      "title": "기능이 동작해도 보안에서 FAIL일 수 있습니다."
+    },
+    {
+      "folder": "09",
+      "pdf_page": 9,
+      "source_page": "9",
+      "title": "같은 조건에서, 일하는 구조만 바꿔 비교합니다."
+    },
+    {
+      "folder": "10",
+      "pdf_page": 10,
+      "source_page": "10",
+      "title": "Agent 구조와 보호시험을 교차해 네 조건으로 비교합니다."
+    },
+    {
+      "folder": "11",
+      "pdf_page": 11,
+      "source_page": "11",
+      "title": "Ver1 · Single과 Multi 성능 비교"
+    },
+    {
+      "folder": "12",
+      "pdf_page": 12,
+      "source_page": "12",
+      "title": "Ver2 · Single과 Multi 성능 비교"
+    },
+    {
+      "folder": "13",
+      "pdf_page": 13,
+      "source_page": "13",
+      "title": "같은 출발점, 같은 최종 시험에서 차이를 확인합니다."
+    },
+    {
+      "folder": "14",
+      "pdf_page": 14,
+      "source_page": "comm-delivery",
+      "title": "보낸 내용이 도착했는지, 실제 입력까지 대조했습니다."
+    },
+    {
+      "folder": "15",
+      "pdf_page": 15,
+      "source_page": "comm-content",
+      "title": "형식 검사를 통과한 응답도, 원문과 다시 비교했습니다."
+    },
+    {
+      "folder": "16",
+      "pdf_page": 16,
+      "source_page": "comm-latency",
+      "title": "전달 시간과 Agent 처리 시간을 나눠 측정했습니다."
+    },
+    {
+      "folder": "17",
+      "pdf_page": 17,
+      "source_page": "14",
+      "title": "통신 검증의 의도와 세 가지 결론"
+    },
+    {
+      "folder": "18",
+      "pdf_page": 18,
+      "source_page": "15",
+      "title": "AIO는 이렇게 작동합니다."
+    },
+    {
+      "folder": "19",
+      "pdf_page": 19,
+      "source_page": "16",
+      "title": "사업 제안"
+    },
+    {
+      "folder": "20",
+      "pdf_page": 20,
+      "source_page": "biz-17",
+      "title": "첫 고객은 PM·QA를 겸하는 2~5인 개발팀입니다."
+    },
+    {
+      "folder": "21",
+      "pdf_page": 21,
+      "source_page": "biz-18",
+      "title": "AI가 하는 일을 보고, 필요한 단계에 직접 개입합니다."
+    },
+    {
+      "folder": "22",
+      "pdf_page": 22,
+      "source_page": "biz-19",
+      "title": "협업 구독에, AI 실행 예산을 더합니다."
+    },
+    {
+      "folder": "23",
+      "pdf_page": 23,
+      "source_page": "biz-offer",
+      "title": "가격정책과 모델별 API 비용 계산"
+    },
+    {
+      "folder": "24",
+      "pdf_page": 24,
+      "source_page": "29",
+      "title": "추가 실행은 금액과 상한을 확인한 뒤 승인합니다."
+    },
+    {
+      "folder": "25",
+      "pdf_page": 25,
+      "source_page": "biz-25",
+      "title": "3인 개발팀, 월 10건의 업무에서 약 16시간 절감 가능성"
+    },
+    {
+      "folder": "26",
+      "pdf_page": 26,
+      "source_page": "30",
+      "title": "TAM · SAM · SOM으로 보는 초기 시장"
+    },
+    {
+      "folder": "27",
+      "pdf_page": 27,
+      "source_page": "biz-launch",
+      "title": "40개 팀 접촉부터, 반복 유료 사용까지."
+    },
+    {
+      "folder": "28",
+      "pdf_page": 28,
+      "source_page": "35",
+      "title": "작은 팀을 위한 All-in-One AI 개발 오피스."
+    }
+  ]
+}

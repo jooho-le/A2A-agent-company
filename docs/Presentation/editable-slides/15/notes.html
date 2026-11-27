@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- 15페이지 발표자 메모입니다. 이 파일의 글자는 장표 본문에 나오지 않습니다. -->
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIO · 15페이지 발표자 메모</title>
+<style>:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;color:#f0f2ec;background:#111318}body{margin:0;padding:6px;line-height:1.8;font-size:16px}h4{color:#d4ff24}a{color:#b5cdf5}p{margin:0 0 18px}</style>
+</head><body>
+<!-- [발표자 메모 수정 영역] 장표 화면을 바꾸려면 index.html의 [화면 글자]를 수정하세요. -->
+<!-- AIO:NOTES:START -->
+<h4>보고서에서 실제로 확인한 0건 결과</h4>
+<p>출처는 docs/reports/agent-communication-revalidation-2026-11-13/revalidation-report.pdf의1·4쪽이다. 2026-11-13 블로그·전자문서·추리게임 자연어3개 요청에 대해 실제 OpenAI API로 받은15개 응답을 확인했다. 닫힌 역할 Schema·원문 인용·실행 선언의 자동 불변조건 위반은0건, 다른 역할 roleWork 필드가 채워진 수는0개, 미실행 상태 선언은15/15개가 NOT_EXECUTED였다.</p>
+<p>장표는 위 자동 검사 결과만을 요약한다. 일반적인 할루시네이션 발생률이0%라는 뜻이나 모든 응답 의미가 정확하다는 뜻으로 발표하지 않는다.</p>
+<h4>같은 보고서에 남아 있는 의미 검토 결과</h4>
+<p>사후 원문 대조에서는 블로그 댓글 제안이 필수 검사 기준에 반영되는 위험과, 추리게임의 위치정보 제외가 개인정보 전체 미수집으로 넓어지는 단정을 확인했다. 이는 전송 일치·인용 존재·형식 검사가 통과해도 별도의 의미 검토가 필요함을 보여준다. 독립 사람 평가나 범용 환각률을 측정한 실험은 아니다.</p>
+<h4>후속 보고서와 구분</h4>
+<p>후속 guarded-natural-4cases-report.pdf(75~80번) 역시 할루시네이션 전체가 제거됐다고 단정하지 않는다. 검토기의 개인정보 범위 확대 미탐, 구조 거절과 보류를 구분해 기록했다. 앞선15개 응답의 자동 위반0건 결과를 후속38회 API 전체나 모든 자연어 요청에 일반화하지 않는다.</p>
+<!-- AIO:NOTES:END -->
+</body></html>

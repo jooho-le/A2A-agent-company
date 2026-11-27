@@ -1,0 +1,166 @@
+/* PDF 13 · 같은 출발점, 같은 최종 시험에서 차이를 확인합니다.
+   이 파일은 이 페이지에만 적용됩니다. 내용은 같은 폴더의 index.html에서 수정합니다.
+   공통 배경·강조색은 아래 변수로, 원본 텍스트 색은 page-color 색상표로 바꿉니다. */
+#deck > .slide[data-editable-page="13"] {
+  --page-background: #030407;
+  --accent: #d4ff24;
+  --blue: #1558c9;
+  --ink: #f0f2ec;
+  --muted: #aaaeb8;
+  --page-padding: 38px 64px 26px;
+  --page-title-size: 58px;
+  --page-title-line-height: 67.86px;
+  --page-title-letter-spacing: -2.4px;
+  --page-title-offset: none; /* 예: 20px 0px = 제목을 오른쪽으로 20px */
+  --page-content-offset: none; /* 예: 0px 20px = 본문을 아래로 20px */
+  --page-color-01: #d4ff24;
+  --page-color-02: #858b98;
+  --page-color-03: #f0f2ec;
+  --page-color-04: #aaaeb8;
+  --page-color-05: #ffffff;
+  --page-color-06: #030407;
+  background-color: var(--page-background);
+  padding: var(--page-padding);
+}
+#deck > .slide[data-editable-page="13"] :is(h1,h2) {
+  font-size: var(--page-title-size);
+  line-height: var(--page-title-line-height);
+  letter-spacing: var(--page-title-letter-spacing);
+  translate: var(--page-title-offset);
+}
+#deck > .slide[data-editable-page="13"] > .content { translate: var(--page-content-offset); }
+
+/* 기존 요소별 스타일: 원래 HTML 안의 색상·폭·위치 값을 여기로 옮겼습니다. */
+#deck > .slide[data-editable-page="13"] .p13-element-001 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-002 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-003 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-004 { color:var(--page-color-04)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-005 { color:var(--page-color-05)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-006 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-007 { color:var(--page-color-06)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-008 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-009 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-010 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-011 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="13"] .p13-element-012 { color:var(--page-color-02)!important }
+
+/* 페이지 전용 추가 스타일. 선택자 앞의 페이지 번호는 유지하세요.
+#deck > .slide[data-editable-page="13"] .원하는요소클래스 {
+  font-size: 32px;
+  margin-top: 20px;
+}
+*/
+
+/* Ver1·Ver2의 질문과 앞선 비교표의 해석을 한 화면에 정리합니다. */
+#deck > .slide[data-editable-page="13"] > .content {
+  justify-content: flex-start;
+  gap: 16px;
+  padding-top: 21px;
+}
+#deck > .slide[data-editable-page="13"] .summary-intents {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+#deck > .slide[data-editable-page="13"] .summary-intent {
+  padding: 18px 24px;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--blue);
+  border-radius: 16px;
+  background: linear-gradient(145deg,#1b212a,#10151c);
+}
+#deck > .slide[data-editable-page="13"] .summary-intent.ver2 { border-top-color: var(--accent); }
+#deck > .slide[data-editable-page="13"] .summary-intent-label {
+  display: block;
+  color: var(--blue-soft);
+  font-size: 20px;
+  line-height: 1.3;
+  margin-bottom: 10px;
+}
+#deck > .slide[data-editable-page="13"] .ver2 .summary-intent-label { color: var(--accent); }
+#deck > .slide[data-editable-page="13"] .summary-intent h3 {
+  font-size: 28px;
+  line-height: 1.35;
+  letter-spacing: -.8px;
+  margin-bottom: 10px;
+  text-wrap: balance;
+}
+#deck > .slide[data-editable-page="13"] .summary-intent p {
+  color: var(--muted);
+  font-size: 19px;
+  line-height: 1.45;
+  margin: 0;
+  word-break: keep-all;
+}
+#deck > .slide[data-editable-page="13"] .summary-results-title {
+  font-size: 25px;
+  line-height: 1.3;
+  margin: 0;
+}
+#deck > .slide[data-editable-page="13"] .summary-results {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  line-height: 1.35;
+}
+#deck > .slide[data-editable-page="13"] .summary-results th,
+#deck > .slide[data-editable-page="13"] .summary-results td {
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+#deck > .slide[data-editable-page="13"] .summary-results thead th {
+  background: var(--panel2);
+  color: var(--blue-soft);
+  font-size: 19px;
+  font-weight: 600;
+}
+#deck > .slide[data-editable-page="13"] .summary-results tbody th {
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 650;
+}
+#deck > .slide[data-editable-page="13"] .summary-results td { font-size: 24px; }
+#deck > .slide[data-editable-page="13"] .summary-results td strong { color: var(--accent); font-size: 28px; }
+#deck > .slide[data-editable-page="13"] .summary-results small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 450;
+}
+#deck > .slide[data-editable-page="13"] .summary-structure {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 5px;
+}
+#deck > .slide[data-editable-page="13"] .summary-structure .employee { width: 25px; height: 42px; }
+#deck > .slide[data-editable-page="13"] .summary-structure .single .employee { width: 32px; height: 44px; }
+#deck > .slide[data-editable-page="13"] .summary-structure > i { font-size: 19px; color: var(--faint); font-style: normal; }
+#deck > .slide[data-editable-page="13"] .summary-takeaway {
+  padding: 12px 20px;
+  border-left: 4px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+  background: var(--panel2);
+  color: var(--ink);
+  font-size: 23px;
+  line-height: 1.4;
+}
+#deck > .slide[data-editable-page="13"] .summary-takeaway strong { color: var(--accent); }
+#deck > .slide[data-editable-page="13"] .pdf-source-line { font-size: 17px; margin-top: 8px; }
+
+#deck > .slide[data-editable-page="13"] .summary-results-head {display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:8px}
+#deck > .slide[data-editable-page="13"] .summary-structure {margin:0}
+#deck > .slide[data-editable-page="13"] .summary-structure .result-crew {display:flex;align-items:center;gap:0}
+#deck > .slide[data-editable-page="13"] .summary-structure .employee {display:block;width:24px;height:36px;flex-shrink:0}
+#deck > .slide[data-editable-page="13"] .summary-structure .single .employee {width:28px;height:36px}
+
+/* 하단 설명을 비워도 장표 번호의 정렬과 크기는 유지합니다. */
+#deck > .slide[data-editable-page="13"] .slide-foot .folio {
+  margin-left: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

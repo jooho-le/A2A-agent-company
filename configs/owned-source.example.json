@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "repositoryPath": null,
+  "repositoryId": null,
+  "commitHash": null,
+  "snapshotSha256": null,
+  "lockPath": "requirements.lock",
+  "gitTimeoutSeconds": null
+}

@@ -1,0 +1,2128 @@
+{
+  "schemaVersion": 1,
+  "kind": "PROTECTED_CHECK_DETAILS",
+  "sourceRunId": "00000000-0000-4000-8000-000000000002",
+  "evaluationId": "168b940a-8b89-46bc-bae7-6161fda7cfaa",
+  "architecture": "MULTI_AGENT",
+  "exam": "final",
+  "suite": {
+    "id": "urn:suite:scn-001:signup-protected",
+    "version": "0.7.0",
+    "sha256": "cd7a246d2309ac7e3e281355be270a9ea8866e837da03058f8caaf10ef8f121f"
+  },
+  "createdAt": "2026-10-28T12:00:00+09:00",
+  "expectedManifest": {
+    "repositoryId": "signup-repo",
+    "codeVersion": 2,
+    "projectArtifactId": "00000000-0000-4000-8000-000000000001",
+    "gitObjectFormat": "sha1",
+    "commitHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "snapshotSha256": "3329a26e2ee6a0a587ba27555ce507ed9490d70753e67b9c48172cb19b5cbf9d",
+    "containerImageDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "dependencyLockHash": "sha256:f74ae7ba4f5d0fbfd2bda5d978174532d0fd9784e0dbbc0bec6121612e45170e"
+  },
+  "manifestCheck": {
+    "errorCode": null,
+    "mismatchedFields": [],
+    "metadataMatches": true
+  },
+  "recordStatus": "COMPLETE",
+  "checks": [
+    {
+      "checkId": "QA-SIGNUP-001",
+      "title": "QA-SIGNUP-001 유효한 이메일·비밀번호로 가입",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 7,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "valid_email_1",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "valid_email_1",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "valid_email_1",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        },
+        {
+          "caseId": "valid_email_2",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "valid_email_2",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "valid_email_2",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        }
+      ]
+    },
+    {
+      "checkId": "QA-SIGNUP-002",
+      "title": "QA-SIGNUP-002 형식 오류 이메일 거부",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 23,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "precondition",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "precondition",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_1",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_1",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "invalid_email_1",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "invalid_email_2",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_2",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "invalid_email_2",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "invalid_email_3",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_3",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "invalid_email_3",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "invalid_email_4",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_4",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "invalid_email_4",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "invalid_email_5",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_5",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "invalid_email_5",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "invalid_email_6",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_6",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "invalid_email_6",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "invalid_email_7",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "invalid_email_7",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "invalid_email_7",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        }
+      ]
+    },
+    {
+      "checkId": "QA-SIGNUP-003",
+      "title": "QA-SIGNUP-003 같은 canonical 이메일 중복 가입 방지",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 11,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "precondition",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "precondition",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_same",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 409,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_same",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "variant_swapcase",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 409,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_swapcase",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "variant_trail",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 409,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_trail",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "variant_swap_lead",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 409,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_swap_lead",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "final",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        }
+      ]
+    },
+    {
+      "checkId": "QA-SIGNUP-004",
+      "title": "QA-SIGNUP-004 비밀번호 최소 8자",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 15,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "reject_length_7",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "reject_length_7",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "reject_length_7",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "reject_length_5",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "reject_length_5",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "reject_length_5",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "accept_length_8",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "accept_length_8",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "accept_length_16",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "accept_length_16",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "lower_length_11",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "lower_length_11",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "digits_length_8",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "digits_length_8",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        }
+      ]
+    },
+    {
+      "checkId": "QA-SIGNUP-005",
+      "title": "QA-SIGNUP-005 동시 가입 요청의 중복 생성 방지",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 10,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "attempt_1",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        },
+        {
+          "caseId": "attempt_1",
+          "itemId": "success_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "성공 응답 수"
+        },
+        {
+          "caseId": "attempt_1",
+          "itemId": "response_statuses",
+          "expected": {
+            "operator": "http_statuses",
+            "value": 5
+          },
+          "kind": "assertion",
+          "actual": [
+            409,
+            409,
+            409,
+            409,
+            201
+          ],
+          "status": "PASS",
+          "reason": null,
+          "label": "모든 응답이 2xx 또는 4xx"
+        },
+        {
+          "caseId": "attempt_2",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        },
+        {
+          "caseId": "attempt_2",
+          "itemId": "success_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "성공 응답 수"
+        },
+        {
+          "caseId": "attempt_2",
+          "itemId": "response_statuses",
+          "expected": {
+            "operator": "http_statuses",
+            "value": 5
+          },
+          "kind": "assertion",
+          "actual": [
+            409,
+            409,
+            409,
+            409,
+            201
+          ],
+          "status": "PASS",
+          "reason": null,
+          "label": "모든 응답이 2xx 또는 4xx"
+        },
+        {
+          "caseId": "attempt_3",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        },
+        {
+          "caseId": "attempt_3",
+          "itemId": "success_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "성공 응답 수"
+        },
+        {
+          "caseId": "attempt_3",
+          "itemId": "response_statuses",
+          "expected": {
+            "operator": "http_statuses",
+            "value": 5
+          },
+          "kind": "assertion",
+          "actual": [
+            409,
+            409,
+            409,
+            409,
+            201
+          ],
+          "status": "PASS",
+          "reason": null,
+          "label": "모든 응답이 2xx 또는 4xx"
+        }
+      ]
+    },
+    {
+      "checkId": "QA-SIGNUP-006",
+      "title": "QA-SIGNUP-006 응답과 실제 가입 결과 일치",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 17,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "step_1_new",
+          "itemId": "response_matches_db",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 성공 여부와 계정 생성 일치"
+        },
+        {
+          "caseId": "step_1_new",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "step_2_duplicate",
+          "itemId": "response_matches_db",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 성공 여부와 계정 생성 일치"
+        },
+        {
+          "caseId": "step_2_duplicate",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 409,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "step_2_duplicate",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "step_2_duplicate",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "step_3_short",
+          "itemId": "response_matches_db",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 성공 여부와 계정 생성 일치"
+        },
+        {
+          "caseId": "step_3_short",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "step_3_short",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "step_3_short",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        },
+        {
+          "caseId": "step_4_new",
+          "itemId": "response_matches_db",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 성공 여부와 계정 생성 일치"
+        },
+        {
+          "caseId": "step_4_new",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "step_5_invalid",
+          "itemId": "response_matches_db",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 성공 여부와 계정 생성 일치"
+        },
+        {
+          "caseId": "step_5_invalid",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              400,
+              499
+            ]
+          },
+          "kind": "assertion",
+          "actual": 422,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "step_5_invalid",
+          "itemId": "user_delta",
+          "expected": {
+            "operator": "eq",
+            "value": 0
+          },
+          "kind": "assertion",
+          "actual": 0,
+          "status": "PASS",
+          "reason": null,
+          "label": "사용자 수 증가량"
+        },
+        {
+          "caseId": "step_5_invalid",
+          "itemId": "rows_unchanged",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "기존 사용자 정보 불변"
+        }
+      ]
+    },
+    {
+      "checkId": "SEC-SIGNUP-002",
+      "title": "SEC-SIGNUP-002 비밀번호 저장값",
+      "parentStatus": "FAIL",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 3,
+        "FAIL": 2,
+        "NOT_RUN": 11,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "account_1_setup",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "precondition",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "account_2_setup",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "precondition",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "storage",
+          "itemId": "no_plaintext",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "FAIL",
+          "reason": "EXPECTATION_MISMATCH",
+          "label": "저장값이 문자열이며 비밀번호 원문 미포함"
+        },
+        {
+          "caseId": "storage",
+          "itemId": "argon2id",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "FAIL",
+          "reason": "EXPECTATION_MISMATCH",
+          "label": "모든 저장값의 Argon2id 형식"
+        },
+        {
+          "caseId": "account_1",
+          "itemId": "m",
+          "expected": {
+            "operator": "gte",
+            "value": 19456
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "Argon2 메모리 m"
+        },
+        {
+          "caseId": "account_1",
+          "itemId": "t",
+          "expected": {
+            "operator": "gte",
+            "value": 2
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "Argon2 반복 t"
+        },
+        {
+          "caseId": "account_1",
+          "itemId": "p",
+          "expected": {
+            "operator": "gte",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "Argon2 병렬도 p"
+        },
+        {
+          "caseId": "account_2",
+          "itemId": "m",
+          "expected": {
+            "operator": "gte",
+            "value": 19456
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "Argon2 메모리 m"
+        },
+        {
+          "caseId": "account_2",
+          "itemId": "t",
+          "expected": {
+            "operator": "gte",
+            "value": 2
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "Argon2 반복 t"
+        },
+        {
+          "caseId": "account_2",
+          "itemId": "p",
+          "expected": {
+            "operator": "gte",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "Argon2 병렬도 p"
+        },
+        {
+          "caseId": "storage",
+          "itemId": "distinct_salts",
+          "expected": {
+            "operator": "eq",
+            "value": 2
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "서로 다른 salt 수"
+        },
+        {
+          "caseId": "account_1",
+          "itemId": "correct_password",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "가입 비밀번호 검증 성공"
+        },
+        {
+          "caseId": "account_1",
+          "itemId": "wrong_password",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "다른 비밀번호 검증 성공"
+        },
+        {
+          "caseId": "account_2",
+          "itemId": "correct_password",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "가입 비밀번호 검증 성공"
+        },
+        {
+          "caseId": "account_2",
+          "itemId": "wrong_password",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": null,
+          "status": "NOT_RUN",
+          "reason": "HASH_FORMAT_REQUIRED",
+          "label": "다른 비밀번호 검증 성공"
+        }
+      ]
+    },
+    {
+      "checkId": "SEC-SIGNUP-003",
+      "title": "SEC-SIGNUP-003 이메일 정규화 저장과 DB UNIQUE",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 19,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "precondition",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "precondition",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_swapcase",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_swapcase",
+          "itemId": "canonical",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "저장 이메일이 정규화 정책과 일치"
+        },
+        {
+          "caseId": "variant_swapcase",
+          "itemId": "unique",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "DB 직접 중복 삽입 거부"
+        },
+        {
+          "caseId": "variant_trail",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_trail",
+          "itemId": "canonical",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "저장 이메일이 정규화 정책과 일치"
+        },
+        {
+          "caseId": "variant_trail",
+          "itemId": "unique",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "DB 직접 중복 삽입 거부"
+        },
+        {
+          "caseId": "variant_swap_lead",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "variant_swap_lead",
+          "itemId": "canonical",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "저장 이메일이 정규화 정책과 일치"
+        },
+        {
+          "caseId": "variant_swap_lead",
+          "itemId": "unique",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "assertion",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "DB 직접 중복 삽입 거부"
+        },
+        {
+          "caseId": "alias_1_address_1",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "alias_1_address_1",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        },
+        {
+          "caseId": "alias_1_address_2",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "alias_1_address_2",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        },
+        {
+          "caseId": "alias_2_address_1",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "alias_2_address_1",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        },
+        {
+          "caseId": "alias_2_address_2",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "assertion",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "alias_2_address_2",
+          "itemId": "account_count",
+          "expected": {
+            "operator": "eq",
+            "value": 1
+          },
+          "kind": "assertion",
+          "actual": 1,
+          "status": "PASS",
+          "reason": null,
+          "label": "해당 이메일 계정 수"
+        }
+      ]
+    },
+    {
+      "checkId": "SEC-SIGNUP-005",
+      "title": "SEC-SIGNUP-005 비밀번호·해시 노출",
+      "parentStatus": "PASS",
+      "evidenceIds": [
+        "b2d6e4ba-8424-4f81-98ce-7149cb8eb5cd"
+      ],
+      "recordIssue": null,
+      "counts": {
+        "PASS": 21,
+        "FAIL": 0,
+        "NOT_RUN": 0,
+        "UNVERIFIED": 0
+      },
+      "items": [
+        {
+          "caseId": "setup",
+          "itemId": "ready",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "앱·DB 관찰 준비"
+        },
+        {
+          "caseId": "precondition",
+          "itemId": "http_status",
+          "expected": {
+            "operator": "range",
+            "value": [
+              200,
+              299
+            ]
+          },
+          "kind": "precondition",
+          "actual": 201,
+          "status": "PASS",
+          "reason": null,
+          "label": "응답 상태"
+        },
+        {
+          "caseId": "db_error",
+          "itemId": "injected",
+          "expected": {
+            "operator": "eq",
+            "value": true
+          },
+          "kind": "precondition",
+          "actual": true,
+          "status": "PASS",
+          "reason": null,
+          "label": "DB 오류 주입 확인"
+        },
+        {
+          "caseId": "success",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "success",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "invalid_email",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "invalid_email",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "short_password",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "short_password",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "duplicate",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "duplicate",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "malformed_misspelled",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "malformed_misspelled",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "malformed_missing_email",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "malformed_missing_email",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "malformed_list",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "malformed_list",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "db_error",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "db_error",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        },
+        {
+          "caseId": "application_logs",
+          "itemId": "password_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "비밀번호 노출 여부"
+        },
+        {
+          "caseId": "application_logs",
+          "itemId": "hash_exposed",
+          "expected": {
+            "operator": "eq",
+            "value": false
+          },
+          "kind": "assertion",
+          "actual": false,
+          "status": "PASS",
+          "reason": null,
+          "label": "해시 또는 해시 부분 노출 여부"
+        }
+      ]
+    }
+  ],
+  "scopeNotes": [
+    "공식 판정은 기존 9개 검사 결과를 사용하며 세부 항목 수로 점수를 바꾸지 않습니다.",
+    "비밀번호·해시·이메일·응답 본문·로그 원문은 저장하지 않습니다.",
+    "노출 검사는 수집된 응답과 앱 시작~종료 로그·출력에 한정됩니다. 별도 파일 등 미수집 경로는 포함하지 않습니다."
+  ],
+  "sha256": "e6a5e7bf82c49de911badbb88ddea227778a713d53cc4079b34e17dfca4f8638"
+}

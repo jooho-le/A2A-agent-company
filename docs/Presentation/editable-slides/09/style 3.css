@@ -1,0 +1,117 @@
+/* PDF 09 · 같은 조건에서, 일하는 구조만 바꿔 비교합니다.
+   이 파일은 이 페이지에만 적용됩니다. 내용은 같은 폴더의 index.html에서 수정합니다.
+   공통 배경·강조색은 아래 변수로, 원본 텍스트 색은 page-color 색상표로 바꿉니다. */
+#deck > .slide[data-editable-page="09"] {
+  --page-background: #030407;
+  --accent: #d4ff24;
+  --blue: #1558c9;
+  --ink: #f0f2ec;
+  --muted: #aaaeb8;
+  --page-padding: 38px 64px 26px;
+  --page-title-size: 62px;
+  --page-title-line-height: 72.54px;
+  --page-title-letter-spacing: -2.4px;
+  --page-title-offset: none; /* 예: 20px 0px = 제목을 오른쪽으로 20px */
+  --page-content-offset: none; /* 예: 0px 20px = 본문을 아래로 20px */
+  --page-color-01: #d4ff24;
+  --page-color-02: #858b98;
+  --page-color-03: #f0f2ec;
+  --page-color-04: #aaaeb8;
+  --page-color-05: #ffffff;
+  --page-color-06: #d5e5ff;
+  background-color: var(--page-background);
+  padding: var(--page-padding);
+}
+#deck > .slide[data-editable-page="09"] :is(h1,h2) {
+  font-size: var(--page-title-size);
+  line-height: var(--page-title-line-height);
+  letter-spacing: var(--page-title-letter-spacing);
+  translate: var(--page-title-offset);
+}
+#deck > .slide[data-editable-page="09"] > .content { translate: var(--page-content-offset); }
+
+/* 기존 요소별 스타일: 원래 HTML 안의 색상·폭·위치 값을 여기로 옮겼습니다. */
+#deck > .slide[data-editable-page="09"] .p09-element-001 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-002 { color:var(--page-color-02)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-003 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-004 { color:var(--page-color-04)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-005 { color:var(--page-color-05)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-006 { color:var(--page-color-05)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-007 { color:var(--page-color-05)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-008 { color:var(--page-color-06)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-009 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-010 { color:var(--page-color-01)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-011 { color:var(--page-color-03)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-012 { color:var(--page-color-04)!important }
+#deck > .slide[data-editable-page="09"] .p09-element-013 { color:var(--page-color-02)!important }
+
+/* 페이지 전용 추가 스타일. 선택자 앞의 페이지 번호는 유지하세요.
+#deck > .slide[data-editable-page="09"] .원하는요소클래스 {
+  font-size: 32px;
+  margin-top: 20px;
+}
+*/
+
+/* 비교 박스: 같은 크기·상하 구획으로 맞추고 내용을 가운데 정렬합니다. */
+#deck > .slide[data-editable-page="09"] .architecture-pair {
+  width: 100%;
+  gap: 32px;
+  align-items: stretch;
+}
+#deck > .slide[data-editable-page="09"] .architecture-half {
+  height: 500px;
+  padding: 32px 34px;
+  display: grid;
+  grid-template-rows: 168px minmax(0, 1fr);
+  gap: 28px;
+  text-align: center;
+}
+#deck > .slide[data-editable-page="09"] .architecture-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  justify-items: center;
+}
+#deck > .slide[data-editable-page="09"] .architecture-heading .big-number {
+  font-size: 112px;
+  line-height: 1;
+  letter-spacing: -5px;
+}
+#deck > .slide[data-editable-page="09"] .architecture-heading h3 {
+  font-size: 46px;
+  line-height: 1.2;
+  padding: 0;
+  margin: 0;
+}
+#deck > .slide[data-editable-page="09"] .architecture-heading .result-crew {
+  margin-left: 0;
+  justify-content: center;
+  align-items: center;
+}
+#deck > .slide[data-editable-page="09"] .architecture-heading .result-crew .employee {
+  width: 52px;
+  height: 132px;
+}
+#deck > .slide[data-editable-page="09"] .architecture-heading .result-crew.single .employee {
+  width: 98px;
+  height: 150px;
+}
+#deck > .slide[data-editable-page="09"] .architecture-roles {
+  min-height: 0;
+  margin: 0;
+  padding: 24px 10px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  font-size: 35px;
+  line-height: 1.6;
+}
+#deck > .slide[data-editable-page="09"] .architecture-roles > span {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+}
